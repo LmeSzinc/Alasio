@@ -44,7 +44,6 @@ from alasio.backend.app.restart.update_check import UPDATE_CHECK, UpdateCheck
 from alasio.backend.mpipe.mpipe_backend import has_supervisor
 from alasio.backend.topic.restart import RestartSource
 from alasio.backend.topic.scan import ConfigScanSource
-from alasio.deploy.pack.job import UpdateAborted
 from alasio.logger import logger
 
 # Seconds to wait for the workers to stop gracefully before killing the
@@ -346,19 +345,15 @@ class RestartStep(RestartBase):
                     # be cancelled any more, its handover ends it
                     flow.close_window()
                 self.update_check.set_state(name, phase)
-                return True
 
             try:
                 job = await mod.job()
                 completed = await job.update(on_phase)
             except trio.Cancelled:
+                # the flow was cancelled: the job unwinds at its next
+                # checkpoint, no real file is touched and its temporary files
+                # are kept for the next run (see DeployJob.update)
                 raise
-            except UpdateAborted as e:
-                # the flow was cancelled: the job removed its temporary files
-                # and the real files were not changed
-                logger.info(f'[Update] The update of "{name}" was aborted: {e}')
-                mod.set_state('available')
-                continue
             except Exception as e:
                 logger.error(f'[Update] Failed to update "{name}": {e}')
                 logger.exception(e)

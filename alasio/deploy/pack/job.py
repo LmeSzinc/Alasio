@@ -11,7 +11,7 @@ from alasio.deploy.pack.job_unpack import UnpackJob
 from alasio.deploy.pack.job_update import UpdateJob
 from alasio.deploy.pack.server_file import LatestInfo
 from alasio.ext.file.filelock import SQLiteFileLock
-from alasio.ext.path.atomic import atomic_read_bytes, atomic_rmtree
+from alasio.ext.path.atomic import atomic_read_bytes
 from alasio.logger import logger
 
 # httpx2 is imported lazily in the places that use it: the package resolves
@@ -59,17 +59,6 @@ class DeployCheck(Struct):
             bool: True when the local version is the latest one
         """
         return bool(self.local) and self.local == self.info.version
-
-
-class UpdateAborted(Exception):
-    """
-    Raised by DeployJob.update() when its phase callback says the flow must
-    not continue: the maintenance flow running the job was cancelled while
-    the job was between two interruptions (a cancel interrupts an in-flight
-    request itself; this is the fallback check of a cancellation that did not
-    have one). The flow aborted before changing anything and removed its
-    temporary files.
-    """
 
 
 class DeployJob(DeployTarget):
@@ -321,31 +310,16 @@ class DeployJob(DeployTarget):
 
     async def _job_phase(self, on_job_phase, phase):
         """
-        [锁内] Report a phase of the flow and abort when the caller says stop,
-        see update().
+        [锁内] Report a phase of the flow, see update().
 
         Args:
             on_job_phase (callable, optional): The async callback of update()
             phase (str): 'checking' (the version check), 'downloading' (the
                 update pack download) or 'updating' (the local changes)
-
-        Raises:
-            UpdateAborted: The callback returned False (the transaction was
-                cancelled meanwhile and could not interrupt an in-flight
-                request): the flow aborted and its temporary files were
-                removed
         """
         if on_job_phase is None:
             return
-        if await on_job_phase(phase):
-            return
-        logger.info(f'Update aborted at the {phase!r} phase, cleaning up the temporary files')
-        # the temporary files of the flow: the workspace of the target ledger
-        # (job.pack and the tmp files of a job; an aborted flow has nothing to
-        # resume, the next update starts over). The removal is blocking file
-        # IO and runs in a worker thread, like every local phase of the jobs
-        await trio.to_thread.run_sync(atomic_rmtree, self.workspace)
-        raise UpdateAborted(f'The update was cancelled by the caller at the {phase!r} phase')
+        await on_job_phase(phase)
 
     async def _get_update_pack(self, old_version, new_version):
         """
@@ -493,15 +467,16 @@ class DeployJob(DeployTarget):
             on_job_phase (callable, optional): Async callback of the update
                 transaction, called before each phase of the flow with
                 'checking' (the version check), 'downloading' (the update pack
-                download) or 'updating' (the local changes start). Its returned
-                bool tells
-                the flow whether to continue: False aborts the flow before it
-                changes anything, the temporary files are removed and
-                UpdateAborted is raised - the fallback check of a
-                cancellation that did not interrupt an in-flight request (a
-                normal cancel interrupts the request itself, the backend
-                transaction turns that into its cancellation). Defaults to
-                None, the whole flow runs without a callback (the CLI)
+                download) or 'updating' (the local changes start). The callback
+                only reports: the caller stops the flow by cancelling the task
+                running it (the backend transaction cancels it from the
+                cancellation window of its flow). A cancelled task interrupts
+                the request in flight and starts no further phase (the version
+                check and the download await on the event loop, every local
+                phase opens with a checkpoint), no real file is touched and the
+                temporary files are kept for the next run, see the class
+                docstring. Defaults to None, the whole flow runs without a
+                callback (the CLI)
             version (str, optional): Version the server must publish as its
                 latest, verified additionally by the check, see the
                 docstring (the dependency install of a mod passes the pin
@@ -520,8 +495,8 @@ class DeployJob(DeployTarget):
         if self.server is None:
             raise ValueError('Failed to update: no server provided')
         async with self.alocked():
-            # the version check opens the flow: the phase is the first
-            # cancellation point of a transaction (see _job_phase)
+            # the version check opens the flow: its phase is reported before
+            # the first request, see _job_phase
             await self._job_phase(on_job_phase, 'checking')
 
             check = await self.check(version)

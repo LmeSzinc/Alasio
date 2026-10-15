@@ -443,7 +443,7 @@ class FakeDeployJob:
 
     async def update(self, on_phase=None):
         for phase in ('checking', 'downloading', 'updating'):
-            assert await on_phase(phase) is True
+            await on_phase(phase)
         if self.error is not None:
             raise self.error
         return self.completed
@@ -540,12 +540,6 @@ class TestUpdateMods:
         manager, states = self._make({'m': None})
         await manager.update_mods(['m', 'nope'])
         assert states == []
-
-    @pytest.mark.trio
-    async def test_an_aborted_job_returns_the_mod_to_available(self):
-        manager, states = self._make({'m': FakeDeployJob(error=step_module.UpdateAborted('cancelled'))})
-        assert await manager.update_mods(['m']) == []
-        assert states[-1] == ('m', 'available', '')
 
     @pytest.mark.trio
     async def test_full_update_notes_the_completion(self):

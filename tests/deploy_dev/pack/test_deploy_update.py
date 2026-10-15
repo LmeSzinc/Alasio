@@ -21,9 +21,10 @@ which the fake filesystem does not provide.
 import os
 
 import pytest
+import trio
 
 from alasio.deploy.pack.decode_base import PackDecodeBase
-from alasio.deploy.pack.job import DeployJob, UpdateAborted
+from alasio.deploy.pack.job import DeployJob
 from alasio.deploy.pack.job_rebuild import RebuildJob
 from alasio.deploy.pack.job_unpack import UnpackJob
 from alasio.deploy.pack.job_update import UpdateJob
@@ -496,7 +497,10 @@ class TestUpdatePhases:
     """The phase contract of update(update_manager): the backend transaction
     follows what the job is really doing ('checking' for the version check,
     'downloading' while it downloads, 'updating' from the first real file
-    change on)."""
+    change on). The callback only reports: stopping the flow is the task
+    cancellation of the caller (the backend transaction cancels the task from
+    the cancellation window of its flow), never a return value of the
+    callback."""
 
     @pytest.mark.trio
     async def test_incremental_reports_checking_downloading_updating(self, app_folder):
@@ -588,52 +592,38 @@ INFO | Update done
 """
         assert read_tree() == NEW_TREE
 
+    @pytest.mark.parametrize('cancel_at, reported', [
+        ('downloading', ['checking', 'downloading']),
+        ('updating', ['checking', 'downloading', 'updating']),
+    ])
     @pytest.mark.trio
-    async def test_abort_at_the_updating_phase(self, app_folder):
-        """A phase callback returning False aborts the flow before the apply:
-        nothing was changed and the temporary files are removed."""
+    async def test_a_cancelled_caller_stops_the_flow(self, app_folder, cancel_at, reported):
+        """Stopping the flow is the cancellation of the caller task (the
+        backend transaction cancels it from the cancellation window of its
+        flow): the phase in flight is interrupted, the next phase never starts
+        (the download is not requested, the local changes are not applied) and
+        no real file is touched."""
         await UnpackJob(OLD_PACK).run()
         phases = []
+        scope = trio.CancelScope()
 
         async def on_job_phase(phase):
             phases.append(phase)
-            return phase != 'updating'
+            if phase == cancel_at:
+                scope.cancel()
 
         with logger.mock_capture_writer() as capture:
-            with pytest.raises(UpdateAborted):
+            with scope:
                 await DeployJob(server=SERVER).update(on_job_phase)
+        assert scope.cancelled_caught
         assert capture.concat() == f"""\
 INFO | [CurrentVersion] old
 INFO | [LatestVersion] new
 INFO | Update available: old -> new
-INFO | Update aborted at the 'updating' phase, cleaning up the temporary files
 """
-        assert phases == ['checking', 'downloading', 'updating']
-        assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
-        # the local tree was not changed (the pack was never applied)
-        assert read_tree() == OLD_TREE
-
-    @pytest.mark.trio
-    async def test_abort_at_the_downloading_phase(self, app_folder):
-        """The callback also guards the downloading phase (a cancel that
-        arrived before the job could start): nothing was read or changed."""
-        await UnpackJob(OLD_PACK).run()
-        phases = []
-
-        async def on_job_phase(phase):
-            phases.append(phase)
-            return phase != 'downloading'
-
-        with logger.mock_capture_writer() as capture:
-            with pytest.raises(UpdateAborted):
-                await DeployJob(server=SERVER).update(on_job_phase)
-        assert capture.concat() == f"""\
-INFO | [CurrentVersion] old
-INFO | [LatestVersion] new
-INFO | Update available: old -> new
-INFO | Update aborted at the 'downloading' phase, cleaning up the temporary files
-"""
-        assert phases == ['checking', 'downloading']
+        assert phases == reported
+        # the local tree was not changed (the pack was never applied), and the
+        # flow never reached the workspace (the pack was not downloaded)
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
         assert read_tree() == OLD_TREE
 
