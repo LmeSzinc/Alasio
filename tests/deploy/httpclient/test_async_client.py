@@ -14,7 +14,7 @@ import httpx2
 import pytest
 import trio
 
-from alasio.deploy.httpclient.async_client import AsyncHttpClient
+from alasio.deploy.httpclient.client_async import AsyncHttpClient
 from alasio.logger import logger
 
 

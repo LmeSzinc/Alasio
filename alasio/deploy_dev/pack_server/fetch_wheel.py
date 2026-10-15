@@ -67,7 +67,7 @@ import httpx2
 import msgspec
 from msgspec.structs import asdict
 
-from alasio.deploy.httpclient.sync_client import HttpClient
+from alasio.deploy.httpclient.client_sync import HttpClient
 from alasio.deploy_dev.pack_server.parse_dep import normalize_name
 from alasio.ext.cache import cached_property
 from alasio.ext.file.jsonfile import write_json

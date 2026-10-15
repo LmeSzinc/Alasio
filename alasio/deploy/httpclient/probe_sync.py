@@ -9,7 +9,7 @@ outside, so the losing probes of a race finish in their own time and their
 results are dropped (at most one probe timeout of extra traffic).
 
 The sync flavour is the one of the synchronous tools of the deploy domain, e.g.
-the wheel fetch of the pack server (see the module note of sync_client.py): the
+the wheel fetch of the pack server (see the module note of client_sync.py): the
 backend and the deploy jobs run on the event loop and use probe_async.
 
 httpx2 is imported lazily in the places that use it: the package resolves its
@@ -19,9 +19,9 @@ filesystem of the tests cannot answer.
 import threading
 from time import perf_counter
 
+from alasio.deploy.httpclient.client_sync import HttpClient
 from alasio.deploy.httpclient.probe_base import ProbeBase
 from alasio.deploy.httpclient.probe_mirrors import AllMirrorsFailedError, RangeUnsupportedError
-from alasio.deploy.httpclient.sync_client import HttpClient
 from alasio.ext.concurrent.threadpool import THREAD_POOL
 from alasio.logger import logger
 

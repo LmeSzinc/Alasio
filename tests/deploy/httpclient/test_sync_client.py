@@ -13,8 +13,8 @@ import weakref
 import httpx2
 import pytest
 
-from alasio.deploy.httpclient import sync_client as sync_client_module
-from alasio.deploy.httpclient.sync_client import HttpClient
+from alasio.deploy.httpclient import client_sync as sync_client_module
+from alasio.deploy.httpclient.client_sync import HttpClient
 from alasio.logger import logger
 
 

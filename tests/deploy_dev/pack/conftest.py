@@ -23,7 +23,7 @@ from starlette.applications import Starlette
 from starlette.routing import Mount
 
 from alasio.db.table import AlasioTable
-from alasio.deploy.httpclient.async_client import AsyncHttpClient
+from alasio.deploy.httpclient.client_async import AsyncHttpClient
 from alasio.deploy.httpclient.probe_db import RECORD_TTL, MirrorRecord, MirrorRecordTable
 from alasio.deploy.pack import job as job_module
 from alasio.deploy.pack.decode_base import PackDecodeBase

@@ -36,7 +36,7 @@ filesystem of the tests cannot answer.
 import trio
 from msgspec import Struct
 
-from alasio.deploy.httpclient.async_client import AsyncHttpClient
+from alasio.deploy.httpclient.client_async import AsyncHttpClient
 from alasio.deploy.httpclient.probe_async import AsyncHttpProbe
 from alasio.deploy.pack.decode_base import PackDecodeBase, PackDecodeError
 from alasio.ext.algorithm.vint import decode_vint

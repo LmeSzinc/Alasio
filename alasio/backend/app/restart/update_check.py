@@ -49,7 +49,7 @@ from typing import Dict, List, Optional
 import trio
 
 from alasio.backend.topic.update import UpdateInfo, UpdateSource
-from alasio.deploy.httpclient.async_client import AsyncHttpClient
+from alasio.deploy.httpclient.client_async import AsyncHttpClient
 from alasio.deploy.httpclient.probe_mirrors import Mirrors
 from alasio.deploy.pack.job import DeployJob
 from alasio.deploy.pack.server_file import ServerFile

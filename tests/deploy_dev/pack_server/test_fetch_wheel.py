@@ -17,7 +17,7 @@ import pytest
 from msgspec.structs import asdict
 from starlette.testclient import TestClient
 
-from alasio.deploy.httpclient import sync_client as sync_client_module
+from alasio.deploy.httpclient import client_sync as sync_client_module
 from alasio.deploy_dev.pack_server.fetch_wheel import (
     INDEX_DATA_FILE, WHEEL_FOLDER, WheelFetcher, WheelHashError, WheelInfo, WheelNotFoundError
 )

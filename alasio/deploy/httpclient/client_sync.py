@@ -6,7 +6,7 @@ wheel fetch of the pack server
 (alasio/deploy_dev/pack_server/fetch_wheel.py). The retry policy, the
 default timeout, the ownership of the client and the ignoring of the
 environment of the user (no proxy is taken from it) are the shared
-design of alasio/deploy/httpclient/base.py, see HttpClientBase. The
+design of alasio/deploy/httpclient/client_base.py, see HttpClientBase. The
 client itself is built by create_client(), the factory of the domain.
 
 request() blocks the calling thread: the wait before a retry is a
@@ -20,7 +20,7 @@ the in-memory filesystem of the tests cannot answer.
 """
 import time
 
-from alasio.deploy.httpclient.base import HttpClientBase
+from alasio.deploy.httpclient.client_base import HttpClientBase
 
 
 class HttpClient(HttpClientBase):

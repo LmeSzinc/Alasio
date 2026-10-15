@@ -6,8 +6,8 @@ sync HttpClient and the async AsyncHttpClient.
 """
 import pytest
 
-from alasio.deploy.httpclient.async_client import AsyncHttpClient
-from alasio.deploy.httpclient.sync_client import HttpClient
+from alasio.deploy.httpclient.client_async import AsyncHttpClient
+from alasio.deploy.httpclient.client_sync import HttpClient
 
 
 class TestClientFlavor:

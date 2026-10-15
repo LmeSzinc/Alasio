@@ -20,7 +20,7 @@ from time import perf_counter
 
 import trio
 
-from alasio.deploy.httpclient.async_client import AsyncHttpClient
+from alasio.deploy.httpclient.client_async import AsyncHttpClient
 from alasio.deploy.httpclient.probe_base import ProbeBase
 from alasio.deploy.httpclient.probe_mirrors import AllMirrorsFailedError, RangeUnsupportedError
 from alasio.logger import logger

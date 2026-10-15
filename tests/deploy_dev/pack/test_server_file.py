@@ -286,7 +286,7 @@ class TestRequestTimeout:
     @pytest.mark.trio
     async def test_latest_pack_timeout(self):
         """A latest.pack request uses PROBE_TIMEOUT on every phase."""
-        from alasio.deploy.httpclient.async_client import AsyncHttpClient
+        from alasio.deploy.httpclient.client_async import AsyncHttpClient
         timeouts = []
 
         def handler(request):
@@ -306,7 +306,7 @@ class TestRequestTimeout:
     async def test_download_timeout(self):
         """A pack range uses the default timeout of the http client: the
         connection budget stays short, the read/write budget is longer."""
-        from alasio.deploy.httpclient.async_client import AsyncHttpClient
+        from alasio.deploy.httpclient.client_async import AsyncHttpClient
         timeouts = []
 
         def handler(request):
