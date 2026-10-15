@@ -62,9 +62,17 @@ async def setup_app(fs):
 
 
 def bad_content(return_value=b'bad data'):
-    """An async stand-in of get_file_content() serving the given bytes."""
+    """
+    An async stand-in of the client download methods that fails.
+
+    The content the server would serve is decoded and validated, so the failure
+    is the very one the client produces for it (the client validates what it
+    serves, see ServerFile) and the job keeps the record in error as before.
+    """
     async def _bad(*args, **kwargs):
-        return return_value
+        decoder = PackDecodeBase(return_value)
+        decoder.validate_index()
+        raise PackDecodeError(f'Failed to decode the pack: {bytes(return_value)[:8]!r}')
     return _bad
 
 
@@ -323,7 +331,7 @@ class TestValidateEolFix:
 
         async def _fail(*args, **kwargs):
             raise AssertionError('no download expected for an EOL mismatch')
-        monkeypatch.setattr(WEBSITE_SERVER, 'get_file_content', _fail)
+        monkeypatch.setattr(WEBSITE_SERVER, 'get_file_data', _fail)
         job = ResetJob(WEBSITE_SERVER)
         assert await job.run()
         assert job.error == []
@@ -338,7 +346,7 @@ class TestValidateEolFix:
         # deploy.sh is eol=0 (LF) mode=755, the local file is CRLF
         with open(target, 'wb') as f:
             f.write(WEBSITE_FILES['scripts/deploy.sh'][0].replace(b'\n', b'\r\n'))
-        monkeypatch.setattr(WEBSITE_SERVER, 'get_file_content', bad_content())
+        monkeypatch.setattr(WEBSITE_SERVER, 'get_file_data', bad_content())
         job = ResetJob(WEBSITE_SERVER)
         assert await job.run()
         assert file_read_bytes(target) == WEBSITE_FILES['scripts/deploy.sh'][0]
@@ -379,7 +387,7 @@ class TestValidateModeFix:
 
         async def _fail(*args, **kwargs):
             raise AssertionError('no download expected for a mode mismatch')
-        monkeypatch.setattr(WEBSITE_SERVER, 'get_file_content', _fail)
+        monkeypatch.setattr(WEBSITE_SERVER, 'get_file_data', _fail)
         job = ResetJob(WEBSITE_SERVER)
         assert await job.run()
         assert job.error == []
@@ -396,7 +404,7 @@ class TestValidateModeFix:
         # deploy.sh is mode=755, the local file has no execute bits
         fs.remove(target)
         fs.create_file(target, st_mode=0o100644, contents=WEBSITE_FILES['scripts/deploy.sh'][0])
-        monkeypatch.setattr(WEBSITE_SERVER, 'get_file_content', bad_content())
+        monkeypatch.setattr(WEBSITE_SERVER, 'get_file_data', bad_content())
         job = ResetJob(WEBSITE_SERVER)
         assert await job.run()
         assert file_read_bytes(target) == WEBSITE_FILES['scripts/deploy.sh'][0]
@@ -530,7 +538,7 @@ class TestDownload:
         await setup_app(fs)
         os.remove(env.PROJECT_ROOT / 'backend/__init__.py')
         server = WEBSITE_SERVER
-        monkeypatch.setattr(server, 'get_file_content', bad_content())
+        monkeypatch.setattr(server, 'get_file_data', bad_content())
         job = ResetJob(server)
         await job.tmp_manager_init()
         job.validate_index()
@@ -538,7 +546,7 @@ class TestDownload:
         with logger.mock_capture_writer() as capture:
             await job.download()
         assert capture.concat() == """\
-WARNING | Failed to download backend/__init__.py: Failed to decode backend/__init__.py: size mismatch: decoded 8 bytes, expected 0
+WARNING | Failed to download backend/__init__.py: Failed to decode header: not a pack file: b'bad '
 """
         assert [item.info.path for item in job.error] == ['backend/__init__.py']
         assert job.pending == []
@@ -767,7 +775,7 @@ WARNING | Failed to reset: Failed to validate index checksum: checksum mismatch,
         await setup_app(fs)
         os.remove(env.PROJECT_ROOT / 'backend/__init__.py')
         server = WEBSITE_SERVER
-        monkeypatch.setattr(server, 'get_file_content', bad_content())
+        monkeypatch.setattr(server, 'get_file_data', bad_content())
         job = ResetJob(server)
         assert not await job.run()
         assert [item.info.path for item in job.error] == ['backend/__init__.py']
@@ -802,10 +810,10 @@ WARNING | Failed to reset: Failed to download the index pack: no server provided
         os.remove(env.PROJECT_ROOT / 'backend/__init__.py')
         server = WEBSITE_SERVER
 
-        async def _index_pack(version):
-            return WEBSITE_INDEX_PACK
+        async def _index_pack(version, checksum=''):
+            return PackDecodeBase(WEBSITE_INDEX_PACK)
         monkeypatch.setattr(server, 'get_index_pack', _index_pack)
-        monkeypatch.setattr(server, 'get_file_content', bad_content())
+        monkeypatch.setattr(server, 'get_file_data', bad_content())
         job = ResetJob(server)
         assert not await job.run()
         assert [item.info.path for item in job.error] == ['backend/__init__.py']

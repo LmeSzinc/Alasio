@@ -370,19 +370,13 @@ class ResetJob(JobBase):
         except (FileNotFoundError, PackDecodeError):
             decoder = None
         if decoder is None or decoder.index_checksum != info.checksum:
-            # the index pack is self-validating, the trailing checksum
-            # covers the header, the length and the whole index section
-            data = await server.get_index_pack(info.version)
-            decoder = PackDecodeBase(data)
-            decoder.validate_index()
-            if decoder.index_checksum != info.checksum:
-                # a downloaded index pack that mismatches the latest
-                # checksum is not the latest one, this is unsolvable
-                raise PackDecodeError(
-                    f'Failed to download the index pack: checksum mismatch, '
-                    f'expected {info.checksum}, got {decoder.index_checksum}'
-                )
-            await trio.to_thread.run_sync(file_write, tmp, data)
+            # the index pack is self-validating (the trailing checksum covers
+            # the header, the length and the whole index section) and the client
+            # validates it against the latest checksum: a mirror that serves a
+            # stale or broken copy is reselected and the download is retried
+            # once
+            decoder = await server.get_index_pack(info.version, info.checksum)
+            await trio.to_thread.run_sync(file_write, tmp, decoder.data)
         # rewrite the pack area paths of the new index and set its
         # decoder into the cache, the next validation reads it without
         # the file again
@@ -474,9 +468,9 @@ class ResetJob(JobBase):
         if self._matches(info, current).match:
             # a leftover tmp file passes the size + sha1 check, reuse it
             return tmp
-        # data_start is an offset into the full pack file, range requests
-        # use it directly
-        data = await server.get_file_content(decoder.current_version, info.data_start, info.data_size)
-        content = decoder.decode_content(info, data)
+        # the client fetches the range of the record from the full pack,
+        # decodes it and validates it against the record (a bad copy makes the
+        # mirror reselect and the download is retried once)
+        content = await server.get_file_data(decoder, info)
         await trio.to_thread.run_sync(file_write, tmp, content)
         return tmp

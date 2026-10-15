@@ -14,6 +14,7 @@ import sqlite3
 from hashlib import sha1
 from random import Random
 from time import time
+from urllib.parse import urlsplit
 
 import httpx2
 import pytest
@@ -21,15 +22,14 @@ import trio
 
 from alasio.db.table import AlasioTable
 from alasio.deploy.httpclient.async_client import AsyncHttpClient
+from alasio.deploy.httpclient.probe_db import RECORD_TTL, MirrorRecord, MirrorRecordTable
 from alasio.deploy.pack import job as job_module
 from alasio.deploy.pack.decode_base import PackDecodeBase
 from alasio.deploy.pack.server_file import ServerFile
-from alasio.deploy.pack.server_url import PackMirrorRow, PackMirrorTable, ServerUrl
 from alasio.deploy_dev.pack import _pack_cache
 from alasio.deploy_dev.pack._pack_cache import PackCache
 from alasio.deploy_dev.pack.pack_full import PackFull
 from alasio.ext import env
-from alasio.ext.cache import cached_property
 from alasio.ext.path import PathStr
 from alasio.git.mock.mock_repo import MockGitRepo
 
@@ -274,6 +274,10 @@ class MockServerFile(ServerFile):
         self.update_bytes = 0
         # the latest registered version
         self.latest_version = ''
+        # urls of the requests served, in order
+        self.requests = []
+        # path of the base url, stripped from every request
+        self.prefix = urlsplit(base_url).path.rstrip('/')
         # the http client of the base serves nothing, replace it by one
         # that serves the memory through a MockTransport, one client
         # per trio run, see MockHttpClient
@@ -307,13 +311,20 @@ class MockServerFile(ServerFile):
         """
         MockTransport handler, serves the packs from the memory.
 
+        The path of the base url is stripped from every request before it is
+        served (the channel base of a deployment works as it is) and the urls
+        of the requests are recorded in order, see requests.
+
         Args:
             request (httpx2.Request): The request
 
         Returns:
             httpx2.Response: The response
         """
+        self.requests.append(str(request.url))
         path = request.url.path
+        if self.prefix and path.startswith(self.prefix):
+            path = path[len(self.prefix):] or '/'
         if path.endswith('/latest.pack'):
             index_pack = self.index_packs[self.latest_version]
             # the checksum of the pack format: the trailing 20 bytes
@@ -356,9 +367,9 @@ WEBSITE_SERVER.register_version(COMMIT, WEBSITE_FULL_PACK, WEBSITE_INDEX_PACK)
 
 class FakeMirrorTable(AlasioTable):
     """
-    PackMirrorTable on the in-memory sqlite database, with IO counters.
+    MirrorRecordTable on the in-memory sqlite database, with IO counters.
 
-    The real table SQL of PackMirrorTable (CREATE_TABLE, select_one,
+    The real table SQL of MirrorRecordTable (CREATE_TABLE, select_one,
     upsert_row) runs against the ':memory:' database of the connection
     pool: the pack tests never touch the real gui.db. The database is
     shared by every connection, the table is dropped on construction,
@@ -366,9 +377,9 @@ class FakeMirrorTable(AlasioTable):
     first use).
     """
 
-    TABLE_NAME = PackMirrorTable.TABLE_NAME
-    CREATE_TABLE = PackMirrorTable.CREATE_TABLE
-    MODEL = PackMirrorRow
+    TABLE_NAME = MirrorRecordTable.TABLE_NAME
+    CREATE_TABLE = MirrorRecordTable.CREATE_TABLE
+    MODEL = MirrorRecord
 
     def __init__(self):
         super().__init__(':memory:')
@@ -387,25 +398,26 @@ class FakeMirrorTable(AlasioTable):
         self.upserts += 1
         return super().upsert_row(rows, conflicts=conflicts, updates=updates, _cursor_=_cursor_)
 
-    def seed(self, scope='', set_key='', name='', expire=None):
+    def seed(self, scene='repo', name='', digest='', result='', expire=None):
         """
         Write a record as fixture data, not counted in the IO counters.
 
         Args:
-            scope (str): Scope of the record. Defaults to ''
-            set_key (str): Fingerprint of the mirror structure the
-                name was selected for. Defaults to ''
-            name (str): Recorded mirror name. Defaults to ''
+            scene (str): Usage domain of the record. Defaults to 'repo'
+            name (str): Identity of the mirror set. Defaults to ''
+            digest (str): Fingerprint of the mirror structure the
+                result was selected for. Defaults to ''
+            result (str): Recorded mirror name. Defaults to ''
             expire (int): Expiration of the record, unix seconds.
                 Defaults to None, a fresh record
-                (now + the max of ServerUrl.RECORD_TTL); tests of the
+                (now + the max of RECORD_TTL); tests of the
                 expiration pass a value
         """
         if expire is None:
-            expire = int(time()) + max(ServerUrl.RECORD_TTL)
+            expire = int(time()) + max(RECORD_TTL)
         super().upsert_row(
-            PackMirrorRow(scope=scope, set_key=set_key, name=name, expire=expire),
-            conflicts='scope', updates=('set_key', 'name', 'expire'))
+            MirrorRecord(scene=scene, name=name, digest=digest, result=result, expire=expire),
+            conflicts=('scene', 'name'), updates=('digest', 'result', 'expire'))
 
 
 class BrokenMirrorTable:
@@ -420,28 +432,30 @@ class BrokenMirrorTable:
         raise sqlite3.OperationalError('unable to open database file')
 
 
-def make_server_url(mirrors, scope='', table=None):
+def make_server_file(mirrors, name='', table=None, client=None):
     """
-    A ServerUrl with a mirror table injected.
+    A ServerFile whose selection record is an injected table.
 
-    The table of a ServerUrl is a cached property created on first
-    use, the injected table replaces it before that: the pack tests
-    never touch the real gui.db.
+    The record table of a probe is the real gui.db table by default
+    (ProbeBase.RECORD_TABLE is None): the pack tests inject their in-memory
+    table here, they never touch the real gui.db.
 
     Args:
-        mirrors (str | dict): Mirror input of the ServerUrl
-        scope (str): Scope of the gui.db record. Defaults to ''
+        mirrors (str | dict): Mirror input of the ServerFile
+        name (str): Identity of the mirror set in the record. Defaults to ''
         table (AlasioTable-like, optional): Table to record in, e.g.
             FakeMirrorTable / BrokenMirrorTable. Defaults to None,
-            the real PackMirrorTable is created when it is first used
+            the real MirrorRecordTable is created when it is first used
+        client (httpx2.AsyncClient | AsyncHttpClient, optional): Client to
+            send the requests with. Defaults to None
 
     Returns:
-        ServerUrl: The server url
+        ServerFile: The server file
     """
-    server_url = ServerUrl(mirrors, scope=scope)
+    server = ServerFile(mirrors, name=name, client=client)
     if table is not None:
-        cached_property.set(server_url, '_db', table)
-    return server_url
+        server.RECORD_TABLE = table
+    return server
 
 
 # ════════════════════════════════════════════════════════════════════════════

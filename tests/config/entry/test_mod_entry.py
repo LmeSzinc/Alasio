@@ -7,7 +7,7 @@ Mirrors.from_input (see doc/2026-10-05_mod-update-backend-integration.md
 import pytest
 
 from alasio.config.entry.const import ModEntryInfo
-from alasio.deploy.httpclient.probe import Mirrors
+from alasio.deploy.httpclient.probe_mirrors import Mirrors
 
 
 class TestModEntryInfoMirrors:

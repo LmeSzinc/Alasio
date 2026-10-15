@@ -115,9 +115,17 @@ def read_tree():
 
 
 def bad_content(return_value=b'bad data'):
-    """An async stand-in of a server download serving the given bytes."""
+    """
+    An async stand-in of the client download methods that fails.
+
+    The content the server would serve is decoded and validated, so the failure
+    is the very one the client produces for it (the client validates what it
+    serves, see ServerFile) and the job keeps the record in error as before.
+    """
     async def _bad(*args, **kwargs):
-        return return_value
+        decoder = PackDecodeBase(return_value)
+        decoder.validate_index()
+        raise PackDecodeError(f'Failed to decode the pack: {bytes(return_value)[:8]!r}')
     return _bad
 
 
@@ -771,7 +779,7 @@ class TestCopyChain:
 
         async def _fail(*args, **kwargs):
             raise AssertionError('no download expected, the content is local')
-        monkeypatch.setattr(CHAIN_SERVER, 'get_file_content', _fail)
+        monkeypatch.setattr(CHAIN_SERVER, 'get_file_data', _fail)
         job = UpdateJob(CHAIN_UPDATE, server=CHAIN_SERVER)
         await job.tmp_manager_init()
         job.write()
@@ -807,7 +815,7 @@ class TestRenameCopySource:
 
         async def _fail(*args, **kwargs):
             raise AssertionError('no download expected, the content is local')
-        monkeypatch.setattr(RENAME_COPY_SERVER, 'get_file_content', _fail)
+        monkeypatch.setattr(RENAME_COPY_SERVER, 'get_file_data', _fail)
         job = UpdateJob(RENAME_COPY_UPDATE, server=RENAME_COPY_SERVER)
         await job.tmp_manager_init()
         job.write()
@@ -828,7 +836,7 @@ class TestRenameCopySource:
 
         async def _fail(*args, **kwargs):
             raise AssertionError('no download expected, the content is local')
-        monkeypatch.setattr(RENAME_COPY_SERVER, 'get_file_content', _fail)
+        monkeypatch.setattr(RENAME_COPY_SERVER, 'get_file_data', _fail)
         job = UpdateJob(RENAME_COPY_UPDATE, server=RENAME_COPY_SERVER)
         await job.tmp_manager_init()
         job.write()
@@ -979,7 +987,7 @@ class TestSourceDownload:
 
         async def _fail(*args, **kwargs):
             raise AssertionError('no download expected for an EOL mismatch')
-        monkeypatch.setattr(SERVER, 'get_file_content', _fail)
+        monkeypatch.setattr(SERVER, 'get_file_data', _fail)
         job = UpdateJob(UPDATE, server=SERVER)
         assert await job.run()
         assert job.error == []
@@ -993,15 +1001,15 @@ class TestSourceDownload:
         """A record that cannot be downloaded stays in error."""
         await setup_app()
         os.remove(env.PROJECT_ROOT / 'docs/readme.md')
-        monkeypatch.setattr(SERVER, 'get_file_content', bad_content())
+        monkeypatch.setattr(SERVER, 'get_file_data', bad_content())
         job = UpdateJob(UPDATE, server=SERVER)
         with logger.mock_capture_writer() as capture:
             assert not await job.run()
         assert capture.concat() == f"""\
 INFO | Updating files to "{env.PROJECT_ROOT}"
-WARNING | Failed to download docs/readme_copy.txt: Failed to decode docs/readme_copy.txt: size mismatch: decoded 8 bytes, expected 10
-WARNING | Failed to download docs/readme_copy2.txt: Failed to decode docs/readme_copy2.txt: size mismatch: decoded 8 bytes, expected 10
-WARNING | Failed to download docs/readme.md: Failed to decode docs/readme.md: size mismatch: decoded 8 bytes, expected 10
+WARNING | Failed to download docs/readme_copy.txt: Failed to decode header: not a pack file: b'bad '
+WARNING | Failed to download docs/readme_copy2.txt: Failed to decode header: not a pack file: b'bad '
+WARNING | Failed to download docs/readme.md: Failed to decode header: not a pack file: b'bad '
 INFO | Replacing files to "{env.PROJECT_ROOT}"
 WARNING | Failed to update: 3 file(s) stayed in error, the workspace is kept for the next run
 """
@@ -1058,13 +1066,13 @@ class TestValidateRemaining:
         target = env.PROJECT_ROOT / 'data/blob.png'
         with open(target, 'wb') as f:
             f.write(b'corrupt content')
-        monkeypatch.setattr(SERVER, 'get_file_content', bad_content())
+        monkeypatch.setattr(SERVER, 'get_file_data', bad_content())
         job = UpdateJob(UPDATE, server=SERVER)
         with logger.mock_capture_writer() as capture:
             assert not await job.run()
         assert capture.concat() == f"""\
 INFO | Updating files to "{env.PROJECT_ROOT}"
-WARNING | Failed to download data/blob.png: Failed to decompress data/blob.png: Corrupt input data
+WARNING | Failed to download data/blob.png: Failed to decode header: not a pack file: b'bad '
 INFO | Replacing files to "{env.PROJECT_ROOT}"
 WARNING | Failed to update: 1 file(s) stayed in error, the workspace is kept for the next run
 """
@@ -1210,13 +1218,13 @@ class TestDownload:
         # check, the first copy is the second download (the leftover was
         # already claimed as the tmp file of the second copy): one
         # download less than without the leftover
-        original = SERVER.get_file_content
+        original = SERVER.get_file_data
         calls = []
 
-        async def _serve(version, offset, size):
-            calls.append(offset)
-            return await original(version, offset, size)
-        monkeypatch.setattr(SERVER, 'get_file_content', _serve)
+        async def _serve(decoder, info):
+            calls.append(info.data_start)
+            return await original(decoder, info)
+        monkeypatch.setattr(SERVER, 'get_file_data', _serve)
         job = UpdateJob(UPDATE, server=SERVER)
         assert await job.run()
         assert job.error == []
@@ -1236,7 +1244,7 @@ class TestDownload:
 
         async def _fail(*args, **kwargs):
             raise AssertionError('no download expected for a healthy tree')
-        monkeypatch.setattr(SERVER, 'get_file_content', _fail)
+        monkeypatch.setattr(SERVER, 'get_file_data', _fail)
         job = UpdateJob(UPDATE, server=SERVER)
         assert await job.run()
         assert job.error == []
@@ -1282,7 +1290,7 @@ WARNING | Failed to update: 1 file(s) stayed in error, the workspace is kept for
         with open(env.PROJECT_ROOT / '.pack/index.pack', 'wb') as f:
             f.write(bad)
 
-        async def _raise(version):
+        async def _raise(*args, **kwargs):
             request = httpx2.Request('GET', 'http://mock/new/full.pack')
             response = httpx2.Response(500, request=request)
             raise httpx2.HTTPStatusError(

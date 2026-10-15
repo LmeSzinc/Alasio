@@ -163,7 +163,7 @@ class TestNamedUpdate:
 
         async def _fail(*args, **kwargs):
             raise AssertionError('no download expected for a named target')
-        monkeypatch.setattr(NAMED_SERVER, 'get_file_content', _fail)
+        monkeypatch.setattr(NAMED_SERVER, 'get_file_data', _fail)
 
         with logger.mock_capture_writer() as capture:
             assert await DeployJob(name='httpx', server=NAMED_SERVER).update()
@@ -241,7 +241,7 @@ INFO | Rebuild done
 
         async def _fail(*args, **kwargs):
             raise AssertionError('no download expected after a rename')
-        monkeypatch.setattr(NAMED_SERVER, 'get_file_content', _fail)
+        monkeypatch.setattr(NAMED_SERVER, 'get_file_data', _fail)
 
         with logger.mock_capture_writer() as capture:
             assert await DeployJob(name='b', server=NAMED_SERVER).update()

@@ -92,7 +92,10 @@ class UpdateJob(JobBase):
     def __init__(self, data, server=None, root=None, name=''):
         """
         Args:
-            data (bytes): Update pack data
+            data (PackDecodeBase | bytes): Update pack data: the validated
+                decoder of ServerFile.get_update_pack() (reused as it is, the
+                pack is not decoded a second time), or raw bytes, which
+                unpack() decodes and validates
             server (ServerFile, optional): Server to download the
                 index pack and the failed records. Defaults to None.
             root (str, optional): Folder to update. Defaults to None,
@@ -100,6 +103,13 @@ class UpdateJob(JobBase):
             name (str, optional): Ledger key of the target. Defaults to
                 '', the project tree target
         """
+        if isinstance(data, PackDecodeBase):
+            # the pack of ServerFile.get_update_pack(), already validated: the
+            # decoder is reused as it is (no second decode / checksum)
+            self._decoder = data
+            data = data.data
+        else:
+            self._decoder = None
         super().__init__(data, root=root, name=name)
         self.server = server
         self.error: "list[PendingFile]" = []
@@ -208,8 +218,10 @@ class UpdateJob(JobBase):
         kept in self.error, download() fetches their content from the
         new full pack instead.
         """
-        decoder = PackDecodeBase(self._data)
-        decoder.validate()
+        decoder = self._decoder
+        if decoder is None:
+            decoder = PackDecodeBase(self._data)
+            decoder.validate()
         if not decoder.old_version:
             raise ValueError('UpdateJob requires an update pack, got a full pack')
         # rewrite the pack area paths of the pack into the ledger
@@ -335,7 +347,7 @@ class UpdateJob(JobBase):
         failed = []
         # the index pack record first: it is not a file of the new
         # full pack, the whole index pack is downloaded
-        new_index_data = None
+        new_index = None
         for item in self.error:
             if item.info.path != self.index_rel:
                 continue
@@ -348,37 +360,38 @@ class UpdateJob(JobBase):
                     info=info, tmp=tmp, mode=info.mode_decoded if info.mode == 1 else None)
                 continue
             try:
-                # the index pack is self-validating, the trailing
-                # checksum covers the header, the length and the whole
-                # index section
-                new_index_data = await server.get_index_pack(self._version)
-                PackDecodeBase(new_index_data).validate_index()
+                # the client validates the index pack it returns (the trailing
+                # checksum covers the header, the length and the whole index
+                # section) and reselects the mirror when it is broken
+                new_index = await server.get_index_pack(self._version)
             except (PackDecodeError, httpx2.HTTPError) as e:
                 # cannot be downloaded or fails the size + sha1 check,
                 # the record stays in error, this is unsolvable
                 logger.warning(f'Failed to download {self.index_rel}: {e}')
-                new_index_data = None
+                new_index = None
                 failed.append(item)
             else:
-                await trio.to_thread.run_sync(file_write, tmp, new_index_data)
+                await trio.to_thread.run_sync(file_write, tmp, new_index.data)
                 self.pending_index = PendingFile(
                     info=info, tmp=tmp, mode=info.mode_decoded if info.mode == 1 else None)
             break
         # the other records, downloaded from the new full pack with
         # the offsets of the new index records
-        if new_index_data is None:
+        if new_index is None:
             # the new index pack: the fixed tmp file prepared in
             # unpack() or download(), or the local index (already the
             # new one when the index record was skipped on a resumed
             # run)
             try:
-                new_index_data = await trio.to_thread.run_sync(
+                data = await trio.to_thread.run_sync(
                     atomic_read_bytes, self.workspace.joinpath(self.NEW_INDEX))
             except FileNotFoundError:
                 pass
-        if new_index_data is None:
+            else:
+                new_index = PackDecodeBase(data)
+        if new_index is None:
             try:
-                new_index_data = await trio.to_thread.run_sync(atomic_read_bytes, self.index_file)
+                data = await trio.to_thread.run_sync(atomic_read_bytes, self.index_file)
             except FileNotFoundError:
                 # the local index is missing and could not be
                 # downloaded, the offsets are unavailable
@@ -386,7 +399,8 @@ class UpdateJob(JobBase):
                 self.pending += pending
                 self.error = failed
                 return
-        new_index = self.localize(PackDecodeBase(new_index_data))
+            new_index = PackDecodeBase(data)
+        new_index = self.localize(new_index)
         for item in self.error:
             if item.info.path == self.index_rel:
                 continue
@@ -406,11 +420,11 @@ class UpdateJob(JobBase):
                 failed.append(item)
                 continue
             try:
-                # data_start is an offset into the new full pack file,
-                # range requests use it directly
-                data = await server.get_file_content(
-                    new_index.current_version, new_info.data_start, new_info.data_size)
-                content = new_index.decode_content(new_info, data)
+                # the client fetches the range of the record from the new full
+                # pack, decodes it and validates it against the record (a bad
+                # copy makes the mirror reselect and the download is retried
+                # once)
+                content = await server.get_file_data(new_index, new_info)
             except (PackDecodeError, httpx2.HTTPError) as e:
                 # cannot be downloaded or fails the size + sha1 check,
                 # the record stays in error, this is unsolvable

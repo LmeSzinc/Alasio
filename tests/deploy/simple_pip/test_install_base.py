@@ -19,7 +19,6 @@ test_pip_pack does, so the requests of a flow run on the urls a real
 deployment serves.
 """
 import os
-from urllib.parse import urlsplit
 
 import httpx2
 import pytest
@@ -158,50 +157,7 @@ def make_mod(fake, content=None, root='/mod', **kwargs):
     return mod
 
 
-class ChannelServer(MockServerFile):
-    """
-    MockServerFile serving a pack channel whose base url carries a path
-    prefix.
-
-    The channel base of a deployment is
-    {mirror}/{Author}_{Repo}_{Branch}/packdep/{name} while MockServerFile
-    serves the packs of the path right after the host: the prefix of the
-    base url is stripped from every request before the packs are served, so
-    the requests of a flow run on the urls a deployment serves. The version
-    registered last is the latest one, served by latest.pack like the
-    deployment serves the packs of its target version.
-    """
-
-    def __init__(self, base_url):
-        """
-        Args:
-            base_url (str): Base url of the channel, the path prefix included
-        """
-        super().__init__(base_url)
-        # the urls of the requests served, in order
-        self.requests = []
-        self._prefix = urlsplit(base_url).path.rstrip('/')
-
-    def _handle(self, request):
-        """
-        Serve one request of the channel, the prefix of the base url stripped.
-
-        Args:
-            request (httpx2.Request): The request
-
-        Returns:
-            httpx2.Response: The response
-        """
-        self.requests.append(str(request.url))
-        path = request.url.path
-        if path.startswith(self._prefix):
-            path = path[len(self._prefix):] or '/'
-        # MockServerFile serves the packs of the stripped path
-        return super()._handle(httpx2.Request(
-            request.method, request.url.copy_with(path=path), headers=request.headers))
-
-
-def patch_servers(monkeypatch, expected_scope, *dists):
+def patch_servers(monkeypatch, expected_name, *dists):
     """
     Patch pip_pack.ServerFile with one in-memory channel server per
     distribution.
@@ -214,24 +170,24 @@ def patch_servers(monkeypatch, expected_scope, *dists):
 
     Args:
         monkeypatch (MonkeyPatch): The active monkeypatch
-        expected_scope (str): Scope the mirror record of every channel is
+        expected_name (str): Name the mirror record of every channel is
             expected with, the mod name: the record is shared with the
             channel of the mod tree
         *dists (str): Dist-keys of the channels to serve
 
     Returns:
-        dict[str, ChannelServer]: Server of the channel of each
+        dict[str, MockServerFile]: Server of the channel of each
             distribution, the requests of its install are served by it
     """
-    servers = {name: ChannelServer(dep_channel(name)) for name in dists}
+    servers = {name: MockServerFile(dep_channel(name)) for name in dists}
     channels = {dep_channel(name): server for name, server in servers.items()}
 
-    def make_server(mirrors, scope='', client=None):
+    def make_server(mirrors, name='', client=None):
         urls = mirrors.urls
         assert len(urls) == 1, 'a dependency channel derives a single url from the mod mirrors'
         url = next(iter(urls.values()))
         assert url in channels, f'the channel of a dependency was not served: {url}'
-        assert scope == expected_scope, 'the mirror record of a channel must be scoped to the mod'
+        assert name == expected_name, 'the mirror record of a channel must be named after the mod'
         return channels[url]
 
     monkeypatch.setattr(pip_pack, 'ServerFile', make_server)

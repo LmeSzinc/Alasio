@@ -15,7 +15,7 @@ import os
 
 import pytest
 
-from alasio.deploy.pack.decode_base import PackDecodeBase
+from alasio.deploy.pack.decode_base import PackDecodeBase, PackDecodeError
 from alasio.deploy.pack.job_rebuild import RebuildJob
 from alasio.deploy.pack.job_unpack import UnpackJob
 from alasio.deploy_dev.pack.pack_full import PackFull
@@ -178,26 +178,19 @@ def no_file_downloads(server, monkeypatch, message):
     """
     Fail every file download, keep the index pack requests working.
 
-    RebuildJob always downloads the index pack, whose range requests
-    are served by get_index_pack() through get_file_content() with
-    offset 0: a plain monkeypatch of get_file_content would break the
-    index download too. This wrapper passes the offset-0 requests
-    through and raises AssertionError for the others, the file
-    downloads of download().
+    RebuildJob always downloads the index pack (get_index_pack(), a method of
+    its own: the client validates it and returns the decoder): this wrapper
+    patches get_file_data() only, the file downloads of download(), and raises
+    AssertionError for every call.
 
     Args:
         server (MockServerFile): Server to patch
         monkeypatch (pytest.MonkeyPatch): Monkeypatch of the test
         message (str): Message of the raised AssertionError
     """
-    original = server.get_file_content
-
-    async def _wrapper(version, offset, size):
-        if offset == 0:
-            # the index pack range requests start at 0
-            return await original(version, offset, size)
+    async def _wrapper(*args, **kwargs):
         raise AssertionError(message)
-    monkeypatch.setattr(server, 'get_file_content', _wrapper)
+    monkeypatch.setattr(server, 'get_file_data', _wrapper)
 
 
 class TestUnconditionalIndex:
@@ -211,9 +204,9 @@ class TestUnconditionalIndex:
         calls = []
         original = SERVER.get_index_pack
 
-        async def _counting(version):
+        async def _counting(version, checksum=''):
             calls.append(version)
-            return await original(version)
+            return await original(version, checksum)
         monkeypatch.setattr(SERVER, 'get_index_pack', _counting)
         job = RebuildJob(SERVER)
         assert await job.run()
@@ -439,39 +432,39 @@ class TestFileRepair:
         """A file that cannot be downloaded stays in error, the run
         fails and the workspace is kept for the next run to resume."""
         await setup_old()
-        # keep the index pack requests (offset 0) working, serve bad
-        # data for the file downloads
-        original = SERVER.get_file_content
+        # the file downloads fail: the client validates what it serves (see
+        # ServerFile), the record stays in error
 
-        async def _bad_files(version, offset, size):
-            if offset == 0:
-                return await original(version, offset, size)
-            return b'bad data'
-        monkeypatch.setattr(SERVER, 'get_file_content', _bad_files)
+        async def _bad_files(decoder, info):
+            if not info.data_size:
+                # a record without data needs no download (see get_file_data)
+                return b''
+            raise PackDecodeError('bad content')
+        monkeypatch.setattr(SERVER, 'get_file_data', _bad_files)
         job = RebuildJob(SERVER)
         with logger.mock_capture_writer() as capture:
             assert not await job.run()
         assert job.error
         assert capture.concat() == f"""\
 INFO | Rebuilding files to "{env.PROJECT_ROOT}"
-WARNING | Failed to download .gitattributes: Failed to decompress .gitattributes: Corrupt input data
-WARNING | Failed to download backend/a1.py: Failed to decompress backend/a1.py: Corrupt input data
-WARNING | Failed to download backend/a2.py: Failed to decompress backend/a2.py: Corrupt input data
-WARNING | Failed to download backend/a3.py: Failed to decompress backend/a3.py: Corrupt input data
-WARNING | Failed to download backend/copy.py: Failed to decode backend/copy.py: size mismatch: decoded 8 bytes, expected 43
-WARNING | Failed to download backend/main.py: Failed to decode backend/main.py: size mismatch: decoded 8 bytes, expected 94
-WARNING | Failed to download backend/tiny.py: Failed to decode backend/tiny.py: size mismatch: decoded 8 bytes, expected 1
-WARNING | Failed to download data/new_blob.bin: Failed to decode data/new_blob.bin: size mismatch: decoded 8 bytes, expected 12800
-WARNING | Failed to download docs/guide2.txt: Failed to decode docs/guide2.txt: size mismatch: decoded 8 bytes, expected 30
-WARNING | Failed to download docs/notes.txt: Failed to decode docs/notes.txt: size mismatch: decoded 8 bytes, expected 13
-WARNING | Failed to download docs/readme_copy.txt: Failed to decode docs/readme_copy.txt: size mismatch: decoded 8 bytes, expected 10
-WARNING | Failed to download docs/readme_copy2.txt: Failed to decode docs/readme_copy2.txt: size mismatch: decoded 8 bytes, expected 10
-WARNING | Failed to download frontend/App.svelte: Failed to decode frontend/App.svelte: size mismatch: decoded 8 bytes, expected 52
-WARNING | Failed to download frontend/App2.svelte: Failed to decode frontend/App2.svelte: size mismatch: decoded 8 bytes, expected 52
-WARNING | Failed to download scripts/new_tool.py: Failed to decompress scripts/new_tool.py: Corrupt input data
-WARNING | Failed to download scripts/runner.sh: Failed to decode scripts/runner.sh: size mismatch: decoded 8 bytes, expected 28
-WARNING | Failed to download tools/run.sh: Failed to decode tools/run.sh: size mismatch: decoded 8 bytes, expected 31
-WARNING | Failed to download .pack/history.pack: Failed to decode .pack/history.pack: size mismatch: decoded 8 bytes, expected 16
+WARNING | Failed to download .gitattributes: bad content
+WARNING | Failed to download backend/a1.py: bad content
+WARNING | Failed to download backend/a2.py: bad content
+WARNING | Failed to download backend/a3.py: bad content
+WARNING | Failed to download backend/copy.py: bad content
+WARNING | Failed to download backend/main.py: bad content
+WARNING | Failed to download backend/tiny.py: bad content
+WARNING | Failed to download data/new_blob.bin: bad content
+WARNING | Failed to download docs/guide2.txt: bad content
+WARNING | Failed to download docs/notes.txt: bad content
+WARNING | Failed to download docs/readme_copy.txt: bad content
+WARNING | Failed to download docs/readme_copy2.txt: bad content
+WARNING | Failed to download frontend/App.svelte: bad content
+WARNING | Failed to download frontend/App2.svelte: bad content
+WARNING | Failed to download scripts/new_tool.py: bad content
+WARNING | Failed to download scripts/runner.sh: bad content
+WARNING | Failed to download tools/run.sh: bad content
+WARNING | Failed to download .pack/history.pack: bad content
 WARNING | Failed to rebuild: 18 file(s) stayed in error, the workspace is kept for the next run
 """
         # the index was not committed: the workspace is the resume base

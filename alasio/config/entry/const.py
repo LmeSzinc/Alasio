@@ -36,7 +36,7 @@ class ModEntryInfo(Struct):
     # default to scan "module" and "tasks" folders
     task_entry_folders: Dict[str, None] = field(default_factory=lambda: dict.fromkeys(['module', 'tasks']))
     # update source of the mod: the mirror structure of its update server,
-    # see alasio.deploy.httpclient.probe.Mirrors.from_input() for the
+    # see alasio.deploy.httpclient.probe_mirrors.Mirrors.from_input() for the
     # accepted forms (a single url, name to url, group to mirrors, and the
     # flat/nested mix). The mods with an empty value declare no update
     # source and are never checked. Defaults to ''

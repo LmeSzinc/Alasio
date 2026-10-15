@@ -36,7 +36,7 @@ installs of the same distribution never interleave and an install killed
 in flight is resumed by the next one.
 """
 
-from alasio.deploy.httpclient.probe import Mirrors
+from alasio.deploy.httpclient.probe_mirrors import Mirrors
 from alasio.deploy.pack.job import DeployJob
 from alasio.deploy.pack.server_file import ServerFile
 from alasio.deploy.simple_pip.pip_list import normalize_name
@@ -66,7 +66,7 @@ class PipPack:
     record (gui.db) is scoped to the mod: whichever channel of the mod
     probed first, the others reuse the winning mirror name (a name is the
     identity of a mirror, its url is read from the mirrors at every use,
-    see ServerUrl).
+    see probe_db).
 
     Attributes:
         mod (Mod): The mounted mod, its entry carries the update source
@@ -160,7 +160,7 @@ class PipPack:
             # the record is shared with the channel of the mod tree: the
             # winning mirror name of either is reused by the other, see the
             # class docstring
-            scope=self.mod.name,
+            name=self.mod.name,
             client=self.client,
         )
         try:
@@ -188,7 +188,7 @@ class PipPack:
         their declared order), only the urls change: the channel probes,
         falls back and records its mirror exactly like the mod channel, and
         the mirror record of either is reused by the other (the structure
-        fingerprint and the scope are the same, see ServerUrl).
+        fingerprint and the name are the same, see probe_db).
 
         Args:
             dist_key (str): PEP 503 normalized distribution name

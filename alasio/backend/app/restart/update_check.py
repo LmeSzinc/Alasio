@@ -50,7 +50,7 @@ import trio
 
 from alasio.backend.topic.update import UpdateInfo, UpdateSource
 from alasio.deploy.httpclient.async_client import AsyncHttpClient
-from alasio.deploy.httpclient.probe import Mirrors
+from alasio.deploy.httpclient.probe_mirrors import Mirrors
 from alasio.deploy.pack.job import DeployJob
 from alasio.deploy.pack.server_file import ServerFile
 from alasio.logger import logger
@@ -263,7 +263,7 @@ class ModUpdateCheck:
         """
         if self.mirrors is None:
             raise ValueError(f'The mod declares no update source: "{self.name}"')
-        server = ServerFile(self.mirrors, scope=self.name, client=self.check_module.client())
+        server = ServerFile(self.mirrors, name=self.name, client=self.check_module.client())
         await server.warmup()
         return DeployJob(root=self.mod.root, server=server)
 

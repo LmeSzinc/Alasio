@@ -18,12 +18,12 @@ stream a response into a consumer and retry the whole transfer
 Only a transport error is retried, i.e. a failure without a status
 code: dns lookup failure, connect refusal, ssl handshake failure,
 timeout, read/write error. A one-off network blip of the user network
-is absorbed instead of failing the caller. An http status error is
-never retried: it is the answer of the server, and whether another
-strategy (e.g. another mirror) makes sense is decided by the caller,
-which knows the content semantics. Every failed attempt is logged
-with a warning, whatever the failure is: an absorbed blip stays
-visible in the log, and exhausted retries read as the sequence of
+is absorbed instead of failing the caller. An http status error
+(4xx / 5xx) is never retried: it is the answer of the server, and
+whether another strategy (e.g. another mirror) makes sense is decided
+by the caller, which knows the content semantics. Every failed attempt
+is logged with a warning, whatever the failure is: an absorbed blip
+stays visible in the log, and exhausted retries read as the sequence of
 attempts.
 
 Every request carries a timeout: the timeout of the call, or the default

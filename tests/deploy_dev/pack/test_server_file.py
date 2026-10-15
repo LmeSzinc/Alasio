@@ -1,22 +1,23 @@
 """
-Tests for ServerFile: async HTTP client of the update server.
+Tests for ServerFile: the pack API of the async HTTP client of the update
+server.
 
 Uses conftest.WEBSITE_SERVER (in-memory MockServerFile) and an
-httpx2.MockTransport client to exercise the http request logic of
-ServerFile without a real server. Every test performing a request is
-async (pytest-trio): the requests await on the test event loop.
+httpx2.MockTransport client to exercise the pack requests without a real
+server. Every test performing a request is async (pytest-trio).
 """
 import httpx2
 import pytest
-import trio
 
+from alasio.deploy.httpclient.probe_mirrors import RangeUnsupportedError
 from alasio.deploy.pack.decode_base import PackDecodeBase, PackDecodeError
 from alasio.deploy.pack.server_file import LatestInfo, ServerFile
-from alasio.ext.cache import cached_property
-from alasio.logger import logger
 from tests.deploy_dev.pack.conftest import (
-    COMMIT, WEBSITE_FULL_PACK, WEBSITE_INDEX_PACK, WEBSITE_SERVER, FakeMirrorTable, make_server_url
+    COMMIT, WEBSITE_FULL_PACK, WEBSITE_INDEX_PACK, WEBSITE_SERVER, FakeMirrorTable, make_server_file
 )
+
+# the checksum of the pack format: the trailing 20 bytes of the index section
+CHECKSUM = bytes.fromhex(PackDecodeBase(WEBSITE_INDEX_PACK).index_checksum)
 
 
 def range_handler(requests, data):
@@ -34,59 +35,60 @@ def make_aclient(handler):
 
 
 class TestMockServerFile:
-    """MockServerFile runs the whole ServerFile logic through the mock
-    transport, serving the packs from the memory."""
+    """MockServerFile runs the whole pack API through the mock transport,
+    serving the packs from the memory (a single mirror set: no probe)."""
 
     @pytest.mark.trio
     async def test_get_latest_info(self):
-        """latest.pack data: version and the index pack checksum."""
+        """latest.pack data: the version and the index pack checksum."""
         info = await WEBSITE_SERVER.get_latest_info()
         assert isinstance(info, LatestInfo)
         assert info.version == COMMIT
-        # the checksum of the pack format: the trailing 20 bytes of
-        # the index section, not a checksum of the whole index file
-        checksum = bytes.fromhex(PackDecodeBase(WEBSITE_INDEX_PACK).index_checksum)
-        assert info.checksum == checksum.hex()
-
-    @pytest.mark.trio
-    async def test_get_file_content(self):
-        """A range of the full pack is sliced from the memory."""
-        assert await WEBSITE_SERVER.get_file_content(COMMIT, 0, 10) == WEBSITE_FULL_PACK[0:10]
-        assert await WEBSITE_SERVER.get_file_content(COMMIT, 5, 10) == WEBSITE_FULL_PACK[5:15]
-        assert await WEBSITE_SERVER.get_file_content(COMMIT, 100, 5) == WEBSITE_FULL_PACK[100:105]
+        assert info.checksum == CHECKSUM.hex()
 
     @pytest.mark.trio
     async def test_get_index_pack(self):
-        """get_index_pack() downloads the index pack with two range
-        requests through the mock transport."""
-        index_pack = await WEBSITE_SERVER.get_index_pack(COMMIT)
-        assert index_pack == WEBSITE_INDEX_PACK
-        # it must be a valid index pack
-        decoder = PackDecodeBase(index_pack)
-        decoder.validate_index()
+        """The index pack is downloaded with two range requests and returned
+        as a validated decoder (no second decode by the caller)."""
+        decoder = await WEBSITE_SERVER.get_index_pack(COMMIT)
+        assert isinstance(decoder, PackDecodeBase)
+        assert decoder.data.tobytes() == WEBSITE_INDEX_PACK
         assert decoder.current_version == COMMIT
 
+    @pytest.mark.trio
+    async def test_get_file_data(self):
+        """The content of a record is fetched, decoded and validated against
+        the record."""
+        decoder = await WEBSITE_SERVER.get_index_pack(COMMIT)
+        info = decoder.fileinfo['backend/main.py']
+        content = await WEBSITE_SERVER.get_file_data(decoder, info)
+        assert content == b'import uvicorn\n\nif __name__ == "__main__":\n    uvicorn.run("app:app")\n'
 
-class TestServerFile:
-    """ServerFile http requests, with a MockTransport client."""
+    @pytest.mark.trio
+    async def test_get_file_data_empty(self):
+        """A record without data (an empty file) needs no request."""
+        decoder = await WEBSITE_SERVER.get_index_pack(COMMIT)
+        info = decoder.fileinfo['backend/__init__.py']
+        assert await WEBSITE_SERVER.get_file_data(decoder, info) == b''
+
+
+class TestPackRequests:
+    """The request shapes and the payload validation of the pack API, with a
+    MockTransport client."""
 
     @pytest.mark.trio
     async def test_get_latest_info(self):
         """latest.pack is parsed as version + 20 bytes checksum."""
         requests = []
-        # the checksum of the pack format: the trailing 20 bytes of
-        # the index section
-        checksum = bytes.fromhex(PackDecodeBase(WEBSITE_INDEX_PACK).index_checksum)
 
         def handler(request):
             requests.append(request)
-            content = COMMIT.encode() + checksum
-            return httpx2.Response(200, content=content)
+            return httpx2.Response(200, content=COMMIT.encode() + CHECKSUM)
 
         server = ServerFile('http://test', client=make_aclient(handler))
         info = await server.get_latest_info()
         assert info.version == COMMIT
-        assert info.checksum == checksum.hex()
+        assert info.checksum == CHECKSUM.hex()
         assert str(requests[0].url) == 'http://test/latest.pack'
 
     @pytest.mark.trio
@@ -99,49 +101,29 @@ class TestServerFile:
             await server.get_latest_info()
 
     @pytest.mark.trio
-    async def test_get_file_content_range(self):
-        """A range request returns the range of the full pack."""
-        requests = []
-        server = ServerFile(
-            'http://test', client=make_aclient(range_handler(requests, WEBSITE_FULL_PACK)))
-        assert await server.get_file_content(COMMIT, 5, 10) == WEBSITE_FULL_PACK[5:15]
-        assert str(requests[0].url) == f'http://test/{COMMIT}/full.pack'
-        assert requests[0].headers['Range'] == 'bytes=5-14'
-
-    @pytest.mark.trio
-    async def test_get_file_content_range_ignored(self):
-        """A 200 response means the server ignored the range request."""
-        def handler(request):
-            return httpx2.Response(200, content=WEBSITE_FULL_PACK)
-        server = ServerFile('http://test', client=make_aclient(handler))
-        assert await server.get_file_content(COMMIT, 5, 10) == WEBSITE_FULL_PACK[5:15]
-
-    @pytest.mark.trio
-    async def test_get_file_content_error(self):
-        """A 404 response raises HTTPStatusError."""
-        def handler(request):
-            return httpx2.Response(404)
-        server = ServerFile('http://test', client=make_aclient(handler))
-        with pytest.raises(httpx2.HTTPStatusError):
-            await server.get_file_content(COMMIT, 0, 10)
-
-    @pytest.mark.trio
-    async def test_get_index_pack(self):
+    async def test_get_index_pack_ranges(self):
         """Two range requests download the self-validating index pack."""
         requests = []
         server = ServerFile(
             'http://test', client=make_aclient(range_handler(requests, WEBSITE_FULL_PACK)))
-        index_pack = await server.get_index_pack(COMMIT)
-        assert index_pack == WEBSITE_INDEX_PACK
-        # the trailing checksum is included, the index pack validates
-        # itself with PackDecodeBase
-        decoder = PackDecodeBase(index_pack)
-        decoder.validate_index()
+        decoder = await server.get_index_pack(COMMIT)
+        assert decoder.data.tobytes() == WEBSITE_INDEX_PACK
         assert decoder.current_version == COMMIT
         # first request: the header and the index section length
         assert requests[0].headers['Range'] == f'bytes=0-{ServerFile.HEADER_REQUEST_SIZE - 1}'
         # second request: the exact range of the index pack
         assert requests[1].headers['Range'] == f'bytes=0-{len(WEBSITE_INDEX_PACK) - 1}'
+        assert str(requests[0].url) == f'http://test/{COMMIT}/full.pack'
+
+    @pytest.mark.trio
+    async def test_get_index_pack_checksum_mismatch(self):
+        """The expected checksum is verified: a mirror that serves an index
+        pack latest.pack does not advertise is not usable."""
+        server = ServerFile(
+            'http://test',
+            client=make_aclient(range_handler([], WEBSITE_FULL_PACK)))
+        with pytest.raises(PackDecodeError, match='checksum mismatch'):
+            await server.get_index_pack(COMMIT, checksum='00' * 20)
 
     @pytest.mark.trio
     async def test_get_index_pack_invalid_header(self):
@@ -153,21 +135,34 @@ class TestServerFile:
             await server.get_index_pack(COMMIT)
 
     @pytest.mark.trio
+    async def test_range_ignored_raises(self):
+        """A mirror that ignores the range request (a 200 answer) is not
+        usable: the whole pack would be transferred for every file."""
+        def handler(request):
+            return httpx2.Response(200, content=WEBSITE_FULL_PACK)
+        server = ServerFile('http://test', client=make_aclient(handler))
+        with pytest.raises(RangeUnsupportedError):
+            await server.get_index_pack(COMMIT)
+
+    @pytest.mark.trio
     async def test_get_update_pack(self):
-        """The update pack url is {new}/from_{old}.pack."""
+        """The update pack url is {new}/from_{old}.pack, the pack is validated
+        before it is returned."""
         requests = []
 
         def handler(request):
             requests.append(request)
-            return httpx2.Response(200, content=b'update pack data')
+            return httpx2.Response(200, content=b'not a pack')
 
         server = ServerFile('http://test', client=make_aclient(handler))
-        assert await server.get_update_pack('old', 'new') == b'update pack data'
+        with pytest.raises(PackDecodeError):
+            await server.get_update_pack('old', 'new')
         assert str(requests[0].url) == 'http://test/new/from_old.pack'
 
     @pytest.mark.trio
     async def test_get_update_pack_error(self):
-        """A 404 response raises HTTPStatusError."""
+        """A 404 response raises HTTPStatusError (the caller falls back to a
+        rebuild)."""
         def handler(request):
             return httpx2.Response(404)
         server = ServerFile('http://test', client=make_aclient(handler))
@@ -179,271 +174,151 @@ class TestServerFile:
         """The trailing whole-pack digest is read with one 20 bytes range
         request, the body is not transferred."""
         requests = []
-
-        def handler(request):
-            requests.append(request)
-            start, _, end = request.headers['Range'].partition('=')[2].partition('-')
-            return httpx2.Response(206, content=WEBSITE_FULL_PACK[int(start):int(end) + 1])
-
         size = len(WEBSITE_FULL_PACK)
-        server = ServerFile('http://test', client=make_aclient(handler))
-        checksum, body = await server.get_update_pack_checksum('old', 'new', size)
+        server = ServerFile(
+            'http://test',
+            client=make_aclient(range_handler(requests, WEBSITE_FULL_PACK)))
+        checksum = await server.get_update_pack_checksum('old', 'new', size)
         assert checksum == WEBSITE_FULL_PACK[-20:].hex()
-        assert body == b''
         assert str(requests[0].url) == 'http://test/new/from_old.pack'
         assert requests[0].headers['Range'] == f'bytes={size - 20}-{size - 1}'
 
-    @pytest.mark.trio
-    async def test_get_update_pack_checksum_range_ignored(self):
-        """A server that ignores the range request serves the whole pack: the
-        body is returned with the checksum, the caller uses it as the
-        download."""
-        def handler(request):
-            return httpx2.Response(200, content=WEBSITE_FULL_PACK)
-
-        size = len(WEBSITE_FULL_PACK)
-        server = ServerFile('http://test', client=make_aclient(handler))
-        checksum, body = await server.get_update_pack_checksum('old', 'new', size)
-        assert checksum == WEBSITE_FULL_PACK[-20:].hex()
-        assert body == WEBSITE_FULL_PACK
-
 
 class TestConstruction:
-    """ServerFile accepts the raw mirror input and builds its ServerUrl."""
+    """ServerFile accepts the mirror input and the identity of the set."""
 
-    def test_mirror_input_builds_the_server_url(self):
-        """A raw mirror input and a scope build the ServerUrl."""
+    def test_mirror_input(self):
+        """A raw mirror input and a name build the structure of the set."""
         server = ServerFile(
-            {'cn': {'123pan': 'http://pan'}, 'global': 'http://global'}, scope='pack')
-        assert server.server_url.scope == 'pack'
-        assert server.server_url.single == ''
-        assert server.server_url.url_of('123pan') == 'http://pan'
-        assert server.server_url.url_of('global') == 'http://global'
+            {'cn': {'123pan': 'http://pan'}, 'global': 'http://global'}, name='alas')
+        assert server.name == 'alas'
+        assert server.SCENE == 'repo'
+        assert server.mirrors.single == ''
+        assert server.mirrors.url_of('123pan') == 'http://pan'
+        assert server.mirrors.url_of('global') == 'http://global'
 
     def test_str_input_is_a_single_mirror(self):
         """A str input stays the plain single mirror shortcut."""
         server = ServerFile('http://only')
-        assert server.server_url.single == 'default'
-        assert server.server_url.url_of('default') == 'http://only'
+        assert server.mirrors.single == 'default'
+        assert server.mirrors.url_of('default') == 'http://only'
+        assert server.name == ''
 
-    def test_server_url_input_is_used_as_is(self):
-        """A given ServerUrl is used as-is, the scope is not applied."""
-        server_url = make_server_url('http://only')
-        server = ServerFile(server_url, scope='ignored')
-        assert server.server_url is server_url
-        assert server_url.scope == ''
-
-    def test_scope_reaches_the_record(self):
-        """The scope given to ServerFile is the scope of the gui.db
-        record of its ServerUrl."""
+    @pytest.mark.trio
+    async def test_name_reaches_the_record(self):
+        """The name given to ServerFile is the name column of the gui.db
+        record of its set."""
         table = FakeMirrorTable()
-        server = ServerFile({'g': {'b': 'http://b', 'a': 'http://a'}}, scope='pack')
-        cached_property.set(server.server_url, '_db', table)
-        server.server_url.set_name('a')
-        assert table.select_one(scope='pack').name == 'a'
-        assert table.select_one(scope='') is None
+        server = make_server_file({'g': {'b': 'http://b', 'a': 'http://a'}}, name='alas',
+                                  table=table,
+                                  client=make_aclient(lambda request: httpx2.Response(
+                                      200, content=COMMIT.encode() + CHECKSUM)))
+        await server.get_latest_info()
+        row = table.select_one(scene='repo', name='alas')
+        # the first member of the group wins the race
+        assert row.result == 'b'
+        assert table.select_one(scene='repo', name='') is None
 
 
-class FakeClient:
-    """Stand-in of httpx2.AsyncClient for the reuse tests: every
-    instance is tracked, latest.pack is served from the memory."""
+class TrackingClient(httpx2.AsyncClient):
+    """The real client of the instance, with the instances tracked: the
+    transport is the mock of the test."""
 
     instances = []
 
-    def __init__(self, *args, **kwargs):
-        FakeClient.instances.append(self)
-        self.requests = []
+    def __init__(self, handler, *args, **kwargs):
+        super().__init__(*args, transport=httpx2.MockTransport(handler), **kwargs)
+        self.handler_requests = []
         self.closed = False
-
-    async def request(self, method, url, headers=None, **kwargs):
-        self.requests.append(str(url))
-        return httpx2.Response(
-            200, content=b'v1' + b'\x00' * 20, request=httpx2.Request(method, url))
+        TrackingClient.instances.append(self)
 
     async def aclose(self):
         self.closed = True
+        await super().aclose()
 
 
 class TestClientReuse:
-    """The async http client of an instance: the injected one is used
-    as-is, a created one is reused by every request (keep-alive)."""
+    """The async http client of an instance: an injected one is used as-is, a
+    created one is reused by every request and closed by aclose()."""
 
     @pytest.mark.trio
     async def test_created_once_and_reused(self, monkeypatch):
-        """Without an injected client, the first request creates the
-        client of the instance and every later request reuses it."""
-        FakeClient.instances.clear()
-        monkeypatch.setattr(httpx2, 'AsyncClient', FakeClient)
-
-        server = ServerFile('http://only')
-        assert (await server.get_latest_info()).version == 'v1'
-        assert (await server.get_latest_info()).version == 'v1'
-        assert len(FakeClient.instances) == 1
-        assert FakeClient.instances[0].requests == [
-            'http://only/latest.pack',
-            'http://only/latest.pack',
-        ]
-
-    @pytest.mark.trio
-    async def test_created_client_is_closed(self, monkeypatch):
-        """aclose() closes the client the instance created, closing
-        again is a no-op, a close before the first request is one."""
-        FakeClient.instances.clear()
-        monkeypatch.setattr(httpx2, 'AsyncClient', FakeClient)
-
-        server = ServerFile('http://only')
-        # nothing was created yet, aclose is a no-op
-        await server.aclose()
-        assert FakeClient.instances == []
-        await server.get_latest_info()
-        client = FakeClient.instances[0]
-        assert not client.closed
-        await server.aclose()
-        assert client.closed
-        await server.aclose()
-        assert client.closed
-
-    @pytest.mark.trio
-    async def test_context_manager_closes(self, monkeypatch):
-        """`async with ServerFile(...) as server:` closes the created
-        client on exit."""
-        FakeClient.instances.clear()
-        monkeypatch.setattr(httpx2, 'AsyncClient', FakeClient)
-
-        async with ServerFile('http://only') as server:
-            assert (await server.get_latest_info()).version == 'v1'
-            assert not FakeClient.instances[0].closed
-        assert FakeClient.instances[0].closed
-
-    @pytest.mark.trio
-    async def test_injected_client_is_used_and_never_closed(self):
-        """An injected client serves the requests and is left alone by
-        aclose(): its lifetime belongs to the caller."""
+        """Without an injected client, the first request creates the client
+        of the instance and every later request reuses it."""
         requests = []
 
         def handler(request):
             requests.append(str(request.url))
-            return httpx2.Response(200, content=b'v1' + b'\x00' * 20)
+            return httpx2.Response(200, content=COMMIT.encode() + CHECKSUM)
 
-        client = make_aclient(handler)
+        TrackingClient.instances.clear()
+        monkeypatch.setattr(
+            httpx2, 'AsyncClient',
+            lambda *args, **kwargs: TrackingClient(handler, *args, **kwargs))
+
+        server = ServerFile('http://only')
+        assert (await server.get_latest_info()).version == COMMIT
+        assert (await server.get_latest_info()).version == COMMIT
+        assert len(TrackingClient.instances) == 1
+        assert requests == ['http://only/latest.pack', 'http://only/latest.pack']
+        # aclose() closes the client the instance created
+        await server.aclose()
+        assert TrackingClient.instances[0].closed is True
+
+    @pytest.mark.trio
+    async def test_injected_client_is_never_closed(self):
+        """An injected client belongs to the caller: aclose() leaves it
+        alone."""
+        client = make_aclient(lambda request: httpx2.Response(
+            200, content=b'v1' + b'\x00' * 20))
         server = ServerFile('http://only', client=client)
         assert (await server.get_latest_info()).version == 'v1'
         await server.aclose()
-        assert not client.is_closed
-        # the injected client is still usable
-        assert (await server.get_latest_info()).version == 'v1'
-        assert requests == ['http://only/latest.pack', 'http://only/latest.pack']
+        # the injected client still works
+        assert (await client.get('http://only/latest.pack')).status_code == 200
+
+
+class TestRequestTimeout:
+    """latest.pack uses the short probe budget, the pack downloads use the
+    default timeout of the http client."""
 
     @pytest.mark.trio
-    async def test_probe_creates_one_client(self, monkeypatch):
-        """The probe of a first request runs the groups in tasks on one
-        thread: the client is still created once and shared."""
-        FakeClient.instances.clear()
-        monkeypatch.setattr(httpx2, 'AsyncClient', FakeClient)
+    async def test_latest_pack_timeout(self):
+        """A latest.pack request uses PROBE_TIMEOUT on every phase."""
+        from alasio.deploy.httpclient.async_client import AsyncHttpClient
+        timeouts = []
 
-        server = ServerFile(
-            make_server_url({'a': 'http://a', 'b': 'http://b'}, table=FakeMirrorTable()))
-        with logger.mock_capture_writer():
-            name, info = await server.probe()
-        assert name in ('a', 'b')
-        assert info.version == 'v1'
-        assert len(FakeClient.instances) == 1
-
-
-class TestWarmup:
-    """warmup() resolves the recorded mirror ahead of the first request."""
-
-    @staticmethod
-    def _latest_handler(requests):
-        """A handler serving latest.pack and counting the requests."""
         def handler(request):
-            requests.append(request)
-            if request.url.path == '/latest.pack':
-                return httpx2.Response(200, content=COMMIT.encode() + b'\x00' * 20)
-            return httpx2.Response(404)
-        return handler
+            timeouts.append(request.extensions['timeout'])
+            return httpx2.Response(200, content=COMMIT.encode() + CHECKSUM)
+
+        server = ServerFile('http://only', client=make_aclient(handler))
+        await server.get_latest_info()
+        assert timeouts == [{
+            'connect': AsyncHttpClient.PROBE_TIMEOUT,
+            'read': AsyncHttpClient.PROBE_TIMEOUT,
+            'write': AsyncHttpClient.PROBE_TIMEOUT,
+            'pool': AsyncHttpClient.PROBE_TIMEOUT,
+        }]
 
     @pytest.mark.trio
-    async def test_warmup_reads_the_record_once(self):
-        """A usable record resolves the mirror without any request."""
-        requests = []
-        table = FakeMirrorTable()
-        server_url = make_server_url(
-            {'cn': 'http://cn', 'global': 'http://global'}, scope='mod', table=table)
-        table.seed(scope='mod', set_key=server_url.set_key, name='global')
-        server = ServerFile(server_url, client=make_aclient(self._latest_handler(requests)))
+    async def test_download_timeout(self):
+        """A pack range uses the default timeout of the http client: the
+        connection budget stays short, the read/write budget is longer."""
+        from alasio.deploy.httpclient.async_client import AsyncHttpClient
+        timeouts = []
 
-        await server.warmup()
-        # the record selected the mirror: no request, one read
-        assert requests == []
-        assert table.selects == 1
-        assert server._mirror == 'global'
+        def handler(request):
+            timeouts.append(request.extensions['timeout'])
+            return httpx2.Response(206, content=b'\x81')
 
-        # the request of the instance reuses the warmed resolution
-        info = await server.get_latest_info()
-        assert info.version == COMMIT
-        assert str(requests[0].url) == 'http://global/latest.pack'
-        assert table.selects == 1
-
-        # warming an instance up twice changes nothing
-        await server.warmup()
-        assert table.selects == 1
-
-    @pytest.mark.trio
-    async def test_warmup_of_a_single_mirror_makes_no_io(self):
-        """A single mirror set has no selection to make: nothing is read
-        and nothing is requested."""
-        requests = []
-        table = FakeMirrorTable()
-        server = ServerFile(
-            make_server_url({'only': 'http://only'}, table=table),
-            client=make_aclient(self._latest_handler(requests)))
-        await server.warmup()
-        assert server._mirror == 'only'
-        assert (requests, table.selects, table.upserts) == ([], 0, 0)
-
-    @pytest.mark.trio
-    async def test_warmup_does_not_probe(self):
-        """Without a record the warmup leaves the probe to the first
-        request, so the probe payload (latest.pack) is not wasted."""
-        requests = []
-        table = FakeMirrorTable()
-        server = ServerFile(
-            make_server_url({'cn': {'123pan': 'http://a', 'tencent': 'http://b'}}, table=table),
-            client=make_aclient(self._latest_handler(requests)))
-        await server.warmup()
-        assert (requests, table.upserts) == ([], 0)
-        assert server._mirror == ''
-
-        # the first request probes and hands the payload over: one request
-        info = await server.get_latest_info()
-        assert info.version == COMMIT
-        assert len(requests) == 1
-        assert table.upserts == 1
-        assert server._mirror == '123pan'
-
-
-class TestCancellation:
-    """A cancelled task interrupts the in-flight request immediately."""
-
-    @pytest.mark.trio
-    async def test_in_flight_request_is_cancelled(self):
-        """The await of an in-flight request is a cancellation point:
-        cancelling the task drops the request instead of waiting for
-        its timeout."""
-        entered = trio.Event()
-
-        async def handler(request):
-            entered.set()
-            # the request never answers: only a cancellation ends it
-            await trio.sleep_forever()
-
-        server = ServerFile('http://test', client=make_aclient(handler))
-        with logger.mock_capture_writer():
-            async with trio.open_nursery() as nursery:
-                nursery.start_soon(server.get_latest_info)
-                await entered.wait()
-                nursery.cancel_scope.cancel()
-        # the cancelled call ended on the cancellation, not on the
-        # request timeout, and the nursery exited cleanly
-        assert entered.is_set()
+        server = ServerFile('http://only', client=make_aclient(handler))
+        with pytest.raises(PackDecodeError):
+            await server.get_index_pack(COMMIT)
+        assert timeouts == [{
+            'connect': AsyncHttpClient.PROBE_TIMEOUT,
+            'read': AsyncHttpClient.DEFAULT_TIMEOUT.read,
+            'write': AsyncHttpClient.DEFAULT_TIMEOUT.write,
+            'pool': AsyncHttpClient.PROBE_TIMEOUT,
+        }]
+        assert AsyncHttpClient.DEFAULT_TIMEOUT.read > AsyncHttpClient.PROBE_TIMEOUT

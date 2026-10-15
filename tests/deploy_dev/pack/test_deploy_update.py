@@ -263,9 +263,7 @@ INFO | Rebuild done
 INFO | [CurrentVersion] old
 INFO | [LatestVersion] new
 INFO | Update available: old -> new
-INFO | Updating files to "{env.PROJECT_ROOT}"
-WARNING | Failed to update: Failed to decode header: not a pack file: b'garb', keeping the workspace for the next run
-WARNING | Failed to apply the update pack, rebuilding from the latest index
+WARNING | Failed to get the update pack old -> new: Failed to decode header: not a pack file: b'garb', rebuilding from the latest index
 INFO | Rebuilding files to "{env.PROJECT_ROOT}"
 INFO | Rebuild done
 """
@@ -416,9 +414,7 @@ INFO | Rebuild done
 INFO | [CurrentVersion] old
 INFO | [LatestVersion] new
 INFO | Update available: old -> new
-INFO | Updating files to "{env.PROJECT_ROOT}"
-WARNING | Failed to update: Failed to decode header: not a pack file: b'garb', keeping the workspace for the next run
-WARNING | Failed to apply the update pack, rebuilding from the latest index
+WARNING | Failed to get the update pack old -> new: Failed to decode header: not a pack file: b'garb', rebuilding from the latest index
 INFO | Rebuilding files to "{env.PROJECT_ROOT}"
 INFO | Rebuild done
 """
@@ -462,9 +458,9 @@ INFO | Update done
             server.latest_version = 'other'
             return info
 
-        async def counting_index(version):
+        async def counting_index(version, checksum=''):
             index_calls.append(version)
-            return await original_index(version)
+            return await original_index(version, checksum)
 
         monkeypatch.setattr(server, 'get_latest_info', latest_then_publish)
         monkeypatch.setattr(server, 'get_index_pack', counting_index)
@@ -689,9 +685,9 @@ INFO | Update done
         index_calls = []
         original_index = SERVER.get_index_pack
 
-        async def counting_index(version):
+        async def counting_index(version, checksum=''):
             index_calls.append(version)
-            return await original_index(version)
+            return await original_index(version, checksum)
 
         monkeypatch.setattr(SERVER, 'get_index_pack', counting_index)
         with logger.mock_capture_writer() as capture:
@@ -797,7 +793,7 @@ class TestKeptPack:
         """The pack of the version pair is offered with its whole-pack digest."""
         UpdateJob(UPDATE, server=SERVER).write()
         kept, checksum = DeployJob(server=SERVER)._load_kept_pack('old', 'new')
-        assert kept == UPDATE
+        assert bytes(kept.data) == UPDATE
         assert checksum == UPDATE_CHECKSUM
 
     def test_pack_of_another_pair(self, app_folder):
@@ -912,7 +908,7 @@ INFO | Update done
         await UnpackJob(OLD_PACK).run()
         UpdateJob(UPDATE, server=server).write()
         data, kept = await DeployJob(server=server)._get_update_pack('old', 'new')
-        assert data == OTHER_UPDATE
+        assert bytes(data.data) == OTHER_UPDATE
         assert kept is False
         assert server.update_bytes == 20 + len(OTHER_UPDATE)
 

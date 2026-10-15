@@ -136,10 +136,11 @@ class AsyncHttpClient(HttpClientBase):
         transport error (dns lookup failure, connect refusal, ssl
         handshake failure, timeout, read/write error - there is no
         status code at all) is retried while an attempt is left, an
-        http status error is never retried (it is the answer of the
-        server, classified by the caller, e.g. a mirror may be
-        reselected for a 5xx, see ServerFile._mirror_failed), and every
-        failed attempt is logged with a warning. The wait before a
+        http status error (4xx / 5xx) is never retried: the status is
+        the answer of the server, classified by the caller - a mirror
+        probe reads a non-2xx as "this candidate cannot serve the
+        path", see AsyncHttpProbe.head() - and every failed attempt
+        is logged with a warning. The wait before a
         retry is a trio sleep, so the cancellation of the enclosing
         task interrupts it (like it interrupts the in-flight request
         itself).
@@ -217,6 +218,32 @@ class AsyncHttpClient(HttpClientBase):
             httpx2.HTTPError: If the request fails
         """
         return await self.request('GET', url, headers=headers, timeout=timeout, attempts=attempts)
+
+    async def head(self, url, headers=None, timeout=None, attempts=HttpClientBase.REQUEST_ATTEMPTS):
+        """
+        Head a url: the HEAD wrapper of request(), see it for the retry,
+        the timeout and the raised errors.
+
+        A HEAD response carries no body: the status and the headers are the
+        answer of the request (the probe of a path asks HEAD to learn whether
+        the mirror serves it, see AsyncHttpProbe.probe_function).
+
+        Args:
+            url (str): URL to head
+            headers (dict, optional): Request headers
+            timeout (float | httpx2.Timeout, optional): Request
+                timeout, the default timeout of the class when not
+                given, see request()
+            attempts (int): Attempts of the request. Defaults to
+                REQUEST_ATTEMPTS, a single-shot request passes 1
+
+        Returns:
+            httpx2.Response: The response
+
+        Raises:
+            httpx2.HTTPError: If the request fails
+        """
+        return await self.request('HEAD', url, headers=headers, timeout=timeout, attempts=attempts)
 
     async def stream(self, url, consume, headers=None, timeout=None, attempts=HttpClientBase.REQUEST_ATTEMPTS):
         """

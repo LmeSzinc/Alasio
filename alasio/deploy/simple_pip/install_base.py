@@ -27,7 +27,7 @@ Usage:
 
 import trio
 
-from alasio.deploy.httpclient.probe import AllMirrorsFailedError
+from alasio.deploy.httpclient.probe_mirrors import AllMirrorsFailedError
 from alasio.deploy.simple_pip.parse_req import Requirements
 from alasio.deploy.simple_pip.pip_list import DIST_INFO_SUFFIX, PipList, normalize_name
 from alasio.deploy.simple_pip.pip_pack import PipPack

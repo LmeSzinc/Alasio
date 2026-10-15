@@ -124,10 +124,12 @@ class HttpClient(HttpClientBase):
         transport error up to `attempts` attempts.
 
         The retry semantics are the shared design of base.py: only a
-        transport error is retried, an http status error is the answer
-        of the server and is classified by the caller, and every failed
-        attempt is logged with a warning. The wait before a retry is a
-        time.sleep, it blocks the calling thread.
+        transport error is retried, an http status error (4xx / 5xx) is
+        the answer of the server and is classified by the caller - a
+        mirror probe reads a non-2xx as "this candidate cannot serve the
+        path", see SyncHttpProbe.head() - and every failed attempt is
+        logged with a warning. The wait before a retry is a time.sleep,
+        it blocks the calling thread.
 
         The timeout is the timeout of the call, or the default timeout
         of the class when the call gives none: httpx always receives it
@@ -211,6 +213,37 @@ class HttpClient(HttpClientBase):
         """
         return self.request(
             'GET', url, headers=headers, timeout=timeout, attempts=attempts,
+            follow_redirects=follow_redirects)
+
+    def head(self, url, headers=None, timeout=None, attempts=HttpClientBase.REQUEST_ATTEMPTS, follow_redirects=None):
+        """
+        Head a url: the HEAD wrapper of request(), see it for the retry,
+        the timeout, the redirects and the raised errors.
+
+        A HEAD response carries no body: the status and the headers are the
+        answer of the request (the probe of a path asks HEAD to learn whether
+        the mirror serves it, see SyncHttpProbe.probe_function).
+
+        Args:
+            url (str): URL to head
+            headers (dict, optional): Request headers
+            timeout (float | httpx2.Timeout, optional): Request
+                timeout, the default timeout of the class when not
+                given, see request()
+            attempts (int): Attempts of the request. Defaults to
+                REQUEST_ATTEMPTS, a single-shot request passes 1
+            follow_redirects (bool, optional): Whether httpx follows the
+                redirects of the response, the default of the client
+                when not given
+
+        Returns:
+            httpx2.Response: The response
+
+        Raises:
+            httpx2.HTTPError: If the request fails
+        """
+        return self.request(
+            'HEAD', url, headers=headers, timeout=timeout, attempts=attempts,
             follow_redirects=follow_redirects)
 
     def stream(self, url, consume, headers=None, timeout=None, attempts=HttpClientBase.REQUEST_ATTEMPTS, follow_redirects=None):

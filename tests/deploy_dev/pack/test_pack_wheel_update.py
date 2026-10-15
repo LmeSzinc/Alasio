@@ -446,7 +446,7 @@ class TestClientRoundTrip:
         async def _fail(*args, **kwargs):
             raise AssertionError('no download expected, every source is local')
 
-        monkeypatch.setattr(server, 'get_file_content', _fail)
+        monkeypatch.setattr(server, 'get_file_data', _fail)
         monkeypatch.setattr(server, 'get_index_pack', _fail)
 
         with logger.mock_capture_writer():
@@ -502,7 +502,7 @@ class TestClientRoundTrip:
         async def _fail(*args, **kwargs):
             raise AssertionError('no download expected, the marker needs no server')
 
-        monkeypatch.setattr(server, 'get_file_content', _fail)
+        monkeypatch.setattr(server, 'get_file_data', _fail)
         monkeypatch.setattr(server, 'get_index_pack', _fail)
 
         with logger.mock_capture_writer():

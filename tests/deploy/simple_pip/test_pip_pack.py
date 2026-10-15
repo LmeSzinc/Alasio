@@ -16,15 +16,12 @@ Every test that performs requests is async (pytest-trio): the install
 awaits its network phases on the test event loop.
 """
 import os
-from urllib.parse import urlsplit
 
-import httpx2
 import pytest
 
 from alasio.config.entry.const import ModEntryInfo
 from alasio.deploy.pack.decode_base import PackDecodeBase
 from alasio.deploy.pack.job_unpack import UnpackJob
-from alasio.deploy.pack.server_url import ServerUrl
 from alasio.deploy.simple_pip import pip_pack
 from alasio.deploy.simple_pip.pip_pack import PipPack
 from alasio.deploy_dev.pack.pack_wheel import PackWheel
@@ -135,50 +132,7 @@ class FakeMod:
         self.entry = ModEntryInfo(name=name, mirrors=mirrors)
 
 
-class ChannelServer(MockServerFile):
-    """
-    MockServerFile serving a pack channel whose base url carries a path
-    prefix.
-
-    The channel base of a deployment is
-    {mirror}/{Author}_{Repo}_{Branch}/packdep/{name} while MockServerFile
-    serves the packs of the path right after the host: the prefix of the
-    base url is stripped from every request before the packs are served, so
-    the requests of a flow run on the urls a deployment serves. The version
-    registered last is the latest one, served by latest.pack like the
-    deployment serves the packs of its target version.
-    """
-
-    def __init__(self, base_url):
-        """
-        Args:
-            base_url (str): Base url of the channel, the path prefix included
-        """
-        super().__init__(base_url)
-        # the urls of the requests served, in order
-        self.requests = []
-        self._prefix = urlsplit(base_url).path.rstrip('/')
-
-    def _handle(self, request):
-        """
-        Serve one request of the channel, the prefix of the base url stripped.
-
-        Args:
-            request (httpx2.Request): The request
-
-        Returns:
-            httpx2.Response: The response
-        """
-        self.requests.append(str(request.url))
-        path = request.url.path
-        if path.startswith(self._prefix):
-            path = path[len(self._prefix):] or '/'
-        # MockServerFile serves the packs of the stripped path
-        return super()._handle(httpx2.Request(
-            request.method, request.url.copy_with(path=path), headers=request.headers))
-
-
-def patch_server(monkeypatch, server, channel, expected_scope):
+def patch_server(monkeypatch, server, channel, expected_name):
     """
     Patch pip_pack.ServerFile with the in-memory server of a channel.
 
@@ -192,14 +146,14 @@ def patch_server(monkeypatch, server, channel, expected_scope):
         server (ChannelServer): Server of the channel, the requests of the
             install are served by it in memory
         channel (str): Channel base url the install is expected to derive
-        expected_scope (str): Scope the mirror record of the channel is
+        expected_name (str): Name the mirror record of the channel is
             expected with, the mod name: the record is shared with the
             channel of the mod tree
     """
 
-    def make_server(mirrors, scope='', client=None):
+    def make_server(mirrors, name='', client=None):
         assert mirrors.urls == {'default': channel}, 'PipPack must derive the channel of the mod mirrors'
-        assert scope == expected_scope, 'the mirror record of a channel must be scoped to it'
+        assert name == expected_name, 'the mirror record of a channel must be named after it'
         return server
 
     monkeypatch.setattr(pip_pack, 'ServerFile', make_server)
@@ -248,7 +202,7 @@ class TestChannelMirrors:
         scoped to the mod, so the probe result of the mod channel (or of
         another dependency) is reused."""
         pip = PipPack(FakeMod(), '/env/Lib/site-packages')
-        assert ServerUrl(pip._channel_mirrors('httpx')).set_key == ServerUrl(pip.mirrors).set_key
+        assert pip._channel_mirrors('httpx').digest == pip.mirrors.digest
 
     def test_url_without_the_channel_folder(self):
         """A url that does not point at a packrepo channel is refused."""
@@ -288,7 +242,7 @@ class TestInstall:
         site = site_packages(fs)
         fs.create_dir(site)
         _, full, index = build_dist('1.0')
-        server = ChannelServer(dep_channel('demo'))
+        server = MockServerFile(dep_channel('demo'))
         server.register_version('1.0', full, index)
         patch_server(monkeypatch, server, dep_channel('demo'), 'alas')
 
@@ -322,7 +276,7 @@ class TestInstall:
         with logger.mock_capture_writer():
             await UnpackJob(full1, root=site, name='demo').run()
 
-        server = ChannelServer(dep_channel('demo'))
+        server = MockServerFile(dep_channel('demo'))
         server.register_version('2.0', full2, index2)
         server.register_update('1.0', '2.0', update)
         patch_server(monkeypatch, server, dep_channel('demo'), 'alas')
@@ -350,7 +304,7 @@ class TestInstall:
             await UnpackJob(full, root=site, name='demo').run()
         file_write(f'{site}/demo/core.py', b'damaged\n')
 
-        server = ChannelServer(dep_channel('demo'))
+        server = MockServerFile(dep_channel('demo'))
         server.register_version('1.0', full, index)
         patch_server(monkeypatch, server, dep_channel('demo'), 'alas')
 
@@ -373,7 +327,7 @@ class TestInstall:
         site = site_packages(fs)
         fs.create_dir(site)
         _, full, index = build_dist('2.0')
-        server = ChannelServer(dep_channel('demo'))
+        server = MockServerFile(dep_channel('demo'))
         server.register_version('2.0', full, index)
         patch_server(monkeypatch, server, dep_channel('demo'), 'alas')
 

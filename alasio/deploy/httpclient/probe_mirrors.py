@@ -1,25 +1,26 @@
 """
-Concurrent mirror probing: race the candidates of every group and take
-the first usable one.
+The shared vocabulary of the mirror probes: the candidate structure of a
+probe (Mirrors) and the error of a probe that found no usable candidate
+(AllMirrorsFailedError).
 
-The engine is transport agnostic and knows nothing about the mirror
-records: a subclass implements probe_function(), one candidate at a
-time, and the engine takes care of the concurrency skeleton. It is
-shared by the probes of the deploy domain, e.g. the pack mirrors
-(ServerFile probes a mirror by fetching its latest.pack) and the
-future pypi mirrors (a probe measures the latency of a mirror with a
-HEAD request).
+The mirror structure is the input of every probe of the deploy domain: the
+pack mirrors (ServerFile / PypiFile) and the future pypi mirrors and dns
+resolvers. The input is normalized by populate_mirrors(): an input is a
+single url, a flat {name: url} map or the full {group: {name: url}}
+structure, see Mirrors.from_input().
 
-A probe is constructed with its mirror structure and only run()
-executes it, so the mirrors of a probe are fixed and visible at
-construction. The mirror input is normalized by populate_mirrors().
+A probe is keyed by the path of the request it serves (e.g. '/latest.pack',
+'/{version}/full.pack'): the path is the whole vocabulary the engine needs,
+the meaning of the path lives in the domain (see probe_base.ProbeBase).
+
+This module is transport agnostic and has no flavour: probe_async and
+probe_sync implement the concurrency and the requests, probe_db keeps the
+selection record in gui.db.
 """
 import re
-from time import perf_counter
+from hashlib import sha1
 
-import trio
-
-from alasio.logger import logger
+from alasio.ext.cache import cached_property
 
 
 class AllMirrorsFailedError(Exception):
@@ -28,6 +29,21 @@ class AllMirrorsFailedError(Exception):
 
     The message carries the failure of every candidate, so the caller
     and the logs show what was tried.
+    """
+
+
+class RangeUnsupportedError(Exception):
+    """
+    Raised when a mirror answers a range request with the whole file.
+
+    A request that carries a Range header (the pack flow fetches one file of a
+    full pack with a range, see ServerFile) must be answered with the range
+    (206): a 200 answer means the server ignored the range and would transfer
+    the whole pack for every file, the mirror is not usable for the flow. The
+    failure is a failure of the mirror (another one may support ranges) and is
+    classified as such by the flavours (see AsyncProbe.FAILURES); the body of
+    the answer is never read (the stream is dropped before its content, see
+    AsyncHttpProbe.get_bytes).
     """
 
 
@@ -145,6 +161,8 @@ class Mirrors:
     groups is the normalized structure {group: {name: url}} (see
     populate_mirrors()), urls is the flat {name: url} map of every
     mirror of every group, the names are unique across the groups.
+    digest is the fingerprint of the structure, the record of a probe
+    is only used while it matches (see probe_db).
     """
 
     def __init__(self, mirrors):
@@ -212,6 +230,10 @@ class Mirrors:
         The only mirror name when the structure has one mirror, ''
         otherwise.
 
+        A single mirror set has nothing to select: its probes skip the
+        record and the probe itself, the only candidate is used as it
+        is (see ProbeBase).
+
         Returns:
             str: The only mirror name, or ''
         """
@@ -231,139 +253,22 @@ class Mirrors:
         """
         return self.urls.get(name, '')
 
-
-class ProbeBase:
-    """
-    Base class of a concurrent candidate probe.
-
-    A candidate is usable when probe_function() returns: the function
-    probes one candidate and raises when the candidate is not usable,
-    the result of the winner is handed to the caller of run().
-
-    Groups are connectivity paths, the groups run in parallel (one
-    task per group in a trio nursery): the earliest group with a
-    usable member wins, the fastest reachable path is selected. The
-    members of a group are probed in their declared order, the first
-    usable one wins: the order is a preference (e.g. a free mirror
-    before a metered one), a failed member falls through to the next
-    one. Losing groups are cancelled as soon as a winner is found,
-    instead of running to their timeouts.
-
-    Result collection is plain lists, no channel or queue: every task
-    runs on the thread of the nursery, only await points switch tasks,
-    and the synchronous code between them has no race (the single
-    thread invariant of async code). The winner appends itself to
-    `winner` and sets the decision event; the caller of run() cancels
-    the losing groups after the event. When every group is exhausted
-    (no usable candidate), the last exhausted group sets the event
-    too and run() raises AllMirrorsFailedError with every failure.
-
-    The engine never reads nor writes the selection record (the gui.db
-    row of the pack mirrors): run() returns the winner and the
-    subclass stores it, see ServerFile.probe.
-    """
-
-    def __init__(self, mirrors):
+    @cached_property
+    def digest(self):
         """
-        Args:
-            mirrors (Mirrors | str | dict): The mirror input, see
-                Mirrors.from_input() for the accepted forms
-        """
-        self.mirrors = Mirrors.from_input(mirrors)
+        Fingerprint of the mirror structure: the group boundaries and
+        the mirror names in their order. A record of another structure
+        is ignored, so the mirror lists of an update can be edited and
+        every client probes once again.
 
-    async def run(self):
-        """
-        Race the candidates of every group and return the first usable
-        one.
-
-        A subclass usually wraps this entry to add its own side
-        effects around the engine result, e.g. ServerFile.probe
-        records the winner.
+        The urls and the group names are not part of the fingerprint: a
+        name is the identity of a mirror, its url is read from the
+        configuration at every use, and a group name is a label only.
+        The boundaries are part of it, moving a mirror to another group
+        is a change of the selection semantics.
 
         Returns:
-            tuple[str, Any]: Name and result of the selected candidate
-
-        Raises:
-            AllMirrorsFailedError: If no candidate of any group is
-                usable, the message carries every failure
+            str: sha1 hex digest of the mirror structure
         """
-        names = [name for members in self.mirrors.groups.values() for name in members]
-        logger.info(f'Probing mirrors: {", ".join(names)}')
-        winner = []
-        failures = []
-        decided = trio.Event()
-        async with trio.open_nursery() as nursery:
-            for members in self.mirrors.groups.values():
-                nursery.start_soon(self._probe_group, members, winner, failures, decided)
-            # wait for the verdict of a group: a winner or the last
-            # exhausted group; every other exit is a cancellation
-            await decided.wait()
-            if winner:
-                # the losing groups are cancelled instead of running
-                # to their timeouts, their results are dropped
-                nursery.cancel_scope.cancel()
-        if not winner:
-            raise AllMirrorsFailedError('; '.join(failures))
-        name, result = winner[0]
-        logger.attr('Mirror', name)
-        return name, result
-
-    async def probe_function(self, name, url):
-        """
-        Probe one candidate, the probe implementation of a subclass.
-
-        Args:
-            name (str): Candidate name, for the logs and the errors
-            url (str): Candidate url
-
-        Returns:
-            Any: Result of a usable candidate, handed to the caller of
-                run()
-
-        Raises:
-            Exception: The candidate is not usable when the function
-                raises, the group falls through to its next member
-        """
-        raise NotImplementedError
-
-    async def _probe_group(self, members, winner, failures, decided):
-        """
-        Probe the members of one group in order and record the outcome
-        of the group.
-
-        The outcome goes into the shared lists directly: the tasks run
-        on one thread, only await points switch them, so no channel or
-        lock is needed.
-
-        Args:
-            members (dict[str, str]): {name: url} of the group in the
-                declared order
-            winner (list): Appended with (name, result) when a member
-                is usable, the first append wins the race
-            failures (list): Appended with the failure summary of the
-                group when every member is exhausted
-            decided (trio.Event): Set when the probe has a verdict: a
-                winner was recorded, or every group was exhausted
-        """
-        reasons = []
-        for name, url in members.items():
-            start = perf_counter()
-            try:
-                result = await self.probe_function(name, url)
-            except Exception as e:
-                # one candidate must never hang the probe: every
-                # failure (http error, malformed payload, anything a
-                # broken candidate raises) makes it unusable and the
-                # group moves on. trio.Cancelled is a BaseException,
-                # it is never caught here and always propagates
-                logger.warning(f'Mirror "{name}" is not usable: {type(e).__name__}: {e}')
-                reasons.append(f'{name}: {type(e).__name__}: {e}')
-                continue
-            logger.info(f'Mirror "{name}" responded in {(perf_counter() - start) * 1000:.0f}ms')
-            winner.append((name, result))
-            decided.set()
-            return
-        failures.append('; '.join(reasons))
-        if len(failures) == len(self.mirrors.groups):
-            # every group is exhausted, no usable candidate
-            decided.set()
+        structure = '\n'.join(','.join(members) for members in self.groups.values())
+        return sha1(structure.encode('utf-8')).hexdigest()

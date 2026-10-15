@@ -362,20 +362,20 @@ class DeployJob(DeployTarget):
 
         The reuse cannot apply content the server does not serve: equal
         digests mean the two packs are byte-identical (the digest covers the
-        whole file, a damaged or crafted file cannot match the server's), and
-        a server that ignored the range request answers with the whole pack,
-        which is used as the download. The local checks (_load_kept_pack)
-        only tell that the kept file is a pack of this version pair worth
-        asking about, they are never a trust anchor.
+        whole file, a damaged or crafted file cannot match the server's). The
+        local checks (_load_kept_pack) only tell that the kept file is a pack
+        of this version pair worth asking about, they are never a trust
+        anchor.
 
         Args:
             old_version (str): Version of the local files
             new_version (str): Version to update to
 
         Returns:
-            tuple[bytes, bool]: Update pack data and whether it was read back
-                from the job file (the kept pack: the file already holds
-                exactly these bytes, the caller keeps it as-is)
+            tuple[PackDecodeBase, bool]: Decoder of the update pack, validated,
+                and whether it was read back from the job file (the kept pack:
+                the file already holds exactly these bytes, the caller keeps it
+                as-is)
 
         Raises:
             httpx2.HTTPStatusError: If the request fails
@@ -385,19 +385,15 @@ class DeployJob(DeployTarget):
             self._load_kept_pack, old_version, new_version)
         if kept is not None:
             try:
-                server_checksum, body = await self.server.get_update_pack_checksum(
-                    old_version, new_version, len(kept))
+                server_checksum = await self.server.get_update_pack_checksum(
+                    old_version, new_version, len(kept.data))
             except httpx2.HTTPError as e:
                 # the probe failed (a missing pack, a mirror that went down):
                 # the download below reports the server's state as usual and
                 # the caller falls back like any failed download
                 logger.warning(f'Failed to read the checksum of the update pack '
                                f'{old_version} -> {new_version}: {e}, downloading it')
-                server_checksum, body = '', b''
-            if body:
-                # the server ignored the range request: its body is the pack
-                # of this flow, no second request is needed
-                return body, False
+                server_checksum = ''
             if server_checksum == checksum:
                 logger.info(f'Update pack unchanged, reusing the kept pack: '
                             f'{old_version} -> {new_version}')
@@ -422,9 +418,9 @@ class DeployJob(DeployTarget):
             new_version (str): Version to update to
 
         Returns:
-            tuple[bytes, str]: Content of the kept pack and its whole-pack
-                checksum, hex string, (None, '') when there is nothing to
-                reuse
+            tuple[PackDecodeBase, str]: Decoder of the kept pack and its
+                whole-pack checksum, hex string, (None, '') when there is
+                nothing to reuse
         """
         try:
             data = atomic_read_bytes(self.job_file)
@@ -437,7 +433,7 @@ class DeployJob(DeployTarget):
             return None, ''
         if decoder.old_version != old_version or decoder.current_version != new_version:
             return None, ''
-        return data, data[-20:].hex()
+        return decoder, data[-20:].hex()
 
     async def update(self, on_job_phase=None, version=''):
         """
@@ -557,11 +553,13 @@ class DeployJob(DeployTarget):
             # when the server still serves it, see _get_update_pack
             await self._job_phase(on_job_phase, 'downloading')
             try:
-                data, kept = await self._get_update_pack(local, info.version)
-            except httpx2.HTTPStatusError as e:
+                decoder, kept = await self._get_update_pack(local, info.version)
+            except (httpx2.HTTPStatusError, PackDecodeError) as e:
                 # the update pack of the local version is not on the server (out
-                # of the update window or removed), the incremental path is
-                # broken: rebuild from the latest index
+                # of the update window or removed), or the server serves a
+                # broken one (the client validates it, see
+                # ServerFile.get_update_pack): the incremental path is broken,
+                # rebuild from the latest index
                 logger.warning(
                     f'Failed to get the update pack {local} -> {info.version}: {e}, '
                     f'rebuilding from the latest index'
@@ -573,7 +571,7 @@ class DeployJob(DeployTarget):
             # the download is over, the local changes start: the workers are
             # stopped before them (the manager phase)
             await self._job_phase(on_job_phase, 'updating')
-            job = UpdateJob(data, server=self.server, root=self.root, name=self.name)
+            job = UpdateJob(decoder, server=self.server, root=self.root, name=self.name)
             # the pack came back from the job file (the server confirmed the
             # kept one): the file already holds it, write() keeps it as-is
             job.job_file_kept = kept
