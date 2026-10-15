@@ -12,7 +12,7 @@ import pytest
 from alasio.backend.app.restart import daily as daily_module, restart_step as step_module
 from alasio.backend.app.restart.daily import DailyState
 from alasio.backend.app.restart.restart_base import FlowRefused
-from alasio.backend.app.restart.restart_flow import FlowDaily, FlowRestart, FlowUpdate
+from alasio.backend.app.restart.restart_flow import FlowDaily, FlowRestart, FlowStartup, FlowUpdate
 from alasio.backend.app.restart.restart_manager import RestartManager
 from alasio.backend.app.restart.restart_step import HandoverFailed
 from alasio.backend.app.restart.resume_file import OWNER_RESTART
@@ -318,6 +318,27 @@ class TestHandover:
         assert phase() == 'shutting-down'
 
     @pytest.mark.trio
+    async def test_a_handover_without_a_list_reads_the_queued_starts_frozen(self):
+        """A flow that stopped no worker (the startup convergence) hands over
+        without a list: the queued starts are read inside the frozen section,
+        so a start accepted while the flow ran is in the file and a start
+        landing after the freeze is refused by the frozen state."""
+        files = FakeFiles()
+        worker_manager = FakeWorkerManager()
+        manager = make_manager(worker_manager=worker_manager, files=files)
+        reads = []
+
+        def resume_intent():
+            reads.append(manager.frozen)
+            return ['cfg_q']
+
+        worker_manager.resume_intent = resume_intent
+        await manager.handover(FlowStartup(manager), 'startup convergence')
+        # the read ran inside the frozen section and the file carries it
+        assert reads == [True]
+        assert files.writes[0]['configs'] == ['cfg_q']
+
+    @pytest.mark.trio
     async def test_handover_without_a_full_update_marks_nothing(self):
         files = FakeFiles()
         daily = make_daily(crossed=True)
@@ -611,22 +632,17 @@ class TestWrapUp:
     """The release path of a flow that did not hand over"""
 
     @pytest.mark.trio
-    async def test_wrap_up_restores_the_checks_and_spawns_the_resume_queue(self):
+    async def test_wrap_up_restores_the_checks_and_queues_the_workers(self):
         manager = make_manager()
-        spawned = []
-        manager.spawn = lambda fn, *args: spawned.append((fn, args))
         await manager.wrap_up(FlowUpdate(manager), ['cfg_a'])
+        # the checks come back and the stopped workers are queued for resume
         assert manager.update_check.restores == 1
         assert manager.worker_manager.cancel_calls == 1
         assert manager.worker_manager.marked == ['cfg_a']
-        # the queue is a task of the nursery, not part of the flow: the wrap-up
-        # only asks for it
-        assert spawned == [(manager.resume_queue, ())]
 
     @pytest.mark.trio
     async def test_wrap_up_releases_the_states_of_the_flow_in_flight(self):
         manager = make_manager()
-        manager.spawn = lambda fn, *args: None
         await manager.wrap_up(FlowUpdate(manager), ['cfg_a'])
         # the pending states of the update steps are released before the check
         # sequences restart (the update of the last check is still pending)
@@ -639,7 +655,6 @@ class TestWrapUp:
         worker_manager.parked = ['cfg_parked']
         worker_manager.queued = ['cfg_queued']
         manager = make_manager(worker_manager=worker_manager)
-        manager.spawn = lambda fn, *args: None
         await manager.wrap_up(FlowRestart(manager), ['cfg_stopped'])
         assert worker_manager.marked == ['cfg_parked', 'cfg_queued', 'cfg_stopped']
 

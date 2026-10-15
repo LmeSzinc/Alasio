@@ -158,7 +158,6 @@ class FakeManager:
         self.changed = list(changed)
         self.handover_error = handover_error
         self.handed_over = []
-        self.spawned = []
         self.views = 0
         self.worker_manager = FakeWorkerManager()
         self.update_check = FakeUpdateCheck(available=available, uptodate=uptodate)
@@ -195,7 +194,11 @@ class FakeManager:
         self.calls.append('maybe_upgrade_to_daily')
         return False
 
-    async def handover(self, flow, reason, resume_list, actions=None):
+    async def handover(self, flow, reason, resume_list=None, actions=None):
+        if resume_list is None:
+            # the real manager reads the queued starts inside its frozen section
+            # when a flow stopped no worker (see RestartStep.handover)
+            resume_list = await self.queued_resume_list()
         self.calls.append(('handover', reason, list(resume_list)))
         if self.handover_error is not None:
             raise self.handover_error
@@ -203,12 +206,6 @@ class FakeManager:
 
     async def wrap_up(self, flow, resume_list=None):
         self.calls.append(('wrap_up', sorted(resume_list or ())))
-
-    async def resume_queue(self):
-        """The task a flow spawns (the assertion compares the bound method)"""
-
-    def spawn(self, async_fn, *args):
-        self.spawned.append((async_fn, args))
 
     def publish_view(self):
         """The flow view push of the manager (the window announces itself)"""
@@ -432,7 +429,6 @@ class TestFlowStartup:
         await FlowStartup(manager).run()
         assert manager.calls == ['read_resume_intent', 'full_update']
         assert manager.update_check.calls == ['bind', 'set_initial_states', 'start']
-        assert manager.spawned and manager.spawned[0][0] == manager.resume_queue
 
     @pytest.mark.trio
     async def test_the_mod_updates_off_skip_the_full_update(self):
@@ -453,7 +449,6 @@ class TestFlowStartup:
         # the checks start all the same (a disabled mod starts no sequence, but
         # the call is part of the startup)
         assert manager.update_check.calls == ['bind', 'set_initial_states', 'start']
-        assert manager.spawned and manager.spawned[0][0] == manager.resume_queue
 
     @pytest.mark.trio
     async def test_a_fresh_record_skips_the_full_update(self):
@@ -496,7 +491,6 @@ class TestFlowStartup:
         assert manager.calls == ['read_resume_intent']
         assert manager.handed_over == []
         assert manager.update_check.calls == ['bind', 'set_initial_states', 'start']
-        assert manager.spawned and manager.spawned[0][0] == manager.resume_queue
 
     @pytest.mark.trio
     async def test_a_convergence_hands_the_process_over(self):
@@ -506,7 +500,6 @@ class TestFlowStartup:
                                  ('handover', 'startup convergence', ['cfg_q'])]
         # nothing is started before the handover: the new process owns the checks
         assert manager.update_check.calls == ['bind', 'set_initial_states']
-        assert manager.spawned == []
 
     @pytest.mark.trio
     async def test_a_failed_convergence_marks_and_wraps_up(self):

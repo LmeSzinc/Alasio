@@ -302,6 +302,11 @@ class RestartStep(RestartBase):
         The configs queued for auto-resume right now (the resume list of a flow
         that stops no worker, e.g. the startup convergence)
 
+        The caller reads it inside a frozen section (``handover``): a start
+        accepted before the freeze is in the list and a start landing after it
+        is refused by the worker manager, so the list and the file written from
+        it never disagree.
+
         Returns:
             List[str]: Sorted config names
         """
@@ -445,12 +450,18 @@ class RestartStep(RestartBase):
     # Handover (old process)
     # ------------------------------------------------------------------
 
-    async def handover(self, flow, reason: str, resume_list, actions=None):
+    async def handover(self, flow, reason: str, resume_list=None, actions=None):
         """
         Hand the backend over to a new process (the last step of a flow)
 
         1. freeze the state: the resume list is final, no start is accepted any
-           more;
+           more. A call without a resume list reads the queued starts of the
+           worker manager here, inside the frozen section: a start accepted
+           before the freeze is in the list and one landing after it is refused
+           (the frozen state), so the list and the written file never disagree.
+           Reading it before the freeze would drop a start accepted in between
+           -- it is still accepted as a queued resume (the flow owns the
+           backend) but the file is written from the earlier list;
         2. publish the resume intent: the file is written and its one-shot
            credential is announced to the supervisor in the same step (a cancel
            cannot interleave the two);
@@ -471,14 +482,19 @@ class RestartStep(RestartBase):
                 line and the meaning of the resume list)
             reason (str): Log message of the handover (e.g. 'user request')
             resume_list (list[str]): Configs the new backend resumes (the frozen
-                list of stop_all, or the queued configs of a flow that stopped
-                no worker)
+                list of stop_all); None reads the queued starts inside the
+                frozen section, the resume list of a flow that stopped no
+                worker (the startup convergence). Defaults to None
             actions (list[str]): Optional resume action tags, see RESUME_ACTIONS
 
         Raises:
             HandoverFailed: When the process restart cannot be requested
         """
         with self.handover_intent():
+            if resume_list is None:
+                # the resume list of a flow that stopped no worker: the queued
+                # starts, read inside the frozen section (see above)
+                resume_list = await self.queued_resume_list()
             # 1) the file and its credential are one step (see the resume_file
             #    module): a file whose credential was never announced is never
             #    consumed
@@ -525,10 +541,12 @@ class RestartStep(RestartBase):
         3. the workers stopped for the flow are resumed: the restart run of the
            worker manager is released (the cancel path may have done it already)
            and the frozen list is queued for the resume task;
-        4. the resume queue is spawned as an external task: it drains outside
-           the slot, so a new flow may take the backend over while it still runs
-           (the queue stops there and its entries are collected by the new
-           flow).
+        4. the slot release that follows drains the queue: the manager spawns
+           the resume queue once this flow released the slot (see
+           ``RestartManager._run_flow``), so the starts queued while the flow
+           owned the backend are read when no flow owns it any more (a new flow
+           may take the backend over while the queue still runs: the queue
+           stops there and its entries are collected by the new flow).
 
         The flow was either cancelled before publishing anything or its
         publication was withdrawn by the failure path, so nothing else is
@@ -559,7 +577,9 @@ class RestartStep(RestartBase):
             logger.warning(f'[Restart] Failed to queue the resume of the stopped workers: {e}')
         logger.info(f'[Restart] The "{flow.name}" flow wraps up: releasing the queued workers')
         await self.push_flow_phase('')
-        self.spawn(self.resume_queue)
+        # the queue itself is not spawned here: the manager drains once this flow
+        # released the slot, so the read of the queued starts happens after the
+        # flow stopped accepting them (see RestartManager._run_flow)
 
     # ------------------------------------------------------------------
     # Resume (new process)
@@ -659,14 +679,17 @@ class RestartStep(RestartBase):
         one by one (WORKER_START_INTERVAL between two starts) with the phases
         'resuming' / 'done' / '' on the Restart topic.
 
-        The task runs outside the slot of the manager (the startup flow spawns
-        it right before releasing the slot, the wrap-up of a cancelled flow
-        spawns it the same way), so a new flow can take the backend over while
-        the queue still drains: the queue then stops (its entries are collected
-        by the new flow's stop_all and recorded in its resume file). The queue
-        also ends at the shutdown of the process. Failures are best effort: the
-        entries left queued stay visible in the Worker topic and a manual start
-        is possible.
+        The manager spawns the task when a flow releases the slot
+        (``RestartManager._run_flow``, skipped while a handover is published),
+        so the single read of the queued starts below cannot miss one: a start
+        accepted while the flow owned the backend is in it, a start accepted
+        after the release is started directly by worker_start. The task
+        runs outside the slot, so a new
+        flow can take the backend over while the queue still drains: the queue
+        then stops (its entries are collected by the new flow's stop_all and
+        recorded in its resume file). The queue also ends at the shutdown of
+        the process. Failures are best effort: the entries left queued stay
+        visible in the Worker topic and a manual start is possible.
         """
         manager = self.worker_manager
         if manager.restarting or self.frozen:

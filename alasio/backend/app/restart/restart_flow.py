@@ -69,8 +69,8 @@ class FlowStartup(Flow):
     4. start the check sequences (the first check waits the standard spread: the
        full update just checked everything). A disabled mod has no sequence:
        nothing is checked while the mod updates are off;
-    5. spawn the resume queue of the configs marked in step 1 and release the
-       slot.
+    5. release the slot: the manager drains the resume queue of the configs
+       marked in step 1 once no flow owns the backend.
 
     No cancellable phase: the process has no checks yet, a cancel would leave
     the backend without them.
@@ -128,14 +128,16 @@ class FlowStartup(Flow):
             if changed:
                 # the files just applied need the new process: hand over, the new
                 # process sees the fresh check in the record and starts its own
-                # checks directly
-                await manager.handover(self, 'startup convergence', await manager.queued_resume_list())
+                # checks directly. The resume list is read inside the frozen
+                # section of the handover: every start accepted during the
+                # startup is in it
+                await manager.handover(self, 'startup convergence')
                 return
             manager.update_check.start()
-            # the resume queue runs outside the slot: the flow releases it as
-            # this task returns (a user flow may take the backend over while
-            # the queue still drains, the queue stops there)
-            manager.spawn(manager.resume_queue)
+            # the flow ends here: the manager drains the resume queue of the
+            # configs marked in step 1 once the slot is released, so the starts
+            # queued during the startup are read by it (a user flow may take the
+            # backend over while the queue still drains, the queue stops there)
         except HandoverFailed as e:
             logger.error(f'[Restart] The startup convergence could not hand the backend over: {e}')
             manager.update_check.mark_restart_required(changed, str(e))

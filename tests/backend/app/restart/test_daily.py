@@ -379,7 +379,7 @@ class TestRun:
 
     @pytest.mark.trio
     async def test_a_jump_over_the_target_is_judged_on_the_next_wake(self, monkeypatch, autojump_clock):
-        """The probe of the review: a clock jump past the target must be judged"""
+        """A clock jump past the target is judged at the next wake-up of the loop"""
         monkeypatch.setattr(daily_module, 'scheduled_restart_time', lambda: TARGET)
         self._fast(monkeypatch)
         manager = FakeManager()

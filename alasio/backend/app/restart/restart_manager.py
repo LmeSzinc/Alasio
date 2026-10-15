@@ -315,6 +315,18 @@ class RestartManager(RestartStep):
         before propagating; a failure reaching here is reported and releases
         the slot, an accepted cancel (``FlowCancelled``) is an expected end.
 
+        The resume queue is spawned here, after the slot was released: the
+        queue drains the starts queued while the flow owned the backend, and
+        it reads them when no flow owns the backend any more -- a start
+        accepted while the flow ran is in that read, a start accepted after
+        the release is started directly (it is only accepted as a queued resume
+        while the slot is owned, see ``worker_start``). Spawning the queue from
+        the flow body would leave the read before the release: a start
+        accepted in between would wait for a drainer that never comes.
+        The frozen state (a published handover) skips the queue: its resume
+        file carries the list of the configs and the process is being
+        replaced.
+
         Args:
             flow (Flow): The flow to run
         """
@@ -332,6 +344,16 @@ class RestartManager(RestartStep):
             except Exception as e:
                 logger.error(f'[Restart] Flow "{flow.name}" failed: {e}')
                 logger.exception(e)
+        if not self.frozen:
+            # the slot is free and no handover published anything: drain what
+            # was queued while the flow owned the backend (the release and this
+            # check are one synchronous section: no other flow ran in between)
+            try:
+                self.spawn(self.resume_queue)
+            except RuntimeError as e:
+                # the manager is shutting down (its nursery is gone): the
+                # queued starts wait for the next process
+                logger.warning(f'[Restart] The resume queue was not started: {e}')
 
     def _require_flow(self, flow_cls: "type[Flow]") -> Flow:
         """

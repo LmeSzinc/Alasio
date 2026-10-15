@@ -62,12 +62,19 @@ class FakeManager(RestartManager):
         self.hold = {name: trio.Event() for name in FLOW_NAMES}
         self.finished = {name: trio.Event() for name in FLOW_NAMES}
         self.views = []
+        # the slot state of every drain the manager spawned (the resume queue
+        # is the manager's task, see _run_flow)
+        self.drains = []
         super().__init__(worker_manager=worker_manager if worker_manager is not None else FakeWorkerManager(),
                          daily=daily if daily is not None else DailyState())
 
     async def push_view(self):
         """The Restart topic push, recorded instead of published"""
         self.views.append(self.view())
+
+    async def resume_queue(self):
+        """The drain the manager spawns when a flow released the slot"""
+        self.drains.append(self.flow_running)
 
 
 @pytest.fixture(autouse=True)
@@ -202,6 +209,42 @@ class TestRun:
 
             h.manager.spawn(task)
             await started.wait()
+            nursery.cancel_scope.cancel()
+
+    @pytest.mark.trio
+    async def test_the_resume_queue_drains_after_the_slot_release(self, monkeypatch):
+        """The manager drains what was queued while a flow owned the backend:
+        the resume queue is spawned once the slot is released, so its read
+        happens when no flow owns the backend any more -- a start accepted
+        while the flow ran is in that read, a start accepted after the release
+        starts directly. A flow that handed over (frozen: the resume file owns
+        the queue, the process is being replaced) drains nothing."""
+
+        async def body_plain(self):
+            await trio.sleep(0)
+
+        async def body_handover(self):
+            await trio.sleep(0)
+            # what the handover of a flow leaves behind: the resume intent is
+            # published and the process is being replaced
+            self.manager.frozen = True
+
+        async with trio.open_nursery() as nursery:
+            h = await Harness.start(nursery)
+            await h.run_idle()
+            # the startup flow released the slot: the queue ran with the slot
+            # free (its read happens when no flow owns the backend any more)
+            assert h.manager.drains == [False]
+            monkeypatch.setattr(FlowRestart, 'run', body_plain)
+            h.manager.restart()
+            await trio.testing.wait_all_tasks_blocked()
+            assert h.manager.drains == [False, False]
+            monkeypatch.setattr(FlowRestart, 'run', body_handover)
+            h.manager.restart()
+            await trio.testing.wait_all_tasks_blocked()
+            # the handover left the resume file in charge: nothing is drained
+            assert h.manager.drains == [False, False]
+            assert h.manager.flow_name == ''
             nursery.cancel_scope.cancel()
 
     @pytest.mark.trio
