@@ -391,8 +391,10 @@ class RestartBase:
             process starts with a fresh state), only a failed publication
             clears it (see handover_intent)
         nursery (trio.Nursery | None): The nursery run() owns the flow tasks
-            with, None while the manager does not run (no flow can be claimed
-            then)
+            with; None while the manager does not serve tasks -- before run()
+            reaches its nursery, and from the moment its teardown starts (the
+            flows are being cancelled and joined: no flow is claimed, no view
+            is pushed, no task is spawned then)
     """
 
     def __init__(self):

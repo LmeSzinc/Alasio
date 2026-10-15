@@ -791,6 +791,44 @@ class TestRun:
     """The lifespan task of the module (the nursery the sequences run in)"""
 
     @pytest.mark.trio
+    async def test_the_nursery_is_cleared_when_the_teardown_starts(self):
+        """
+        The module serves no sequence from the teardown on: the nursery field
+        is cleared before the sequences are cancelled and joined, so a restore
+        landing in that window (the wrap-up of a flow during the shutdown)
+        starts nothing. The field is what the entries read, and a task spawned
+        into the closing nursery would only be swallowed by the cancellation
+        """
+        module, state = make_mod()
+        joining = trio.Event()
+
+        async def sequence():
+            try:
+                await trio.sleep_forever()
+            except trio.Cancelled:
+                # hold the teardown open: the module is joining this task
+                with trio.CancelScope(shield=True):
+                    await joining.wait()
+                raise
+
+        async with trio.open_nursery() as nursery:
+            await start_module(module, nursery)
+            module.nursery.start_soon(sequence)
+            await trio.testing.wait_all_tasks_blocked()
+            nursery.cancel_scope.cancel()
+            with trio.CancelScope(shield=True):
+                try:
+                    await trio.testing.wait_all_tasks_blocked()
+                    # the teardown is in flight (the sequence is being joined) and
+                    # the module already serves no sequence
+                    assert module.nursery is None
+                    module.restore()
+                    assert state._loop_scope is None
+                finally:
+                    # never leave the held task waiting, even on a failure
+                    joining.set()
+
+    @pytest.mark.trio
     async def test_the_nursery_is_set_before_a_sibling_spawns_its_own_tasks(self):
         """
         The lifespan starts this task and the restart manager in one section:

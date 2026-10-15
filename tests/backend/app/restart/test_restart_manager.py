@@ -248,6 +248,64 @@ class TestRun:
             nursery.cancel_scope.cancel()
 
     @pytest.mark.trio
+    async def test_the_manager_serves_nothing_when_the_teardown_starts(self, monkeypatch):
+        """
+        The manager's nursery is cleared before the flows are cancelled and
+        joined: a flow ending in that window (the shutdown) starts nothing --
+        the release of the slot pushes no view and the drain spawns no queue,
+        the tasks would only be swallowed by the cancellation
+        """
+        joining = trio.Event()
+
+        async def body(self):
+            try:
+                await trio.sleep_forever()
+            except trio.Cancelled:
+                # hold the teardown open: the manager is joining this flow
+                with trio.CancelScope(shield=True):
+                    await joining.wait()
+                raise
+
+        monkeypatch.setattr(FlowStartup, 'run', body)
+        manager = FakeManager()
+        async with trio.open_nursery() as nursery:
+            nursery.start_soon(manager.run)
+            await trio.testing.wait_all_tasks_blocked()
+            views = len(manager.views)
+            nursery.cancel_scope.cancel()
+            with trio.CancelScope(shield=True):
+                try:
+                    await trio.testing.wait_all_tasks_blocked()
+                    # the teardown is in flight (the flow is being joined) and the
+                    # manager already serves no task
+                    assert manager.nursery is None
+                    joining.set()
+                    # the release of the slot and the drain both find no nursery
+                    await trio.testing.wait_all_tasks_blocked()
+                    assert len(manager.views) == views
+                    assert manager.drains == []
+                finally:
+                    # never leave the held task waiting, even on a failure
+                    joining.set()
+
+    @pytest.mark.trio
+    async def test_a_flow_ending_without_a_nursery_drains_nothing(self, monkeypatch):
+        """
+        The drain belongs to the running manager: a flow ending with the
+        nursery cleared spawns no queue (it would raise into the flow's tail
+        instead) -- the queued starts belong to the process that is going down
+        """
+
+        async def body(self):
+            return
+
+        monkeypatch.setattr(FlowRestart, 'run', body)
+        manager = FakeManager()
+        assert manager.nursery is None
+        await manager._run_flow(FlowRestart(manager))
+        assert manager.drains == []
+
+    @pytest.mark.trio
     async def test_a_failing_body_releases_the_slot(self, monkeypatch):
         async def broken(self):
             raise ValueError('the body failed')

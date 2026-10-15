@@ -612,11 +612,23 @@ class UpdateCheck:
         is cancelled): the sequences are cancelled and joined with this
         nursery, then ``close`` closes the shared http client (shielded: the
         teardown must complete under the cancellation of the shutdown).
+
+        The nursery field is cleared the moment the teardown starts, before
+        the sequences are cancelled and joined: from then on the module starts
+        no sequence (the field is what the entries read). A restore landing in
+        that window -- the wrap-up of a flow during the shutdown -- starts
+        nothing instead of hitting a closing nursery.
         """
         try:
             async with trio.open_nursery() as nursery:
                 self._nursery = nursery
-                await trio.sleep_forever()
+                try:
+                    await trio.sleep_forever()
+                finally:
+                    # the teardown: the sequences are about to be cancelled and
+                    # joined, no sequence may start from here on (the field is
+                    # cleared before the nursery closes for new arrivals)
+                    self._nursery = None
         except trio.Cancelled:
             raise
         except Exception as e:

@@ -63,6 +63,10 @@ class RestartManager(RestartStep):
         cancelled); a failure of the nursery is reported, the backend keeps
         running without a flow (the next restart / update request claims the
         slot normally).
+
+        The nursery field is cleared the moment the teardown starts, before the
+        flows are cancelled and joined: from then on the manager serves no task
+        -- no flow is claimed, no view is pushed, no resume queue is spawned.
         """
         try:
             async with trio.open_nursery() as nursery:
@@ -80,7 +84,13 @@ class RestartManager(RestartStep):
                     self.abandon_startup()
                 # the requests claim flows from any task of the backend (the
                 # rpc layer, the daily task) while this task keeps the nursery
-                await trio.sleep_forever()
+                try:
+                    await trio.sleep_forever()
+                finally:
+                    # the teardown: the flows are about to be cancelled and
+                    # joined, no task may start from here on (the field is
+                    # cleared before the nursery closes for new arrivals)
+                    self.nursery = None
         except trio.Cancelled:
             # the process is going down (the lifespan nursery was cancelled)
             raise
@@ -323,9 +333,9 @@ class RestartManager(RestartStep):
         while the slot is owned, see ``worker_start``). Spawning the queue from
         the flow body would leave the read before the release: a start
         accepted in between would wait for a drainer that never comes.
-        The frozen state (a published handover) skips the queue: its resume
-        file carries the list of the configs and the process is being
-        replaced.
+        The frozen state (a published handover) and the shutdown (the nursery
+        field is cleared by then) skip the queue: the process is being
+        replaced or going down, its queued starts belong to it.
 
         Args:
             flow (Flow): The flow to run
@@ -344,16 +354,13 @@ class RestartManager(RestartStep):
             except Exception as e:
                 logger.error(f'[Restart] Flow "{flow.name}" failed: {e}')
                 logger.exception(e)
-        if not self.frozen:
-            # the slot is free and no handover published anything: drain what
-            # was queued while the flow owned the backend (the release and this
-            # check are one synchronous section: no other flow ran in between)
-            try:
-                self.spawn(self.resume_queue)
-            except RuntimeError as e:
-                # the manager is shutting down (its nursery is gone): the
-                # queued starts wait for the next process
-                logger.warning(f'[Restart] The resume queue was not started: {e}')
+        if not self.frozen and self.nursery is not None:
+            # the slot is free, no handover published anything and the manager
+            # still serves tasks: drain what was queued while the flow owned the
+            # backend (the release and this check are one synchronous section:
+            # no other flow ran in between). Nothing is drained at shutdown:
+            # the process is going down, its queued starts belong to it
+            self.spawn(self.resume_queue)
 
     def _require_flow(self, flow_cls: "type[Flow]") -> Flow:
         """
