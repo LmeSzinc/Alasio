@@ -10,9 +10,10 @@ verdict, the real job is covered by tests/deploy_dev/pack.
 import pytest
 import trio
 
+from alasio.backend.app.restart import update_check as update_check_module
 from alasio.backend.app.restart.update_check import (
-    BUSY_MESSAGE, CHECK_INTERVAL, DISABLED_MESSAGE, FLOW_STATES, FRESH_MESSAGE, FRESH_WINDOW, UNMANAGED_MESSAGE,
-    ModUpdateCheck, UpdateCheck
+    BUSY_MESSAGE, CHECK_INTERVAL, DISABLED_MESSAGE, FLOW_STATES, FRESH_MESSAGE, FRESH_WINDOW, NO_SUPERVISOR_MESSAGE,
+    UNMANAGED_MESSAGE, ModUpdateCheck, UpdateCheck
 )
 from alasio.backend.topic.update import UpdateSource
 from alasio.logger import logger
@@ -149,6 +150,35 @@ class TestState:
         # a property of the mod
         assert module.names() == ['ok']
 
+    def test_initial_states_without_a_supervisor(self, monkeypatch):
+        """
+        A backend without a live supervisor cannot apply an update (only a
+        supervisor spawns the new process an applied update takes effect in):
+        every mod with an update source is 'no-supervisor', a mod without one
+        stays 'unmanaged' -- the environment gate is the outermost one
+        """
+        monkeypatch.setattr(update_check_module, 'has_supervisor', lambda: False)
+        module = UpdateCheck()
+        module.mods = {
+            'none': ModUpdateCheck(module, FakeMod('none', mirrors=None)),
+            'ok': ModUpdateCheck(module, FakeMod('ok', mirrors='https://example.com/alas')),
+        }
+        module.set_initial_states()
+        assert module.state_of('none') == 'unmanaged'
+        assert module.state_of('ok') == 'no-supervisor'
+        assert UpdateSource().data['ok'].state == 'no-supervisor'
+        # a mod without a source is not a no-supervisor mod: the source keeps
+        # the mod unmanaged whatever the environment says
+        assert module.mods['none'].no_supervisor is False
+        assert module.mods['ok'].no_supervisor is True
+        # the mod still has its update source, like a disabled one
+        assert module.names() == ['ok']
+        # the gate outranks the switch: a backend without a supervisor is not
+        # 'disabled' (turning AutoUpdate back on would not help)
+        module.auto = False
+        module.set_initial_states()
+        assert module.state_of('ok') == 'no-supervisor'
+
     def test_names_and_available(self):
         module, state = make_mod()
         module.mods['none'] = ModUpdateCheck(module, FakeMod('none', mirrors=None))
@@ -180,7 +210,7 @@ class TestReleaseStates:
         assert module.available() == ['m']
 
     @pytest.mark.parametrize("state", [
-        'unmanaged', 'disabled', 'idle', 'checking', 'uptodate',
+        'unmanaged', 'no-supervisor', 'disabled', 'idle', 'checking', 'uptodate',
         'available', 'updating', 'restart-required', 'error',
     ])
     def test_the_other_states_stay(self, state):
@@ -383,6 +413,28 @@ class TestRhythm:
         module, state = make_mod()
         module.auto = False
         assert state.disabled is True
+        async with trio.open_nursery() as nursery:
+            module.attach(nursery)
+            # every entry refuses it: the start of the mod, of the module and
+            # a restore all leave it without a sequence
+            state.start_check_loop()
+            module.start()
+            module.restore()
+            await trio.testing.wait_all_tasks_blocked()
+            assert state.running is False
+            assert (await module.mods['m'].job()).checks == 0
+            nursery.cancel_scope.cancel()
+
+    @pytest.mark.trio
+    async def test_a_mod_without_a_supervisor_never_starts_a_sequence(self, monkeypatch):
+        """
+        The backend cannot replace itself without a parent process: its mod
+        updates are off, no sequence is started for the mod -- like a disabled
+        one
+        """
+        monkeypatch.setattr(update_check_module, 'has_supervisor', lambda: False)
+        module, state = make_mod()
+        assert state.no_supervisor is True
         async with trio.open_nursery() as nursery:
             module.attach(nursery)
             # every entry refuses it: the start of the mod, of the module and
@@ -628,6 +680,21 @@ class TestManualCheck:
         # no request was made and the state stays where the startup put it
         assert (await module.mods['m'].job()).checks == 0
         assert state.info.state == 'disabled'
+
+    @pytest.mark.trio
+    async def test_check_of_a_mod_without_a_supervisor_answers_the_message(self, monkeypatch):
+        """
+        The backend cannot replace itself (no live supervisor): its mod updates
+        are off, the manual check answers the message and no request is made
+        """
+        monkeypatch.setattr(update_check_module, 'has_supervisor', lambda: False)
+        module, state = make_mod()
+        module.set_initial_states()
+        assert await module.update_check('m') == NO_SUPERVISOR_MESSAGE
+        assert await state.update_check() == NO_SUPERVISOR_MESSAGE
+        # no request was made and the state stays where the startup put it
+        assert (await module.mods['m'].job()).checks == 0
+        assert state.info.state == 'no-supervisor'
 
     @pytest.mark.trio
     async def test_cancel_check_of_an_unknown_mod_is_false(self):

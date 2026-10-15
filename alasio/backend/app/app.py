@@ -6,7 +6,7 @@ from starlette.responses import PlainTextResponse
 from starlette.routing import Route, WebSocketRoute
 
 from alasio.backend.app.frontend import SITE
-from alasio.backend.app.restart.daily import task_daily
+from alasio.backend.app.restart.daily import DAILY
 from alasio.backend.app.restart.restart_manager import RESTART_MANAGER
 from alasio.backend.app.restart.update_check import UPDATE_CHECK
 from alasio.backend.auth import auth
@@ -195,12 +195,13 @@ async def lifespan(app):
         # the background, the 5s startup window of the supervisor must not be
         # spent on the whole tree (requests prepare their file on demand)
         nursery.start_soon(SITE.warm_up)
-        # daily maintenance (Deploy.Update.AutoRestartTime): a no-op when the
-        # config disables it. The task only decides WHEN the daily action is
-        # due -- the action itself is the daily flow (the same stop + full
+        # daily maintenance (Deploy.Update.AutoRestartTime): the bookkeeping owns
+        # the schedule task, a no-op when the config disables it or the backend
+        # runs without a supervisor. The task only decides WHEN the daily action
+        # is due -- the action itself is the daily flow (the same stop + full
         # update + handover as a restart), so the running configs are resumed
         # by the new backend and the frontend merely reconnects over them
-        nursery.start_soon(task_daily)
+        nursery.start_soon(DAILY.run)
         # the maintenance flows of the backend (see
         # alasio.backend.app.restart): run() enters the init slot and claims
         # the startup flow before its first await (the startup flow consumes

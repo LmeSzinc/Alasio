@@ -1,5 +1,5 @@
 """
-Daily maintenance state (Deploy.Update.AutoRestartTime)
+Daily maintenance: the crossing of the configured restart time, and its task
 
 The daily action exists for two reasons: check every mod for updates and
 restart the workers before a mod that leaks memory can grow for a whole day.
@@ -8,34 +8,38 @@ serves both -- the new process checks every mod at startup and the workers are
 young again -- so the daily action is a *due* decision, not a scheduled
 command:
 
-- a process that starts after the target time has just checked every mod and
-  its workers have no accumulated runtime: the day is done by the startup
-  itself;
-- a process that is alive at the target time and is idle then runs the daily
-  flow (stop the workers, full update, handover);
-- a flow (restart / update) that is in flight at the target time is upgraded
-  into the daily maintenance before its handover instead of starting a second
-  one;
-- a process that was asleep and wakes up after the target time without
-  restarting runs the daily flow at the next evaluation.
+- a process that starts after the crossing of the target time has just checked
+  every mod and its workers have no accumulated runtime: the day is served by
+  the startup itself (the crossings before a process started belong to the
+  past, see DailyState.observe);
+- a process alive when the clock crosses the target runs the daily flow (stop
+  the workers, full update, handover), at the crossing or at the next
+  observation (a suspend across it);
+- a flow (restart / update) in flight at the crossing is upgraded into the
+  daily maintenance before its handover instead of starting a second one;
+- the clock walked backwards crosses nothing; when it flows forward again and
+  crosses the target, that is a crossing again -- even when the same target
+  instant was served before (a service is one restart, the second traversal
+  owes another one).
 
-This module owns the bookkeeping of that decision: the target of the day, the
-completion mark of the day and the completion time of the last full update of
-this process. It is state only (no task, no IO): the daily task of
-``alasio.backend.app.restart.daily`` drives it, the flows read it at their
-handover.
-
-Deliberately dependency free apart from the standard library: the manager, the
-step layer and the daily task all import it.
+This module owns the bookkeeping of that decision and the task that drives it:
+the crossing cursor, the crossing waiting to be served, the completion time of
+the last full update of this process (the resume record carries it to the next
+process). Deliberately light apart from trio and the logger: the manager, the
+step layer, the flows and the lifespan import it.
 
 The clock of this module is the **local wall clock** (``datetime.now()``): the
 daily action restarts the backend in the local small hours, when the user is
 least likely to be playing, so the target follows the user's local time --
 including DST shifts and a manually changed clock, which only move when the
-action happens (the task re-reads the clock on every wake). Durations that
-compare one instant of this process with another one (e.g. the fresh window of
-the update check) do not use this clock: they use ``time.monotonic()``, a jump
+action happens (the task observes the clock on every wake). Durations that
+compare one instant of this process with another one (the retry interval of an
+unserved crossing) do not use this clock: they use ``time.monotonic()``, a jump
 of the wall clock must not change them.
+
+Without a supervisor the backend cannot replace itself (no parent process to
+spawn the new one, see ``alasio.backend.mpipe.mpipe_backend``): the daily
+action and the mod updates are disabled then, the task does not start at all.
 """
 import datetime
 import time
@@ -43,181 +47,270 @@ import time
 import trio
 
 from alasio.base.servertime import parse_server_update
+from alasio.ext.cache import cached_property
 from alasio.logger import logger
+
+# Re-evaluation cap of the sleep: the next wake is the sooner of the remaining
+# delay to the target and this cap, so a clock jump / DST shift / a suspend
+# crossing the target is judged within it instead of after a full day
+SCHEDULE_WAKE_CAP = 60.0
+# Seconds between two claims of a flow for a crossing that is not served yet (a
+# flow that failed before its handover): a claim stops every worker and runs a
+# full update, a failed one must not be repeated on every wake
+RETRY_INTERVAL = 600.0
+# Reminder interval of the retry log
+RETRY_LOG_INTERVAL = 60.0 * 60.0
 
 
 class DailyState:
     """
-    Bookkeeping of the daily maintenance of one backend process
+    The daily bookkeeping of one backend process, and its schedule task
 
-    Attributes:
+    Attributes (read-only for the outside):
         target (tuple[int, int] | None): (hour, minute) of the daily action,
-            None when the config disables it. Read once per process (a changed
-            config takes effect with the next restart)
-        done_day (datetime.date | None): Day whose daily action is finished
+            read once from the deploy config (a changed config takes effect
+            with the next restart); None when the config disables it
+        seen (datetime.datetime): The local wall clock of the last observation;
+            at construction it is the boundary of this process -- the crossings
+            at or before it belong to the past and are never detected
+        pending (datetime.datetime | None): The daily target instant of the
+            crossing detected and not served yet, None when there is none. A
+            clock rolled back below it drops it (the action is due again when
+            the clock crosses the target another time)
         updated_all_at (float): Completion time (unix timestamp) of the last
             full update of THIS process, 0 when it ran none
     """
 
-    def __init__(self, target=None):
-        """
-        Args:
-            target (tuple[int, int]): (hour, minute) of the daily action, None
-                (the default) when disabled
-        """
-        self.target = target
-        self.done_day = None
+    def __init__(self):
+        # the boundary of the process and the cursor every observation compares
+        # against
+        self.seen = datetime.datetime.now()
+        self.pending = None
         self.updated_all_at = 0.0
+
+    @cached_property
+    def target(self):
+        """
+        (hour, minute) of the daily action, read once from the deploy config
+
+        Returns:
+            tuple[int, int] | None: The time, None when the config disables the
+                daily action (or holds an invalid value: the reason is logged
+                once, a typo must not restart the backend daily at an arbitrary
+                time)
+        """
+        return scheduled_restart_time()
 
     def reset(self):
         """
         Return to the initial state (tests: a fresh process has fresh state)
+
+        The cached target is dropped as well: a test that patched the config
+        reader must not leak its target into the next one.
         """
+        cached_property.pop(self, 'target')
         self.__init__()
 
     # ------------------------------------------------------------------
-    # Target of the day
+    # The crossing of the daily target
     # ------------------------------------------------------------------
 
-    def target_datetime(self, now: "datetime.datetime | None" = None) -> "datetime.datetime | None":
+    def observe(self):
         """
-        The target moment of the day `now` belongs to
+        Read the wall clock and detect the crossing it just made
 
-        Args:
-            now (datetime.datetime): Local time, defaults to the current time
+        Every judgment of this class calls this first. A crossing is the clock
+        walking from before a daily target to at or after it: the comparison is
+        the previous observation (``seen``), so a rollback crosses nothing (the
+        interval backwards is empty) and it never invents a crossing, while the
+        same stretch of wall clock walked a second time crosses the target
+        again -- a crossing again, even when that target instant was served
+        before.
+
+        One traversal detects the crossing once: the observation advances
+        ``seen`` past the target it just crossed, so the crossing is not
+        re-detected while it waits to be served. A clock that walks back below
+        the target drops the crossing it had detected: the rollback is not a
+        crossing (nothing is served for it) and the service it undid is not
+        owed -- the action is due again when the clock crosses the target
+        another time.
+        """
+        now = datetime.datetime.now()
+        target = self.target
+        if target is not None:
+            crossed = last_target(now, target)
+            if crossed > self.seen:
+                # the clock walked over the target: a crossing
+                self.pending = crossed
+            elif self.pending is not None and crossed < self.pending:
+                # the clock walked back below the crossing it had reached: the
+                # rollback crosses nothing, and the owed service is dropped with
+                # it (the next traversal of the target owes it again)
+                self.pending = None
+        self.seen = now
+
+    def is_due(self) -> bool:
+        """
+        Whether a crossing was detected and is not served yet (the trigger)
 
         Returns:
-            datetime.datetime | None: Today at the target hour:minute, or None
-                when the daily action is disabled
+            bool: True when the daily action must run
         """
-        if self.target is None:
-            return None
-        now = now if now is not None else datetime.datetime.now()
-        hour, minute = self.target
-        return now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        self.observe()
+        return self.pending is not None
 
-    def target_passed(self, now: "datetime.datetime | None" = None) -> bool:
+    def mark_done(self) -> bool:
         """
-        Whether the target moment of the day was reached
+        Serve the pending crossing
 
-        Args:
-            now (datetime.datetime): Local time, defaults to the current time
+        The observation runs first: the traversal that crossed the target is
+        not detected again. A service that does not hand the process over (the
+        startup of a process that started before the target, a flow in flight
+        covering the crossing itself) must not be repeated.
 
         Returns:
-            bool: True when the daily action is configured and due
+            bool: True when there was a crossing to serve
         """
-        target = self.target_datetime(now)
-        if target is None:
+        self.observe()
+        if self.pending is None:
             return False
-        now = now if now is not None else datetime.datetime.now()
-        return now >= target
+        self.pending = None
+        return True
 
-    def is_done(self, now: "datetime.datetime | None" = None) -> bool:
+    def covered_by(self, ts) -> bool:
         """
-        Whether the daily action of the day `now` belongs to is finished
+        Whether a full update completed at ``ts`` covers the crossing of now
 
-        Args:
-            now (datetime.datetime): Local time, defaults to the current time
-
-        Returns:
-            bool: True when the day was marked done (see mark_done)
-        """
-        now = now if now is not None else datetime.datetime.now()
-        return self.done_day == now.date()
-
-    def mark_done(self, now: "datetime.datetime | None" = None):
-        """
-        Mark the daily action of the day `now` belongs to as finished
-
-        Args:
-            now (datetime.datetime): Local time, defaults to the current time
-        """
-        now = now if now is not None else datetime.datetime.now()
-        self.done_day = now.date()
-
-    def should_upgrade(self, now: "datetime.datetime | None" = None) -> bool:
-        """
-        Whether a flow in flight must be upgraded into the daily maintenance
-
-        A restart / update flow that reaches this check after the target moment
-        of a day whose action is not finished yet covers the daily action with
-        its own handover (stop the workers + full update + restart): the flow
-        is upgraded instead of letting the daily task start a second
-        maintenance right after it.
-
-        Args:
-            now (datetime.datetime): Local time, defaults to the current time
-
-        Returns:
-            bool: True when the flow must upgrade itself
-        """
-        if self.is_done(now):
-            return False
-        return self.target_passed(now)
-
-    # ------------------------------------------------------------------
-    # Full update bookkeeping
-    # ------------------------------------------------------------------
-
-    def note_full_update(self, ts: "float | None" = None):
-        """
-        Record that a full update finished (the update steps call this)
-
-        Args:
-            ts (float): Completion time (time.time()), defaults to now
-        """
-        self.updated_all_at = ts if ts is not None else datetime.datetime.now().timestamp()
-
-    def covered_by(self, ts: float, now: "datetime.datetime | None" = None) -> bool:
-        """
-        Whether a full update completed at `ts` covers the daily action of the
-        day `now` belongs to (it finished at or after the target moment)
+        Stateless: compared against the most recent target instant at or
+        before now, so the answer is the same for the handover mark (the full
+        update of this process ran after the crossing), the guard of a daily
+        upgrade (the full update of this process is not repeated) and the
+        startup (the previous process checked after the crossing).
 
         Args:
             ts (float): Completion time of the full update (unix timestamp),
                 0 when there was none
-            now (datetime.datetime): Local time, defaults to the current time
 
         Returns:
-            bool: True when the update covers today's daily action
+            bool: True when the update finished at or after the crossing
         """
-        if not ts:
+        target = self.target
+        if not ts or target is None:
             return False
-        target = self.target_datetime(now)
-        if target is None:
-            return False
-        return datetime.datetime.fromtimestamp(ts) >= target
+        return datetime.datetime.fromtimestamp(ts) >= last_target(datetime.datetime.now(), target)
 
-    def mark_done_if_covered(self, now: "datetime.datetime | None" = None) -> bool:
+    def mark_done_if_covered(self) -> bool:
         """
-        Mark the daily action done when the last full update of this process
-        already covers it (the handover bookkeeping)
+        Serve the pending crossing when the last full update of this process
+        covers it (the handover mark, the startup full update)
+
+        Returns:
+            bool: True when a crossing was served
+        """
+        if not self.covered_by(self.updated_all_at):
+            return False
+        return self.mark_done()
+
+    def note_full_update(self, ts=None):
+        """
+        Record that a full update finished (the apply steps call this)
 
         Args:
-            now (datetime.datetime): Local time, defaults to the current time
-
-        Returns:
-            bool: True when the day was marked done by this call
+            ts (float): Completion time (time.time()), defaults to now; a
+                startup that skips its full update records the completion time
+                of the process it replaces -- the check it relies on
         """
-        if not self.covered_by(self.updated_all_at, now):
-            return False
-        self.mark_done(now)
-        return True
+        self.updated_all_at = ts if ts is not None else datetime.datetime.now().timestamp()
+
+    # ------------------------------------------------------------------
+    # The schedule task
+    # ------------------------------------------------------------------
+
+    async def run(self, manager=None):
+        """
+        Lifespan background task: wake up, judge the crossing, claim the daily flow
+
+        One task per backend process. The target time is read once (the deploy
+        config; changing it takes effect with the next restart); with the daily
+        action disabled, or without a supervisor (the backend cannot replace
+        itself then), the task ends right away. It wakes in bounded steps and
+        observes the wall clock on every wake, so a clock jump / DST shift / a
+        suspend crossing the target is judged shortly after instead of a day
+        later.
+
+        One evaluation: the crossing of the clock is served -> nothing;
+        otherwise the manager decides -- an idle slot claims the daily flow (it
+        stops the workers, runs the full update and hands the process over), a
+        restart / update flow in flight covers the crossing itself (it upgrades
+        into the daily maintenance before its handover), a backend that is
+        starting up has just checked every mod and has no accumulated runtime
+        (it serves the crossing itself). The task never interrupts a flow: it
+        only re-evaluates.
+
+        A crossing that could not be served (a flow that failed before its
+        handover) is retried: the claim is throttled by RETRY_INTERVAL (it is
+        expensive) and the retry log by RETRY_LOG_INTERVAL.
+
+        Args:
+            manager (RestartManager): The restart manager, defaults to the
+                process singleton
+        """
+        if manager is None:
+            # local import: the manager imports this module (its bookkeeping), a
+            # module level import would be circular
+            from alasio.backend.app.restart.restart_manager import RESTART_MANAGER
+            manager = RESTART_MANAGER
+        target = self.target
+        if target is None:
+            return
+        # local import: this module stays light (the mpipe module is a leaf, but
+        # the import is only needed by the task)
+        from alasio.backend.mpipe.mpipe_backend import has_supervisor
+        if not has_supervisor():
+            # the backend cannot replace itself without a parent process (see
+            # MPipeBackend): the daily restart and the mod updates are disabled,
+            # the schedule has nothing to do
+            logger.info('[Schedule] The backend runs without a supervisor: '
+                        'the daily maintenance is disabled')
+            return
+        logger.info(f'[Schedule] Daily maintenance at {target[0]:02d}:{target[1]:02d}')
+        last_attempt = None
+        last_retry_log = 0.0
+        while True:
+            if not has_supervisor():
+                # the supervisor died while the backend ran (the recv loop
+                # cleared the pipe): the process is shutting down, the schedule
+                # stops claiming
+                return
+            if self.is_due():
+                if last_attempt is None or time.monotonic() - last_attempt >= RETRY_INTERVAL:
+                    last_attempt = time.monotonic()
+                    try:
+                        flow = manager.request_daily()
+                    except Exception as e:
+                        # a failed request must never kill the lifespan task
+                        logger.error(f'[Schedule] Failed to start the daily maintenance: {e}')
+                    else:
+                        if flow is not None:
+                            logger.info(f'[Schedule] Daily maintenance started by the schedule '
+                                        f'("{flow.name}" flow)')
+                elif time.monotonic() - last_retry_log >= RETRY_LOG_INTERVAL:
+                    last_retry_log = time.monotonic()
+                    logger.info('[Schedule] The daily action of the crossed target is not served '
+                                'yet, retrying')
+            else:
+                last_attempt = None
+            # sleep to the next occurrence, in bounded steps: an idle loop wakes
+            # exactly at the target, a clock jump / a suspend is judged within
+            # SCHEDULE_WAKE_CAP (a rollback needs no special case: it simply
+            # crosses nothing)
+            await trio.sleep(min(next_restart_delay(datetime.datetime.now(), target),
+                                 SCHEDULE_WAKE_CAP))
 
 
 # =============================================================================
-# The daily task
+# The configured time
 # =============================================================================
-
-# Re-evaluation cap of the wait: the next wake is the sooner of the remaining
-# delay and this cap, so a clock jump / DST shift / suspend crossing the target
-# is noticed within it instead of after a full day
-SCHEDULE_WAKE_CAP = 60.0
-# Reminder interval of a daily action that could not be served yet (a handover
-# that failed): the retry itself runs on every evaluation, only the log is
-# throttled
-RETRY_LOG_INTERVAL = 60.0 * 60.0
-
 
 def parse_restart_time(value):
     """
@@ -254,15 +347,37 @@ def parse_restart_time(value):
     return condition.hour, condition.minute or 0
 
 
+def last_target(now, hour_minute):
+    """
+    The most recent occurrence of `hour_minute` at or before `now` (local time)
+
+    The instant a crossing walks over (see DailyState.observe). Computed from
+    the local datetime itself, like `next_restart_delay`, so the daily rhythm
+    follows the local wall clock through DST shifts.
+
+    Args:
+        now (datetime.datetime): The local time of the observation
+        hour_minute (tuple[int, int]): (hour, minute) of the daily target
+
+    Returns:
+        datetime.datetime: The occurrence at or before `now` (today or yesterday)
+    """
+    hour, minute = hour_minute
+    target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if target > now:
+        target -= datetime.timedelta(days=1)
+    return target
+
+
 def next_restart_delay(now, hour_minute):
     """
     Seconds from `now` to the next occurrence of `hour_minute` in local time
 
     Computed numerically from `now` (local datetime), so the local time of the
     target is the constant and DST-shifted days are handled by the arithmetic
-    itself. The occurrence exactly at `now` counts as passed: a backend that
-    restarts at the target and comes back inside the same minute must not
-    trigger again.
+    itself. The occurrence exactly at `now` counts as passed: this helper only
+    says how long to sleep towards the next crossing, whether a crossing is due
+    is decided by DailyState (its cursor), never here.
 
     Args:
         now (datetime.datetime): Current local time
@@ -303,75 +418,6 @@ def scheduled_restart_time():
     except ValueError as e:
         logger.error(f'[Schedule] {e}, the daily maintenance is disabled')
         return None
-
-
-async def task_daily(manager=None, daily=None):
-    """
-    Lifespan background task: the daily maintenance evaluation
-
-    One task per backend process. The target time is read once (the deploy
-    config; changing it takes effect with the next restart); with the daily
-    action disabled the task ends right away. It wakes in bounded steps and
-    re-reads the wall clock on every wake, so a clock jump / DST shift / a
-    suspend crossing the target is noticed shortly after instead of a day
-    later.
-
-    One evaluation: the day is served -> nothing; before the target -> nothing;
-    otherwise the manager decides -- an idle slot claims the daily flow (it
-    stops the workers, runs the full update and hands the process over), a
-    restart / update flow in flight covers the action itself (it upgrades into
-    the daily maintenance before its handover), a backend that is starting up
-    has just checked every mod and has no accumulated runtime (it marks the day
-    served). The task never interrupts a flow: it only re-evaluates.
-
-    A daily action whose flow could not hand the process over is retried on the
-    next evaluation (the day was not marked), the retry log is throttled.
-
-    Args:
-        manager (RestartManager): The restart manager, defaults to the process
-            singleton
-        daily (DailyState): The bookkeeping, defaults to the process singleton
-    """
-    if manager is None:
-        # local import: the manager imports this module (its bookkeeping), a
-        # module level import would be circular
-        from alasio.backend.app.restart.restart_manager import RESTART_MANAGER
-        manager = RESTART_MANAGER
-    daily = daily if daily is not None else DAILY
-    target = scheduled_restart_time()
-    daily.target = target
-    if target is None:
-        return
-    logger.info(f'[Schedule] Daily maintenance scheduled at {target[0]:02d}:{target[1]:02d}')
-    last_retry_log = 0.0
-    while True:
-        # sleep in bounded steps and re-evaluate the wall clock on every wake
-        remaining = next_restart_delay(datetime.datetime.now(), target)
-        while remaining > SCHEDULE_WAKE_CAP:
-            await trio.sleep(SCHEDULE_WAKE_CAP)
-            remaining = next_restart_delay(datetime.datetime.now(), target)
-        await trio.sleep(max(remaining, 0.0))
-
-        if daily.is_done() or not daily.target_passed():
-            continue
-        try:
-            flow = manager.request_daily()
-        except Exception as e:
-            # a failed request must never kill the lifespan task
-            logger.error(f'[Schedule] Failed to start the daily maintenance: {e}')
-            continue
-        if flow is not None:
-            logger.info(f'[Schedule] Daily maintenance started by the schedule ("{flow.name}" flow)')
-            continue
-        # no flow was claimed: either one is in flight (it covers the day by
-        # itself), or the startup just served the day. A due action that could
-        # not be served is retried here, the log is throttled
-        if daily.is_done():
-            continue
-        now = time.time()
-        if now - last_retry_log >= RETRY_LOG_INTERVAL:
-            last_retry_log = now
-            logger.info('[Schedule] The daily action of today is not served yet, retrying')
 
 
 # The process-wide daily bookkeeping

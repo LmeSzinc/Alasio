@@ -9,7 +9,7 @@ import datetime
 
 import pytest
 
-from alasio.backend.app.restart import restart_step as step_module
+from alasio.backend.app.restart import daily as daily_module, restart_step as step_module
 from alasio.backend.app.restart.daily import DailyState
 from alasio.backend.app.restart.restart_base import FlowRefused
 from alasio.backend.app.restart.restart_flow import FlowDaily, FlowRestart, FlowUpdate
@@ -164,6 +164,38 @@ async def _no_restart():
     return None
 
 
+@pytest.fixture(autouse=True)
+def daily_target(monkeypatch):
+    """
+    The daily target of the step tests: 00:00
+
+    The clock crossed it today at the latest, so a state whose boundary is a
+    day older (see make_daily) sees a pending crossing.
+    """
+    monkeypatch.setattr(daily_module, 'scheduled_restart_time', lambda: (0, 0))
+
+
+def make_daily(crossed=False):
+    """
+    The daily state of the step tests, with the crossing pending when asked
+
+    The state fixes its boundary (the process start) at construction and the
+    clock of the test process is after today's target: moving the boundary back
+    one day is what a process started before the target looks like, so the
+    crossing of today is detected on the next judgment.
+
+    Args:
+        crossed (bool): Move the boundary back so the crossing is pending
+
+    Returns:
+        DailyState: The state
+    """
+    daily = DailyState()
+    if crossed:
+        daily.seen -= datetime.timedelta(days=1)
+    return daily
+
+
 def make_manager(worker_manager=None, update_check=None, daily=None, files=None, restart_fn=None):
     """
     A manager of the real steps with injected stand-ins
@@ -171,7 +203,7 @@ def make_manager(worker_manager=None, update_check=None, daily=None, files=None,
     return RestartManager(
         worker_manager=worker_manager if worker_manager is not None else FakeWorkerManager(),
         update_check=update_check if update_check is not None else FakeUpdateCheck(),
-        daily=daily if daily is not None else DailyState(target=(0, 0)),
+        daily=daily if daily is not None else DailyState(),
         files=files if files is not None else FakeFiles(),
         restart_fn=restart_fn if restart_fn is not None else _no_restart,
     )
@@ -266,7 +298,7 @@ class TestHandover:
     @pytest.mark.trio
     async def test_handover_publishes_and_marks_the_daily_action(self):
         files = FakeFiles()
-        daily = DailyState(target=(0, 0))
+        daily = make_daily(crossed=True)
         daily.note_full_update(NOW.timestamp())
         calls = []
 
@@ -281,22 +313,24 @@ class TestHandover:
         assert files.writes == [{
             'configs': ['cfg_a'], 'owner': OWNER_RESTART, 'actions': None,
             'updated_all_at': daily.updated_all_at}]
-        assert daily.is_done() is True
+        # the crossing is served: the full update of this process ran after it
+        assert daily.is_due() is False
         assert phase() == 'shutting-down'
 
     @pytest.mark.trio
     async def test_handover_without_a_full_update_marks_nothing(self):
         files = FakeFiles()
-        daily = DailyState(target=(0, 0))
+        daily = make_daily(crossed=True)
         manager = make_manager(daily=daily, files=files)
         await manager.handover(FlowDaily(manager), 'daily', [])
-        assert daily.done_day is None
+        # no full update of this process: the crossing is not covered
+        assert daily.is_due() is True
         assert files.writes[0]['updated_all_at'] == 0.0
 
     @pytest.mark.trio
     async def test_handover_failure_withdraws_and_unfreezes(self):
         files = FakeFiles()
-        daily = DailyState(target=(0, 0))
+        daily = DailyState()
 
         async def restart_fn():
             raise PermissionError('Cannot restart backend running without supervisor')
@@ -436,13 +470,15 @@ class TestUpdateMods:
     """The apply step: one deploy job per mod, phases, failure isolation"""
 
     @staticmethod
-    def _make(jobs):
+    def _make(jobs, daily=None):
         """
         A manager whose check module carries the given jobs
 
         Args:
             jobs (dict[str, FakeDeployJob | None]): The job of every mod, None
                 for a mod without a usable update source
+            daily (DailyState): The daily bookkeeping, defaults to a fresh one
+                (no crossing of today)
 
         Returns:
             tuple: (the manager, the recorded states)
@@ -450,7 +486,7 @@ class TestUpdateMods:
         update_check = FakeUpdateCheck()
         for name, job in jobs.items():
             update_check.mods[name] = FakePerMod(name, job, update_check.states)
-        return make_manager(update_check=update_check), update_check.states
+        return make_manager(update_check=update_check, daily=daily), update_check.states
 
     @pytest.mark.trio
     async def test_success_drives_the_phases_and_reports_the_change(self):
@@ -533,8 +569,23 @@ class TestUpdateMods:
         assert manager.daily.updated_all_at == 0.0
 
     @pytest.mark.trio
+    async def test_a_full_update_without_a_supervisor_is_empty(self, monkeypatch):
+        """
+        The backend cannot replace itself without a supervisor: applying an
+        update would leave the new files on disk and the old packages imported
+        in this process, and no parent process can spawn the one that applies
+        them -- the full update checks nothing, applies nothing and records no
+        completion
+        """
+        manager, states = self._make({'m': FakeDeployJob(changed=True)})
+        monkeypatch.setattr(step_module, 'has_supervisor', lambda: False)
+        assert await manager.full_update() == []
+        assert states == []
+        assert manager.daily.updated_all_at == 0.0
+
+    @pytest.mark.trio
     async def test_the_daily_upgrade_runs_the_full_update_once(self):
-        manager, _ = self._make({'m': FakeDeployJob(changed=True)})
+        manager, _ = self._make({'m': FakeDeployJob(changed=True)}, daily=make_daily(crossed=True))
         flow = FlowRestart(manager)
         assert await manager.maybe_upgrade_to_daily(flow) is True
         assert flow.upgraded is True
@@ -546,9 +597,17 @@ class TestUpdateMods:
         assert manager.daily.updated_all_at == first
 
     @pytest.mark.trio
-    async def test_the_upgrade_is_skipped_when_the_day_is_served(self):
+    async def test_the_upgrade_is_skipped_when_the_crossing_is_served(self):
+        manager, _ = self._make({'m': FakeDeployJob(changed=True)}, daily=make_daily(crossed=True))
+        assert manager.daily.mark_done() is True
+        flow = FlowRestart(manager)
+        assert await manager.maybe_upgrade_to_daily(flow) is False
+        assert flow.upgraded is False
+
+    @pytest.mark.trio
+    async def test_the_upgrade_is_skipped_without_a_crossing(self):
+        """A flow that did not live through the crossing does not upgrade"""
         manager, _ = self._make({'m': FakeDeployJob(changed=True)})
-        manager.daily.mark_done()
         flow = FlowRestart(manager)
         assert await manager.maybe_upgrade_to_daily(flow) is False
         assert flow.upgraded is False

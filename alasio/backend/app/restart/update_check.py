@@ -30,15 +30,17 @@ pause the sequences they do not need (``pause``), restore them on their way out
 
 The states of one mod (Update topic):
 
-    unmanaged / disabled / idle / checking / uptodate / available / error
+    unmanaged / no-supervisor / disabled / idle / checking / uptodate / available / error
 
 plus the states the apply steps set: 'queued', 'stopping', 'downloading',
 'updating' and 'restart-required'.
 
-A mod is classified once, at the startup: 'unmanaged' when it declares no
-usable update source (the source is parsed once), 'disabled' when the mod
-updates are off for this process (``auto``, i.e. Deploy.Update.AutoUpdate =
-false), 'idle' otherwise. Neither an unmanaged nor a disabled mod is ever
+A mod is classified once, at the startup: 'no-supervisor' when the backend
+runs without a live supervisor (only a supervisor can spawn the new process
+that makes an applied update effective, see MPipeBackend), 'unmanaged' when it
+declares no usable update source (the source is parsed once), 'disabled' when
+the mod updates are off for this process (``auto``, i.e.
+Deploy.Update.AutoUpdate = false), 'idle' otherwise. None of them is ever
 checked: no sequence is started for it and the manual entry answers a message
 instead of checking.
 """
@@ -48,6 +50,7 @@ from typing import Dict, List, Optional
 
 import trio
 
+from alasio.backend.mpipe.mpipe_backend import has_supervisor
 from alasio.backend.topic.update import UpdateInfo, UpdateSource
 from alasio.deploy.httpclient.client_async import AsyncHttpClient
 from alasio.deploy.httpclient.probe_mirrors import Mirrors
@@ -75,6 +78,13 @@ UNMANAGED_MESSAGE = 'The mod has no update source'
 # entries answer it instead of raising: turning the updates off is a normal
 # state, the startup flow publishes it as 'disabled')
 DISABLED_MESSAGE = 'The mod updates are disabled'
+# The message of a check requested for a mod of a backend running without a
+# live supervisor: only a supervisor can spawn the new process that makes an
+# applied update effective (this one has the mod packages imported already), so
+# the updates are off -- no sequence, no manual check, no full update (the
+# entries answer it instead of raising: running without a supervisor is a
+# normal state, the startup flow publishes it as 'no-supervisor')
+NO_SUPERVISOR_MESSAGE = 'The backend runs without a supervisor'
 # The states the apply steps of a flow set on a mod while the flow runs
 # ('queued' / 'stopping' / 'downloading'): they describe the flow in flight, not
 # the update itself -- the wrap-up of a flow that does not hand over releases
@@ -240,6 +250,27 @@ class ModUpdateCheck:
         """
         return self.mirrors is not None and not self.check_module.auto
 
+    @property
+    def no_supervisor(self) -> bool:
+        """
+        Whether the mod updates are off because the backend has no live supervisor
+
+        A supervisor is the only one that can replace the backend process, and
+        an applied update only takes effect in the new process (this one has
+        the mod packages imported already). Without a live supervisor nothing
+        is checked -- no sequence, no manual check, no full update -- and the
+        state published at the startup is 'no-supervisor'. Read live: the
+        supervisor can die while the backend runs (the recv loop of the
+        lifespan clears the pipe), the backend shuts itself down right after.
+        A mod without a usable update source is 'unmanaged' whatever the
+        environment says.
+
+        Returns:
+            bool: True when the backend runs without a live supervisor and the
+                mod has an update source to check
+        """
+        return self.mirrors is not None and not has_supervisor()
+
     async def job(self):
         """
         Build the deploy job of this mod, bound to a fresh update server
@@ -290,10 +321,10 @@ class ModUpdateCheck:
         startup flow just ran a full update, a check right now would repeat it.
 
         A mod that is never checked has no sequence: nothing is started for an
-        unmanaged or disabled one (their states, 'unmanaged' / 'disabled', are
-        published once by the startup flow).
+        unmanaged, disabled or no-supervisor one (their states are published
+        once by the startup flow).
         """
-        if self.mirrors is None or self.disabled:
+        if self.mirrors is None or self.disabled or self.no_supervisor:
             return
         nursery = self.check_module.nursery
         if nursery is None:
@@ -331,11 +362,11 @@ class ModUpdateCheck:
         if scope is None:
             # dropped before this task started
             return
-        if self.mirrors is None or self.disabled:
+        if self.mirrors is None or self.disabled or self.no_supervisor:
             # defensive: the sequence is never started for a mod that is never
             # checked (see start_check_loop), a sequence that finds itself
-            # without a source, or with the mod updates turned off, ends here
-            # instead of checking
+            # without a source, with the mod updates turned off, or on a
+            # backend that lost its supervisor, ends here instead of checking
             return
         try:
             with scope:
@@ -373,8 +404,12 @@ class ModUpdateCheck:
         Returns:
             str: The message of the check: '' when it ran, the reason it was
                 discarded otherwise (FRESH_MESSAGE / BUSY_MESSAGE /
-                UNMANAGED_MESSAGE / DISABLED_MESSAGE)
+                UNMANAGED_MESSAGE / DISABLED_MESSAGE / NO_SUPERVISOR_MESSAGE)
         """
+        if self.no_supervisor:
+            # the backend cannot replace itself (no live supervisor): an
+            # applied update could not take effect, the mods are never checked
+            return NO_SUPERVISOR_MESSAGE
         if self.mirrors is None:
             # the entry of the manual check: a mod without a usable update
             # source is never checked (its state is 'unmanaged', published once
@@ -432,8 +467,13 @@ class ModUpdateCheck:
                 (the second check of the fresh window, inside the lock),
                 UNMANAGED_MESSAGE for an unmanaged mod (defensive: the entry
                 refuses it and its sequence is never started), DISABLED_MESSAGE
-                for a disabled one (the same, the mod updates are off)
+                for a disabled one, NO_SUPERVISOR_MESSAGE for a mod of a
+                backend without a live supervisor (the same, the mod updates
+                are off)
         """
+        if self.no_supervisor:
+            # defensive: the last line of defence of the check path
+            return NO_SUPERVISOR_MESSAGE
         if self.mirrors is None:
             # defensive: the last line of defence of the check path
             return UNMANAGED_MESSAGE
@@ -674,15 +714,19 @@ class UpdateCheck:
     def set_initial_states(self):
         """
         Publish the initial state of every mod (the startup flow, before the
-        first check): 'unmanaged' for a mod without a usable update source (no
+        first check): 'no-supervisor' for a mod of a backend without a live
+        supervisor, 'unmanaged' for a mod without a usable update source (no
         mirrors, or a malformed declaration: the mod is never checked),
         'disabled' for a mod whose updates are off (``auto``), 'idle'
-        otherwise. The classification is final: the source of a mod is parsed
-        once and the switch is read once, see ModUpdateCheck.mirrors and
-        ModUpdateCheck.disabled.
+        otherwise. The classification is final for the update source and the
+        switch (parsed and read once, see ModUpdateCheck.mirrors and
+        ModUpdateCheck.disabled); the supervisor gate is read live
+        (ModUpdateCheck.no_supervisor).
         """
         for mod in self.mods.values():
-            if mod.mirrors is None:
+            if mod.no_supervisor:
+                mod.set_state('no-supervisor')
+            elif mod.mirrors is None:
                 mod.set_state('unmanaged')
             elif mod.disabled:
                 mod.set_state('disabled')

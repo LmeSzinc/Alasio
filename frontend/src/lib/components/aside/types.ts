@@ -31,6 +31,9 @@ export type RestartTopicLike = {
 };
 
 // States of a mod update (the Update topic, one entry per mod):
+// - 'no-supervisor': the backend runs without a live supervisor, only one can
+//   spawn the new process an applied update needs, the mod is never checked
+//   either
 // - 'unmanaged': the mod declares no update source, it is never checked
 // - 'disabled': the mod updates are off for this backend
 //   (Deploy.Update.AutoUpdate = false), the mod is never checked either
@@ -49,6 +52,7 @@ export type RestartTopicLike = {
 //   not be requested, the next backend start converges them
 // - 'error': the last check or the update failed, see error
 export type UPDATE_STATE =
+  | "no-supervisor"
   | "unmanaged"
   | "disabled"
   | "idle"

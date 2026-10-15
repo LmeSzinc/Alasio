@@ -56,9 +56,19 @@
   // backend restarts), see the update flow of the backend
   let confirmUpdate = $state(false);
   // states whose update runs (or waits for a window): a start is queued,
-  // see the maintenance flows of the backend. 'disabled' and 'unmanaged' are
-  // never checked by the backend (the check button would be refused)
-  const UPDATE_NOT_CHECKABLE = ["unmanaged", "disabled", "checking", "queued", "stopping", "downloading", "updating"];
+  // see the maintenance flows of the backend. 'unmanaged', 'no-supervisor' and
+  // 'disabled' are never checked by the backend (the check button would be
+  // refused)
+  const UPDATE_NOT_CHECKABLE = [
+    "no-supervisor",
+    "unmanaged",
+    "disabled",
+    "checking",
+    "queued",
+    "stopping",
+    "downloading",
+    "updating",
+  ];
   // states of the update flow that may still be cancelled (the check of a mod,
   // the stop of the workers, the download): 'updating' is past the point of no
   // return, the flow restarts the backend by itself when it finishes
@@ -72,6 +82,8 @@
   const availableMods = $derived(mods.filter((mod) => updateInfo(mod.value)?.state === "available"));
   /** Whether the mod updates are off for this backend (every managed mod is 'disabled'). */
   const updatesDisabled = $derived(mods.some((mod) => updateInfo(mod.value)?.state === "disabled"));
+  /** Whether the backend runs without a live supervisor (no mod can be updated). */
+  const noSupervisor = $derived(mods.some((mod) => updateInfo(mod.value)?.state === "no-supervisor"));
   /** Whether the update flow of the backend may still be cancelled. */
   const updateCancellable = $derived(
     mods.some((mod) => {
@@ -83,6 +95,8 @@
   /** Badge label of an update state, '' when the mod has no entry yet. */
   function updateLabel(info: UpdateInfoLike | undefined): string {
     switch (info?.state) {
+      case "no-supervisor":
+        return t.Update.StateNoSupervisor();
       case "unmanaged":
         return t.Update.StateUnmanaged();
       case "disabled":
@@ -132,6 +146,8 @@
       <span class="text-muted-foreground text-sm">
         {#if availableMods.length}
           {t.Update.AvailableCount({ count: String(availableMods.length) })}
+        {:else if noSupervisor}
+          {t.Update.UpdatesNoSupervisor()}
         {:else if updatesDisabled}
           {t.Update.UpdatesDisabled()}
         {:else}

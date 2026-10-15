@@ -67,10 +67,16 @@ def mpipe_recv_loop(conn, trio_token):
             msg = conn.recv_bytes()
         except (EOFError, OSError):
             request_shutdown('Backend disconnected to supervisor, shutting down backend')
+            # no live supervisor is behind this backend any more: the maintenance
+            # gates (has_supervisor) must answer no while the process shuts down
+            mpipe_backend.disconnect()
             break
 
         if msg == b'command:stop':
             request_shutdown('Backend received stop request from supervisor, shutting down backend')
+            # a supervisor that asked the backend to stop cannot complete a restart
+            # or an update for it any more: the same gates close
+            mpipe_backend.disconnect()
             break
         elif msg.startswith(b'token:'):
             # New token from the supervisor rotation: add it to the table

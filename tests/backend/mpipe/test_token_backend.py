@@ -21,6 +21,32 @@ class TestMPipeBackend:
         monkeypatch.setattr(builtins, '__mpipe_conn__', object(), raising=False)
         assert mpipe_backend
 
+    def test_disconnect_reads_as_no_supervisor(self, monkeypatch):
+        """
+        The recv loop clears the pipe when the supervisor is gone or asked the
+        backend to stop: every later check reads it as no supervisor, and the
+        strict send of the restart / stop RPCs answers the accurate error
+        """
+        import builtins
+
+        from alasio.backend.mpipe.mpipe_backend import has_supervisor
+
+        monkeypatch.setattr(builtins, '__mpipe_conn__', object(), raising=False)
+        assert has_supervisor() is True
+        mpipe_backend.disconnect()
+        assert not mpipe_backend
+        assert has_supervisor() is False
+        with pytest.raises(PermissionError):
+            mpipe_backend.send(b'command:restart', strict=True)
+
+    def test_has_supervisor_without_a_pipe(self, monkeypatch):
+        import builtins
+
+        from alasio.backend.mpipe.mpipe_backend import has_supervisor
+
+        monkeypatch.delattr(builtins, '__mpipe_conn__', raising=False)
+        assert has_supervisor() is False
+
     def test_send_without_conn_is_silent(self, monkeypatch):
         """No pipe (backend without supervisor): send() is a no-op."""
         import builtins

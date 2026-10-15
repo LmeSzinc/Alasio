@@ -2,6 +2,7 @@
 Fixtures for the backend tests.
 """
 
+import builtins
 import socket
 from datetime import datetime
 
@@ -35,20 +36,43 @@ def frozen_clock():
         yield clock
 
 
+class FakePipeConnection:
+    """
+    The supervisor pipe of the tests: the sends are dropped
+
+    The maintenance gates (``has_supervisor``) read the pipe attached by the
+    backend spawn target: a test process runs no supervisor, so the suite
+    attaches this stand-in and the tests of the no-supervisor paths remove it
+    (``monkeypatch.delattr(builtins, '__mpipe_conn__', raising=False)``).
+    """
+
+    @staticmethod
+    def send_bytes(data):
+        """
+        Drop a message of the backend (the supervisor side is the test process)
+
+        Args:
+            data (bytes): The message
+        """
+
+
 @pytest.fixture(autouse=True)
-def restart_state():
+def restart_state(monkeypatch):
     """
     Reset the restart manager, the check module and the daily bookkeeping around
-    every test
+    every test, and attach the stand-in supervisor pipe
 
     The singletons are process-wide while the tests run many "backends" in one
     process: a test that claims the flow slot, freezes a handover or binds the
-    check module must not leak into the next one.
+    check module must not leak into the next one. The pipe makes the backend of
+    every test one with a live supervisor (the maintenance gates read it, see
+    FakePipeConnection).
     """
     from alasio.backend.app.restart.daily import DAILY
     from alasio.backend.app.restart.restart_manager import RESTART_MANAGER
     from alasio.backend.app.restart.update_check import UPDATE_CHECK
 
+    monkeypatch.setattr(builtins, '__mpipe_conn__', FakePipeConnection(), raising=False)
     RESTART_MANAGER.reset()
     UPDATE_CHECK.reset()
     DAILY.reset()

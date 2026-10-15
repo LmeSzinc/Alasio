@@ -6,10 +6,12 @@ order (pause, stop, update, hand over / wrap up) and the states they drive are
 what these tests pin.
 """
 import datetime
+import time
 
 import pytest
 import trio
 
+from alasio.backend.app.restart import daily as daily_module, restart_flow as flow_module
 from alasio.backend.app.restart.daily import DailyState
 from alasio.backend.app.restart.restart_base import FLOW_NAMES, INIT_FLOW, STARTING_UP, FlowCancelled
 from alasio.backend.app.restart.restart_flow import FlowDaily, FlowRestart, FlowStartup, FlowUpdate
@@ -17,6 +19,18 @@ from alasio.backend.app.restart.restart_step import HandoverFailed
 from alasio.backend.app.restart.resume_file import ResumeRecord
 
 NOW = datetime.datetime.now()
+
+
+@pytest.fixture(autouse=True)
+def daily_target(monkeypatch):
+    """
+    The daily target of the flow tests: 00:00
+
+    The clock of the test process is already after it, so the crossings of the
+    process under test belong to the past (a state that lived through one is
+    built by the step tests, see test_restart_step.make_daily).
+    """
+    monkeypatch.setattr(daily_module, 'scheduled_restart_time', lambda: (0, 0))
 
 
 async def run_expecting_cancel(coro):
@@ -128,7 +142,7 @@ class FakeManager:
     """
 
     def __init__(self, record=None, stop_result=(True, ['cfg_a']), changed=(), handover_error=None,
-                 available=('m',), uptodate=False, target=(0, 0)):
+                 available=('m',), uptodate=False):
         """
         Args:
             record (ResumeRecord): The resume intent the startup flow reads
@@ -137,7 +151,6 @@ class FakeManager:
             handover_error (Exception): Raised by the handover step
             available (list[str]): The mods with an available update
             uptodate (bool): The pre-check verdict of the available mods
-            target (tuple[int, int]): The daily target time
         """
         self.calls = []
         self.record = record
@@ -149,9 +162,9 @@ class FakeManager:
         self.views = 0
         self.worker_manager = FakeWorkerManager()
         self.update_check = FakeUpdateCheck(available=available, uptodate=uptodate)
-        daily = DailyState(target=target)
+        daily = DailyState()
         daily.note_full_update(NOW.timestamp())
-        # a full update of this process covers today's daily action
+        # a full update of this process covers the crossing of the day
         self.daily = daily
 
     # ------------------------------------------------------------------
@@ -426,31 +439,64 @@ class TestFlowStartup:
         """
         Deploy.Update.AutoUpdate = false: with every mod 'disabled' the startup
         applies nothing -- it does not call the full update at all (the step
-        would be empty) and is never handed over for an update. The daily action
-        of a crossed target is served by the startup itself: the restart is the
-        half the switch leaves on
+        would be empty) and is never handed over for an update. The startup
+        marks nothing either: the crossings before this process started belong
+        to the past (its own restart is their restart half), and a crossing it
+        lived through is served by the daily flow
         """
         manager = FakeManager(changed=['m'])
         manager.update_check.auto = False
         await FlowStartup(manager).run()
         assert manager.calls == ['read_resume_intent']
         assert manager.handed_over == []
-        assert manager.daily.is_done() is True
+        assert manager.daily.is_due() is False
         # the checks start all the same (a disabled mod starts no sequence, but
         # the call is part of the startup)
         assert manager.update_check.calls == ['bind', 'set_initial_states', 'start']
         assert manager.spawned and manager.spawned[0][0] == manager.resume_queue
 
     @pytest.mark.trio
-    async def test_a_record_skips_the_full_update(self):
+    async def test_a_fresh_record_skips_the_full_update(self):
+        """
+        The process this one replaces checked a moment ago (the daily restart
+        checks right before its handover, a convergence handover follows the
+        update it applied): the new backend does not repeat the check, and the
+        completion time is carried into this process so the window is always
+        measured from the last real check
+        """
+        checked_at = time.time()
         record = ResumeRecord(ts=0.0, owner='restart', configs=['cfg_a'], actions=[],
-                              updated_all_at=NOW.timestamp())
+                              updated_all_at=checked_at)
         manager = FakeManager(record=record)
         await FlowStartup(manager).run()
         assert manager.calls == ['read_resume_intent']
-        # the previous process served the daily action of today
-        assert manager.daily.is_done() is True
+        assert manager.daily.updated_all_at == checked_at
         assert manager.update_check.calls == ['bind', 'set_initial_states', 'start']
+
+    @pytest.mark.trio
+    async def test_an_old_record_runs_the_full_update(self):
+        """A record older than the window is stale: the tree is converged now"""
+        record = ResumeRecord(ts=0.0, owner='restart', configs=['cfg_a'], actions=[],
+                              updated_all_at=time.time() - 3600.0)
+        manager = FakeManager(record=record)
+        await FlowStartup(manager).run()
+        assert manager.calls == ['read_resume_intent', 'full_update']
+        assert manager.update_check.calls == ['bind', 'set_initial_states', 'start']
+
+    @pytest.mark.trio
+    async def test_without_a_supervisor_the_startup_applies_nothing(self, monkeypatch):
+        """
+        The backend cannot replace itself without a parent process: an applied
+        update could only take effect in the new process, so nothing is checked
+        and nothing is applied
+        """
+        monkeypatch.setattr(flow_module, 'has_supervisor', lambda: False)
+        manager = FakeManager(changed=['m'])
+        await FlowStartup(manager).run()
+        assert manager.calls == ['read_resume_intent']
+        assert manager.handed_over == []
+        assert manager.update_check.calls == ['bind', 'set_initial_states', 'start']
+        assert manager.spawned and manager.spawned[0][0] == manager.resume_queue
 
     @pytest.mark.trio
     async def test_a_convergence_hands_the_process_over(self):

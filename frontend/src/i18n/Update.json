@@ -27,6 +27,13 @@
     "zh-TW": "DialogView",
     "es-ES": "DialogView"
   },
+  "StateNoSupervisor": {
+    "en-US": "No supervisor",
+    "zh-CN": "无 supervisor",
+    "ja-JP": "スーパーバイザーなし",
+    "zh-TW": "無 supervisor",
+    "es-ES": "Sin supervisor"
+  },
   "StateUnmanaged": {
     "en-US": "No update source",
     "zh-CN": "未配置更新源",
@@ -117,6 +124,13 @@
     "ja-JP": "{count} 個の Mod を更新できます",
     "zh-TW": "{count} 個插件可更新",
     "es-ES": "{count} mod(s) se pueden actualizar"
+  },
+  "UpdatesNoSupervisor": {
+    "en-US": "Mod updates are disabled: the backend runs without a supervisor",
+    "zh-CN": "插件更新已禁用：后端没有 supervisor",
+    "ja-JP": "Mod の更新は無効です：バックエンドにスーパーバイザーがいません",
+    "zh-TW": "插件更新已停用：後端沒有 supervisor",
+    "es-ES": "Las actualizaciones de mods están desactivadas: el backend se ejecuta sin supervisor"
   },
   "UpdatesDisabled": {
     "en-US": "Mod updates are disabled (Deploy.Update.AutoUpdate)",

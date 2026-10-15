@@ -34,6 +34,7 @@ import trio
 from alasio.backend.app.restart.restart_base import INIT_FLOW, STARTING_UP, Flow, FlowCancelled, FlowRefused, InitFlow
 from alasio.backend.app.restart.restart_flow import FlowDaily, FlowRestart, FlowStartup, FlowUpdate
 from alasio.backend.app.restart.restart_step import RestartStep
+from alasio.backend.mpipe.mpipe_backend import has_supervisor
 from alasio.logger import logger
 
 
@@ -146,8 +147,13 @@ class RestartManager(RestartStep):
 
         Raises:
             FlowRefused: When another flow owns the backend (the message is the
-                user-facing reason of FlowRestart.REFUSALS)
+                user-facing reason of FlowRestart.REFUSALS), or when the backend
+                runs without a supervisor: only a supervisor spawns the new
+                process, refusing the request up front is the accurate answer
+                (the alternative is failing at the handover)
         """
+        if not has_supervisor():
+            raise FlowRefused('The backend runs without a supervisor: it cannot restart itself')
         return self._claim(FlowRestart)
 
     def update_apply(self) -> Flow:
@@ -167,22 +173,19 @@ class RestartManager(RestartStep):
         """
         return self._claim(FlowUpdate)
 
-    def request_daily(self, now=None) -> "Optional[Flow]":
+    def request_daily(self) -> "Optional[Flow]":
         """
         Claim the slot for the daily maintenance (the daily task entry)
 
         The daily action is a *due* decision (see
         ``alasio.backend.app.restart.daily``): an occupied slot is not an error.
 
-        Args:
-            now (datetime.datetime): Local time of the evaluation, defaults to
-                the current time
-
         Returns:
             Flow | None: The claimed flow, None when the action is skipped --
                 restart / update in flight upgrade themselves before their
-                handover, a startup (or the init slot) means the day is already
-                served by the starting process, a daily flow already runs
+                handover, a startup (or the init slot) serves the crossing
+                itself (the process just started: its young workers are the
+                restart half of the daily action), a daily flow already runs
         """
         current = self.current
         if current is None:
@@ -193,9 +196,11 @@ class RestartManager(RestartStep):
             return self._claim(FlowDaily)
         if current.name in (INIT_FLOW, 'startup'):
             # the process just started: its startup full update and its young
-            # workers already serve both purposes of the daily action
-            self.daily.mark_done(now)
-            logger.info('[Restart] Daily action skipped: the backend is starting up')
+            # workers already serve both purposes of the daily action. The
+            # crossing is served only when one was detected: the process may
+            # have started before the target and be evaluated after it
+            if self.daily.mark_done():
+                logger.info('[Restart] Daily action skipped: the backend is starting up')
         return None
 
     # ------------------------------------------------------------------

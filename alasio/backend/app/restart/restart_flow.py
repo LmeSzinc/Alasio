@@ -32,10 +32,13 @@ it paused, the workers it stopped, the resume queue. A flow that hands over
 does nothing else -- the process is replaced and the new one resumes what the
 resume file recorded.
 """
+import time
 from typing import List
 
 from alasio.backend.app.restart.restart_base import INIT_FLOW, STARTING_UP, Flow
 from alasio.backend.app.restart.restart_step import HandoverFailed
+from alasio.backend.app.restart.update_check import CHECK_INTERVAL
+from alasio.backend.mpipe.mpipe_backend import has_supervisor
 from alasio.logger import logger
 
 
@@ -45,21 +48,24 @@ class FlowStartup(Flow):
 
     1. consume the resume file of the previous process (its configs are queued,
        the stale leftovers of dead sessions are cleaned);
-    2. a full update when the previous process did not just run one
-       (``updated_all_at`` unset): the tree converges whatever happened before.
-       When the full update changed real files the flow hands the process over
-       -- the new process sees ``updated_all_at`` and skips its own full
-       update, so the chain converges in one update and one restart. The flow
-       runs **no full update at all** while the mod updates are off
-       (Deploy.Update.AutoUpdate = false: every mod is 'disabled'): a disabled
-       backend applies nothing and restarts for no update;
-    3. the daily coverage: a process that just ran the full update (this one or
-       the previous one) after the target moment serves the daily action of the
-       day, the daily task then leaves the day alone. A disabled backend serves
-       it with the startup itself when it starts after the target moment: the
-       restart is the half of the daily action the switch leaves on (the check
-       half is off, and no completion is recorded for a full update that never
-       ran);
+    2. a full update when the process this one replaces did not just run one:
+       the record carries the completion time of its last full update, and the
+       check is skipped while that is younger than ``CHECK_INTERVAL`` (the
+       daily restart checked right before its handover, the convergence
+       handover follows the update it applied; the window of a startup is the
+       check rhythm of a sequence). When the full update changed
+       real files the flow hands the process over -- the new process sees the
+       fresh check in the record and skips its own full update, so the chain
+       converges in one update and one restart. The flow runs **no full update
+       at all** while the mod updates are off (Deploy.Update.AutoUpdate =
+       false: every managed mod is 'disabled') or while the backend has no live
+       supervisor (an applied update could only take effect in a new process,
+       and no parent process can spawn one);
+    3. the daily crossing: the startup full update of step 2 serves it when it
+       finished after the target moment (``mark_done_if_covered``); a crossing
+       this process lived through is otherwise served by the daily flow, and
+       the crossings before this process started belong to the past -- the
+       startup itself is their restart half;
     4. start the check sequences (the first check waits the standard spread: the
        full update just checked everything). A disabled mod has no sequence:
        nothing is checked while the mod updates are off;
@@ -80,27 +86,45 @@ class FlowStartup(Flow):
         try:
             if not manager.update_check.auto:
                 # the mod updates are off for this process (Deploy.Update.AutoUpdate
-                # = false, every mod is 'disabled'): the startup runs no full
-                # update at all -- nothing is checked, nothing is applied and
-                # the process is never handed over for an update. The daily
-                # action of a crossed target is still served: its restart is
-                # what this startup does, the check half is off by the switch
+                # = false, every managed mod is 'disabled'): the startup runs no
+                # full update at all -- nothing is checked, nothing is applied and
+                # the process is never handed over for an update. A crossing this
+                # process lived through is served by the daily flow (a restart
+                # only while the switch is off); the crossings before it started
+                # belong to the past, the startup is their restart half
                 logger.info('[Restart] The mod updates are disabled: the startup runs no full update')
-                if manager.daily.target_passed():
-                    manager.daily.mark_done()
-                    logger.info('[Restart] The daily action of today is served by the startup')
-            elif record is None or not record.updated_all_at:
+            elif not has_supervisor():
+                # the backend cannot replace itself without a parent process: an
+                # applied update could only take effect in a new process (the mod
+                # packages live in this one), so nothing is checked and nothing is
+                # applied
+                logger.info('[Restart] The backend runs without a supervisor: '
+                            'the startup runs no full update')
+            elif (
+                record is not None
+                and record.updated_all_at
+                and time.time() - record.updated_all_at <= CHECK_INTERVAL
+            ):
+                # the process this one replaces checked a moment ago (the daily
+                # restart checked right before its handover, a convergence handover
+                # follows the update it applied): a check right now would only
+                # repeat it. The completion time is carried into this process so the
+                # window is always measured from the last real check
+                manager.daily.note_full_update(record.updated_all_at)
+                logger.info(f'[Restart] The previous process checked less than '
+                            f'{CHECK_INTERVAL:.0f}s ago: the startup runs no full update')
+            else:
+                # the record is missing, or its check is older than the window: the
+                # tree is converged now (a record that only says "someone checked
+                # hours ago" is no answer about the tree as it is now)
                 changed = await manager.full_update(self)
                 if manager.daily.mark_done_if_covered():
-                    logger.info('[Restart] The daily action of today is served by the '
+                    logger.info('[Restart] The crossing of the daily target is served by the '
                                 'startup full update')
-            elif manager.daily.covered_by(record.updated_all_at):
-                manager.daily.mark_done()
-                logger.info('[Restart] The daily action of today was served by the '
-                            'previous process')
             if changed:
-                # the files just applied need the new process: hand over, the
-                # new process sees updated_all_at and starts its checks directly
+                # the files just applied need the new process: hand over, the new
+                # process sees the fresh check in the record and starts its own
+                # checks directly
                 await manager.handover(self, 'startup convergence', await manager.queued_resume_list())
                 return
             manager.update_check.start()

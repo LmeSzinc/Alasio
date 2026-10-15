@@ -46,6 +46,21 @@ class MPipeBackend:
         """
         return self._conn() is not None
 
+    def disconnect(self):
+        """
+        Drop the pipe of a supervisor that is gone or asked the backend to stop
+
+        Called by the recv loop (lifespan.mpipe_recv_loop) right before it
+        returns: a broken pipe and a command:stop both mean no supervisor can
+        complete a restart or an update for this backend any more, and the
+        process is on its way out. Every later check reads it as "no
+        supervisor": bool(self) is False, so the maintenance gates
+        (has_supervisor) close, the restart / stop RPCs raise PermissionError
+        instead of writing to a dead pipe, and send() becomes a no-op.
+        """
+        import builtins
+        builtins.__mpipe_conn__ = None
+
     def send(self, data, strict=False):
         """
         Send bytes to the supervisor through the pipe.
@@ -78,3 +93,23 @@ class MPipeBackend:
 
 
 mpipe_backend = MPipeBackend()
+
+
+def has_supervisor() -> bool:
+    """
+    Whether a live supervisor is behind this backend (its pipe is attached and not broken)
+
+    The recv loop clears the pipe when the supervisor disconnects or asks the
+    backend to stop (see MPipeBackend.disconnect): from then on the backend is
+    shutting down by itself and nothing may be started that only a supervisor
+    could complete -- a restart, or an update that needs the new process to
+    take effect (this one has the mod packages imported already).
+
+    Called by the maintenance gates (the daily schedule, the startup full
+    update, the manual checks) and by the restart entry of the manager. Read
+    live on purpose: the supervisor can die while the backend runs.
+
+    Returns:
+        bool: True when the supervisor pipe is attached and alive
+    """
+    return bool(mpipe_backend)

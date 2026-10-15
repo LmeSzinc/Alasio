@@ -13,6 +13,7 @@ import pytest
 import trio
 import trio.testing
 
+from alasio.backend.app.restart import daily as daily_module
 from alasio.backend.app.restart.daily import DailyState
 from alasio.backend.app.restart.restart_base import FLOW_NAMES, INIT_FLOW, STARTING_UP, FlowRefused
 from alasio.backend.app.restart.restart_flow import FlowDaily, FlowRestart, FlowStartup, FlowUpdate
@@ -20,6 +21,18 @@ from alasio.backend.app.restart.restart_manager import RestartManager
 from alasio.logger import logger
 
 NOW = datetime.datetime(2026, 10, 13, 4, 0)
+
+
+@pytest.fixture(autouse=True)
+def daily_target(monkeypatch):
+    """
+    The daily target of the manager tests: 03:50
+
+    The manager builds its daily bookkeeping at construction and the state
+    reads the target once: a test that needs a pending crossing moves the
+    boundary of the state back (see TestDailyRequest).
+    """
+    monkeypatch.setattr(daily_module, 'scheduled_restart_time', lambda: (3, 50))
 
 
 class FakeWorkerManager:
@@ -50,7 +63,7 @@ class FakeManager(RestartManager):
         self.finished = {name: trio.Event() for name in FLOW_NAMES}
         self.views = []
         super().__init__(worker_manager=worker_manager if worker_manager is not None else FakeWorkerManager(),
-                         daily=daily if daily is not None else DailyState(target=(3, 50)))
+                         daily=daily if daily is not None else DailyState())
 
     async def push_view(self):
         """The Restart topic push, recorded instead of published"""
@@ -172,7 +185,7 @@ class TestRun:
         with pytest.raises(FlowRefused) as e:
             manager.update_apply()
         assert str(e.value) == STARTING_UP
-        assert manager.request_daily(now=NOW) is None
+        assert manager.request_daily() is None
         with pytest.raises(RuntimeError, match='does not run'):
             manager.request_startup()
         with pytest.raises(RuntimeError, match='does not run'):
@@ -237,7 +250,7 @@ def flow_entries(manager):
     return {
         'restart': manager.restart,
         'update': manager.update_apply,
-        'daily': lambda: manager.request_daily(now=NOW),
+        'daily': manager.request_daily,
     }
 
 
@@ -432,27 +445,43 @@ class TestCancel:
 
 
 class TestDailyRequest:
-    """The daily entry: claim an idle slot, skip (and mark) the others"""
+    """The daily entry: claim an idle slot, serve the crossing of a starting backend"""
+
+    @staticmethod
+    def _cross(daily):
+        """
+        Make the clock of the state show a crossing (a process started before
+        the target): the boundary moves back one day, the crossing of today is
+        detected on the next judgment
+        """
+        daily.seen -= datetime.timedelta(days=1)
 
     @pytest.mark.trio
     async def test_daily_claims_an_idle_slot(self):
         async with trio.open_nursery() as nursery:
             h = await Harness.start(nursery)
             await h.run_idle()
-            flow = h.manager.request_daily(now=NOW)
+            flow = h.manager.request_daily()
             assert flow is not None and flow.name == 'daily'
             assert h.manager.cancellable is False
             await h.manager.started['daily'].wait()
             nursery.cancel_scope.cancel()
 
     @pytest.mark.trio
-    @pytest.mark.parametrize("current, marked", [
+    @pytest.mark.parametrize("current, served", [
         ('restart', False),
         ('update', False),
         ('daily', False),
         ('startup', True),
     ])
-    async def test_daily_skipped_while_a_flow_runs(self, current, marked):
+    async def test_daily_skipped_while_a_flow_runs(self, current, served):
+        """
+        An occupied slot is not an error. A restart / update flow in flight
+        serves the crossing itself (it upgrades into the daily maintenance),
+        a daily flow is one already, and a starting backend serves it with its
+        own startup (the process just started: its young workers are the
+        restart half of the daily action)
+        """
         async with trio.open_nursery() as nursery:
             h = await Harness.start(nursery)
             entries = flow_entries(h.manager)
@@ -460,8 +489,9 @@ class TestDailyRequest:
                 await h.run_idle()
                 entries[current]()
             await h.manager.started[current].wait()
-            assert h.manager.request_daily(now=NOW) is None
-            assert h.manager.daily.is_done(NOW) is marked
+            self._cross(h.manager.daily)
+            assert h.manager.request_daily() is None
+            assert h.manager.daily.is_due() is not served
             assert h.manager.flow_name == current
             nursery.cancel_scope.cancel()
 

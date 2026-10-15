@@ -6,6 +6,7 @@ import trio
 
 from alasio.backend.app import lifespan
 from alasio.backend.app.lifespan import mpipe_recv_loop
+from alasio.backend.mpipe.mpipe_backend import mpipe_backend
 
 
 class TestAnnounceStarted:
@@ -75,7 +76,8 @@ class TestMpipeRecvLoop:
     def test_conn_eof_sets_shutdown_event(self, monkeypatch):
         """
         When the supervisor's end of the pipe is closed (supervisor died),
-        the shutdown event must be set and the listener thread must exit
+        the shutdown event must be set, the listener thread must exit, and the
+        pipe must read as gone (no live supervisor behind the backend)
         """
         parent_conn, event, child_conn = self._make(monkeypatch)
         parent_conn.close()
@@ -92,11 +94,13 @@ class TestMpipeRecvLoop:
 
         self._run(main)
         child_conn.close()
+        assert not mpipe_backend
 
     def test_command_stop_sets_shutdown_event(self, monkeypatch):
         """
-        A command:stop message must set the shutdown event and stop the
-        listener thread
+        A command:stop message must set the shutdown event, stop the listener
+        thread, and close the pipe (a supervisor that asked the backend to stop
+        can complete no restart or update for it any more)
         """
         parent_conn, event, child_conn = self._make(monkeypatch)
 
@@ -115,6 +119,7 @@ class TestMpipeRecvLoop:
         self._run(main)
         parent_conn.close()
         child_conn.close()
+        assert not mpipe_backend
 
     def test_shutdown_event_set_even_when_stdout_broken(self, monkeypatch):
         """

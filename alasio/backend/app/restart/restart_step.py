@@ -41,6 +41,7 @@ from alasio.backend.app.restart.daily import DAILY, DailyState
 from alasio.backend.app.restart.restart_base import Flow, RestartBase
 from alasio.backend.app.restart.resume_file import OWNER_RESTART, RESUME_FILES, ResumeFiles, ResumeRecord
 from alasio.backend.app.restart.update_check import UPDATE_CHECK, UpdateCheck
+from alasio.backend.mpipe.mpipe_backend import has_supervisor
 from alasio.backend.topic.restart import RestartSource
 from alasio.backend.topic.scan import ConfigScanSource
 from alasio.deploy.pack.job import UpdateAborted
@@ -382,10 +383,12 @@ class RestartStep(RestartBase):
         instead of being applied -- the tree converges either way.
 
         The automatic mod updates off (Deploy.Update.AutoUpdate = false: every
-        managed mod is 'disabled') make the step empty -- no mod is checked and
-        none is applied, and no completion is recorded (a full update that
-        never ran must not claim the daily action of a crossed target: the
-        startup of a disabled backend does that by itself, see ``FlowStartup``).
+        managed mod is 'disabled') and a backend without a live supervisor (an
+        applied update could only take effect in the new process, and no parent
+        process can spawn one) both make the step empty -- no mod is checked and
+        none is applied, and no completion is recorded (a full update that never
+        ran must not claim the daily action of a crossed target: the startup of
+        such a backend serves it with the process start itself).
 
         Args:
             flow (Flow): The flow running this step, see update_mods
@@ -400,6 +403,12 @@ class RestartStep(RestartBase):
             # startup flow does not call it at all while the switch is off)
             logger.info('[Update] The mod updates are disabled, the full update is empty')
             return []
+        if not has_supervisor():
+            # the backend cannot replace itself: applying an update would leave
+            # the new files on disk and the old packages imported in this
+            # process, and the restart that would apply them cannot be ordered
+            logger.info('[Update] The backend runs without a supervisor, the full update is empty')
+            return []
         changed = await self.update_mods(self.update_check.names(), flow=flow)
         self.daily.note_full_update()
         logger.info(f'[Update] Full update finished, changed mods: {changed}')
@@ -407,13 +416,14 @@ class RestartStep(RestartBase):
 
     async def maybe_upgrade_to_daily(self, flow) -> bool:
         """
-        Upgrade a flow in flight into the daily maintenance when it crossed the
-        target time of a day whose action is not served yet
+        Upgrade a flow in flight into the daily maintenance when the clock
+        crossed the daily target and that crossing is not served yet
 
         The flow already stopped the workers and (for an update) applied what
         the user asked; the daily action only adds the full update, which the
         handover of the flow then serves (the worker restart is the same one).
-        The upgrade closes the cancellation window: the day is served in one go.
+        The upgrade closes the cancellation window: the crossing is served in
+        one go.
 
         Args:
             flow (Flow): The flow reaching its handover
@@ -424,14 +434,14 @@ class RestartStep(RestartBase):
         if flow.upgraded:
             # only the first crossing of a flow upgrades it
             return False
-        if not self.daily.should_upgrade():
+        if not self.daily.is_due():
             return False
         logger.info(f'[Restart] The "{flow.name}" flow is upgraded into the daily maintenance '
-                    f'(the daily action of today was not served yet)')
+                    f'(the crossing of the daily target is not served yet)')
         flow.upgrade_to_daily()
         await self.push_view()
-        # a full update of this process that already covers today (a failed
-        # daily handover, an update that ran one) is not repeated
+        # a full update of this process that already covers the crossing (a
+        # failed daily handover, an update that ran one) is not repeated
         if not self.daily.covered_by(self.daily.updated_all_at):
             await self.full_update(flow)
         return True
