@@ -222,11 +222,11 @@ INFO | [Mirror `probe`] a
             with pytest.raises(AllMirrorsFailedError) as e:
                 probe.run(PATH)
         assert 'a: NotImplementedError' in str(e.value)
-        # the base probe_function raises without a message: the reason of
-        # the log ends with the empty one
+        # the base probe_function raises without a message: the reason of the
+        # log is the type alone (stringify_event)
         assert capture.concat() == f"""\
 INFO | Probing `probe` for "{PATH}": a
-WARNING | Mirror "a" is not usable: NotImplementedError: {''}
+WARNING | Mirror "a" is not usable: NotImplementedError
 ERROR | Failed to probe `probe` for "{PATH}": no mirror is usable
 """
 

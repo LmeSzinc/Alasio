@@ -287,6 +287,33 @@ WARNING | Request to "http://test/a" failed (attempt 2/3): ReadTimeout: read tim
 WARNING | Request to "http://test/a" failed (attempt 3/3): ReadTimeout: read timed out
 """
 
+    def test_blocked_mirror_times_out(self, fake_sleep):
+        """The shape of a mirror the network blocks, as it was observed
+        against the real hosts (the poisoned DNS of the CN network resolves
+        google.com to a blackholed address, the connect never answers): the
+        sync backend maps the socket timeout of the connect, so the failure
+        is a ConnectTimeout('timed out') retried like any other transport
+        error. The trio flavour of the client has no message at all, see
+        test_probe_async.TestBlockedMirror."""
+        requests = []
+
+        def handler(request):
+            requests.append(str(request.url))
+            raise httpx2.ConnectTimeout('timed out')
+
+        client = HttpClient(make_sclient(handler))
+        with logger.mock_capture_writer() as capture:
+            with pytest.raises(httpx2.ConnectTimeout) as e:
+                client.head('https://www.google.com/latest.pack', timeout=HttpClient.PROBE_TIMEOUT)
+        assert str(e.value) == 'timed out'
+        assert requests == ['https://www.google.com/latest.pack'] * 3
+        assert fake_sleep.seconds == [HttpClient.RETRY_BACKOFF] * 2
+        assert capture.concat() == """\
+WARNING | Request to "https://www.google.com/latest.pack" failed (attempt 1/3): ConnectTimeout: timed out
+WARNING | Request to "https://www.google.com/latest.pack" failed (attempt 2/3): ConnectTimeout: timed out
+WARNING | Request to "https://www.google.com/latest.pack" failed (attempt 3/3): ConnectTimeout: timed out
+"""
+
 
 class TestSyncStream:
     """The streamed transfer: the consumer is called once per attempt, a

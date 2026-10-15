@@ -63,6 +63,7 @@ the in-memory filesystem of the tests cannot answer.
 """
 from alasio.ext.cache import cached_class_property
 from alasio.logger import logger
+from alasio.logger.utils import stringify_event
 
 
 class HttpClientBase:
@@ -186,4 +187,4 @@ class HttpClientBase:
             e (Exception): The failure of the attempt
         """
         logger.warning(
-            f'Request to "{url}" failed (attempt {attempt + 1}/{attempts}): {type(e).__name__}: {e}')
+            f'Request to "{url}" failed (attempt {attempt + 1}/{attempts}): {stringify_event(e)}')

@@ -24,6 +24,7 @@ from alasio.deploy.httpclient.client_async import AsyncHttpClient
 from alasio.deploy.httpclient.probe_base import ProbeBase
 from alasio.deploy.httpclient.probe_mirrors import AllMirrorsFailedError, RangeUnsupportedError
 from alasio.logger import logger
+from alasio.logger.utils import stringify_event
 
 # {(scene, name): trio.Lock}: the probe of one candidate set runs at most once
 # at a time inside this process. The keys are bounded by the scenes times the
@@ -371,8 +372,8 @@ class AsyncProbe(ProbeBase):
                 # error, malformed payload, anything a broken candidate raises)
                 # makes it unusable and the group moves on. trio.Cancelled is a
                 # BaseException, it is never caught here and always propagates
-                logger.warning(f'Mirror "{name}" is not usable: {type(e).__name__}: {e}')
-                reasons.append(f'{name}: {type(e).__name__}: {e}')
+                logger.warning(f'Mirror "{name}" is not usable: {stringify_event(e)}')
+                reasons.append(f'{name}: {stringify_event(e)}')
                 continue
             logger.info(f'Mirror "{name}" responded in {(perf_counter() - start) * 1000:.0f}ms')
             winner.append((name, payload))

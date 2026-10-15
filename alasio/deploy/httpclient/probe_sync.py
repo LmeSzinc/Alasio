@@ -24,6 +24,7 @@ from alasio.deploy.httpclient.probe_base import ProbeBase
 from alasio.deploy.httpclient.probe_mirrors import AllMirrorsFailedError, RangeUnsupportedError
 from alasio.ext.concurrent.threadpool import THREAD_POOL
 from alasio.logger import logger
+from alasio.logger.utils import stringify_event
 
 # {(scene, name): threading.Lock}: the blocking twin of probe_async.probe_lock,
 # the same keys and the same purpose (one probe per key in this process)
@@ -325,8 +326,8 @@ class SyncProbe(ProbeBase):
             except Exception as e:
                 # one candidate must never hang the probe: every failure makes
                 # it unusable and the group moves on
-                logger.warning(f'Mirror "{name}" is not usable: {type(e).__name__}: {e}')
-                reasons.append(f'{name}: {type(e).__name__}: {e}')
+                logger.warning(f'Mirror "{name}" is not usable: {stringify_event(e)}')
+                reasons.append(f'{name}: {stringify_event(e)}')
                 continue
             logger.info(f'Mirror "{name}" responded in {(perf_counter() - start) * 1000:.0f}ms')
             race.win(name, payload)

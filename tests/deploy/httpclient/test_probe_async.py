@@ -9,11 +9,12 @@ ProbeBase.RECORD_TABLE. Every test running the flow is async (pytest-trio); a
 slow candidate is a slow async probe_function, the losing groups are cancelled
 by the engine instead of running to their timeouts.
 """
+import httpx2
 import pytest
 import trio
 
 from alasio.deploy.httpclient import probe_async
-from alasio.deploy.httpclient.probe_async import AsyncProbe, probe_lock
+from alasio.deploy.httpclient.probe_async import AsyncHttpProbe, AsyncProbe, probe_lock
 from alasio.deploy.httpclient.probe_mirrors import AllMirrorsFailedError, Mirrors, RangeUnsupportedError
 from alasio.logger import logger
 from tests.deploy_dev.pack.conftest import FakeMirrorTable
@@ -21,6 +22,18 @@ from tests.deploy_dev.pack.conftest import FakeMirrorTable
 # the path of the tests: the stub does not care what it means, the engine keys
 # its bookkeeping by it
 PATH = '/latest.pack'
+
+# the mirror set of the blocked-network tests: the hosts a CN network blocks,
+# as a temporary mirror set of a deployment may list them. The urls are labels
+# of the real hosts: the tests serve their requests with a MockTransport
+BLOCKED_MIRRORS = {
+    'cn': {'google': 'https://www.google.com', 'youtube': 'https://www.youtube.com'},
+}
+
+
+def make_aclient(handler):
+    """A httpx2.AsyncClient with a MockTransport handler."""
+    return httpx2.AsyncClient(transport=httpx2.MockTransport(handler))
 
 
 class StubProbe(AsyncProbe):
@@ -210,11 +223,11 @@ INFO | [Mirror `probe`] a
             with pytest.raises(AllMirrorsFailedError) as e:
                 await probe.run(PATH)
         assert 'a: NotImplementedError' in str(e.value)
-        # the base probe_function raises without a message: the reason of
-        # the log ends with the empty one
+        # the base probe_function raises without a message: the reason of the
+        # log is the type alone (stringify_event)
         assert capture.concat() == f"""\
 INFO | Probing `probe` for "{PATH}": a
-WARNING | Mirror "a" is not usable: NotImplementedError: {''}
+WARNING | Mirror "a" is not usable: NotImplementedError
 ERROR | Failed to probe `probe` for "{PATH}": no mirror is usable
 """
 
@@ -533,3 +546,62 @@ ERROR | Failed to probe `probe` for "{PATH}": no mirror is usable
         # nothing to select and nothing to probe: no log
         assert capture.concat() == ''
         assert probe.probed == []
+
+
+class TestBlockedMirror:
+    """The shape of a mirror the network blocks, as it was observed against
+    the real hosts (a temporary mirror set of google.com and youtube.com):
+    the poisoned DNS of the CN network resolves them to a blackholed address,
+    the connect never answers, so every attempt of the request times out and
+    the trio backend of the http client gives up with a ConnectTimeout whose
+    message is empty (it maps trio.TooSlowError, which carries no message;
+    the sync backend maps the socket timeout and says 'timed out', see
+    test_sync_client).
+
+    A blocked candidate is a transport error like any other: the request is
+    retried REQUEST_ATTEMPTS times, the candidate is unusable, and the wall
+    leaves no candidate to fall back on (it blocks every mirror of the set).
+    """
+
+    @pytest.mark.trio
+    async def test_every_candidate_is_blocked(self, autojump_clock):
+        """Every candidate of the set is blocked: the probe retries every
+        request, marks every candidate unusable and fails."""
+        requests = []
+
+        def handler(request):
+            requests.append(str(request.url))
+            # httpx2.ConnectTimeout('') as the trio backend raises it: the
+            # backend maps the underlying timeout (trio.TooSlowError, which
+            # carries no message) to a ConnectTimeout of an empty message
+            raise httpx2.ConnectTimeout('')
+
+        table = FakeMirrorTable()
+        probe = AsyncHttpProbe(BLOCKED_MIRRORS, name='blocked', client=make_aclient(handler))
+        probe.RECORD_TABLE = table
+        with logger.mock_capture_writer() as capture:
+            with pytest.raises(AllMirrorsFailedError) as e:
+                await probe.fetch(PATH)
+        # every request of every candidate was retried its attempts
+        assert requests == (
+            ['https://www.google.com/latest.pack'] * 3
+            + ['https://www.youtube.com/latest.pack'] * 3
+        )
+        # the aggregate error carries the reasons as the log does: the
+        # message of a blocked connect timeout is empty, stringify_event()
+        # renders the type alone rather than a dangling separator
+        assert str(e.value) == 'google: ConnectTimeout; youtube: ConnectTimeout'
+        assert capture.concat() == f"""\
+INFO | Probing `probe/blocked` for "{PATH}": google, youtube
+WARNING | Request to "https://www.google.com/latest.pack" failed (attempt 1/3): ConnectTimeout
+WARNING | Request to "https://www.google.com/latest.pack" failed (attempt 2/3): ConnectTimeout
+WARNING | Request to "https://www.google.com/latest.pack" failed (attempt 3/3): ConnectTimeout
+WARNING | Mirror "google" is not usable: ConnectTimeout
+WARNING | Request to "https://www.youtube.com/latest.pack" failed (attempt 1/3): ConnectTimeout
+WARNING | Request to "https://www.youtube.com/latest.pack" failed (attempt 2/3): ConnectTimeout
+WARNING | Request to "https://www.youtube.com/latest.pack" failed (attempt 3/3): ConnectTimeout
+WARNING | Mirror "youtube" is not usable: ConnectTimeout
+ERROR | Failed to probe `probe/blocked` for "{PATH}": no mirror is usable
+"""
+        # nothing was recorded: a blocked network is not a wrong mirror
+        assert table.upserts == 0
