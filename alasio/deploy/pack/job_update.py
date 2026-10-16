@@ -146,7 +146,7 @@ class UpdateJob(JobBase):
         """
         try:
             # the records of the job file of a previous run join the
-            # deletion base (R19): read them before write() replaces it
+            # deletion base: read them before write() replaces it
             await trio.to_thread.run_sync(self._warm_residue)
             await self.tmp_manager_init()
             await trio.to_thread.run_sync(self.write)
@@ -454,7 +454,7 @@ class UpdateJob(JobBase):
         download().
 
         The deletion base of the flow also covers the records of the job
-        file of a previous run (R19, see residue_fileinfo()): a file
+        file of a previous run (see residue_fileinfo()): a file
         that only an intermediate version has - neither the local index
         nor the update pack describes it - is removed with the leftover
         files of the old version.
@@ -488,7 +488,7 @@ class UpdateJob(JobBase):
         # set() rebinds the cached attribute to another dict, the one
         # bound here keeps the full records
         self.new_fileinfo = new_index.fileinfo
-        # the records of the job file of a previous run (R19): the paths
+        # the records of the job file of a previous run: the paths
         # it may have written that the new version does not have are
         # removed, like the leftover files of the old version (the local
         # index part of the base is already covered by the pack records)

@@ -1,7 +1,12 @@
 import trio
 
+from alasio.deploy.pack.decode_base import PackDecodeBase, PackDecodeError
 from alasio.deploy.pack.job_reset import ResetJob
+from alasio.deploy.pack.job_unpack import UnpackJob
+from alasio.deploy.pack.local_probe import LocalProbe
 from alasio.deploy.pack.pack_model import IdxInfo
+from alasio.ext.cache import InstanceCacheOperation, cached_property
+from alasio.ext.path.atomic import atomic_read_bytes, file_write
 from alasio.logger import logger
 
 
@@ -12,14 +17,34 @@ class RebuildJob(ResetJob):
     working tree to the latest version, interruptible and resumable.
 
     Unlike ResetJob, the local index pack is never trusted: the latest
-    index pack is downloaded unconditionally (download_index()), then
-    the working tree is verified against it. The leftover files are the
-    difference between the old local index and the new one, so only
-    managed files are removed, files the user placed by hand are
-    untouched. The old fileinfo is read before the new index is
-    downloaded, and the new index pack is committed last by
-    replace_index(), only when every file of it landed: an
-    interruption during replace() leaves the old index pack in
+    index pack is downloaded unconditionally (download_index()), then a
+    presence probe of the working tree (LocalProbe) decides how the files
+    are rebuilt:
+
+    - per file: the files of the new index are verified like ResetJob and
+      the failed ones are downloaded with range requests of the full pack
+    - full pack: the whole full pack of the version is downloaded with one
+      request and applied by the unpack stage of UnpackJob
+
+    The probe prefers the full pack when the tree supplies less than
+    PRESENT_RATIO of the stored bytes or more than REQUEST_BUDGET blocks
+    are missing (see LocalProbe): an empty tree or a fresh install pays
+    one transfer instead of the record by record ranges, a tree that
+    already holds the files keeps the per-file way. A failed full pack
+    download fails the flow, there is no per-file fallback: the ranges of
+    the per-file way would fetch the very same bytes from the very same
+    file. The downloaded full pack is kept in the workspace
+    ({ledger}/workspace/full.pack): a run that is interrupted after the
+    download reuses it instead of transferring the whole file again, see
+    _load_kept_full_pack().
+
+    The leftover files are the difference between the old local index and
+    the new one, so only managed files are removed, files the user placed
+    by hand are untouched. The old fileinfo is read before the local index
+    pack is replaced (the new index is prepared to the workspace first,
+    replace_index() commits it last), and the new index pack is committed
+    only when every file of it landed: an interruption
+    during replace() leaves the old index pack in
     place, so a resumed run still computes the leftover deletion list
     from it.
 
@@ -37,6 +62,12 @@ class RebuildJob(ResetJob):
     # marker of a rebuild task in the job file
     MARK = b'RBIL\x00'
 
+    # the name of the workspace file the full pack of the flow is kept in
+    # before it is applied: the resume base of an interrupted full pack
+    # run (see _load_kept_full_pack()), cleaned up with the workspace when
+    # the flow succeeds
+    FULL_PACK = 'full.pack'
+
     def __init__(self, server, root=None, name=''):
         """
         Args:
@@ -49,21 +80,31 @@ class RebuildJob(ResetJob):
         """
         super().__init__(server, root=root, name=name)
         # {path: IdxInfo} of the old local index pack plus the records of
-        # the job file of a previous run (R19), the deletion base of the
+        # the job file of a previous run, the deletion base of the
         # leftover cleanup, {} when both are empty/missing
         self._old_fileinfo: "dict[str, IdxInfo]" = {}
+
+    @cached_property
+    def full_pack_file(self):
+        """
+        Returns:
+            PathStr: Path of the full pack kept in the workspace, the
+                resume base of an interrupted full pack run
+        """
+        return self.workspace.joinpath(self.FULL_PACK)
 
     async def run(self):
         """
         Execute the full rebuild flow.
 
-        Writes the job marker first, then reads the old local index for the leftover cleanup and
-        downloads the latest index pack unconditionally: the local
+        Writes the job marker first, then downloads the latest index pack
+        unconditionally: the local
         index is never trusted, unlike ResetJob which validates it
-        first. Every file is verified against the new index, the
-        leftover files of the old version are deleted, the failed
-        files are downloaded to tmp files and replaced to the real
-        files. The new index pack is committed last by replace_index()
+        first. A presence probe of the working tree (LocalProbe) then
+        decides how the files are rebuilt: verified and downloaded per
+        file, or applied from the whole full pack in one transfer, see
+        the class docstring. The new index pack is committed last by
+        replace_index()
         and only when every file was rebuilt, see the class docstring.
         The network phases await on the event loop, the local phases
         run in a worker thread (see JobBase.run()). On failure the
@@ -80,23 +121,32 @@ class RebuildJob(ResetJob):
         """
         try:
             # the records of the job file of a previous run join the
-            # deletion base (R19): read them before write() replaces it
+            # deletion base: read them before write() replaces it
             await trio.to_thread.run_sync(self._warm_residue)
             await self.tmp_manager_init()
             await trio.to_thread.run_sync(self.write)
             logger.info(f'Rebuilding files to {self.described_target}')
-            # the deletion base of the leftover cleanup: the old local
-            # index plus the records of the job file of a previous run
-            # (R19), so a file that only an intermediate version has is
-            # removed too
-            old_fileinfo = await trio.to_thread.run_sync(self._old_fileinfo_from_index)
-            self._old_fileinfo = {**old_fileinfo, **self.residue_fileinfo}
             await self.download_index()
-            await trio.to_thread.run_sync(self.validate_files)
-            await self.download()
-            # the new index records every file of the new version, the
-            # emptiness base of replace_data()
-            self.new_fileinfo = self._index_pack.fileinfo
+            # the presence probe of the tree decides the way the files are
+            # rebuilt: the per-file way below, or the whole full pack when
+            # the tree supplies too little of it (see LocalProbe)
+            probe = LocalProbe(self._index_pack)
+            presence = await trio.to_thread.run_sync(probe.presence, self.root)
+            if presence.prefer_full_pack():
+                await self.download_full_pack()
+            else:
+                # the deletion base of the leftover cleanup: the old local
+                # index plus the records of the job file of a previous run,
+                # so a file that only an intermediate version has is
+                # removed too. The full pack path builds the same base in
+                # its unpack stage, see download_full_pack()
+                old_fileinfo = await trio.to_thread.run_sync(self._old_fileinfo_from_index)
+                self._old_fileinfo = {**old_fileinfo, **self.residue_fileinfo}
+                await trio.to_thread.run_sync(self.validate_files)
+                await self.download()
+                # the new index records every file of the new version, the
+                # emptiness base of replace_data()
+                self.new_fileinfo = self._index_pack.fileinfo
         except Exception as e:
             # no real file was written: the workspace (the job file
             # and the tmp files written so far) is kept as the resume
@@ -130,6 +180,96 @@ class RebuildJob(ResetJob):
         logger.info(f'Rebuild done')
         return True
 
+    async def download_full_pack(self):
+        """
+        Prepare every change of the new version from the full pack.
+
+        The flow took the full pack path (the presence probe of the tree
+        found too little of the pack to use, see LocalProbe): the whole
+        full pack of the version is downloaded with one request, no range
+        request, and applied by the unpack stage of UnpackJob in the shared
+        workspace, so the pending changes of this job are the same ones the
+        per-file way prepares. The pack is kept in the workspace first
+        ({ledger}/workspace/full.pack): a run that is interrupted after the
+        download reuses it instead of transferring the whole file again,
+        see _load_kept_full_pack(). A failed download fails the flow:
+        there is no per-file fallback, the range requests of the per-file
+        way would fetch the very same bytes from the very same file.
+
+        Raises:
+            PackDecodeError: If the server is missing, or the full pack
+                does not decode, validate or match the latest checksum
+            httpx2.HTTPError: If the request fails
+            AllMirrorsFailedError: If no mirror is usable
+        """
+        server = self.server
+        if server is None:
+            raise PackDecodeError('Failed to download the full pack: no server provided')
+        # the latest index pack of the flow: the full pack must be the pack
+        # of this version, the checksum rules out a mirror that serves
+        # another pack under the same path
+        version = self._index_pack.current_version
+        checksum = self._index_pack.index_checksum
+        kept = await trio.to_thread.run_sync(self._load_kept_full_pack, version, checksum)
+        if kept is None:
+            logger.info(f'Downloading the full pack of {version}')
+            full = await server.get_full_pack(version, checksum)
+            # keep the pack in the workspace before it is applied: an
+            # interrupted run reuses it instead of downloading it again
+            await trio.to_thread.run_sync(file_write, self.full_pack_file, full.data)
+        else:
+            logger.info(f'Reusing the full pack of {version} kept in the workspace')
+            full = kept
+        # the unpack stage of UnpackJob prepares the changes from the pack
+        # in the shared workspace: the tmp manager is shared (the tmp files
+        # of the run are named once and the ones an interrupted run left
+        # are reused by content) and the residue records are the ones this
+        # job read before write() replaced the job file
+        unpack = UnpackJob(full, root=self.root, name=self.name)
+        unpack.tmp_manager = self.tmp_manager
+        InstanceCacheOperation.set(unpack, 'residue_fileinfo', self.residue_fileinfo)
+        await trio.to_thread.run_sync(unpack.unpack)
+        # the pending changes and the index commit record of the flow: the
+        # same fields the per-file way fills, replace() applies them alike
+        self.pending = unpack.pending
+        self.pending_index = unpack.pending_index
+        self.new_fileinfo = unpack.new_fileinfo
+
+    def _load_kept_full_pack(self, version, checksum):
+        """
+        The full pack kept in the workspace, when it is the pack of the flow.
+
+        The pack of an interrupted run (downloaded and kept before it was
+        applied) is verified before it is offered for reuse: it must decode,
+        validate (the checksums of both sections, one pass) and be the pack
+        of the version (the version recorded in it and the index checksum of
+        its front part match the requested ones). A truncated, damaged or
+        foreign file is never offered, the pack is downloaded as usual.
+
+        Args:
+            version (str): Version of the flow
+            checksum (str): Index pack checksum of the version, the one
+                latest.pack advertised
+
+        Returns:
+            PackDecodeBase: Decoder of the kept pack, validated, None when
+                there is nothing to reuse
+        """
+        try:
+            data = atomic_read_bytes(self.full_pack_file)
+        except FileNotFoundError:
+            return None
+        try:
+            decoder = PackDecodeBase(data)
+            decoder.validate()
+        except PackDecodeError:
+            return None
+        if decoder.old_version or decoder.current_version != version:
+            return None
+        if checksum and decoder.index_checksum != checksum:
+            return None
+        return decoder
+
     def validate_files(self):
         """
         Collect the changes to apply against the new index.
@@ -139,7 +279,7 @@ class RebuildJob(ResetJob):
         fixable EOL or mode mismatches are written to tmp files
         without a download), then the leftover files are appended to
         self.pending: paths recorded in the old index (or in the job
-        file of a previous run, R19) but not in the new one become
+        file of a previous run) but not in the new one become
         deleted markers, removed by replace_data(). The
         leftover deletions never enter self.error: self.error is the
         download list of download(), the leftover files are deleted,

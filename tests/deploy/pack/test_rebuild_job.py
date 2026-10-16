@@ -20,11 +20,11 @@ from alasio.deploy.pack.job_rebuild import RebuildJob
 from alasio.deploy.pack.job_unpack import UnpackJob
 from alasio.deploy_dev.pack.pack_full import PackFull
 from alasio.ext import env
-from alasio.ext.path.atomic import file_read_bytes
+from alasio.ext.path.atomic import file_read_bytes, file_write
 from alasio.git.mock.mock_repo import MockGitRepo
 from alasio.logger import logger
 from alasio.testing.filesystem import fs  # noqa: F401
-from tests.deploy_dev.pack.conftest import FULL_SCENARIO_NEW, FULL_SCENARIO_OLD, MockServerFile
+from tests.deploy_dev.pack.conftest import FULL_SCENARIO_NEW, FULL_SCENARIO_OLD, MockServerFile, random_bytes
 
 
 def make_pack(files, commit='c1'):
@@ -193,6 +193,82 @@ def no_file_downloads(server, monkeypatch, message):
     monkeypatch.setattr(server, 'get_file_data', _wrapper)
 
 
+def server_with(pack):
+    """
+    A server whose latest version is the pack.
+
+    Args:
+        pack (bytes): Full pack of the latest version
+
+    Returns:
+        MockServerFile: Server serving the version of the pack
+    """
+    server = MockServerFile()
+    decoder = PackDecodeBase(pack)
+    server.register_version(
+        decoder.current_version, pack, bytes(decoder.extract_index_pack()))
+    return server
+
+
+def no_full_pack(server, monkeypatch):
+    """
+    Fail every whole-pack download, keep the ranged requests working.
+
+    The presence probe of a mostly supplied tree keeps the per-file way (see
+    LocalProbe): this wrapper patches get_full_pack(), the whole-pack download
+    of the full pack path, and raises AssertionError for every call.
+
+    Args:
+        server (MockServerFile): Server to patch
+        monkeypatch (pytest.MonkeyPatch): Monkeypatch of the test
+    """
+    async def _wrapper(version, checksum=''):
+        raise AssertionError('no full pack download expected')
+    monkeypatch.setattr(server, 'get_full_pack', _wrapper)
+
+
+# the files a partial tree is missing in the per-file tests: small records,
+# the stored bytes of the large data/new_blob.bin keep the tree above
+# PRESENT_RATIO
+PARTIAL_MISSING = [
+    'backend/a1.py',
+    'backend/a2.py',
+    'backend/a3.py',
+    'docs/guide2.txt',
+    'docs/readme_copy.txt',
+    'docs/readme_copy2.txt',
+    'frontend/App2.svelte',
+    'scripts/new_tool.py',
+    'tools/run.sh',
+]
+# the files to repair of the shared block test: a subset of PARTIAL_MISSING
+# whose records share stored blocks (the later records must reuse the content
+# of the earlier ones)
+SHARED_MISSING = [
+    'backend/a1.py',
+    'backend/a2.py',
+    'backend/a3.py',
+    'docs/guide2.txt',
+    'docs/readme_copy.txt',
+    'docs/readme_copy2.txt',
+    'frontend/App2.svelte',
+]
+
+# the request budget guard: four large blocks and 101 small ones, the
+# distribution of a real pack where the bytes and the block count are decided
+# by different files (the large blocks stay in the tree, the 101 missing
+# small blocks are one over the budget)
+GUARD_FILES = {f'big{i}.bin': random_bytes(4000, i) for i in range(4)}
+GUARD_FILES.update({f'small{i}.txt': f'guard content {i}\n'.encode() for i in range(101)})
+GUARD_PACK = make_pack(GUARD_FILES, commit='guard')
+GUARD_DECODER = PackDecodeBase(GUARD_PACK)
+GUARD_TREE = {
+    path: bytes(GUARD_DECODER.catfile(info))
+    for path, info in GUARD_DECODER.fileinfo.items()
+    if info.edit != 2 and not path.startswith('.pack/')
+}
+
+
 class TestUnconditionalIndex:
     """The latest index pack is downloaded without any local check."""
 
@@ -329,6 +405,7 @@ class TestLeftoverCleanup:
             assert await job.run()
         assert capture.concat() == f"""\
 INFO | Rebuilding files to "{env.PROJECT_ROOT}"
+INFO | Downloading the full pack of new
 WARNING | Failed to read the old index pack: [Errno 2] No such file or directory: '{env.PROJECT_ROOT}/.pack/index.pack'
 INFO | Rebuild done
 """
@@ -355,6 +432,7 @@ INFO | Rebuild done
             assert await job.run()
         assert capture.concat() == f"""\
 INFO | Rebuilding files to "{env.PROJECT_ROOT}"
+INFO | Downloading the full pack of new
 WARNING | Failed to read the old index pack: Failed to validate index checksum: checksum mismatch
 INFO | Rebuild done
 """
@@ -431,7 +509,13 @@ class TestFileRepair:
     async def test_download_failure_stays_in_error(self, app_folder, monkeypatch):
         """A file that cannot be downloaded stays in error, the run
         fails and the workspace is kept for the next run to resume."""
-        await setup_old()
+        # the tree holds the version except the files to repair: the
+        # presence probe keeps the per-file way (the full pack path is
+        # covered by TestFullPackPath)
+        await UnpackJob(NEW_PACK).run()
+        for path in PARTIAL_MISSING:
+            os.remove(env.PROJECT_ROOT / path)
+        server = server_with(NEW_PACK)
         # the file downloads fail: the client validates what it serves (see
         # ServerFile), the record stays in error
 
@@ -440,39 +524,30 @@ class TestFileRepair:
                 # a record without data needs no download (see get_file_data)
                 return b''
             raise PackDecodeError('bad content')
-        monkeypatch.setattr(SERVER, 'get_file_data', _bad_files)
-        job = RebuildJob(SERVER)
+        monkeypatch.setattr(server, 'get_file_data', _bad_files)
+        job = RebuildJob(server)
         with logger.mock_capture_writer() as capture:
             assert not await job.run()
         assert job.error
         assert capture.concat() == f"""\
 INFO | Rebuilding files to "{env.PROJECT_ROOT}"
-WARNING | Failed to download .gitattributes: bad content
 WARNING | Failed to download backend/a1.py: bad content
 WARNING | Failed to download backend/a2.py: bad content
 WARNING | Failed to download backend/a3.py: bad content
-WARNING | Failed to download backend/copy.py: bad content
-WARNING | Failed to download backend/main.py: bad content
-WARNING | Failed to download backend/tiny.py: bad content
-WARNING | Failed to download data/new_blob.bin: bad content
 WARNING | Failed to download docs/guide2.txt: bad content
-WARNING | Failed to download docs/notes.txt: bad content
 WARNING | Failed to download docs/readme_copy.txt: bad content
 WARNING | Failed to download docs/readme_copy2.txt: bad content
-WARNING | Failed to download frontend/App.svelte: bad content
 WARNING | Failed to download frontend/App2.svelte: bad content
 WARNING | Failed to download scripts/new_tool.py: bad content
-WARNING | Failed to download scripts/runner.sh: bad content
 WARNING | Failed to download tools/run.sh: bad content
-WARNING | Failed to download .pack/history.pack: bad content
-WARNING | Failed to rebuild: 18 file(s) stayed in error, the workspace is kept for the next run
+WARNING | Failed to rebuild: 9 file(s) stayed in error, the workspace is kept for the next run
 """
-        # the index was not committed: the workspace is the resume base
-        # of the next run, which retries the failed records
+        # the workspace is the resume base of the next run, which retries
+        # the failed records
         assert file_read_bytes(env.PROJECT_ROOT / '.pack/workspace/job.pack') == RebuildJob.MARK
         # the new index pack is not committed: the local version does
         # not advance (see JobBase.replace())
-        assert file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack') == OLD_INDEX
+        assert file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack') == NEW_INDEX
 
     @pytest.mark.trio
     async def test_no_server(self, app_folder):
@@ -483,7 +558,6 @@ WARNING | Failed to rebuild: 18 file(s) stayed in error, the workspace is kept f
             assert not await job.run()
         assert capture.concat() == f"""\
 INFO | Rebuilding files to "{env.PROJECT_ROOT}"
-WARNING | Failed to read the old index pack: [Errno 2] No such file or directory: '{env.PROJECT_ROOT}/.pack/index.pack'
 WARNING | Failed to rebuild: Failed to download the index pack: no server provided, keeping the workspace for the next run
 """
         assert file_read_bytes(env.PROJECT_ROOT / '.pack/workspace/job.pack') == RebuildJob.MARK
@@ -494,20 +568,31 @@ class TestSharedBlockDownload:
 
     @pytest.mark.trio
     async def test_every_block_fetched_once(self, app_folder, monkeypatch):
-        """A rebuild from nothing fetches every stored block of the new
-        full pack exactly once: the later records of a shared block (a C
-        record copies the data of its source) are written from the
-        content of the earlier record instead of being downloaded again."""
-        # the scenario has records sharing a stored block (the readme
-        # copies), the premise of the test
-        keys = [
+        """A per-file rebuild fetches every stored block of the repaired
+        records exactly once: the later records of a shared block (a C
+        record copies the data of its source) are written from the content
+        of the earlier record instead of being downloaded again."""
+        # the records to repair share stored blocks (the readme copies,
+        # a1/a2/a3, the App copies), the premise of the test
+        all_keys = [
             (info.data_start, info.data_size)
             for info in NEW_DECODER.fileinfo.values()
             if info.edit != 2 and info.data_size
         ]
-        assert len(keys) > len(set(keys))
+        assert len(all_keys) > len(set(all_keys))
+        missing_blocks = {
+            (info.data_start, info.data_size)
+            for info in NEW_DECODER.fileinfo.values()
+            if info.edit != 2 and info.data_size and info.path in SHARED_MISSING
+        }
+        assert len(missing_blocks) < len(SHARED_MISSING)
+        await UnpackJob(NEW_PACK).run()
+        for path in SHARED_MISSING:
+            os.remove(env.PROJECT_ROOT / path)
+        server = server_with(NEW_PACK)
+        no_full_pack(server, monkeypatch)
         calls = []
-        original = SERVER.get_file_data
+        original = server.get_file_data
 
         async def _serve(decoder, info):
             if info.data_size:
@@ -515,11 +600,11 @@ class TestSharedBlockDownload:
                 # (see ServerFile.get_file_data)
                 calls.append((info.data_start, info.data_size))
             return await original(decoder, info)
-        monkeypatch.setattr(SERVER, 'get_file_data', _serve)
-        assert await RebuildJob(SERVER).run()
+        monkeypatch.setattr(server, 'get_file_data', _serve)
+        assert await RebuildJob(server).run()
         assert read_tree() == NEW_TREE
         # every block is fetched exactly once, not once per record
-        assert sorted(calls) == sorted(set(keys))
+        assert sorted(calls) == sorted(missing_blocks)
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
 
@@ -571,6 +656,7 @@ class TestResume:
             assert not await job.run()
         assert capture.concat() == f"""\
 INFO | Rebuilding files to "{env.PROJECT_ROOT}"
+INFO | Downloading the full pack of new
 ERROR | Failed to replace file: interrupted, keeping the workspace for the next run
 """
         # the interrupted pass replaced a data file, never the index pack
@@ -748,4 +834,219 @@ class TestRebuildMatrix:
         else:
             assert file_read_bytes(env.PROJECT_ROOT / 'pkg/__init__.py') == (
                 GOOD if local == 'good' else BAD)
+        assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
+
+
+class TestFullPackPath:
+    """The full pack path: a tree that supplies too little of the pack is
+    rebuilt from one whole-pack download applied by the unpack stages of
+    UnpackJob, with no per-record range request."""
+
+    @pytest.mark.trio
+    async def test_empty_root_downloads_full_pack(self, app_folder, monkeypatch):
+        """An empty root supplies nothing: the whole full pack is
+        downloaded with one request and applied."""
+        server = server_with(NEW_PACK)
+        no_file_downloads(server, monkeypatch, 'no per-file download expected, the full pack is used')
+        job = RebuildJob(server)
+        with logger.mock_capture_writer() as capture:
+            assert await job.run()
+        assert capture.concat() == f"""\
+INFO | Rebuilding files to "{env.PROJECT_ROOT}"
+INFO | Downloading the full pack of new
+WARNING | Failed to read the old index pack: [Errno 2] No such file or directory: '{env.PROJECT_ROOT}/.pack/index.pack'
+INFO | Rebuild done
+"""
+        assert read_tree() == NEW_TREE
+        assert file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack') == NEW_INDEX
+        assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
+        # the whole pack was transferred once, no range request was made
+        # for a record
+        assert server.full_bytes == len(NEW_PACK)
+
+    @pytest.mark.trio
+    @pytest.mark.parametrize('state', ['missing', 'corrupted'])
+    async def test_intact_tree_keeps_per_file(self, app_folder, monkeypatch, state):
+        """A tree that holds the version takes the per-file way, a missing
+        or corrupted index aside: the files are kept and the whole pack is
+        never downloaded."""
+        await UnpackJob(NEW_PACK).run()
+        if state == 'missing':
+            os.remove(env.PROJECT_ROOT / '.pack/index.pack')
+        else:
+            with open(env.PROJECT_ROOT / '.pack/index.pack', 'wb') as f:
+                f.write(b'broken')
+        server = server_with(NEW_PACK)
+        no_full_pack(server, monkeypatch)
+        no_file_downloads(
+            server, monkeypatch, 'no file download expected, the tree holds the version')
+        job = RebuildJob(server)
+        assert await job.run()
+        assert read_tree() == NEW_TREE
+        assert file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack') == NEW_INDEX
+        assert server.full_bytes == 0
+        assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
+
+    @pytest.mark.trio
+    async def test_full_pack_failure_fails_the_flow(self, app_folder, monkeypatch):
+        """A failed whole-pack download fails the flow, there is no
+        per-file fallback: the range requests of the per-file way would
+        fetch the very same bytes from the very same file."""
+        server = server_with(NEW_PACK)
+
+        async def _fail(version, checksum=''):
+            raise PackDecodeError('bad full pack')
+        monkeypatch.setattr(server, 'get_full_pack', _fail)
+        no_file_downloads(server, monkeypatch, 'no per-file fallback expected')
+        job = RebuildJob(server)
+        with logger.mock_capture_writer() as capture:
+            assert not await job.run()
+        assert job.error == []
+        assert capture.concat() == f"""\
+INFO | Rebuilding files to "{env.PROJECT_ROOT}"
+INFO | Downloading the full pack of new
+WARNING | Failed to rebuild: bad full pack, keeping the workspace for the next run
+"""
+        # no index was committed and the workspace is the resume base of
+        # the next run
+        assert server.full_bytes == 0
+        assert not os.path.exists(env.PROJECT_ROOT / '.pack/index.pack')
+        assert file_read_bytes(env.PROJECT_ROOT / '.pack/workspace/job.pack') == RebuildJob.MARK
+
+
+class TestFullPackReuse:
+    """The full pack kept in the workspace: a run interrupted after the
+    download reuses it instead of transferring the whole pack again."""
+
+    @staticmethod
+    async def interrupt_replace(server, monkeypatch):
+        """
+        Take the full pack path and interrupt the data pass once, leaving the
+        workspace (the kept full pack, the job marker and the tmp files)
+        behind.
+
+        Args:
+            server (MockServerFile): Server of the run
+            monkeypatch (pytest.MonkeyPatch): Monkeypatch of the test
+        """
+        import alasio.deploy.pack.job_base as job_base
+        original = job_base.atomic_replace
+        calls = []
+
+        def _fail(tmp, target):
+            if calls:
+                raise PermissionError('interrupted')
+            calls.append(target)
+            return original(tmp, target)
+        monkeypatch.setattr(job_base, 'atomic_replace', _fail)
+        job = RebuildJob(server)
+        with logger.mock_capture_writer() as capture:
+            assert not await job.run()
+        assert capture.concat() == f"""\
+INFO | Rebuilding files to "{env.PROJECT_ROOT}"
+INFO | Downloading the full pack of new
+WARNING | Failed to read the old index pack: [Errno 2] No such file or directory: '{env.PROJECT_ROOT}/.pack/index.pack'
+ERROR | Failed to replace file: interrupted, keeping the workspace for the next run
+"""
+        # the whole pack is kept for the next run, the marker is the
+        # record of the task in flight
+        assert file_read_bytes(env.PROJECT_ROOT / '.pack/workspace/full.pack') == NEW_PACK
+        assert file_read_bytes(env.PROJECT_ROOT / '.pack/workspace/job.pack') == RebuildJob.MARK
+        # the index was not committed: the data pass never reached it
+        assert not os.path.exists(env.PROJECT_ROOT / '.pack/index.pack')
+        monkeypatch.setattr(job_base, 'atomic_replace', original)
+
+    @pytest.mark.trio
+    async def test_kept_pack_reused(self, app_folder, monkeypatch):
+        """A run interrupted after the pack download reuses the kept pack:
+        the whole pack is not transferred again."""
+        server = server_with(NEW_PACK)
+        await self.interrupt_replace(server, monkeypatch)
+        no_full_pack(server, monkeypatch)
+        job = RebuildJob(server)
+        with logger.mock_capture_writer() as capture:
+            result = await job.run()
+        assert result, capture.concat()
+        assert capture.concat() == f"""\
+INFO | Rebuilding files to "{env.PROJECT_ROOT}"
+INFO | Reusing the full pack of new kept in the workspace
+WARNING | Failed to read the old index pack: [Errno 2] No such file or directory: '{env.PROJECT_ROOT}/.pack/index.pack'
+INFO | Rebuild done
+"""
+        assert read_tree() == NEW_TREE
+        assert file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack') == NEW_INDEX
+        assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
+
+    @pytest.mark.trio
+    @pytest.mark.parametrize('kept', ['damaged', 'foreign'])
+    async def test_stale_kept_pack_downloaded(self, app_folder, monkeypatch, kept):
+        """A kept pack that is not the pack of the flow (damaged, or the
+        pack of another version) is never reused: the whole pack is
+        downloaded again."""
+        server = server_with(NEW_PACK)
+        await self.interrupt_replace(server, monkeypatch)
+        if kept == 'damaged':
+            data = bytearray(NEW_PACK)
+            data[-5] ^= 0xFF
+        else:
+            data = OLD_PACK
+        file_write(env.PROJECT_ROOT / '.pack/workspace/full.pack', bytes(data))
+        calls = []
+        original = server.get_full_pack
+
+        async def _counting(version, checksum=''):
+            calls.append(version)
+            return await original(version, checksum)
+        monkeypatch.setattr(server, 'get_full_pack', _counting)
+        job = RebuildJob(server)
+        assert await job.run()
+        assert calls == ['new']
+        assert read_tree() == NEW_TREE
+        assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
+
+
+class TestBudgetGuard:
+    """The request budget of the path decision: a tree that holds the
+    stored bytes but misses more blocks than the budget is rebuilt from
+    the full pack, one block below it keeps the per-file way."""
+
+    @pytest.mark.trio
+    async def test_missing_over_budget_full_pack(self, app_folder, monkeypatch):
+        """101 missing small blocks: over the budget of 100, the whole
+        full pack is downloaded (the present bytes alone would keep the
+        per-file way)."""
+        await UnpackJob(GUARD_PACK).run()
+        for i in range(101):
+            os.remove(env.PROJECT_ROOT / f'small{i}.txt')
+        server = server_with(GUARD_PACK)
+        no_file_downloads(server, monkeypatch, 'no per-file download expected, over the budget')
+        job = RebuildJob(server)
+        with logger.mock_capture_writer() as capture:
+            assert await job.run()
+        assert capture.concat() == f"""\
+INFO | Rebuilding files to "{env.PROJECT_ROOT}"
+INFO | Downloading the full pack of guard
+INFO | Rebuild done
+"""
+        assert read_tree() == GUARD_TREE
+        assert server.full_bytes == len(GUARD_PACK)
+        assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
+
+    @pytest.mark.trio
+    async def test_missing_within_budget_per_file(self, app_folder, monkeypatch):
+        """100 missing small blocks: inside the budget, the per-file way
+        repairs exactly them and the whole pack is not downloaded."""
+        await UnpackJob(GUARD_PACK).run()
+        for i in range(100):
+            os.remove(env.PROJECT_ROOT / f'small{i}.txt')
+        server = server_with(GUARD_PACK)
+        no_full_pack(server, monkeypatch)
+        job = RebuildJob(server)
+        with logger.mock_capture_writer() as capture:
+            assert await job.run()
+        assert capture.concat() == f"""\
+INFO | Rebuilding files to "{env.PROJECT_ROOT}"
+INFO | Rebuild done
+"""
+        assert read_tree() == GUARD_TREE
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')

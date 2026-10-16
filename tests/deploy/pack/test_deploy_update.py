@@ -222,6 +222,7 @@ INFO | [LatestVersion] new
 INFO | Update available: no local version, latest is new
 WARNING | Failed to read the local version, rebuilding from the latest index
 INFO | Rebuilding files to "{env.PROJECT_ROOT}"
+INFO | Downloading the full pack of new
 WARNING | Failed to read the old index pack: [Errno 2] No such file or directory: '{env.PROJECT_ROOT}/.pack/index.pack'
 INFO | Rebuild done
 """
@@ -244,6 +245,7 @@ INFO | Update available: old -> new
 WARNING | Request to "http://mock/new/from_old.pack" failed (attempt 1/3): HTTPStatusError: Client error '404 Not Found' for url 'http://mock/new/from_old.pack'
 WARNING | Failed to get the update pack old -> new: Client error '404 Not Found' for url 'http://mock/new/from_old.pack', rebuilding from the latest index
 INFO | Rebuilding files to "{env.PROJECT_ROOT}"
+INFO | Downloading the full pack of new
 INFO | Rebuild done
 """
         assert read_tree() == NEW_TREE
@@ -264,6 +266,7 @@ INFO | [LatestVersion] new
 INFO | Update available: old -> new
 WARNING | Failed to get the update pack old -> new: Failed to decode header: not a pack file: b'garb', rebuilding from the latest index
 INFO | Rebuilding files to "{env.PROJECT_ROOT}"
+INFO | Downloading the full pack of new
 INFO | Rebuild done
 """
         assert read_tree() == NEW_TREE
@@ -301,6 +304,7 @@ INFO | [LatestVersion] new
 INFO | Update available: no local version, latest is new
 WARNING | Failed to read the local version, rebuilding from the latest index
 INFO | Rebuilding files to "{env.PROJECT_ROOT}"
+INFO | Downloading the full pack of new
 WARNING | Failed to read the old index pack: [Errno 2] No such file or directory: '{env.PROJECT_ROOT}/.pack/index.pack'
 INFO | Rebuild done
 """
@@ -376,6 +380,7 @@ INFO | [LatestVersion] new
 INFO | Update available: no local version, latest is new
 WARNING | Failed to read the local version, rebuilding from the latest index
 INFO | Rebuilding files to "{env.PROJECT_ROOT}"
+INFO | Downloading the full pack of new
 WARNING | Failed to read the old index pack: [Errno 2] No such file or directory: '{env.PROJECT_ROOT}/.pack/index.pack'
 INFO | Rebuild done
 """
@@ -396,6 +401,7 @@ INFO | Update available: old -> new
 WARNING | Request to "http://mock/new/from_old.pack" failed (attempt 1/3): HTTPStatusError: Client error '404 Not Found' for url 'http://mock/new/from_old.pack'
 WARNING | Failed to get the update pack old -> new: Client error '404 Not Found' for url 'http://mock/new/from_old.pack', rebuilding from the latest index
 INFO | Rebuilding files to "{env.PROJECT_ROOT}"
+INFO | Downloading the full pack of new
 INFO | Rebuild done
 """
         assert len(calls) == 1
@@ -413,6 +419,7 @@ INFO | [LatestVersion] new
 INFO | Update available: old -> new
 WARNING | Failed to get the update pack old -> new: Failed to decode header: not a pack file: b'garb', rebuilding from the latest index
 INFO | Rebuilding files to "{env.PROJECT_ROOT}"
+INFO | Downloading the full pack of new
 INFO | Rebuild done
 """
         assert len(calls) == 1
@@ -534,6 +541,7 @@ INFO | Update available: old -> new
 WARNING | Request to "http://mock/new/from_old.pack" failed (attempt 1/3): HTTPStatusError: Client error '404 Not Found' for url 'http://mock/new/from_old.pack'
 WARNING | Failed to get the update pack old -> new: Client error '404 Not Found' for url 'http://mock/new/from_old.pack', rebuilding from the latest index
 INFO | Rebuilding files to "{env.PROJECT_ROOT}"
+INFO | Downloading the full pack of new
 INFO | Rebuild done
 """
         assert phases.phases == ['checking', 'downloading', 'updating']
@@ -552,6 +560,7 @@ INFO | [LatestVersion] new
 INFO | Update available: no local version, latest is new
 WARNING | Failed to read the local version, rebuilding from the latest index
 INFO | Rebuilding files to "{env.PROJECT_ROOT}"
+INFO | Downloading the full pack of new
 WARNING | Failed to read the old index pack: [Errno 2] No such file or directory: '{env.PROJECT_ROOT}/.pack/index.pack'
 INFO | Rebuild done
 """
@@ -682,6 +691,7 @@ INFO | [LatestVersion] new
 INFO | Update available: no local version, latest is new
 WARNING | Failed to read the local version, rebuilding from the latest index
 INFO | Rebuilding files to "{env.PROJECT_ROOT}"
+INFO | Downloading the full pack of new
 WARNING | Failed to read the old index pack: [Errno 2] No such file or directory: '{env.PROJECT_ROOT}/.pack/index.pack'
 INFO | Rebuild done
 """
@@ -725,6 +735,7 @@ INFO | Update available: old -> new
 WARNING | Request to "http://mock/new/from_old.pack" failed (attempt 1/3): HTTPStatusError: Client error '404 Not Found' for url 'http://mock/new/from_old.pack'
 WARNING | Failed to get the update pack old -> new: Client error '404 Not Found' for url 'http://mock/new/from_old.pack', rebuilding from the latest index
 INFO | Rebuilding files to "{env.PROJECT_ROOT}"
+INFO | Downloading the full pack of new
 INFO | Rebuild done
 """
         assert len(latest_calls) == 1

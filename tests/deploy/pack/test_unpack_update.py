@@ -1351,7 +1351,7 @@ class TestCallerFlow:
     @pytest.mark.trio
     async def test_a_new_flow_converges_a_failed_run(self, app_folder):
         """A flow is always a new one: the job file of a previous run is a
-        record (its records join the deletion base, R19), never a task to
+        record (its records join the deletion base), never a task to
         resume -- a fresh UpdateJob of the same pack converges the tree."""
         await setup_app()
         # the state a failed run leaves: the job file of the update pack
@@ -1391,7 +1391,7 @@ INFO | Update done
 
     def test_failure_keeps_job_file(self, app_folder):
         """job.pack survives a failed run: the next flow takes its records
-        as a deletion base (R19) and its tmp files as a cache."""
+        as a deletion base and its tmp files as a cache."""
         decoder = PackDecodeBase(UPDATE)
         index_end = 5 + len(decoder.index_section)
         bad = bytearray(UPDATE)
@@ -1475,7 +1475,7 @@ async def unpack_intermediate():
 
 
 class TestIntermediateLeftovers:
-    """R19: the files of an intermediate version, recorded by nothing.
+    """The files of an intermediate version, recorded by nothing.
 
     A flow that fails half way applies the files it computed and does not
     commit the local index: a file that only the intermediate version has

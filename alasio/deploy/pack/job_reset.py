@@ -40,7 +40,7 @@ class ResetJob(JobBase):
     that cannot be downloaded or fail the size + sha1 check stay in
     self.error with an empty tmp, this is an unsolvable problem per
     the draft of PackEncodeBase. The records of the job file of a
-    previous run are an extra deletion base (R19, see
+    previous run are an extra deletion base (see
     residue_fileinfo()): the paths they describe that the local version
     does not have are removed by replace() too. The tmp files are named by the tmp
     manager of the workspace (see TmpManager and JobBase.tmp_file()),
@@ -101,7 +101,7 @@ class ResetJob(JobBase):
         """
         try:
             # the records of the job file of a previous run join the
-            # deletion base (R19): read them before write() replaces it
+            # deletion base: read them before write() replaces it
             await trio.to_thread.run_sync(self._warm_residue)
             await self.tmp_manager_init()
             await trio.to_thread.run_sync(self.write)
@@ -118,7 +118,7 @@ class ResetJob(JobBase):
             # the new index records every file of the new version, the
             # emptiness base of replace_data()
             self.new_fileinfo = self._index_pack.fileinfo
-            # the records of the job file of a previous run (R19): the
+            # the records of the job file of a previous run: the
             # paths it may have written that the local version does not
             # have are removed as well (the local index part of the base
             # cancels out, the target of a reset is the local index)

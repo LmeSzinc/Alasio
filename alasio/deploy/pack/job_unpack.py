@@ -70,12 +70,22 @@ class UnpackJob(JobBase):
     def __init__(self, data, root=None, name=''):
         """
         Args:
-            data (bytes): Full pack data
+            data (bytes | PackDecodeBase): Full pack data: the validated
+                decoder of ServerFile.get_full_pack() (reused as it is, the
+                pack is not decoded a second time), or raw bytes, which
+                unpack() decodes and validates
             root (str, optional): Folder to update. Defaults to None,
                 env.PROJECT_ROOT
             name (str, optional): Ledger key of the target. Defaults to
                 '', the project tree target
         """
+        if isinstance(data, PackDecodeBase):
+            # the pack of ServerFile.get_full_pack(), already validated: the
+            # decoder is reused as it is (no second decode / checksum)
+            self._decoder = data
+            data = data.data
+        else:
+            self._decoder = None
         super().__init__(data, root=root, name=name)
 
     async def run(self):
@@ -97,7 +107,7 @@ class UnpackJob(JobBase):
         """
         try:
             # the records of the job file of a previous run join the
-            # deletion base (R19): read them before write() replaces it
+            # deletion base: read them before write() replaces it
             await trio.to_thread.run_sync(self._warm_residue)
             await self.tmp_manager_init()
             await trio.to_thread.run_sync(self.write)
@@ -148,7 +158,7 @@ class UnpackJob(JobBase):
         pack is read first: files recorded in it but not in this pack
         are the leftover files of the old version, removed by
         replace_data() like the deleted markers; the records of the job
-        file of a previous run are taken as a second base (R19, see
+        file of a previous run are taken as a second base (see
         residue_fileinfo()), so a file that only an intermediate version
         has - it is in neither the index nor this pack - is removed too.
         A target file whose
@@ -160,8 +170,10 @@ class UnpackJob(JobBase):
         place, so a resumed run still computes the leftover deletion
         list from it.
         """
-        decoder = PackDecodeBase(self._data)
-        decoder.validate()
+        decoder = self._decoder
+        if decoder is None:
+            decoder = PackDecodeBase(self._data)
+            decoder.validate()
         # rewrite the pack area paths of the pack into the ledger
         # folder of the target before any comparison
         self.localize(decoder)
@@ -170,7 +182,7 @@ class UnpackJob(JobBase):
         self.new_fileinfo = decoder.fileinfo
         # the old index is read before the new index pack replaces it,
         # and it joins the records of the job file of a previous run
-        # (R19, read before this run replaced it): a file that only an
+        # (read before this run replaced it): a file that only an
         # intermediate version has is in neither base alone
         old_fileinfo = {**self._old_fileinfo_from_index(), **self.residue_fileinfo}
 

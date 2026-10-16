@@ -146,6 +146,45 @@ class TestPackRequests:
             await server.get_index_pack(COMMIT)
 
     @pytest.mark.trio
+    async def test_get_full_pack(self):
+        """The whole full pack is fetched with one request without a range
+        header and validated before it is returned."""
+        requests = []
+
+        def handler(request):
+            requests.append(request)
+            return httpx2.Response(200, content=WEBSITE_FULL_PACK)
+
+        server = ServerFile('http://test', client=make_aclient(handler))
+        decoder = await server.get_full_pack(COMMIT)
+        assert bytes(decoder.data) == WEBSITE_FULL_PACK
+        assert str(requests[0].url) == f'http://test/{COMMIT}/full.pack'
+        assert 'Range' not in requests[0].headers
+
+    @pytest.mark.trio
+    async def test_get_full_pack_validated(self):
+        """A pack that does not validate is a failure of the mirror, the
+        PackDecodeError is raised (the probe reselects and retries once)."""
+        def handler(request):
+            return httpx2.Response(200, content=b'not a pack')
+
+        server = ServerFile('http://test', client=make_aclient(handler))
+        with pytest.raises(PackDecodeError):
+            await server.get_full_pack(COMMIT)
+
+    @pytest.mark.trio
+    async def test_get_full_pack_checksum(self):
+        """A pack whose index checksum does not match the advertised one is
+        rejected: a mirror that serves another pack under the same path
+        cannot be used."""
+        def handler(request):
+            return httpx2.Response(200, content=WEBSITE_FULL_PACK)
+
+        server = ServerFile('http://test', client=make_aclient(handler))
+        with pytest.raises(PackDecodeError, match='checksum mismatch'):
+            await server.get_full_pack(COMMIT, checksum='00' * 20)
+
+    @pytest.mark.trio
     async def test_get_update_pack(self):
         """The update pack url is {new}/from_{old}.pack, the pack is validated
         before it is returned."""

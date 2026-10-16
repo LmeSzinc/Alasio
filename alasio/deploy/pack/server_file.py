@@ -306,6 +306,51 @@ class ServerFile(AsyncHttpProbe):
                 f'expected {checksum}, got {decoder.index_checksum}')
         return decoder
 
+    async def get_full_pack(self, version, checksum=''):
+        """
+        Get the whole full pack of a version from {mirror}/{version}/full.pack.
+
+        The whole file is transferred with one request, with no range request:
+        the full pack path of a rebuild needs every byte of the data section,
+        the range requests of the per-file path would fetch the very same bytes
+        record by record. The pack is validated before it is returned
+        (validate(), the checksums of both sections): a mirror that serves a
+        broken pack is dropped and the download is retried once on another one,
+        see the class docstring. When a checksum is given, the index checksum
+        of the pack (the trailing digest of its front part) must match it, the
+        checksum latest.pack advertised for the version: a mirror that serves
+        another pack under the same path cannot be used, it is reselected and
+        the download is retried once.
+
+        Args:
+            version (str): Version to query
+            checksum (str, optional): Expected index pack checksum, hex string,
+                the one get_latest_info() returned. Defaults to '', no extra
+                check
+
+        Returns:
+            PackDecodeBase: Decoder of the full pack, validated
+
+        Raises:
+            PackDecodeError: If the pack does not decode or validate, or the
+                checksum mismatches
+            httpx2.HTTPError: If the request fails
+            AllMirrorsFailedError: If no mirror is usable
+        """
+        path = f'/{version}/full.pack'
+
+        async def work(name, url):
+            data = await self.get_bytes(url, path)
+            decoder = PackDecodeBase(data)
+            decoder.validate()
+            if checksum and decoder.index_checksum != checksum:
+                raise PackDecodeError(
+                    f'Failed to download the full pack: index checksum mismatch, '
+                    f'expected {checksum}, got {decoder.index_checksum}')
+            return decoder
+
+        return await self.fetch(path, work)
+
     async def get_update_pack(self, old_version, new_version):
         """
         Get the update pack from an old version to a new version from

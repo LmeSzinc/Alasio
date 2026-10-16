@@ -21,6 +21,7 @@ import pytest
 
 from alasio.deploy.pack.decode_base import PackDecodeBase
 from alasio.deploy.pack.job import DeployJob
+from alasio.deploy.pack.job_rebuild import RebuildJob
 from alasio.deploy.pack.job_unpack import UnpackJob
 from alasio.deploy_dev.pack.pack_full import PackFull
 from alasio.deploy_dev.pack.pack_update import PackUpdate
@@ -228,6 +229,31 @@ INFO | Rebuild done
             assert file_read_bytes(env.PROJECT_ROOT / path) == content, path
         decoder = PackDecodeBase(file_read_bytes(env.PROJECT_ROOT / '.pack/httpx/index.pack'))
         assert decoder.current_version == 'new'
+        assert not os.path.exists(env.PROJECT_ROOT / '.pack/httpx/workspace')
+
+    @pytest.mark.trio
+    async def test_rebuild_whole_pack_in_shared_root(self, app_folder, fs):
+        """A fresh dist in a shared root: the unrelated files of the root
+        take part in no record, the probe sees an empty target and the
+        whole full pack is downloaded once."""
+        # another dist of the shared site-packages root
+        fs.create_file(env.PROJECT_ROOT / 'other/__init__.py', contents=b'other')
+        server = MockServerFile()
+        server.register_version('new', NAMED_NEW_PACK, NAMED_NEW_INDEX)
+        with logger.mock_capture_writer() as capture:
+            assert await RebuildJob(server, name='httpx').run()
+        assert capture.concat() == f"""\
+INFO | Rebuilding files to "{env.PROJECT_ROOT}", name="httpx"
+INFO | Downloading the full pack of new
+WARNING | Failed to read the old index pack: [Errno 2] No such file or directory: '{env.PROJECT_ROOT}/.pack/httpx/index.pack'
+INFO | Rebuild done
+"""
+        for path, content in NAMED_TREE.items():
+            assert file_read_bytes(env.PROJECT_ROOT / path) == content, path
+        assert server.full_bytes == len(NAMED_NEW_PACK)
+        # the file of the other dist is kept, the ledger of the target is
+        # its own folder
+        assert file_read_bytes(env.PROJECT_ROOT / 'other/__init__.py') == b'other'
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/httpx/workspace')
 
     @pytest.mark.trio

@@ -707,7 +707,7 @@ class TestFailure:
 
     def test_failure_keeps_job_file(self, app_folder):
         """job.pack survives a failed run: the next flow takes its records
-        as a deletion base (R19) and its tmp files as a cache."""
+        as a deletion base and its tmp files as a cache."""
         decoder = PackDecodeBase(WEBSITE_FULL_PACK)
         index_end = 5 + len(decoder.index_section)
         bad = bytearray(WEBSITE_FULL_PACK)
