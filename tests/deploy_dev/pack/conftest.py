@@ -1,6 +1,10 @@
 """
 Shared test data: a mock modern full-stack website (python backend + svelte 5 frontend).
 
+The fixtures are shared by the encoder tests (tests/deploy_dev/pack) and the
+decoder and job tests (tests/deploy/pack), which re-exports the fixtures in
+scope, see its conftest.
+
 The file list is designed to cover every record type produced by PackFull:
 
 - edit: A (added), C (copied, same content as a previous file), D (deleted marker,
@@ -191,7 +195,9 @@ WEBSITE_FILES = {
     'docs/README.md': (b'# Website\n\nModern full-stack site.\n', 644),
 }
 
-# Module level singletons shared by all tests in this folder.
+# Module level singletons shared by all tests of the pack conftest (the
+# encoder tests of tests/deploy_dev/pack and the decoder and job tests of
+# tests/deploy/pack).
 # The repo and the encoded pack are treated as read-only test data:
 # registering more files or mutating the pack bytes would affect every
 # test, create a fresh MockGitRepo instead. Building the pack once here
@@ -519,6 +525,33 @@ def make_server_file(mirrors, name='', table=None, client=None):
     if table is not None:
         server.RECORD_TABLE = table
     return server
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  path validation
+# ════════════════════════════════════════════════════════════════════════════
+
+# unsafe paths: traversal, absolute, reserved system names, illegal
+# characters, trailing dot / space, too long. The encoder and the decoder
+# both validate with validate_filepath, the two ends of the pack must reject
+# the same paths, the table is shared by test_path_validate.py of both pack
+# test folders.
+INVALID_PATHS = [
+    '../evil.txt',
+    'a/../../evil.txt',
+    '/etc/passwd',
+    '\\evil.txt',
+    'CON',
+    'CON.txt',
+    'a/CON',
+    'LPT1',
+    'a/*.txt',
+    'a/b?.txt',
+    'a/b<c.txt',
+    'a/b.txt.',
+    'a/b.txt ',
+    'a' * 300,
+]
 
 
 # ════════════════════════════════════════════════════════════════════════════

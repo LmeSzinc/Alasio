@@ -4,7 +4,8 @@ Tests for the command line entry of unpack.py.
 Uses conftest.WEBSITE_FULL_PACK (mock modern full-stack website).
 Every test runs in the in-memory fake filesystem, no real files are
 written: the app_folder fixture points env.PROJECT_ROOT at the fake
-filesystem.
+filesystem. The fixtures of the pack tests are imported from the shared
+conftest of tests/deploy_dev/pack, the way tests/deploy/simple_pip does it.
 """
 import os
 import sys
@@ -15,7 +16,7 @@ from alasio.deploy.unpack import main
 from alasio.ext import env
 from alasio.ext.path.atomic import file_read_bytes
 from alasio.testing.filesystem import fs  # noqa: F401
-from tests.deploy_dev.pack.conftest import WEBSITE_FILES, WEBSITE_FULL_PACK
+from tests.deploy_dev.pack.conftest import WEBSITE_FILES, WEBSITE_FULL_PACK, _posix_exec_bits, app_folder  # noqa: F401
 
 
 class TestUnpackCli:

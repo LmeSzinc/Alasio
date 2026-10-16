@@ -5,7 +5,7 @@ lock and fresh window, and the pause / restore discipline of the maintenance
 flows.
 
 The deploy job of a mod is a stand-in: the module only asks it for the check
-verdict, the real job is covered by tests/deploy_dev/pack.
+verdict, the real job is covered by tests/deploy/pack.
 """
 import pytest
 import trio
