@@ -51,7 +51,10 @@ def test_loaddll_windows_kernel32():
 
     lib = loaddll(path)
     assert isinstance(lib, ctypes.CDLL)
-    # GetTickCount is a common function in kernel32.dll
+    # GetTickCount is a common function in kernel32.dll.
+    # It returns a DWORD (unsigned 32-bit), declare the prototype, or the value
+    # would be negative after 24.9 days of system uptime
+    lib.GetTickCount.restype = ctypes.c_uint32
     assert lib.GetTickCount() > 0
 
 
@@ -87,7 +90,10 @@ def test_loaddll_windows_user32_windll():
     # user32.dll uses stdcall, loading with WinDLL is appropriate
     lib = loaddll(path, use_windll=True)
     assert isinstance(lib, ctypes.WinDLL)
-    # MessageBoxA is a common function in user32.dll
+    # GetDesktopWindow is a common function in user32.dll.
+    # It returns a HWND (pointer), declare the prototype, or a handle with
+    # the high bit of the low 32 bits set would be negative
+    lib.GetDesktopWindow.restype = ctypes.c_void_p
     assert lib.GetDesktopWindow() > 0
 
 
