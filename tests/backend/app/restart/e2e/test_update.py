@@ -15,7 +15,7 @@ import trio
 from alasio.backend.app.restart.restart_base import FlowRefused
 from alasio.logger import logger
 
-from .conftest import FULL_V2, RESUME_INTERVAL, assert_logs, at, read_record, wait_until
+from .conftest import FULL_V2, assert_logs, at, read_record, wait_until
 
 
 @pytest.mark.trio
@@ -176,7 +176,7 @@ INFO | Update available: v1 -> v2
 INFO | [Restart] The "update" flow wraps up: releasing the queued workers
 INFO | [Restart] The update flow was cancelled
 INFO | [Restart] Flow "update" finished
-INFO | [Restart] Resume queue: 1 configs, starting them with a {RESUME_INTERVAL}s interval
+INFO | [Restart] Resume queue: 1 configs, starting them one by one
 INFO | [WorkerManager] Resuming worker: cfg_a
 INFO | [Restart] Worker resumed: cfg_a
 """)
@@ -434,7 +434,7 @@ ERROR | [Restart] The update could not hand the backend over: Cannot restart the
 WARNING | [Update] The update of "WorkerTestScheduler" needs a restart to be applied
 INFO | [Restart] The "update" flow wraps up: releasing the queued workers
 INFO | [Restart] Flow "update" finished
-INFO | [Restart] Resume queue: 1 configs, starting them with a {RESUME_INTERVAL}s interval
+INFO | [Restart] Resume queue: 1 configs, starting them one by one
 INFO | [WorkerManager] Resuming worker: cfg_a
 INFO | [Restart] Worker resumed: cfg_a
 """)

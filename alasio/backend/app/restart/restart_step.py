@@ -49,10 +49,17 @@ from alasio.logger import logger
 # Seconds to wait for the workers to stop gracefully before killing the
 # remaining ones
 GRACEFUL_STOP_TIMEOUT = 600.0
-# Interval between two worker starts of the resume queue (measured from the
-# previous worker_resume return; the queue exists to avoid spawning dozens of
-# processes and device connections in the same instant)
-WORKER_START_INTERVAL = 1.0
+# Seconds the resume queue waits for a started worker to report itself before
+# it starts the next config (the report is what ends a start, see
+# WorkerManager.worker_wait_started). The wait covers the start of the process
+# only: mod_entry() brings its bridge up and reports the worker before it
+# imports the mod, so a start slower than this is already rare. The queue exists
+# to avoid spawning dozens of processes and device connections in the same
+# instant and the wait is what paces it; every end of a start other than the
+# report of the worker wakes the wait at once, so the timeout only covers a
+# worker that sits in its spawn window without ever reporting, which must not
+# hold the rest of the queue
+RESUME_REPORT_TIMEOUT = 5.0
 # Orders the phase pushes of the resume queue and of the flows: a queue that
 # checks "did a flow take the backend over" and pushes inside one section can
 # never overwrite the phase a flow pushed in the meantime
@@ -626,10 +633,13 @@ class RestartStep(RestartBase):
 
     def _resume_one(self, config: str):
         """
-        Resolve one queued config and start it (blocking, thread pool only)
+        Resolve one queued config, start it and wait for its own report
+        (blocking, thread pool only)
 
         Failures are logged, not raised: one broken config must not stop the
-        queue.
+        queue. The call returns when the worker reported itself, when the entry
+        left its spawn window another way, or after RESUME_REPORT_TIMEOUT: the
+        queue never waits forever for a worker that cannot come up.
 
         Args:
             config (str): Config name
@@ -664,7 +674,21 @@ class RestartStep(RestartBase):
             # new flow (the entry belongs to its resume list from then on)
             logger.info(f'[Restart] Resume skipped: "{config}": {msg}')
             return
-        logger.info(f'[Restart] Worker resumed: {config}')
+        # the spawn returns before the process exists for the manager: the entry
+        # stays "starting" until the worker reports itself through its pipe, and
+        # that report is what ends the start
+        reported, state = manager.worker_wait_started(config, RESUME_REPORT_TIMEOUT)
+        if reported:
+            logger.info(f'[Restart] Worker resumed: {config}')
+            return
+        if state == 'starting':
+            logger.warning(f'[Restart] Resume unconfirmed after {RESUME_REPORT_TIMEOUT}s: "{config}"')
+        else:
+            # the worker left its spawn window without reporting itself: the
+            # flow in flight stopped it, or its process died. The queue moves
+            # on, the entry keeps its state in the Worker topic and a manual
+            # start stays possible
+            logger.info(f'[Restart] Resume unconfirmed: "{config}"')
 
     async def resume_queue(self):
         """
@@ -676,7 +700,8 @@ class RestartStep(RestartBase):
         the config scan (one forced refresh): a config the scan does not expose
         is dropped, never started -- starting it would recreate its file with
         the default settings, which the user never asked for. The configs start
-        one by one (WORKER_START_INTERVAL between two starts) with the phases
+        one by one, each one after the previous worker reported itself
+        (RESUME_REPORT_TIMEOUT bounds the wait), with the phases
         'resuming' / 'done' / '' on the Restart topic.
 
         The manager spawns the task when a flow releases the slot
@@ -724,8 +749,7 @@ class RestartStep(RestartBase):
         if not await self.push_queue_phase('resuming'):
             logger.info('[Restart] The resume queue was interrupted by a new flow')
             return
-        logger.info(f'[Restart] Resume queue: {len(resolved)} configs, '
-                    f'starting them with a {WORKER_START_INTERVAL}s interval')
+        logger.info(f'[Restart] Resume queue: {len(resolved)} configs, starting them one by one')
         for config in resolved:
             if SHUTDOWN_EVENT.is_set():
                 logger.info(f'[Restart] The resume queue was interrupted by the shutdown: {config}')
@@ -735,11 +759,9 @@ class RestartStep(RestartBase):
                 # collects the entries and its handover records them)
                 logger.info('[Restart] The resume queue was interrupted by a new flow')
                 return
-            # blocking (mod resolution + process spawn) -> thread pool
+            # blocking (mod resolution, process spawn and the wait for the own
+            # report of the worker) -> thread pool
             await trio.to_thread.run_sync(self._resume_one, config)
-            # interval between two starts, measured from the worker_resume
-            # return (do not wait for the worker to reach "running")
-            await trio.sleep(WORKER_START_INTERVAL)
         # the terminal phases, refused together when a flow took the backend
         # over while the last config was starting: 'done' is transient, "phase
         # present" means "a restart is in progress" for the frontend

@@ -18,7 +18,7 @@ import trio
 
 from alasio.logger import logger
 
-from .conftest import RESUME_INTERVAL, assert_logs, at, read_record, wait_log
+from .conftest import assert_logs, at, read_record, wait_log
 
 
 @pytest.mark.trio
@@ -253,7 +253,7 @@ ERROR | [Restart] The daily maintenance could not hand the backend over: Cannot 
 WARNING | [Update] The update of "WorkerTestScheduler" needs a restart to be applied
 INFO | [Restart] The "daily" flow wraps up: releasing the queued workers
 INFO | [Restart] Flow "daily" finished
-INFO | [Restart] Resume queue: 1 configs, starting them with a {RESUME_INTERVAL}s interval
+INFO | [Restart] Resume queue: 1 configs, starting them one by one
 INFO | [WorkerManager] Resuming worker: cfg_a
 INFO | [Restart] Worker resumed: cfg_a
 """)

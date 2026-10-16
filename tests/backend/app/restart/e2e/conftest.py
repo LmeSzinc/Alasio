@@ -37,12 +37,11 @@ The supervisor restart is the one action with no real implementation (a test
 process is not spawned by a supervisor): ``RestartRequest`` records it, and
 the supervisor pipe is the stand-in of ``tests/backend/conftest.py``.
 
-The runs shrink one value: the interval between two worker starts of the
-resume queue (``restart_step.WORKER_START_INTERVAL``, 1.0s in production) is
-0.05s here, see ``RESUME_INTERVAL`` and the ``resume_interval`` fixture -- the
-interval is the queue's pacing, not its behaviour, and one real second per
-config per draining run is what makes the runs slow. The log line of the
-queue prints the value of the run.
+The runs change no timing constant: the resume queue paces itself by the
+report of each worker (``WorkerManager.worker_wait_started``), and a scenario
+that needs the queue to wait closes the report gate of the peers (see
+``MockWorkerProcess.REPORT_GATE`` and the ``report_gate`` fixture), so no
+scenario has to race a fixed window.
 """
 import datetime
 import multiprocessing
@@ -121,11 +120,6 @@ BROKEN_HOST = 'broken.mock'
 # The one-shot credential token of the resume files (secrets.token_hex is
 # patched to it: the real token is random by design)
 TOKEN = '5c' * 16
-
-# Seconds between two worker starts of the resume queue in the runs: the real
-# one is 1.0s (restart_step.WORKER_START_INTERVAL), the tests shrink it, the
-# log line of the queue prints the value (see resume_interval)
-RESUME_INTERVAL = 0.05
 
 # The default target of the daily maintenance (config/deploy.yaml)
 RESTART_TIME = '03:50'
@@ -281,6 +275,14 @@ class MockWorkerProcess:
     # worker mods whose scheduler ignores the graceful stop (see
     # tests/backend/worker/worker_mods.py)
     IGNORES_GRACEFUL_STOP = ('WorkerTestInfinite',)
+    # The gate of the first report of every peer (open by default, see the
+    # report_gate fixture). A closed gate parks the report of the worker, so a
+    # scenario that needs the resume queue to wait for a worker that has not
+    # reported itself holds that moment from the test instead of racing a fixed
+    # window. The peer keeps serving the pipe while the report is parked, like
+    # a real worker that is still booting when the manager sends it a stop
+    # command
+    REPORT_GATE = threading.Event()
     # how long the peer takes to go down after the stop command: a real worker
     # needs about half a second to stop, the peer only a moment -- long enough
     # that the manager's own logs of the wait land first (its log lines are
@@ -298,15 +300,34 @@ class MockWorkerProcess:
         self._thread = None
 
     def start(self):
-        """Start the peer thread (the "worker" reports running through the pipe)"""
+        """Start the peer threads (the "worker" reports running through the pipe)"""
         self.pid = os.getpid()
+        if self.REPORT_GATE.is_set():
+            # the plain case: the report goes out before the peer serves the
+            # pipe, like a real worker announces itself while it boots
+            self._report_running()
+        else:
+            # a held report must not park the spawn itself: the queue would
+            # never see the process of the worker it waits for. Its own thread
+            # parks on the gate while the peer keeps serving the pipe
+            report = threading.Thread(target=self._report_running, name=f'{self.name}-report', daemon=True)
+            report.start()
         self._thread = threading.Thread(target=self._run, name=self.name, daemon=True)
         self._thread.start()
+
+    def _report_running(self):
+        """Report the state of the worker through the pipe (see REPORT_GATE)"""
+        try:
+            self.REPORT_GATE.wait()
+            self.conn.send_bytes(msgspec.msgpack.encode(ConfigEvent(t='WorkerState', v='running')))
+        except OSError:
+            # the manager closed the pipe while the report was parked: the
+            # entry was finalized without it
+            pass
 
     def _run(self):
         """Play the worker protocol until the manager stops the worker"""
         try:
-            self.conn.send_bytes(msgspec.msgpack.encode(ConfigEvent(t='WorkerState', v='running')))
             stopped_by_command = False
             while True:
                 try:
@@ -705,17 +726,17 @@ def at(hour, minute=0, day=13, second=0):
 # =============================================================================
 
 @pytest.fixture(autouse=True)
-def resume_interval(monkeypatch):
+def report_gate():
     """
-    Shrink the interval between two starts of the resume queue
+    Open the report gate of the peers (see MockWorkerProcess.REPORT_GATE)
 
-    The real interval is 1.0s (restart_step.WORKER_START_INTERVAL): one second
-    per config per queue is what makes a draining run slow, and the value is
-    the only thing the tests change about the queue (its phases, its log line
-    and the start path are the real ones; the line prints the interval of the
-    run, see RESUME_INTERVAL).
+    A test that wants the resume queue to wait for a worker closes the gate
+    before the backend runs: the report of that worker then arrives when the
+    test wants it, so no scenario needs a timing window to hit its race.
     """
-    monkeypatch.setattr(step_module, 'WORKER_START_INTERVAL', RESUME_INTERVAL)
+    MockWorkerProcess.REPORT_GATE.set()
+    yield
+    MockWorkerProcess.REPORT_GATE.set()
 
 
 @pytest.fixture(autouse=True)

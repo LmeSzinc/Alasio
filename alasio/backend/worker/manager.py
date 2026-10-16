@@ -37,8 +37,9 @@ from alasio.logger import logger
 #   instead of "restarting", every other behavior (park / collect / resume /
 #   refusal) is identical.
 # resuming: queued for auto-resume after the backend restart (no process yet).
-#   The new backend builds the queue with mark_resume() and starts each entry
-#   through worker_resume() with a 1s interval.
+#   The new backend builds the queue with mark_resume() and starts the entries
+#   one by one through worker_resume(), each one after the previous worker
+#   reported itself (worker_wait_started).
 WORKER_STATE = Literal[
     'idle', 'starting', 'running', 'disconnected', 'error',
     'scheduler-stopping', 'scheduler-waiting',
@@ -86,11 +87,17 @@ class WorkerState(msgspec.Struct):
     conn: Optional[Connection] = None
     running_event: threading.Event = msgspec.field(default_factory=threading.Event)
     stopped_event: threading.Event = msgspec.field(default_factory=threading.Event)
+    # Set by every state this entry goes through (see set_state), whatever the
+    # side that set it: worker_wait_started() waits on it for the entry to leave
+    # its spawn window, so an entry finalized without a report of the worker (a
+    # flow stopping it, a disconnect) is seen at once rather than at the timeout
+    changed_event: threading.Event = msgspec.field(default_factory=threading.Event)
     recv_thread: Optional[threading.Thread] = None
 
     def set_state(self, state: WORKER_STATE):
         self.state = state
         self.update = time.time()
+        self.changed_event.set()
         if state in WORKER_RUNNING_STATE:
             self.running_event.set()
             self.stopped_event.clear()
@@ -1200,6 +1207,55 @@ class WorkerManager(metaclass=Singleton):
 
         self.on_worker_info(config, f'[WorkerManager] Resuming worker: {config}')
         return self._worker_start_process(state, mod, config, child_conn, project_root, mod_root, path_main)
+
+    def worker_wait_started(self, config: str, timeout: float) -> "tuple[bool, str]":
+        """
+        Wait for a worker of its spawn window to report itself
+
+        worker_start() and worker_resume() return as soon as the process is
+        spawned: the entry stays "starting" until the worker announces a state
+        of its own through its pipe (its bridge sends "running" once it is up,
+        before the mod is imported, which is the earliest moment the process
+        exists for the manager) or the manager finalizes the entry another way
+        (a spawn failure, a disconnect, a maintenance flow stopping the workers
+        of a start still in flight). The wait blocks the calling thread, never
+        the backend loop: the resume queue calls it from a worker thread.
+
+        Every transition of the entry wakes the wait, so an entry finalized
+        without a report of the worker is seen the moment it happens: the
+        timeout only ends a wait whose entry stays in its spawn window without
+        the worker ever reporting itself.
+
+        Args:
+            config (str): Config name
+            timeout (float): Seconds to wait for the entry to leave "starting"
+
+        Returns:
+            bool: True when the worker reported a state of its own
+                ("running" / "scheduler-waiting"), False when the entry left
+                the spawn window another way or the wait expired
+            str: The state of the entry at the end of the wait
+        """
+        deadline = time.monotonic() + timeout
+        with self._lock:
+            state = self.state.get(config, None)
+            if not state:
+                return False, 'idle'
+            changed = state.changed_event
+            changed.clear()
+            current = state.state
+        while current == 'starting':
+            # the deadline is the only end left for an entry that sits in its
+            # spawn window while its worker never reports
+            if not changed.wait(max(deadline - time.monotonic(), 0.)):
+                break
+            with self._lock:
+                # read the state and clear the event in one lock hold: a state
+                # set in between is seen by this read, a later one by the wait
+                # above, never lost
+                current = state.state
+                changed.clear()
+        return current in WORKER_STATE_ALLOWS, current
 
     # ---------------- maintenance flows (restart / update / daily) ----------------
 

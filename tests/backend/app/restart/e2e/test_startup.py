@@ -13,6 +13,7 @@ new flow.
 Every test asserts the complete log of its run, see the conftest docstring.
 """
 import builtins
+import threading
 
 import pytest
 import trio
@@ -20,9 +21,12 @@ import trio
 from alasio.backend.app.restart import restart_step as step_module
 from alasio.backend.app.restart.restart_base import STARTING_UP, FlowRefused
 from alasio.backend.app.restart.resume_file import RESUME_TOKEN_ENV
+from alasio.backend.topic import worker as worker_module
 from alasio.logger import logger
 
-from .conftest import RESUME_INTERVAL, assert_logs, at, credential_of, read_record, wait_log, write_resume
+from .conftest import (
+    MockWorkerProcess, assert_logs, at, credential_of, read_record, rendered, wait_log, wait_until, write_resume
+)
 
 
 @pytest.mark.trio
@@ -138,12 +142,13 @@ INFO | [Restart] Resume intent accepted: 1 configs, 0 actions, owner=restart, up
 INFO | [Restart] Resume queue recorded: ['cfg_a']
 INFO | [Restart] The previous process checked less than 300s ago: the startup runs no full update
 INFO | [Restart] Flow "startup" finished
-INFO | [Restart] Resume queue: 1 configs, starting them with a {RESUME_INTERVAL}s interval
+INFO | [Restart] Resume queue: 1 configs, starting them one by one
 INFO | [WorkerManager] Resuming worker: cfg_a
 INFO | [Restart] Worker resumed: cfg_a
 """)
-            # the queue does not wait for the worker to report running: the new
-            # process of the chain reaches the running state on its own
+            # the queue waited for the report of the worker (the log above ends
+            # with it): the new process of the chain reached the running state
+            # on its own
             await second.wait_running('cfg_a')
             nursery.cancel_scope.cancel()
 
@@ -169,7 +174,7 @@ INFO | [Restart] Resume intent accepted: 1 configs, 0 actions, owner=restart, up
 INFO | [Restart] Resume queue recorded: ['cfg_a']
 INFO | [Restart] The previous process checked less than 300s ago: the startup runs no full update
 INFO | [Restart] Flow "startup" finished
-INFO | [Restart] Resume queue: 1 configs, starting them with a {RESUME_INTERVAL}s interval
+INFO | [Restart] Resume queue: 1 configs, starting them one by one
 INFO | [WorkerManager] Resuming worker: cfg_a
 INFO | [Restart] Worker resumed: cfg_a
 """)
@@ -205,7 +210,7 @@ INFO | Resetting files to "{mod_root}"
 INFO | Reset done
 INFO | [Update] Full update finished, changed mods: []
 INFO | [Restart] Flow "startup" finished
-INFO | [Restart] Resume queue: 1 configs, starting them with a {RESUME_INTERVAL}s interval
+INFO | [Restart] Resume queue: 1 configs, starting them one by one
 INFO | [WorkerManager] Resuming worker: cfg_a
 INFO | [Restart] Worker resumed: cfg_a
 """)
@@ -368,7 +373,7 @@ WARNING | [Restart] Unknown resume action ignored: no-such-action
 INFO | [Restart] Resume queue recorded: ['cfg_a']
 INFO | [Restart] The previous process checked less than 300s ago: the startup runs no full update
 INFO | [Restart] Flow "startup" finished
-INFO | [Restart] Resume queue: 1 configs, starting them with a {RESUME_INTERVAL}s interval
+INFO | [Restart] Resume queue: 1 configs, starting them one by one
 INFO | [WorkerManager] Resuming worker: cfg_a
 INFO | [Restart] Worker resumed: cfg_a
 """)
@@ -380,24 +385,35 @@ INFO | [Restart] Worker resumed: cfg_a
 async def test_the_resume_queue_stops_when_a_new_flow_takes_the_backend_over(make_backend, monkeypatch):
     """
     The resume queue drains the configs of the new process; a user restart
-    claims the backend while the queue runs: the queue stops -- its remaining
-    entries are collected by the new flow and its handover records them for
-    the process after it
+    claims the backend while the queue is inside the start of the second config:
+    the new flow collects that entry (its resume list owns it from then on), the
+    start finds a worker no queue may resume any more and is skipped, and the
+    handover records both configs for the process after it
     """
     backend = make_backend(configs={'cfg_a': 'WorkerTestScheduler', 'cfg_b': 'WorkerTestScheduler'})
     await backend.install('WorkerTestScheduler')
     credential = await write_resume(backend, ['cfg_a', 'cfg_b'], updated_all_at=at(2, 0))
     monkeypatch.setenv(RESUME_TOKEN_ENV, credential)
-    # the test claims the restart inside the interval between the two starts of
-    # the queue: it needs the real one (the runs shrink it otherwise)
-    monkeypatch.setattr(step_module, 'WORKER_START_INTERVAL', 1.0)
+    # the queue is held inside the start of the second config (the test owns the
+    # moment its mod resolves): no timing window is guessed
+    held = threading.Event()
+    real_get_mod = worker_module.get_mod
+
+    def get_mod(config):
+        if config == 'cfg_b':
+            held.wait()
+        return real_get_mod(config)
+
+    monkeypatch.setattr(worker_module, 'get_mod', get_mod)
     with logger.mock_capture_writer() as capture:
         async with trio.open_nursery() as nursery:
             nursery.start_soon(backend.manager.run)
-            # the queue is between two configs (the interval between starts)
-            await wait_log(capture, 'Resume queue: 2 configs')
+            # the first config is started and reported, the queue is inside the
+            # start of the second one
+            await wait_log(capture, 'Worker resumed: cfg_a')
             backend.manager.restart()
             await wait_log(capture, 'Flow "restart" finished')
+            held.set()
             await backend.wait_quiet()
             assert_logs(capture, f"""\
 INFO | [Restart] Flow "init" accepted
@@ -406,7 +422,7 @@ INFO | [Restart] Resume intent accepted: 2 configs, 0 actions, owner=restart, up
 INFO | [Restart] Resume queue recorded: ['cfg_a', 'cfg_b']
 INFO | [Restart] The previous process checked less than 300s ago: the startup runs no full update
 INFO | [Restart] Flow "startup" finished
-INFO | [Restart] Resume queue: 2 configs, starting them with a 1.0s interval
+INFO | [Restart] Resume queue: 2 configs, starting them one by one
 INFO | [WorkerManager] Resuming worker: cfg_a
 INFO | [Restart] Worker resumed: cfg_a
 INFO | [Restart] Flow "restart" accepted
@@ -417,7 +433,94 @@ INFO | [Restart] Resume credential announced to the supervisor
 INFO | [Restart] Resume file written: {backend.resume_file} (owner=restart, 2 configs, 0 actions, updated_all_at={at(2, 0):.0f})
 INFO | [Restart] Handover of the "restart" flow (user request): 2 configs to resume
 INFO | [Restart] Flow "restart" finished
-INFO | [Restart] The resume queue was interrupted by a new flow
+INFO | [Restart] Resume skipped: "cfg_b": Worker is not awaiting auto-resume: "cfg_b"
 """)
             assert read_record(backend).configs == ['cfg_a', 'cfg_b']
             nursery.cancel_scope.cancel()
+
+
+@pytest.mark.trio
+async def test_the_queue_waits_for_each_worker_to_report_itself(make_backend, monkeypatch):
+    """
+    Every start of the resume queue ends with the report of the worker itself
+    (the report is what the manager sees the process through): the second
+    config of the queue starts only after the first worker reported itself
+    """
+    backend = make_backend(configs={'cfg_a': 'WorkerTestScheduler', 'cfg_b': 'WorkerTestScheduler'})
+    await backend.install('WorkerTestScheduler')
+    credential = await write_resume(backend, ['cfg_a', 'cfg_b'], updated_all_at=at(2, 0))
+    monkeypatch.setenv(RESUME_TOKEN_ENV, credential)
+    # the test holds the report of the first worker (see REPORT_GATE): the queue
+    # parks in the wait of the start of "cfg_a" and the moment the report
+    # arrives is the test's to choose
+    MockWorkerProcess.REPORT_GATE.clear()
+    try:
+        with logger.mock_capture_writer() as capture:
+            async with trio.open_nursery() as nursery:
+                nursery.start_soon(backend.manager.run)
+                await wait_log(capture, 'Resuming worker: cfg_a')
+                # the queue is parked in the wait of the report of the worker: the
+                # entry is the "starting" the manager marked and the second config
+                # of the queue did not start while the report was missing
+                await wait_until(lambda: backend.worker_manager.state['cfg_a'].state == 'starting')
+                assert 'Resuming worker: cfg_b' not in rendered(capture)
+                MockWorkerProcess.REPORT_GATE.set()
+                await wait_log(capture, 'Resuming worker: cfg_b')
+                await backend.wait_quiet()
+                assert_logs(capture, f"""\
+INFO | [Restart] Flow "init" accepted
+INFO | [Restart] Flow "startup" accepted
+INFO | [Restart] Resume intent accepted: 2 configs, 0 actions, owner=restart, updated_all_at={at(2, 0):.0f}
+INFO | [Restart] Resume queue recorded: ['cfg_a', 'cfg_b']
+INFO | [Restart] The previous process checked less than 300s ago: the startup runs no full update
+INFO | [Restart] Flow "startup" finished
+INFO | [Restart] Resume queue: 2 configs, starting them one by one
+INFO | [WorkerManager] Resuming worker: cfg_a
+INFO | [Restart] Worker resumed: cfg_a
+INFO | [WorkerManager] Resuming worker: cfg_b
+INFO | [Restart] Worker resumed: cfg_b
+""")
+                nursery.cancel_scope.cancel()
+    finally:
+        # a report the test never released must not leave the queue waiting for
+        # it: the run would pay the whole RESUME_REPORT_TIMEOUT before it ends
+        MockWorkerProcess.REPORT_GATE.set()
+
+
+@pytest.mark.trio
+async def test_the_queue_wakes_the_moment_its_worker_is_taken_over(make_backend, monkeypatch):
+    """
+    A user restart claims the backend while the resume queue waits for the report
+    of a worker: the stop the flow sends moves the entry, the state wakes the
+    wait at once -- the worker never reported, the queue stops at the stop of
+    the flow instead of sitting out the timeout of the wait
+    """
+    backend = make_backend(configs={'cfg_a': 'WorkerTestScheduler', 'cfg_b': 'WorkerTestScheduler'})
+    await backend.install('WorkerTestScheduler')
+    credential = await write_resume(backend, ['cfg_a', 'cfg_b'], updated_all_at=at(2, 0))
+    monkeypatch.setenv(RESUME_TOKEN_ENV, credential)
+    # the first worker never reports (its report is held): the queue is parked in
+    # the wait of the start of "cfg_a" when the flow takes the backend over
+    MockWorkerProcess.REPORT_GATE.clear()
+    try:
+        with logger.mock_capture_writer() as capture:
+            async with trio.open_nursery() as nursery:
+                nursery.start_soon(backend.manager.run)
+                await wait_log(capture, 'Resuming worker: cfg_a')
+                backend.manager.restart()
+                # the wake-up is part of the stop of the flow: a wait that ended
+                # by its timeout (RESUME_REPORT_TIMEOUT, 5s) would not make this
+                # bound, and the timeout line is asserted absent below
+                await wait_log(capture, 'Resume unconfirmed: "cfg_a"', timeout=1.0)
+                await wait_log(capture, 'The resume queue was interrupted by a new flow')
+                await wait_log(capture, 'Flow "restart" finished')
+                await backend.wait_quiet()
+                # the queue wakes inside the stop of the flow, so the two write
+                # their lines as it happens: the lines are asserted, not how the
+                # two actors interleave them
+                assert 'Resume unconfirmed after' not in rendered(capture)
+                assert read_record(backend).configs == ['cfg_a', 'cfg_b']
+                nursery.cancel_scope.cancel()
+    finally:
+        # the report the test held leaves no peer of the run parked on the gate
+        MockWorkerProcess.REPORT_GATE.set()

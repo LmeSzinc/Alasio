@@ -36,6 +36,7 @@ class FakeWorkerManager:
         self.begin_error = None
         self.wait_result = (True, ['cfg_running'])
         self.queued = []
+        self.waited = []
         self.parked = []
         self.resumed = []
         self.killed = []
@@ -85,6 +86,10 @@ class FakeWorkerManager:
             # a new flow took the backend over while the queue was draining
             self.restarting = True
         return True, ''
+
+    def worker_wait_started(self, config, timeout):
+        self.waited.append(config)
+        return True, 'running'
 
     def worker_force_kill(self, config, restart_resume=False):
         self.killed.append(config)
@@ -397,7 +402,6 @@ class TestResumeQueue:
 
     @pytest.mark.trio
     async def test_starts_the_queued_configs(self, monkeypatch):
-        monkeypatch.setattr(step_module, 'WORKER_START_INTERVAL', 0.01)
         monkeypatch.setattr(step_module, 'ConfigScanSource', FakeScan)
         monkeypatch.setattr('alasio.backend.topic.worker.get_mod', lambda config: f'mod_{config}')
         FakeScan.data = {'cfg_a': True, 'cfg_b': True}
@@ -406,6 +410,8 @@ class TestResumeQueue:
         await manager.resume_queue()
         assert manager.worker_manager.resumed == [('mod_cfg_a', 'cfg_a'), ('mod_cfg_b', 'cfg_b')]
         assert manager.worker_manager.dropped == []
+        # every start ends with the worker reporting itself
+        assert manager.worker_manager.waited == ['cfg_a', 'cfg_b']
         # one forced refresh decides whether the configs exist
         assert FakeScan.forces == [True]
         # the terminal phases are pushed (the topic is cleared at the end)
@@ -413,7 +419,6 @@ class TestResumeQueue:
 
     @pytest.mark.trio
     async def test_missing_configs_are_dropped(self, monkeypatch):
-        monkeypatch.setattr(step_module, 'WORKER_START_INTERVAL', 0.01)
         monkeypatch.setattr(step_module, 'ConfigScanSource', FakeScan)
         monkeypatch.setattr('alasio.backend.topic.worker.get_mod', lambda config: f'mod_{config}')
         FakeScan.data = {'cfg_a': True}
@@ -425,7 +430,6 @@ class TestResumeQueue:
 
     @pytest.mark.trio
     async def test_a_new_flow_interrupts_the_queue(self, monkeypatch):
-        monkeypatch.setattr(step_module, 'WORKER_START_INTERVAL', 0.01)
         monkeypatch.setattr(step_module, 'ConfigScanSource', FakeScan)
         monkeypatch.setattr('alasio.backend.topic.worker.get_mod', lambda config: f'mod_{config}')
         FakeScan.data = {'cfg_a': True, 'cfg_b': True}
@@ -439,7 +443,6 @@ class TestResumeQueue:
 
     @pytest.mark.trio
     async def test_scan_failure_falls_back_to_the_current_data(self, monkeypatch):
-        monkeypatch.setattr(step_module, 'WORKER_START_INTERVAL', 0.01)
         monkeypatch.setattr('alasio.backend.topic.worker.get_mod', lambda config: f'mod_{config}')
 
         class FailingScan(FakeScan):
