@@ -153,7 +153,11 @@ class AlasioConfigBaseAccess(AlasioConfigGenerated):
         self.is_template_config = config_name.startswith("template")
         if self.is_template_config:
             # For dev tools
-            logger.info("Using template config, which is read only")
+            # The message is for the user of the backend, a test or a dev tool
+            # without a backend does not need it
+            from alasio.backend.worker.bridge import BackendBridge
+            if BackendBridge().inited:
+                logger.info("Using template config, which is read only")
             self.auto_save = False
 
         self.init_task()
@@ -263,8 +267,19 @@ class AlasioConfigBaseAccess(AlasioConfigGenerated):
             logger.warning(f'Loading config="{self.config_name}" mod="{mod_name}" as mod="{self.mod.name}", '
                            f'maybe wrong config?')
 
-    def init_task(self):
+    def init_task(self, task=None):
+        """
+        Load the config of the current task
+
+        Args:
+            task (str): Task to bind, None to keep the task of the config
+        """
         with self._lock:
+            if task is not None and task != self.task:
+                self.task = task
+                # The cached groups belong to the previous task
+                self.release()
+
             if self.is_template_config:
                 return
 
