@@ -1,14 +1,44 @@
-import json
+"""
+Install a wheel file into a python environment, the way pip installs one.
+
+The files of a wheel are placed by PEP 427: the members below the root of
+the wheel (the modules and the .dist-info directory) go to the site-packages
+directory of the environment, the members of the .data directory go to the
+locations of its install scheme (Scripts, Include, the root of the
+environment). The installation is then written the way pip writes it: the
+.py files are compiled to .pyc, an INSTALLER file and a RECORD listing every
+installed file are written. The distribution is a PEP 376 installation, pip
+can uninstall it ("pip uninstall", "pip show -f"), importlib.metadata and
+"pip list" read it, and an uninstallation removes exactly the files of the
+RECORD.
+
+The scope is one local wheel file at a time, on purpose: no requirement is
+resolved, no index is queried, no dependency of the distribution is checked,
+and the wheel is not checked against the environment it is installed to (the
+platform tags of its filename, its WHEEL metadata). The caller decides what
+is installed where, the installer reproduces the result of the installation
+only, see the known limitations of SimplePip.
+
+Usage:
+    python -m alasio.deploy.simple_pip.pip_install demo-1.0-py3-none-any.whl
+    python -m alasio.deploy.simple_pip.pip_install --python D:/toolkit/python.exe demo-1.0-py3-none-any.whl
+
+    from alasio.deploy.simple_pip.pip_install import SimplePip
+    pip = SimplePip.from_python(python_executable)
+    pip.install(wheel)
+"""
+import argparse
 import os
 import py_compile
 import stat
+import sys
 import zipfile
 from importlib.util import cache_from_source
 
 from alasio.backport import removeprefix, removesuffix
-from alasio.deploy_dev.simple_pip.whl_record import RecordEntry, RecordManager
+from alasio.deploy.simple_pip.python_probe import PythonProbe, Scheme, prefix_of
+from alasio.deploy.simple_pip.whl_record import RecordEntry, RecordManager
 from alasio.ext.cache import cached_property
-from alasio.ext.concurrent.cmd import CmdlineError, run_cmd
 from alasio.ext.concurrent.threadpool import THREAD_POOL
 from alasio.ext.path import PathStr
 from alasio.ext.path.calc import to_posix
@@ -17,38 +47,6 @@ from alasio.logger import logger
 # Categories of the .data directory of a wheel, PEP 427 maps the files of a
 # wheel to the keys of the install scheme of the environment. Same keys as pip.
 DATA_CATEGORIES = ('purelib', 'platlib', 'scripts', 'data', 'headers')
-
-# Conventions of the install scheme of Windows (Lib/site-packages, Scripts,
-# Include). A module constant on purpose: os.name drives the flavour pathlib
-# instantiates on every Path() call, patching it breaks pathlib while the
-# patch is active, tests patch this constant to cover both layouts
-WINDOWS = os.name == 'nt'
-
-# Debian based distributions name the site-packages directory dist-packages
-SITE_PACKAGES_NAMES = ('site-packages', 'dist-packages')
-
-# Tag of the probe output, the command line environment of the user prints
-# random output as well, only the lines with the tag are read
-PROBE_TAG = 'xxxsitepackage'
-
-# The probe asks the interpreter for the paths of its environment in one call:
-#   - the site-packages directories (site.getsitepackages)
-#   - the prefix of the environment (sys.prefix), the bound of the directories
-#     an uninstallation may remove. Not the directory of the executable: a
-#     virtual environment keeps its python executable in Scripts/ on Windows,
-#     in bin/ on Linux
-#   - the install scheme (sysconfig.get_paths), the truth for the locations of
-#     the files of a wheel, the layout of the environment is not re-derived
-#     here. In a virtual environment pip overrides the include directory, the
-#     include directory of the interpreter belongs to the base environment,
-#     the override is applied the same way (pip's locations/_sysconfig.py)
-PROBE_CODE = """\
-import json, os, site, sys, sysconfig
-scheme = sysconfig.get_paths()
-if sys.prefix != getattr(sys, 'base_prefix', sys.prefix) or hasattr(sys, 'real_prefix'):
-    scheme['include'] = os.path.join(sys.prefix, 'include', 'site', 'python%d.%d' % sys.version_info[:2])
-print('{tag}', json.dumps(dict(site_packages=site.getsitepackages(), prefix=sys.prefix, scheme=scheme)))
-""".format(tag=PROBE_TAG)
 
 
 def assert_inside(root, path):
@@ -106,193 +104,6 @@ def zip_item_is_executable(member):
     """
     mode = member.external_attr >> 16
     return bool(mode and stat.S_ISREG(mode) and mode & 0o111)
-
-
-def prefix_of(site_packages):
-    """
-    Root of the python environment, derived from the site-packages layout.
-
-    Windows:     <prefix>/Lib/site-packages
-    Linux/macOS: <prefix>/lib/python3.X/site-packages
-
-    Only the default install scheme is supported, the derivation is the
-    fallback when the prefix of the interpreter is not known, from_python()
-    probes the sys.prefix of the interpreter instead.
-
-    Args:
-        site_packages (str): Path of the site-packages directory, posix style
-
-    Returns:
-        PathStr: Path of the environment root
-    """
-    site_packages = PathStr.new(site_packages)
-    if WINDOWS:
-        return site_packages.uppath(2)
-    else:
-        return site_packages.uppath(3)
-
-
-class Scheme:
-    """
-    Install scheme of a python environment, the target of the categories of
-    the .data directory of a wheel (PEP 427).
-
-    The paths are the paths of the environment itself, sysconfig.get_paths()
-    of the interpreter (see probe_python), not paths re-derived from the
-    layout of site-packages: a virtual environment keeps its python
-    executable in Scripts/ on Windows and in bin/ on Linux, the include
-    directory of the interpreter belongs to the base environment, and
-    sysconfig is the only one knowing the real locations.
-
-    Attributes:
-        purelib (PathStr): Directory of the pure python packages
-        platlib (PathStr): Directory of the platform specific packages
-        scripts (PathStr): Directory of the scripts
-        data (PathStr): Root of the environment
-        include (PathStr): Directory of the headers, the headers of a
-            distribution go to a directory named after it below it, pip does
-            the same
-    """
-
-    def __init__(self, purelib, platlib, scripts, data, include):
-        """
-        Args:
-            purelib (str | PathStr): Directory of the pure python packages
-            platlib (str | PathStr): Directory of the platform specific packages
-            scripts (str | PathStr): Directory of the scripts
-            data (str | PathStr): Root of the environment
-            include (str | PathStr): Directory of the headers
-        """
-        self.purelib = PathStr.new(purelib)
-        self.platlib = PathStr.new(platlib)
-        self.scripts = PathStr.new(scripts)
-        self.data = PathStr.new(data)
-        self.include = PathStr.new(include)
-
-    def __repr__(self):
-        return (
-            f'<Scheme purelib={self.purelib} platlib={self.platlib} scripts={self.scripts} '
-            f'data={self.data} include={self.include}>'
-        )
-
-    def dir_of(self, category, package_name):
-        """
-        Directory of a category of the .data directory of a wheel.
-
-        Args:
-            category (str): Category of the .data directory, PEP 427
-            package_name (str): Name of the distribution, the headers of a
-                distribution go to their own directory
-
-        Returns:
-            PathStr: Directory to install the files of the category to
-        """
-        if category == 'purelib':
-            return self.purelib
-        elif category == 'platlib':
-            return self.platlib
-        elif category == 'scripts':
-            return self.scripts
-        elif category == 'headers':
-            return self.include / package_name
-        else:
-            # data
-            return self.data
-
-    @classmethod
-    def from_dict(cls, payload):
-        """
-        Build the scheme probed from an interpreter.
-
-        Args:
-            payload (dict | None): The "scheme" of the probe output
-
-        Returns:
-            Scheme | None: None if the payload does not hold every path of
-                the scheme, the caller falls back to from_layout()
-        """
-        if not isinstance(payload, dict):
-            return None
-        keys = ('purelib', 'platlib', 'scripts', 'data', 'include')
-        if not all(isinstance(payload.get(key), str) and payload[key] for key in keys):
-            return None
-        return cls(**{key: payload[key] for key in keys})
-
-    @classmethod
-    def from_layout(cls, site_packages, prefix=None):
-        """
-        Build the scheme of the default install scheme from the layout of
-        site-packages, the fallback when no interpreter was probed.
-
-        Windows:     <prefix>/Lib/site-packages, <prefix>/Scripts,
-                     <prefix>/Include
-        Linux/macOS: <prefix>/lib/python3.X/site-packages, <prefix>/bin,
-                     <prefix>/include/python3.X
-
-        The include directory of a virtual environment is not reproduced,
-        pip uses <prefix>/include/site/python3.X there, the interpreter has
-        to be probed to know it.
-
-        Args:
-            site_packages (str | PathStr): Path of the site-packages directory
-            prefix (str | PathStr): Root of the environment. Defaults to
-                None, derived from the layout of site-packages (see prefix_of)
-
-        Returns:
-            Scheme:
-        """
-        site_packages = PathStr.new(site_packages)
-        prefix = prefix_of(site_packages) if prefix is None else PathStr.new(prefix)
-        if WINDOWS:
-            scripts = prefix / 'Scripts'
-            include = prefix / 'Include'
-        else:
-            scripts = prefix / 'bin'
-            # <prefix>/lib/python3.X/site-packages -> python3.X
-            version = site_packages.uppath(1).name
-            include = prefix / 'include' / version if version.startswith('python') else prefix / 'include'
-        return cls(
-            purelib=site_packages,
-            platlib=site_packages,
-            scripts=scripts,
-            data=prefix,
-            include=include,
-        )
-
-
-def probe_python(python_executable):
-    """
-    Ask a python interpreter for the paths of its environment, in one call.
-
-    Returns:
-        dict: "site_packages" (list[str]), "prefix" (str) and "scheme"
-            (dict[str, str]), the paths of the interpreter itself
-
-    Raises:
-        ValueError: If the interpreter can not be run, or its output can not
-            be read
-    """
-    # The output of the probe is filtered by the tag, the command line
-    # environment of the user may print random output as well
-    try:
-        result = run_cmd([python_executable, '-c', PROBE_CODE]).stdout
-    except CmdlineError as e:
-        raise ValueError(f'Failed to probe {python_executable}: {e}')
-
-    # xxxsitepackage {"site_packages": ["xxx\\envs\\alas2026\\Lib\\site-packages"], "prefix": "xxx\\envs\\alas2026", "scheme": {...}}
-    for row in result.splitlines():
-        if not row.startswith(PROBE_TAG):
-            continue
-        row = removeprefix(row, PROBE_TAG).strip()
-        try:
-            info = json.loads(row)
-        except json.JSONDecodeError:
-            raise ValueError(f'Invalid probe return: "{row}"')
-        if not isinstance(info, dict):
-            raise ValueError(f'Invalid probe return: "{row}"')
-        return info
-
-    raise ValueError(f'Failed to probe {python_executable}')
 
 
 class DistInfo:
@@ -546,9 +357,9 @@ class SimplePip:
         """
         Create a SimplePip of the environment of a python executable.
 
-        The interpreter is probed once for the paths of its own environment:
-        the site-packages directory to install to, the prefix of the
-        environment and its install scheme.
+        The interpreter is probed once for the paths of its own environment
+        (PythonProbe): the site-packages directory to install to, the prefix
+        of the environment and its install scheme.
 
         Args:
             python_executable (str): Path of the python executable of the
@@ -561,25 +372,8 @@ class SimplePip:
             ValueError: If the interpreter can not be probed, or its output
                 holds no site-packages directory
         """
-        info = probe_python(python_executable)
-        prefix = info.get('prefix')
-        if not isinstance(prefix, str) or not prefix:
-            prefix = None
-        scheme = Scheme.from_dict(info.get('scheme'))
-
-        for path in info.get('site_packages') or []:
-            if not isinstance(path, str):
-                continue
-            if not path.endswith(SITE_PACKAGES_NAMES):
-                continue
-            return cls(path, prefix=prefix, scheme=scheme)
-
-        # The listing of the interpreter named no site-packages directory,
-        # the purelib directory of its scheme is the one
-        if scheme is not None:
-            return cls(scheme.purelib, prefix=prefix, scheme=scheme)
-
-        raise ValueError(f'Failed to get sitepackage from {python_executable}')
+        probe = PythonProbe.from_python(python_executable)
+        return cls(probe.site_packages, prefix=probe.prefix, scheme=probe.scheme)
 
     @property
     def dist_info(self) -> "dict[str, PathStr]":
@@ -862,6 +656,60 @@ class SimplePip:
         record.add_content(rel_pyc, None)
 
 
+def main():
+    """
+    Command line entry, install the wheels into the environment of a python
+    interpreter.
+
+    The environment is the one of the running interpreter unless another one
+    is named: --python probes the environment of that interpreter (see
+    PythonProbe.from_python), --site-packages installs into the given
+    site-packages directory without probing an interpreter, e.g. for a tree
+    of an other device whose python can not be run.
+
+    Raises:
+        SystemExit: If the arguments are invalid, the target environment can
+            not be read, or a wheel can not be installed
+    """
+    parser = argparse.ArgumentParser(
+        description='Install a local wheel into the environment of a python interpreter',
+    )
+    parser.add_argument(
+        'wheel', nargs='+',
+        help='path of the .whl file to install, one or more',
+    )
+    target = parser.add_mutually_exclusive_group()
+    target.add_argument(
+        '--python',
+        help='python executable of the environment to install to, default to the running interpreter',
+    )
+    target.add_argument(
+        '--site-packages',
+        help='site-packages directory of the environment to install to, no interpreter is probed',
+    )
+    parser.add_argument(
+        '--prefix',
+        help='root of the environment to install to, only with --site-packages, '
+             'derived from the layout of site-packages by default',
+    )
+    args = parser.parse_args()
+    if args.prefix and not args.site_packages:
+        parser.error('--prefix requires --site-packages')
+
+    try:
+        if args.site_packages:
+            pip = SimplePip(args.site_packages, prefix=args.prefix)
+        else:
+            pip = SimplePip.from_python(args.python or sys.executable)
+    except ValueError as e:
+        parser.error(str(e))
+
+    for wheel in args.wheel:
+        try:
+            pip.install(wheel)
+        except (ValueError, FileNotFoundError, zipfile.BadZipFile) as e:
+            parser.error(f'{wheel}: {e}')
+
+
 if __name__ == '__main__':
-    self = SimplePip.from_python(r'E:\ProgramFiles\Anaconda3\envs\alas2026\python.exe')
-    self.install(r'E:\ProgramData\Pycharm\Alasio\dist\alasio-0.1.0-py3-none-any.whl')
+    main()

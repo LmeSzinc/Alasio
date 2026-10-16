@@ -1,7 +1,6 @@
 import pytest
 
-from alasio.deploy_dev.simple_pip import RecordManager, sha256_checksum
-from alasio.deploy_dev.simple_pip.whl_record import RecordEntry
+from alasio.deploy.simple_pip.whl_record import RecordEntry, RecordManager, sha256_checksum
 from alasio.testing.filesystem import fs  # noqa: F401
 
 

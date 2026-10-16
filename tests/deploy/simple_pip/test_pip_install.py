@@ -8,14 +8,14 @@ from importlib.util import cache_from_source
 
 import pytest
 
-from alasio.deploy_dev.simple_pip import DistInfo, SimplePip
-from alasio.deploy_dev.simple_pip.simple_pip import Scheme, probe_python
+from alasio.deploy.simple_pip.pip_install import DistInfo, SimplePip
+from alasio.deploy.simple_pip.python_probe import Scheme, probe_python
 from alasio.ext.concurrent.cmd import CmdlineError, CmdlineResultStr
 from alasio.ext.path import PathStr
 from alasio.ext.path.calc import to_posix
 from alasio.logger import logger
 from alasio.testing.filesystem import fs  # noqa: F401
-from tests.deploy_dev.simple_pip.conftest import (  # noqa: F401
+from tests.deploy.simple_pip.conftest import (  # noqa: F401
     abs_path, build_wheel, create_dist, list_files, list_folders, pyc_compile, sha256_record, site_packages
 )
 
@@ -113,7 +113,7 @@ class TestFromPython:
         def run_cmd(cmd, **kwargs):
             return CmdlineResultStr(cmd=list(cmd), returncode=0, stdout=stdout)
 
-        monkeypatch.setattr('alasio.deploy_dev.simple_pip.simple_pip.run_cmd', run_cmd)
+        monkeypatch.setattr('alasio.deploy.simple_pip.python_probe.run_cmd', run_cmd)
 
     def test_from_python(self, monkeypatch):
         """The site-packages entry is used, the random output of the environment is ignored."""
@@ -214,7 +214,7 @@ class TestFromPython:
         def run_cmd(cmd, **kwargs):
             raise CmdlineError(msg='Command not found: not_exists.exe', cmd=list(cmd))
 
-        monkeypatch.setattr('alasio.deploy_dev.simple_pip.simple_pip.run_cmd', run_cmd)
+        monkeypatch.setattr('alasio.deploy.simple_pip.python_probe.run_cmd', run_cmd)
         with pytest.raises(ValueError, match='Failed to probe not_exists.exe'):
             SimplePip.from_python('not_exists.exe')
 
@@ -302,7 +302,7 @@ class TestScheme:
     ])
     def test_scheme_from_layout(self, monkeypatch, layout, site_rel, expected):
         """The fallback derives the default scheme from the layout of site-packages."""
-        monkeypatch.setattr('alasio.deploy_dev.simple_pip.simple_pip.WINDOWS', layout == 'nt')
+        monkeypatch.setattr('alasio.deploy.simple_pip.python_probe.WINDOWS', layout == 'nt')
         scheme = Scheme.from_layout(site_rel)
         assert {
             'purelib': scheme.purelib, 'platlib': scheme.platlib,
@@ -521,7 +521,7 @@ demo-1.0.dist-info/top_level.txt,sha256=65wmuu5H8Z5Jk6d7ypNtD_CeNVqC09t5vxVOv_Go
     def test_install_data_categories(self, fs, pyc_compile, monkeypatch, layout, site_rel, category,
                                      member, target_rel, record_rel, ):
         """The .data directories are installed to the locations of the scheme of pip."""
-        monkeypatch.setattr('alasio.deploy_dev.simple_pip.simple_pip.WINDOWS', layout == 'nt')
+        monkeypatch.setattr('alasio.deploy.simple_pip.python_probe.WINDOWS', layout == 'nt')
         site = abs_path(fs, site_rel)
         wheel = build_wheel('/w/demo-1.0-py3-none-any.whl', {
             f'demo-1.0.data/{category}/{member}': b'demo data\n',

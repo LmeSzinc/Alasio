@@ -41,7 +41,7 @@ from tests.deploy_dev.pack_server.test_fetch_wheel import MockMirror
 # starlette about the timeout argument is noise here, see the mock
 pytestmark = pytest.mark.filterwarnings(
     'ignore::starlette.exceptions.StarletteDeprecationWarning')
-from tests.deploy_dev.simple_pip.conftest import build_wheel, site_packages
+from tests.deploy.simple_pip.conftest import build_wheel, site_packages
 
 # the dependency files of the mock repo: httpx is pinned to a new version on
 # every commit, demo is pinned but not a managed name of the config, so it is

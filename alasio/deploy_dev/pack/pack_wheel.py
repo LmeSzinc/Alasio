@@ -74,11 +74,11 @@ from msgspec import Struct
 
 from alasio.backport import removeprefix, removesuffix
 from alasio.deploy.pack.pack_model import FileInfo
+from alasio.deploy.simple_pip.pip_install import DATA_CATEGORIES, SimplePip, zip_item_is_executable
+from alasio.deploy.simple_pip.whl_record import RecordManager
 from alasio.deploy_dev.pack._pack_cache import PACK_POOL, PackCache, PlainCache
 from alasio.deploy_dev.pack.encode_base import PACK_AREA, PACK_AREA_DIR, PackEncodeBase
 from alasio.deploy_dev.pack.pack_full import PackFull, _dfs_path_key, apply_encoding
-from alasio.deploy_dev.simple_pip.simple_pip import DATA_CATEGORIES, SimplePip, zip_item_is_executable
-from alasio.deploy_dev.simple_pip.whl_record import RecordManager
 from alasio.ext.cache import cached_property
 from alasio.ext.path import PathStr
 

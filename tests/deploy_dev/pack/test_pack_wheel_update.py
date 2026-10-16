@@ -29,8 +29,8 @@ from alasio.deploy_dev.pack.pack_wheel_update import PackWheelUpdate, WheelDiff
 from alasio.ext.path.atomic import file_read_bytes
 from alasio.logger import logger
 from alasio.testing.filesystem import fs  # noqa: F401
+from tests.deploy.simple_pip.conftest import build_wheel, site_packages
 from tests.deploy_dev.pack.conftest import MockServerFile
-from tests.deploy_dev.simple_pip.conftest import build_wheel, site_packages
 
 # a module big enough that a zstd patch from the old content wins the encoding
 # of the modified record

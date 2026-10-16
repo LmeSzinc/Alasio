@@ -30,8 +30,8 @@ from alasio.ext.path.atomic import file_read_bytes, file_write
 from alasio.ext.path.iter import iter_files
 from alasio.logger import logger
 from alasio.testing.filesystem import fs  # noqa: F401
+from tests.deploy.simple_pip.conftest import build_wheel, site_packages
 from tests.deploy_dev.pack.conftest import MockServerFile, app_folder  # noqa: F401
-from tests.deploy_dev.simple_pip.conftest import build_wheel, site_packages
 
 # the mirrors of the fake mod: the channel base of its tree, the packrepo
 # folder of a pack server deployment

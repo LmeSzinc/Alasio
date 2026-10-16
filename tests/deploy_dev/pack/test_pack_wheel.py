@@ -18,14 +18,14 @@ import pytest
 from alasio.deploy.pack.decode_base import PackDecodeBase
 from alasio.deploy.pack.job_unpack import UnpackJob
 from alasio.deploy.pack.server_file import LatestInfo
+from alasio.deploy.simple_pip.pip_install import SimplePip
 from alasio.deploy_dev.pack import _pack_cache, pack_wheel
 from alasio.deploy_dev.pack._pack_cache import PackCache
 from alasio.deploy_dev.pack.pack_wheel import PackWheel
-from alasio.deploy_dev.simple_pip.simple_pip import SimplePip
 from alasio.ext.path.atomic import file_read_bytes
 from alasio.logger import logger
 from alasio.testing.filesystem import fs  # noqa: F401
-from tests.deploy_dev.simple_pip.conftest import (  # noqa: F401
+from tests.deploy.simple_pip.conftest import (  # noqa: F401
     build_wheel, list_files, pyc_compile, sha256_record, site_packages
 )
 

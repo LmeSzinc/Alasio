@@ -9,7 +9,7 @@ explicitly, the fixture is never registered in a conftest.py:
 Wheels and distributions are built on the (fake) filesystem, the functions
 here are imported by the tests the way tests/deploy_dev/pack does it:
 
-    from tests.deploy_dev.simple_pip.conftest import build_wheel, create_dist, site_packages
+    from tests.deploy.simple_pip.conftest import build_wheel, create_dist, site_packages
 """
 import base64
 import hashlib
@@ -19,7 +19,7 @@ import zipfile
 
 import pytest
 
-from alasio.deploy_dev.simple_pip import DistInfo
+from alasio.deploy.simple_pip.pip_install import DistInfo
 from alasio.ext.path.iter import iter_files, iter_folders
 from alasio.logger.writer import LogWriter
 
