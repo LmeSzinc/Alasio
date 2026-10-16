@@ -5,10 +5,31 @@ from typing import Dict, Union
 from msgspec import Struct, field
 
 from alasio.ext import env
+from alasio.ext.cache import cached_property
 from alasio.ext.path.calc import joinnormpath
 
+# default mirrors of the PyPI simple index (PEP 503): the source of the
+# distributions a mod installs with pip, when they do not update by pack.
+# Two groups of the public mirrors: 'cn' (the mirrors of the mainland
+# network) and 'global' (the official PyPI). The groups run in parallel, the
+# members of a group are tried in the declared order, see
+# alasio.deploy.httpclient.probe_mirrors. A mod whose distributions come from
+# another source (e.g. a private index) overrides it on its entry
+# (ModEntryInfo.pypi_mirrors); the mods that keep the default share one
+# mirror record, see ModEntryInfo.pypi_record_name
+DEFAULT_PYPI_MIRRORS = {
+    'cn': {
+        'tsinghua': 'https://pypi.tuna.tsinghua.edu.cn/simple',
+        'aliyun': 'https://mirrors.aliyun.com/pypi/simple',
+        'tencent': 'https://mirrors.cloud.tencent.com/pypi/simple',
+    },
+    'global': {
+        'pypi': 'https://pypi.org/simple',
+    },
+}
 
-class ModEntryInfo(Struct):
+
+class ModEntryInfo(Struct, dict=True):
     """
     ModEntryInfo
     """
@@ -41,6 +62,15 @@ class ModEntryInfo(Struct):
     # flat/nested mix). The mods with an empty value declare no update
     # source and are never checked. Defaults to ''
     mirrors: Union[str, Dict[str, str], Dict[str, Dict[str, str]]] = ''
+    # mirrors of the PyPI simple index (PEP 503) the distributions of the mod
+    # are downloaded from, when they do not update by pack: the same input
+    # forms as mirrors, see
+    # alasio.deploy.httpclient.probe_mirrors.Mirrors.from_input(). Defaults
+    # to DEFAULT_PYPI_MIRRORS; a mod whose distributions come from another
+    # source (e.g. a private index) overrides it. The mods that keep the
+    # default share one mirror record, see pypi_record_name
+    pypi_mirrors: Union[str, Dict[str, str], Dict[str, Dict[str, str]]] = field(
+        default_factory=lambda: deepcopy(DEFAULT_PYPI_MIRRORS))
     # relative path from mod root to the requirements file of the mod: the
     # distributions it runs with, every one pinned to an exact version, see
     # alasio.deploy.simple_pip.install_base. Defaults to 'requirements.txt'
@@ -76,6 +106,35 @@ class ModEntryInfo(Struct):
         """
         yield ''
         yield from self.asset_lang
+
+    @cached_property
+    def pypi_record_name(self):
+        """
+        The name of this mod in the record of the pypi mirror probes
+        (alasio.deploy.httpclient.probe_db): the mods whose pypi mirrors are
+        the default share one record (''), whichever of them probes first
+        serves the others, the mirrors are probed once per machine instead of
+        once per mod; a mod with mirrors of its own keeps a record of its own
+        (the mod name), its selection never overwrites the shared one.
+
+        The compare is on the digest of the mirror structure (the group
+        boundaries and the mirror names in their order; the urls and the
+        group names are not part of it, see Mirrors.digest): two entries
+        share the record exactly when the probe engine would reuse it for
+        both. Cached: the mirrors of an entry are fixed at creation.
+
+        Returns:
+            str: '' when the mirrors are the default, the mod name otherwise
+        """
+        # The import is local on purpose: the config layer is imported by
+        # everything, it must not pull the deploy layer at import time
+        from alasio.deploy.httpclient.probe_mirrors import Mirrors
+
+        mirrors = Mirrors.from_input(self.pypi_mirrors)
+        default = Mirrors.from_input(DEFAULT_PYPI_MIRRORS)
+        if mirrors.digest == default.digest:
+            return ''
+        return self.name
 
     @classmethod
     def alasio(cls):

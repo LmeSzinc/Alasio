@@ -6,8 +6,8 @@ channels of the mod.
 
 The requirements file of the mod (mod.entry.requirements_file, default
 'requirements.txt' under the mod root) pins the distributions the mod runs
-with, every one pinned to an exact version -- the file style the deploy
-config names (Deploy.Python.RequirementsFile, see
+with, every one pinned to an exact version -- the file style the mod entry
+names (ModEntryInfo.requirements_file, see
 alasio.deploy.simple_pip.parse_req). The site-packages folder has to
 satisfy the pins: this module reads the pins (Requirements), compares them
 with the installed distributions (PipList) and reports the pins the folder

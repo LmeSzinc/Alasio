@@ -61,20 +61,6 @@ class PythonConfig(Struct):
         "[Easy installer] Use './toolkit/python.exe'",
         "[Other] Use you own python, and its version should be 3.7.6 64bit",
     ]})] = "./toolkit/python.exe"
-    PypiMirror: Annotated[Optional[str], Meta(extra={"help": [
-        "URL of pypi mirror",
-        "[CN user] Use 'https://mirrors.aliyun.com/pypi/simple' for faster and more stable download",
-        "[Other] Use null",
-    ]})] = None
-    InstallDependencies: Annotated[bool, Meta(extra={"help": [
-        "Install dependencies at startup",
-        "[In most cases] Use true",
-    ]})] = True
-    RequirementsFile: Annotated[str, Meta(extra={"help": [
-        "Path to requirements.txt",
-        "[In most cases] Use 'requirements.txt'",
-        "[In AidLux] Use './deploy/AidLux/{version}/requirements.txt', version is default to 0.92",
-    ]})] = "requirements.txt"
 
 
 class AdbConfig(Struct):
