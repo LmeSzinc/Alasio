@@ -641,25 +641,6 @@ class UpdateJob(JobBase):
             raise SourceError(source_path)
         return converted, ''
 
-    def _read_matched(self, file, info):
-        """
-        Read a file and check it against a record.
-
-        Args:
-            file (str): File to read
-            info (IdxInfo): Record to check against
-
-        Returns:
-            bytes: Content of the file in the record eol (match_data of
-                the check when the content matches after converting the
-                eol), None when the file does not match the record
-        """
-        current = self._read_current(file)
-        result = self._matches(info, current)
-        if not result.match and not result.match_data:
-            return None
-        return result.match_data if result.match_data else current.data
-
     @staticmethod
     def _to_blob(content, eol):
         """

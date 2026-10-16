@@ -1214,10 +1214,10 @@ class TestDownload:
             f.write(b'# Website\r\n')
 
         # the copy record is served from the leftover tmp without a
-        # download; the missing readme.md is downloaded by the remaining
-        # check, the first copy is the second download (the leftover was
-        # already claimed as the tmp file of the second copy): one
-        # download less than without the leftover
+        # download; the second copy is downloaded by the update job, the
+        # missing readme.md is repaired by the remaining check from the
+        # content the downloads registered: two downloads less than
+        # without the leftover
         original = SERVER.get_file_data
         calls = []
 
@@ -1234,7 +1234,10 @@ class TestDownload:
         assert file_read_bytes(env.PROJECT_ROOT / 'docs/readme_copy.txt') == b'# Website\r\n'
         # the missing unchanged source is repaired by the remaining check
         assert file_read_bytes(env.PROJECT_ROOT / 'docs/readme.md') == b'# Website\n'
-        assert len(calls) == 2
+        # only the second copy is downloaded: the first copy reads the
+        # leftover, the remaining check reads the content the download
+        # phase registered (see ResetJob._read_available())
+        assert len(calls) == 1
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
 
     @pytest.mark.trio

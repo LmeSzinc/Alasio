@@ -590,6 +590,39 @@ WARNING | Failed to download backend/__init__.py: Failed to decode header: not a
         assert job.error == []
         assert job.pending[0].tmp == tmp
 
+    @pytest.mark.trio
+    async def test_download_shared_block_fetched_once(self, app_folder, fs, monkeypatch):
+        """A stored block shared by several records is fetched once: the
+        later records are written from the content the first one prepared
+        instead of downloading the same range again."""
+        await setup_app(fs)
+        # config.py <- settings.py <- utils.py: one stored block,
+        # three records
+        same = ['backend/config.py', 'backend/settings.py', 'backend/utils.py']
+        decoder = PackDecodeBase(WEBSITE_FULL_PACK)
+        block = (decoder.fileinfo['backend/config.py'].data_start,
+                 decoder.fileinfo['backend/config.py'].data_size)
+        for path in same:
+            info = decoder.fileinfo[path]
+            assert (info.data_start, info.data_size) == block
+            os.remove(env.PROJECT_ROOT / path)
+        calls = []
+        original = WEBSITE_SERVER.get_file_data
+
+        async def _serve(dec, info):
+            calls.append((info.data_start, info.data_size))
+            return await original(dec, info)
+        monkeypatch.setattr(WEBSITE_SERVER, 'get_file_data', _serve)
+        job = ResetJob(WEBSITE_SERVER)
+        assert await job.run()
+        assert job.error == []
+        for path in same:
+            assert file_read_bytes(env.PROJECT_ROOT / path) == WEBSITE_FILES[path][0]
+        # the shared range of the full pack is fetched once, not once
+        # per record
+        assert calls == [block]
+        assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
+
 
 class TestReplace:
     """replace(): apply the downloaded files to the real files."""

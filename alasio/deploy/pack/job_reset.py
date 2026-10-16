@@ -285,7 +285,10 @@ class ResetJob(JobBase):
         pending without a download. A file whose content matches but
         whose mode differs is written to a tmp file with the current
         content, replace() chmod-ed the target to the record mode,
-        no download is needed either. The tmp file names come from the
+        no download is needed either. The tmp files written here are
+        registered for their content (see register_tmp()), so a later
+        record of a shared stored block reads them instead of
+        downloading the same range. The tmp file names come from the
         tmp manager of the run, applied for when the tmp file is needed,
         see tmp_file(). Other failed
         files are collected in self.error with an empty tmp, the caller
@@ -317,6 +320,7 @@ class ResetJob(JobBase):
                 tmp = self.tmp_file(path, info)
                 if not self._matches(info, self._read_current(tmp)).match:
                     file_write(tmp, current.data)
+                self.register_tmp(path, info, tmp)
                 self.error.append(PendingFile(info=info, tmp=tmp, mode=info.mode_decoded))
                 continue
             if result.match_data:
@@ -324,6 +328,7 @@ class ResetJob(JobBase):
                 # to a tmp file, download() moves it to pending
                 tmp = self.tmp_file(path, info)
                 file_write(tmp, result.match_data)
+                self.register_tmp(path, info, tmp)
                 self.error.append(PendingFile(
                     info=info, tmp=tmp, mode=info.mode_decoded if info.mode == 1 else None))
                 continue
@@ -390,18 +395,24 @@ class ResetJob(JobBase):
         """
         Download the failed files recorded in self.error to tmp files.
 
-        Every failed file is fetched from the full pack of the index
-        pack version with a range request, decompressed and written to
-        its tmp file ({ledger}/workspace/{size}_{sha1}_{rank}.tmp,
-        see JobBase.tmp_file()), the record is
-        moved to self.pending for replace(). Records that already carry a
-        tmp (an EOL or mode mismatch fixed in validate_files()) and
-        deleted markers need no download and are moved to pending
-        directly. The requests await on the event loop; the file reads
-        and the tmp writes run in worker threads. Files that cannot be
-        downloaded or fail the size + sha1 check stay in self.error
-        with an empty tmp, this is an unsolvable problem per the draft
-        of PackEncodeBase.
+        Every failed file is written to its tmp file
+        ({ledger}/workspace/{size}_{sha1}_{rank}.tmp,
+        see JobBase.tmp_file()): a record whose stored block is shared
+        with an earlier record of the run - a C record copies the data of
+        its source - is written from the content that record prepared
+        (see _read_available()), the range of the full pack of the index
+        pack version is fetched only for a content the workspace does not
+        hold yet, decompressed and validated against the record. The tmp
+        files are registered for their content whatever their source (see
+        register_tmp()), so a later record of a shared block reads them
+        instead of fetching the same range again. The record is moved to
+        self.pending for replace(). Records that already carry a tmp (an
+        EOL or mode mismatch fixed in validate_files()) and deleted
+        markers need no download and are moved to pending directly. The
+        requests await on the event loop; the file reads and the tmp
+        writes run in worker threads. Files that cannot be downloaded or
+        fail the size + sha1 check stay in self.error with an empty tmp,
+        this is an unsolvable problem per the draft of PackEncodeBase.
 
         Raises:
             PackDecodeError: If the server is missing
@@ -433,6 +444,10 @@ class ResetJob(JobBase):
                 logger.warning(f'Failed to download {info.path}: {e}')
                 error.append(item)
                 continue
+            # the tmp file is registered for its content: a later record
+            # of the same stored block reads it instead of fetching the
+            # same range again, see _read_available()
+            self.register_tmp(info.path, info, tmp)
             # the file is written by python with the default mode 666,
             # a 755 record is chmod-ed in replace()
             pending.append(PendingFile(
@@ -443,13 +458,45 @@ class ResetJob(JobBase):
         self.pending += pending
         self.error = error
 
+    def _read_available(self, info):
+        """
+        Read the content of a record from the tmp files of the workspace.
+
+        The tmp files this run prepared are registered for their content
+        (see register_tmp()): a record whose stored block is shared with
+        an earlier record of the run - a C record copies the data of its
+        source, e.g. an asset several servers share - finds the content
+        of that record here instead of fetching the same range of the
+        full pack a second time. The leftovers of an interrupted run that
+        were not handed out yet are read too. Every candidate is verified
+        against the record: a partial or stale file is skipped and the
+        next one is tried.
+
+        Args:
+            info (IdxInfo): Record whose content to read
+
+        Returns:
+            bytes: Content of the record in its eol, None when no tmp
+                file of the workspace holds it
+        """
+        for _, tmp in self.tmp_manager.candidates(info.size, info.sha1):
+            content = self._read_matched(tmp, info)
+            if content is not None:
+                return content
+        return None
+
     async def _download_file(self, decoder, server, info):
         """
-        Download and decompress a file from the full pack, write the
-        content to a tmp file.
+        Prepare the content of a failed record: reuse what the workspace
+        already holds, fetch the rest from the full pack.
 
-        The range request awaits on the event loop; the leftover tmp
-        read and the tmp write run in worker threads.
+        The content is written to the tmp file of the record. A record
+        whose stored block is shared with another record of the run (a C
+        record copies the data of its source) is written from the content
+        that record prepared, see _read_available(); the range of the
+        full pack is fetched only for a content the workspace does not
+        hold yet. The range request awaits on the event loop; the tmp
+        reads and the tmp write run in worker threads.
 
         Args:
             decoder (PackDecodeBase): Decoder of the local index pack
@@ -468,9 +515,14 @@ class ResetJob(JobBase):
         if self._matches(info, current).match:
             # a leftover tmp file passes the size + sha1 check, reuse it
             return tmp
-        # the client fetches the range of the record from the full pack,
-        # decodes it and validates it against the record (a bad copy makes the
-        # mirror reselect and the download is retried once)
-        content = await server.get_file_data(decoder, info)
+        # a stored block shared with an earlier record of the run (a C
+        # record copies its source): write the copy from the content the
+        # workspace already holds instead of fetching the same range again
+        content = await trio.to_thread.run_sync(self._read_available, info)
+        if content is None:
+            # the client fetches the range of the record from the full pack,
+            # decodes it and validates it against the record (a bad copy makes
+            # the mirror reselect and the download is retried once)
+            content = await server.get_file_data(decoder, info)
         await trio.to_thread.run_sync(file_write, tmp, content)
         return tmp

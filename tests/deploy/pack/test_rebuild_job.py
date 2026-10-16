@@ -489,6 +489,40 @@ WARNING | Failed to rebuild: Failed to download the index pack: no server provid
         assert file_read_bytes(env.PROJECT_ROOT / '.pack/workspace/job.pack') == RebuildJob.MARK
 
 
+class TestSharedBlockDownload:
+    """download(): a stored block shared by several records is fetched once."""
+
+    @pytest.mark.trio
+    async def test_every_block_fetched_once(self, app_folder, monkeypatch):
+        """A rebuild from nothing fetches every stored block of the new
+        full pack exactly once: the later records of a shared block (a C
+        record copies the data of its source) are written from the
+        content of the earlier record instead of being downloaded again."""
+        # the scenario has records sharing a stored block (the readme
+        # copies), the premise of the test
+        keys = [
+            (info.data_start, info.data_size)
+            for info in NEW_DECODER.fileinfo.values()
+            if info.edit != 2 and info.data_size
+        ]
+        assert len(keys) > len(set(keys))
+        calls = []
+        original = SERVER.get_file_data
+
+        async def _serve(decoder, info):
+            if info.data_size:
+                # a record without data needs no range request
+                # (see ServerFile.get_file_data)
+                calls.append((info.data_start, info.data_size))
+            return await original(decoder, info)
+        monkeypatch.setattr(SERVER, 'get_file_data', _serve)
+        assert await RebuildJob(SERVER).run()
+        assert read_tree() == NEW_TREE
+        # every block is fetched exactly once, not once per record
+        assert sorted(calls) == sorted(set(keys))
+        assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
+
+
 class TestResume:
     """Interruption and resume."""
 
