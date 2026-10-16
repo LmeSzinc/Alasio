@@ -10,6 +10,7 @@
   import { cn } from "$lib/utils";
   import { useTopic } from "$lib/ws";
   import ModCommit from "./ModCommit.svelte";
+  import ModVersion from "./ModVersion.svelte";
   import { type ModHistory, type ModOption, prettyVersion } from "./utils";
 
   // One mod of the ModManager list as a card: the title row (the mod, the
@@ -155,9 +156,7 @@
         <Card.Title class="truncate">{mod.label}</Card.Title>
         <!-- the version pill is always there, even when the pack of the mod is
              unknown (the layout of the title row stays the same) -->
-        <Badge variant="default" class="shrink-0 bg-blue-600 font-mono" title={version}>
-          {version ? prettyVersion(version) : t.Update.VersionUnavailable()}
-        </Badge>
+        <ModVersion {version} class="shrink-0" />
         <Badge
           variant={flashing ? "default" : stateVariant(updateState)}
           class={cn("shrink-0", stateClass(updateState))}

@@ -97,13 +97,6 @@
     "zh-TW": "未檢查",
     "es-ES": "Sin comprobar"
   },
-  "VersionUnavailable": {
-    "en-US": "Local version unavailable",
-    "zh-CN": "无法获取本地版本",
-    "ja-JP": "ローカル版を取得できません",
-    "zh-TW": "無法取得本地版本",
-    "es-ES": "Versión local no disponible"
-  },
   "ButtonCancel": {
     "en-US": "Cancel",
     "zh-CN": "取消",
@@ -117,6 +110,13 @@
     "ja-JP": "更新を確認",
     "zh-TW": "檢查更新",
     "es-ES": "Buscar actualizaciones"
+  },
+  "VersionUnavailable": {
+    "en-US": "Local version unavailable",
+    "zh-CN": "无法获取本地版本",
+    "ja-JP": "ローカル版を取得できません",
+    "zh-TW": "無法取得本地版本",
+    "es-ES": "Versión local no disponible"
   },
   "DialogTitle": {
     "en-US": "Update available",
@@ -180,5 +180,26 @@
     "ja-JP": "すべての Mod は最新です",
     "zh-TW": "所有插件已是最新",
     "es-ES": "Todos los mods están actualizados"
+  },
+  "ToastTitle": {
+    "en-US": "Update available",
+    "zh-CN": "有可用更新",
+    "ja-JP": "更新があります",
+    "zh-TW": "有可用更新",
+    "es-ES": "Actualización disponible"
+  },
+  "ToastClose": {
+    "en-US": "Close",
+    "zh-CN": "关闭",
+    "ja-JP": "閉じる",
+    "zh-TW": "關閉",
+    "es-ES": "Cerrar"
+  },
+  "ToastView": {
+    "en-US": "View",
+    "zh-CN": "查看",
+    "ja-JP": "表示",
+    "zh-TW": "查看",
+    "es-ES": "Ver"
   }
 }
