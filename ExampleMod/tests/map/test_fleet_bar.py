@@ -66,6 +66,14 @@ class TestFleetBarFleet1Expanded:
     """
     The fleet bar of fleet 1 is opened, the info bar covers the left side of the
     first two options, so they are narrower than the 169px of a full option.
+
+    The same screenshot reads the state of the fleet with `FleetOperator`: the
+    options of the opened fleet bar, if the fleet can be cleared or recommended,
+    and if it is the fleet in use.
+
+    `is_hard_satisfied()` is None on this screenshot: `is_hard()` is False, the
+    stage is not a hard mode, so the hard mode detection, which needs scipy, is
+    never reached.
     """
 
     @image("map/fleet_bar/infobar_fleet1_expanded.webp")
@@ -80,6 +88,19 @@ class TestFleetBarFleet1Expanded:
             5: FleetOption(area=(1013, 438, 1182, 473), index=5, selected=False),
             6: FleetOption(area=(1013, 480, 1182, 515), index=6, selected=False),
         }
+
+        fleet_1 = FleetOperator(
+            choose=FLEET_1_CHOOSE, advice=FLEET_1_ADVICE, bar=FLEET_1_BAR, clear=FLEET_1_CLEAR,
+            in_use=FLEET_1_IN_USE, hard_satisfied=FLEET_1_HARD_SATIESFIED, main=main)
+
+        fleet_1.update_options()
+
+        assert fleet_1.options == options
+        assert fleet_1.allow() is True
+        assert fleet_1.is_hard() is False
+        assert fleet_1.is_hard_satisfied() is None
+        # in_use() compares with numpy, it returns a numpy bool
+        assert bool(fleet_1.in_use()) is True
 
 
 class TestFleetBarFleet2Expanded:
@@ -101,14 +122,8 @@ class TestFleetBarFleet2Expanded:
             6: FleetOption(area=(1013, 594, 1182, 628), index=6, selected=True),
         }
 
-    @image("map/fleet_bar/fleet2_expanded.webp")
-    def test_fleet2_expanded_option_pitch(self, main: ModuleBase):
-        """
-        The options are stacked from the top of the fleet bar, one option per
-        fleet, 42 pixels apart.
-        """
-        options = FleetBarDetector(main, bar=FLEET_2_BAR, choose=FLEET_2_CHOOSE).options
-
+        # The options are stacked from the top of the fleet bar, one option per
+        # fleet, 42 pixels apart.
         assert [option.area[1] for option in options.values()] == [384, 426, 468, 510, 552, 594]
 
 
@@ -128,41 +143,13 @@ class TestFleetBarTwoFleets:
         }
 
 
-class TestFleetOperator:
+class TestFleetBarSubmarineExpanded:
     """
-    `FleetOperator` reads the state of one fleet out of the screenshot of the
-    fleet preparation page: the options of its opened fleet bar, if the fleet can
-    be cleared or recommended, and if the fleet is the one in use.
-
-    `is_hard_satisfied()` is None on these screenshots: `is_hard()` is False, the
-    stage is not a hard mode, so the hard mode detection, which needs scipy, is
-    never reached.
+    The fleet bar of the submarine is opened, submarine 1 is in use.
     """
-
-    @image("map/fleet_bar/infobar_fleet1_expanded.webp")
-    def test_fleet_1(self, main: ModuleBase):
-        fleet_1 = FleetOperator(
-            choose=FLEET_1_CHOOSE, advice=FLEET_1_ADVICE, bar=FLEET_1_BAR, clear=FLEET_1_CLEAR,
-            in_use=FLEET_1_IN_USE, hard_satisfied=FLEET_1_HARD_SATIESFIED, main=main)
-
-        fleet_1.update_options()
-
-        assert fleet_1.options == {
-            1: FleetOption(area=(1034, 270, 1182, 304), index=1, selected=True),
-            2: FleetOption(area=(1080, 312, 1182, 346), index=2, selected=False),
-            3: FleetOption(area=(1013, 354, 1182, 388), index=3, selected=False),
-            4: FleetOption(area=(1013, 396, 1182, 430), index=4, selected=False),
-            5: FleetOption(area=(1013, 438, 1182, 473), index=5, selected=False),
-            6: FleetOption(area=(1013, 480, 1182, 515), index=6, selected=False),
-        }
-        assert fleet_1.allow() is True
-        assert fleet_1.is_hard() is False
-        assert fleet_1.is_hard_satisfied() is None
-        # in_use() compares with numpy, it returns a numpy bool
-        assert bool(fleet_1.in_use()) is True
 
     @image("map/fleet_bar/submarine_expanded.webp")
-    def test_submarine(self, main: ModuleBase):
+    def test_submarine_expanded(self, main: ModuleBase):
         submarine = FleetOperator(
             choose=SUBMARINE_CHOOSE, advice=SUBMARINE_ADVICE, bar=SUBMARINE_BAR, clear=SUBMARINE_CLEAR,
             in_use=SUBMARINE_IN_USE, hard_satisfied=SUBMARINE_HARD_SATIESFIED, main=main)
