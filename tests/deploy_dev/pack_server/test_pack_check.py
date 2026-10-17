@@ -6,9 +6,13 @@ the pack of the version pair, see kept_pack: the format version,
 the versions and the index pack checksum are read from the index section of
 the file, the data section is never read.
 """
+from hashlib import sha1
+
 import pytest
 
 from alasio.deploy.pack.decode_base import PackDecodeBase, PackDecodeError
+from alasio.deploy.pack.packdep import PACKDEP_PATH
+from alasio.deploy_dev.pack.encode_packdep import encode_packdep
 from alasio.deploy_dev.pack.pack_full import PackFull
 from alasio.deploy_dev.pack.pack_update import PackUpdate
 from alasio.deploy_dev.pack_server.pack_check import PackChecksum, kept_pack
@@ -62,6 +66,27 @@ def full_pack_file(fs, repo):
     """The full pack of the latest version, written to a file."""
     file = PathStr.new(fs.root_dir.path).joinpath('full_c2.pack')
     atomic_write(file, b''.join(PackFull(repo, 'c2').iter_pack_data()))
+    return file
+
+
+# a generated dependency snapshot of the tests
+PACKDEP_ENTRIES = {'demo': ('1.0', bytes(range(20)))}
+PACKDEP_DATA = encode_packdep(PACKDEP_ENTRIES)
+
+
+class FakeDepGen:
+    """The interface PackFull reads from a DepGen: the published snapshots."""
+
+    def __init__(self, published):
+        self.published = published
+
+
+@pytest.fixture
+def packdep_full_pack_file(fs, repo):
+    """A full pack of c2 with a generated .pack/packdep.pack."""
+    file = PathStr.new(fs.root_dir.path).joinpath('full_c2_packdep.pack')
+    pack = PackFull(repo, 'c2', dep_gen=FakeDepGen(PACKDEP_ENTRIES))
+    atomic_write(file, b''.join(pack.iter_pack_data()))
     return file
 
 
@@ -177,3 +202,48 @@ class TestKeptPack:
         fs.create_dir(folder)
         with pytest.raises(ValueError, match='not a file'):
             kept_pack(folder, 0, 'c2', '')
+
+    def test_expected_record_matches(self, packdep_full_pack_file):
+        """A pack that carries the expected generated record is kept."""
+        expected = {
+            PACKDEP_PATH: (len(PACKDEP_DATA), sha1(PACKDEP_DATA).digest()),
+        }
+        checksum = kept_pack(packdep_full_pack_file, 0, 'c2', '', expected=expected)
+        assert checksum is not None
+        assert checksum.current_version == 'c2'
+
+    def test_expected_record_mismatches(self, packdep_full_pack_file):
+        """A pack with another generated record is written again."""
+        other = b'PDEP\x00another-content'
+        assert kept_pack(
+            packdep_full_pack_file, 0, 'c2', '',
+            expected={PACKDEP_PATH: (len(other), sha1(other).digest())}) is None
+        assert kept_pack(
+            packdep_full_pack_file, 0, 'c2', '',
+            expected={PACKDEP_PATH: (len(PACKDEP_DATA), b'x' * 20)}) is None
+
+    def test_expected_record_missing(self, full_pack_file):
+        """A pack that misses the expected generated record is written again."""
+        expected = {
+            PACKDEP_PATH: (len(PACKDEP_DATA), sha1(PACKDEP_DATA).digest()),
+        }
+        assert kept_pack(full_pack_file, 0, 'c2', '', expected=expected) is None
+
+    def test_expected_record_absent(self, full_pack_file, packdep_full_pack_file):
+        """A pack without the generated record is kept when it must be absent."""
+        assert kept_pack(
+            full_pack_file, 0, 'c2', '', expected={PACKDEP_PATH: None}) is not None
+        assert kept_pack(
+            packdep_full_pack_file, 0, 'c2', '', expected={PACKDEP_PATH: None}) is None
+
+    def test_expected_record_in_update_pack(self, fs, repo):
+        """The new side of an update pack carries the expected generated record."""
+        file = PathStr.new(fs.root_dir.path).joinpath('update_c1_packdep.pack')
+        new = PackFull(repo, 'c2', dep_gen=FakeDepGen(PACKDEP_ENTRIES))
+        atomic_write(file, b''.join(PackUpdate(new, 'c1').iter_pack_data()))
+        expected = {
+            PACKDEP_PATH: (len(PACKDEP_DATA), sha1(PACKDEP_DATA).digest()),
+        }
+        checksum = kept_pack(file, 0, 'c2', 'c1', expected=expected)
+        assert checksum is not None
+        assert checksum.old_version == 'c1'

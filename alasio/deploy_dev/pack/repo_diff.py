@@ -516,8 +516,18 @@ class RepoDiff:
         Returns:
             dict[str, str]: {new path: old path} of matched renames
         """
-        deleted = [path for path, info in real_old.items() if path not in real_new and info.sha1]
-        added = [path for path, info in real_new.items() if path not in real_old and info.sha1]
+        # only files of the git tree are rename candidates: a generated extra
+        # file (e.g. .pack/packdep.pack) has no git blob in filelist and its
+        # content is not a revision of the repo, so it never pairs with a
+        # deleted file
+        deleted = [
+            path for path, info in real_old.items()
+            if path not in real_new and info.sha1 and path in self.old.filelist
+        ]
+        added = [
+            path for path, info in real_new.items()
+            if path not in real_old and info.sha1 and path in self.new.filelist
+        ]
 
         candidates = []
         for new_path in added:
@@ -556,8 +566,7 @@ class RepoDiff:
         sha1 pair of the deleted and the added revision: every version of the
         window that pairs the same two revisions takes the score instead of
         compressing again, and a hit needs no blob read at all, the size of the
-        new content comes from the record. See PackCache.rename and
-        doc/2026-09-27_update-pack-from-repo.md section 7.21.
+        new content comes from the record. See PackCache.rename.
 
         Args:
             old_info (IdxInfo): Deleted file record, the patch dictionary
@@ -567,7 +576,13 @@ class RepoDiff:
             float: Similarity in [0, 1], see similarity
         """
         cache = _pack_cache.PACK_CACHE
-        key = (self.old.filelist[old_info.path].sha1, self.new.filelist[new_info.path].sha1)
+        old_entry = self.old.filelist.get(old_info.path)
+        new_entry = self.new.filelist.get(new_info.path)
+        if old_entry is None or new_entry is None:
+            # a generated extra file has no git blob, it is never a rename
+            # candidate (see _find_renames), a foreign caller gets no match
+            return 0.0
+        key = (old_entry.sha1, new_entry.sha1)
         length = cache.get(cache.rename, key)
         if length is None:
             length = len(zstd_compress(

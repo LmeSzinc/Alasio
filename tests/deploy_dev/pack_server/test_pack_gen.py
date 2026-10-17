@@ -23,7 +23,9 @@ import pytest
 from alasio.deploy.pack.decode_base import PackDecodeBase
 from alasio.deploy.pack.job_unpack import UnpackJob
 from alasio.deploy.pack.job_update import UpdateJob
+from alasio.deploy.pack.packdep import PACKDEP_PATH
 from alasio.deploy.pack.server_file import LatestInfo
+from alasio.deploy_dev.pack.encode_packdep import encode_packdep
 from alasio.deploy_dev.pack.pack_full import PackFull
 from alasio.deploy_dev.pack_server import pack_gen
 from alasio.deploy_dev.pack_server.gate import RunDirError, check_run_dir
@@ -93,6 +95,19 @@ CONFIG = PackRepoModel(
 # folder of the packs of CONFIG in the run directory, the packrepo folder
 # of the repo folder
 PACK_ROOT = 'pack/Author_Repo_master/packrepo'
+
+# generated dependency snapshots of the tests
+PACKDEP_ENTRIES = {'demo': ('1.0', bytes(range(20)))}
+PACKDEP_ENTRIES_SECOND = {'demo': ('2.0', bytes(range(20, 40)))}
+PACKDEP_DATA = encode_packdep(PACKDEP_ENTRIES)
+PACKDEP_DATA_SECOND = encode_packdep(PACKDEP_ENTRIES_SECOND)
+
+
+class FakeDepGen:
+    """The interface PackFull reads from a DepGen: the published snapshots."""
+
+    def __init__(self, published):
+        self.published = published
 
 
 @pytest.fixture
@@ -282,6 +297,93 @@ class TestConfigAndFolders:
         monkeypatch.setattr(pack_gen, 'check_run_dir', check_run_dir.__wrapped__)
         with pytest.raises(RunDirError):
             PackRepoGen(make_repo(VERSIONS), CONFIG).run()
+
+
+class TestPackdep:
+    """The generated .pack/packdep.pack of a repo version."""
+
+    def test_full_pack_carries_packdep(self, fs, run_dir):
+        """The full pack records the snapshot of the DepGen."""
+        repo = make_repo(VERSIONS)
+        PackRepoGen(repo, CONFIG, dep_gen=FakeDepGen(PACKDEP_ENTRIES)).run()
+
+        full = PackDecodeBase(file_read_bytes(
+            join_path(run_dir, PACK_ROOT, 'c3', 'full_c3.pack')))
+        full.validate()
+        info = full.fileinfo[PACKDEP_PATH]
+        assert info.edit != 2
+        assert bytes(full.catfile(info)) == PACKDEP_DATA
+        # the index pack of the full pack records the file too
+        index = PackDecodeBase(bytes(full.extract_index_pack()))
+        assert PACKDEP_PATH in index.fileinfo
+
+    def test_update_pack_carries_packdep(self, fs, run_dir):
+        """The new side of an update pack carries the generated file."""
+        repo = make_repo(VERSIONS)
+        PackRepoGen(repo, CONFIG, dep_gen=FakeDepGen(PACKDEP_ENTRIES)).run()
+
+        update = PackDecodeBase(file_read_bytes(
+            join_path(run_dir, PACK_ROOT, 'c3', 'update_c1.pack')))
+        update.validate()
+        info = update.fileinfo[PACKDEP_PATH]
+        assert info.edit == 0
+        assert bytes(update.catfile(info)) == PACKDEP_DATA
+
+    def test_packdep_is_rebuilt_when_changed(self, fs, run_dir):
+        """A kept pack with another packdep snapshot is written again."""
+        repo = make_repo(VERSIONS)
+        PackRepoGen(repo, CONFIG, dep_gen=FakeDepGen(PACKDEP_ENTRIES)).run()
+        PackRepoGen(repo, CONFIG, dep_gen=FakeDepGen(PACKDEP_ENTRIES_SECOND)).run()
+
+        full = PackDecodeBase(file_read_bytes(
+            join_path(run_dir, PACK_ROOT, 'c3', 'full_c3.pack')))
+        assert bytes(full.catfile(full.fileinfo[PACKDEP_PATH])) == PACKDEP_DATA_SECOND
+        update = PackDecodeBase(file_read_bytes(
+            join_path(run_dir, PACK_ROOT, 'c3', 'update_c1.pack')))
+        assert bytes(update.catfile(update.fileinfo[PACKDEP_PATH])) == PACKDEP_DATA_SECOND
+
+    def test_packdep_is_removed_when_not_given(self, fs, run_dir):
+        """A run without a DepGen removes the file from the kept packs."""
+        repo = make_repo(VERSIONS)
+        PackRepoGen(repo, CONFIG, dep_gen=FakeDepGen(PACKDEP_ENTRIES)).run()
+        PackRepoGen(repo, CONFIG).run()
+
+        full = PackDecodeBase(file_read_bytes(
+            join_path(run_dir, PACK_ROOT, 'c3', 'full_c3.pack')))
+        assert PACKDEP_PATH not in full.fileinfo
+        update = PackDecodeBase(file_read_bytes(
+            join_path(run_dir, PACK_ROOT, 'c3', 'update_c1.pack')))
+        assert PACKDEP_PATH not in update.fileinfo
+
+    @pytest.mark.trio
+    async def test_full_pack_unpacks_packdep(self, fs, run_dir, monkeypatch):
+        """A client that does not read packdep still unpacks it as a normal file."""
+        repo = make_repo(VERSIONS)
+        PackRepoGen(repo, CONFIG, dep_gen=FakeDepGen(PACKDEP_ENTRIES)).run()
+        data = file_read_bytes(join_path(run_dir, PACK_ROOT, 'c3', 'full_c3.pack'))
+        client = make_client(monkeypatch, fs)
+        with logger.mock_capture_writer():
+            assert await UnpackJob(data).run()
+        assert file_read_bytes(client.joinpath(PACKDEP_PATH)) == PACKDEP_DATA
+
+    def test_packdep_kept_when_unchanged(self, fs, run_dir, monkeypatch):
+        """A complete output with the same snapshot is kept as it is."""
+        repo = make_repo(VERSIONS)
+        PackRepoGen(repo, CONFIG, dep_gen=FakeDepGen(PACKDEP_ENTRIES)).run()
+        tree = read_tree(join_path(run_dir, PACK_ROOT))
+
+        class NoPackUpdate:
+            def __init__(self, *args, **kwargs):
+                raise AssertionError('the pack of the version must not be built again')
+
+        written = []
+        monkeypatch.setattr(pack_gen, 'PackUpdate', NoPackUpdate)
+        monkeypatch.setattr(
+            pack_gen, 'atomic_write_stream', lambda file, data: written.append(str(file)))
+        PackRepoGen(repo, CONFIG, dep_gen=FakeDepGen(PACKDEP_ENTRIES)).run()
+
+        assert written == []
+        assert read_tree(join_path(run_dir, PACK_ROOT)) == tree
 
 
 class TestRun:

@@ -9,11 +9,12 @@ what tells these cases apart, and the index pack checksum it carries is what
 latest.pack is built from when the full pack is kept. kept_pack() is the
 whole check of a caller, over the identity of the file.
 
-This is the server side of the pack front, it does not decode a pack: only the
-header, the version parts of the index section and its trailing checksum are
-read, a few hundred KB at most. The client decodes a pack with
-alasio/deploy/pack, the server generates and checks the packs, it never
-unpacks one.
+This is the server side of the pack front: only the header, the version parts
+of the index section and its trailing checksum are read, a few hundred KB at
+most. The index section is decoded only when kept_pack() checks the records of
+the generated files (e.g. .pack/packdep.pack); the data section of a full pack
+is never read. The client decodes a pack with alasio/deploy/pack, the server
+generates and checks the packs, it never unpacks one.
 
 Usage:
     from alasio.deploy_dev.pack_server.pack_check import PackChecksum, kept_pack
@@ -28,7 +29,7 @@ import stat
 
 from msgspec import Struct
 
-from alasio.deploy.pack.decode_base import PackDecodeError
+from alasio.deploy.pack.decode_base import PackDecodeBase, PackDecodeError
 from alasio.ext.algorithm.vint import decode_vint
 from alasio.ext.path.atomic import atomic_open
 from alasio.logger import logger
@@ -79,25 +80,53 @@ class PackChecksum(Struct):
             PackDecodeError: If the file is not a pack, or is shorter than
                 its index section
         """
-        with atomic_open(file, 'rb') as f:
-            head = f.read(HEAD_SIZE)
-            pack_version, index_end = _read_header(file, head)
-            # the index section of a full pack of the real repo is a few
-            # hundred KB: read the rest of it, the version parts and the
-            # checksum are in it
-            data = head + f.read(max(0, index_end - len(head)))
-        section = data[5:index_end]
-        if len(section) != index_end - 5:
-            raise PackDecodeError(
-                f'Failed to read the pack: the file ends before its index section: "{file}"')
-        current_version, old_version = _read_versions(file, section)
-        return cls(
-            pack_version=pack_version,
-            current_version=current_version,
-            old_version=old_version,
-            # the checksum is the trailing 20 bytes of the index section
-            index_checksum=bytes(section[-20:]),
-        )
+        return read_pack_index(file)[0]
+
+
+def read_pack_index(file):
+    """
+    Read the identity of a pack and its index pack prefix.
+
+    The index pack prefix is the header plus the index section, exactly the
+    bytes a PackDecodeBase needs to decode the records without a data section.
+    It is returned for the callers that validate generated records of a kept
+    pack, see kept_pack.
+
+    Args:
+        file (str): Path of a pack file
+
+    Returns:
+        tuple[PackChecksum, bytes]: Identity of the pack, and its index pack
+            prefix (header + index section)
+
+    Raises:
+        OSError: If the file cannot be read
+        PackDecodeError: If the file is not a pack, or is shorter than its
+            index section
+    """
+    with atomic_open(file, 'rb') as f:
+        head = f.read(HEAD_SIZE)
+        pack_version, index_end = _read_header(file, head)
+        # the index section of a full pack of the real repo is a few
+        # hundred KB: read the rest of it, the version parts and the
+        # checksum are in it
+        data = head + f.read(max(0, index_end - len(head)))
+    if len(data) < index_end:
+        raise PackDecodeError(
+            f'Failed to read the pack: the file ends before its index section: "{file}"')
+    # head is a fixed 256 bytes and can carry the start of the data section
+    # when the index section is shorter: the decoder needs exactly the index
+    # pack prefix, not the read buffer
+    index_data = bytes(data[:index_end])
+    section = index_data[5:index_end]
+    current_version, old_version = _read_versions(file, section)
+    return PackChecksum(
+        pack_version=pack_version,
+        current_version=current_version,
+        old_version=old_version,
+        # the checksum is the trailing 20 bytes of the index section
+        index_checksum=bytes(section[-20:]),
+    ), index_data
 
 
 def _read_header(file, head):
@@ -178,7 +207,7 @@ def _read_versions(file, section):
     return versions[0], versions[1]
 
 
-def kept_pack(file, pack_version, current_version, old_version):
+def kept_pack(file, pack_version, current_version, old_version, expected=None):
     """
     Check whether the pack of an earlier run at a path is kept.
 
@@ -191,9 +220,14 @@ def kept_pack(file, pack_version, current_version, old_version):
     format. The pack server flows share the check, see PackRepoGen for the
     git flow and DepGen for the dependency flow.
 
-    Only the identity of the file is read (PackChecksum): the data section
-    of a full pack is never read, neither when the pack is kept nor when it
-    is written again.
+    expected is the record check of the generated files of a version (e.g.
+    .pack/packdep.pack): a kept pack that does not carry the expected
+    records is written again. A value None means the record must be absent,
+    which removes a generated file that a config no longer produces.
+
+    Only the identity of the file is read (PackChecksum) unless expected is
+    given: the data section of a full pack is never read, and the index
+    section is decoded only for the expected records.
 
     Args:
         file (PathStr): Path of the pack file
@@ -201,6 +235,10 @@ def kept_pack(file, pack_version, current_version, old_version):
         current_version (str): Version the pack packs
         old_version (str): Version the pack updates from, empty for the
             full pack
+        expected (dict[str, tuple[int, bytes] | None], optional): Records the
+            kept pack must carry, keyed by path. A value is (size, sha1);
+            None means the record must be absent. Defaults to None, no
+            record check
 
     Returns:
         PackChecksum | None: Identity of the kept file, None when the pack
@@ -217,7 +255,7 @@ def kept_pack(file, pack_version, current_version, old_version):
     if not stat.S_ISREG(st.st_mode):
         raise ValueError(f'Pack path exists but is not a file: "{file}"')
     try:
-        checksum = PackChecksum.from_file(file)
+        checksum, index_data = read_pack_index(file)
     except PackDecodeError as e:
         # nothing of a file the server cannot read can be kept: the pack
         # is generated again, overwriting the file
@@ -229,4 +267,31 @@ def kept_pack(file, pack_version, current_version, old_version):
         logger.warning(
             f'Existing pack is not the pack of this version, writing it again: "{file}"')
         return None
+    if expected:
+        try:
+            records = PackDecodeBase(index_data).fileinfo
+        except PackDecodeError as e:
+            logger.warning(
+                f'Failed to decode the index of the existing pack, writing it again: {e}')
+            return None
+        for path, value in expected.items():
+            info = records.get(path)
+            if value is None:
+                if info is None or info.edit == 2:
+                    continue
+                logger.warning(
+                    f'Existing pack carries the obsolete generated file, writing it again: '
+                    f'"{file}", path={path!r}')
+                return None
+            if info is None or info.edit == 2:
+                logger.warning(
+                    f'Existing pack misses the generated file, writing it again: '
+                    f'"{file}", path={path!r}')
+                return None
+            size, digest = value
+            if info.size != size or info.sha1 != digest:
+                logger.warning(
+                    f'Existing pack carries another generated file, writing it again: '
+                    f'"{file}", path={path!r}')
+                return None
     return checksum

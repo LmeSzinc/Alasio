@@ -18,15 +18,18 @@ import pytest
 from alasio.deploy.pack.decode_base import PackDecodeBase
 from alasio.deploy.pack.job_unpack import UnpackJob
 from alasio.deploy.pack.job_update import UpdateJob
+from alasio.deploy.pack.packdep import PACKDEP_PATH, decode_packdep
 from alasio.deploy.pack.server_file import LatestInfo
 from alasio.deploy_dev.pack import pack_wheel
 from alasio.deploy_dev.pack._pack_cache import PackCache
+from alasio.deploy_dev.pack.encode_packdep import encode_packdep
 from alasio.deploy_dev.pack.pack_wheel import PackWheel
 from alasio.deploy_dev.pack_server import dep_gen
 from alasio.deploy_dev.pack_server.dep_gen import DepGen
 from alasio.deploy_dev.pack_server.model import (
     LookbackConfig, PackRepoModel, PythonDepsConfig, PythonMirrorInfo, RepoConfig
 )
+from alasio.deploy_dev.pack_server.pack_gen import PackRepoGen
 from alasio.ext import env
 from alasio.ext.path import PathStr
 from alasio.ext.path.atomic import atomic_write, file_read_bytes
@@ -343,8 +346,10 @@ class TestRun:
         """The wheels are fetched and the channel of the dependency is written."""
         register_wheels(mirror)
         repo = make_repo(REQUIREMENTS)
+        gen = DepGen(repo, make_config(mirror.base), client=mirror.client)
         with logger.mock_capture_writer() as capture:
-            DepGen(repo, make_config(mirror.base), client=mirror.client).run()
+            assert gen.run() is None
+        payload = encode_packdep(gen.published)
 
         # 1. the wheel of every version is fetched, unmanaged names are not
         for version in ('0.27.7', '0.27.8', '0.28.1'):
@@ -387,6 +392,14 @@ class TestRun:
         assert info.version == '0.28.1'
         assert info.checksum == full.index_checksum
         assert data == b'0.28.1' + bytes(full.extract_index_pack())[-20:]
+
+        # the packdep payload carries the published target snapshot
+        assert payload is not None
+        entries = decode_packdep(payload)
+        assert list(entries) == ['httpx']
+        assert entries['httpx'].version == '0.28.1'
+        assert entries['httpx'].index_checksum == bytes(full.extract_index_pack())[-20:]
+        assert gen.published == {'httpx': ('0.28.1', bytes(full.extract_index_pack())[-20:])}
 
         # the progress of the run is logged
         assert capture.fd.any_contains('[1/3] Fetching wheel of "httpx==0.28.1"')
@@ -440,11 +453,58 @@ class TestRun:
         assert not os.path.exists(f'{site}/httpx/version-0.27.8.txt')
         assert file_read_bytes(f'{site}/.pack/httpx/index.pack') == new.index_pack
 
+    def test_packdep_does_not_need_latest_pack(self, fs, run_dir, mirror):
+        """The payload is built from the full packs, the per dependency latest.pack is not read."""
+        register_wheels(mirror)
+        repo = make_repo(REQUIREMENTS)
+        config = make_config(mirror.base)
+        first = DepGen(repo, config, client=mirror.client)
+        first.run()
+        first_published = dict(first.published)
+        assert first_published
+        # the legacy marker is removed: a run over the kept channel still
+        # produces the same packdep from the full pack
+        os.remove(pack_file(run_dir, 'latest.pack'))
+
+        gen = DepGen(repo, config, client=mirror.client)
+        assert gen.run() is None
+        assert gen.published == first_published
+        assert gen.published == {
+            'httpx': ('0.28.1', bytes(PackDecodeBase(
+                file_read_bytes(pack_file(run_dir, '0.28.1', 'full.pack'))
+            ).extract_index_pack())[-20:]),
+        }
+
+    def test_packdep_is_carried_by_the_repo_pack(self, fs, run_dir, mirror):
+        """The payload of DepGen is a generated file of the repo version."""
+        register_wheels(mirror)
+        repo = make_repo(REQUIREMENTS)
+        config = make_config(mirror.base)
+        dep = DepGen(repo, config, client=mirror.client)
+        assert dep.run() is None
+        assert dep.published
+        payload = encode_packdep(dep.published)
+
+        PackRepoGen(repo, config, dep_gen=dep).run()
+
+        full = PackDecodeBase(file_read_bytes(join_path(
+            run_dir, REPO_FOLDER, 'packrepo', 'c3', 'full_c3.pack')))
+        full.validate()
+        info = full.fileinfo[PACKDEP_PATH]
+        assert bytes(full.catfile(info)) == payload
+        entries = decode_packdep(payload)
+        dep_full = PackDecodeBase(file_read_bytes(pack_file(run_dir, '0.28.1', 'full.pack')))
+        assert list(entries) == ['httpx']
+        assert entries['httpx'].version == '0.28.1'
+        assert entries['httpx'].index_checksum == bytes(dep_full.extract_index_pack())[-20:]
+
     def test_no_dependency(self, fs, run_dir, mirror):
         """A config with no managed dependency writes nothing and removes nothing."""
         with logger.mock_capture_writer() as capture:
-            DepGen(make_repo(REQUIREMENTS), make_config(mirror.base, pack_update=[])).run()
+            gen = DepGen(make_repo(REQUIREMENTS), make_config(mirror.base, pack_update=[]))
+            assert gen.run() is None
         assert capture.fd.any_contains('No dependency to build')
+        assert gen.published == {}
         assert not join_path(run_dir, REPO_FOLDER).exists()
         assert mirror.requests == []
 

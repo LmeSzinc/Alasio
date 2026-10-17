@@ -59,6 +59,18 @@ up to date builds nothing and only rewrites latest.pack, which is written
 after every pack of the target version is on the disk: it is the small file
 the clients read the published version from.
 
+The run leaves the snapshots of the channels it published on the DepGen
+instance (the published attribute): the version and index checksum of every
+dependency whose latest commit pin has a target. The snapshots are built from
+the target full pack itself, never from latest.pack: the per dependency
+latest.pack is a legacy marker for old clients and is going to be removed. It
+is still written for now, the packdep flow does not read it. A dependency
+whose target full pack is not built (e.g. the mirror has no wheel of the
+target) is left out, the client falls back to the channel.
+
+The pack encoder receives the DepGen object and encodes the snapshots into
+.pack/packdep.pack when the version extras are built.
+
 The repo of a config is an input of the generator, not cloned here: the caller
 opens the git repo of the config and passes it in, the generation only reads
 it, like PackRepoGen.
@@ -75,6 +87,7 @@ Usage:
 
 from msgspec import Struct
 
+from alasio.deploy.pack.packdep import validate_packdep_name
 from alasio.deploy_dev.pack.pack_wheel import PackWheel
 from alasio.deploy_dev.pack.pack_wheel_update import PackWheelUpdate
 from alasio.deploy_dev.pack_server.fetch_wheel import WHEEL_FOLDER, WheelFetcher, WheelNotFoundError
@@ -159,6 +172,11 @@ class DepGen:
         self.repo = repo
         self.config = config
         self.client = client
+        # {name: (version, index checksum)} of the channels published by
+        # run(), filled while the target full packs are written/kept. It is
+        # read from the full packs, not from latest.pack: the per dependency
+        # latest.pack is a legacy marker and will be removed.
+        self.published = {}
         # the pins of the dependency files over the lookback window, the
         # latest commit first, see LookbackWheel
         self.wheel = LookbackWheel(repo, config)
@@ -276,6 +294,8 @@ class DepGen:
             OSError: If a wheel or a pack cannot be written
         """
         check_run_dir()
+        # a run is a new publication set, also when the instance is reused
+        self.published = {}
         sample = self.sample
         if not sample:
             logger.info(f'No dependency to build of "{self.repo_folder.name}", skipped')
@@ -420,6 +440,19 @@ class DepGen:
             # path does, so latest.pack is built from the checksum of the
             # pack that is on the disk
             target_checksum = PackChecksum.from_file(file).index_checksum
+
+        # the snapshot of the channel, read from the target full pack: the
+        # repo packdep is built from this, never from latest.pack (the legacy
+        # per dependency marker is going to be removed)
+        try:
+            validate_packdep_name(name)
+            validate_filename(target.version)
+        except ValueError as e:
+            logger.warning(
+                f'The channel of "{name}=={target.version}" has no packdep-safe name or '
+                f'version, the dependency is left out of packdep: {e}')
+            return
+        self.published[name] = (target.version, target_checksum)
 
         # 2. the update pack from every other version to the target. The
         # install tree of the old version is the old side of the update pack

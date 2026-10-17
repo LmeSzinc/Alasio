@@ -14,9 +14,11 @@ import pytest
 from alasio.deploy.history.decode_history import HistoryObj, decode_history
 from alasio.deploy.pack.decode_base import PackDecodeBase
 from alasio.deploy.pack.pack_model import FileInfo
+from alasio.deploy.pack.packdep import PACKDEP_PATH
 from alasio.deploy.pack.server_file import LatestInfo
 from alasio.deploy_dev.pack._pack_cache import PackCache, PlainCache
 from alasio.deploy_dev.pack.encode_base import PackEncodeBase
+from alasio.deploy_dev.pack.encode_packdep import encode_packdep
 from alasio.deploy_dev.pack.pack_full import PackFull, _dfs_path_key
 from alasio.ext.path.pathstr import PathStr
 from alasio.ext.path.validate import validate_filepath
@@ -24,6 +26,13 @@ from alasio.git.mock.mock_repo import MockGitRepo
 from alasio.git.stage.gitreset import FileEntry
 
 COMMIT = 'c1'
+
+
+class FakeDepGen:
+    """The interface PackFull reads from a DepGen: the published snapshots."""
+
+    def __init__(self, published):
+        self.published = published
 
 
 def _make_repo():
@@ -1050,6 +1059,60 @@ class TestExtraData:
         assert info['history_copy.pack'].size == len(self.HISTORY_DATA)
         assert info['.pack/history.pack'].source_lookback == 0
         assert info['.pack/history.pack'].size == len(self.HISTORY_DATA)
+
+    def test_dep_gen_packdep(self):
+        """The DepGen snapshot is packed after the commit history."""
+        mock = _make_repo()
+        mock.register_file('c1', 'a.txt', b'aaa')
+        entries = {'demo': ('1.0', bytes(range(20)))}
+        pack = PackFull(mock, commit='c1', dep_gen=FakeDepGen(entries))
+        content = encode_packdep(entries)
+        assert pack.packdep == content
+        assert pack.packdep is pack.packdep
+        assert list(pack.extra_content) == ['.pack/history.pack', PACKDEP_PATH]
+        assert pack.extra_content[PACKDEP_PATH] == content
+        extra = pack.extra_fileinfo
+        assert list(extra) == ['.pack/history.pack', PACKDEP_PATH]
+        info = extra[PACKDEP_PATH]
+        assert info.path == PACKDEP_PATH
+        assert info.edit == 0
+        assert info.eol == 2
+        assert info.mode == 0
+        assert PackDecodeBase.decode_content(info, info.data) == content
+        assert info.size == len(content)
+        assert info.sha1 == _sha1(content).digest()
+        # the version files keep their order, the generated files come last
+        assert list(pack.fileinfo) == [
+            'a.txt', '.pack/history.pack', PACKDEP_PATH]
+
+    def test_no_dep_gen(self):
+        """A pack without a DepGen has no packdep file."""
+        mock = _make_repo()
+        pack = PackFull(mock, commit='c1')
+        assert pack.packdep is None
+        assert list(pack.extra_content) == ['.pack/history.pack']
+
+    def test_empty_published(self):
+        """A DepGen that published nothing adds no packdep file."""
+        mock = _make_repo()
+        pack = PackFull(mock, commit='c1', dep_gen=FakeDepGen({}))
+        assert pack.packdep is None
+        assert list(pack.extra_content) == ['.pack/history.pack']
+
+    def test_packdep_cache_is_keyed_by_content(self, cache):
+        """The extra cache does not serve the encoding of another snapshot."""
+        mock = _make_repo()
+        first_entries = {'demo': ('1.0', bytes(range(20)))}
+        second_entries = {'demo': ('2.0', bytes(range(20, 40)))}
+        first = PackFull(mock, commit='c1', dep_gen=FakeDepGen(first_entries))
+        second = PackFull(mock, commit='c1', dep_gen=FakeDepGen(second_entries))
+        first_content = first.packdep
+        second_content = second.packdep
+        assert first_content != second_content
+        first_info = first.extra_fileinfo[PACKDEP_PATH]
+        second_info = second.extra_fileinfo[PACKDEP_PATH]
+        assert PackDecodeBase.decode_content(first_info, first_info.data) == first_content
+        assert PackDecodeBase.decode_content(second_info, second_info.data) == second_content
 
 
 # ════════════════════════════════════════════════════════════════════════════
