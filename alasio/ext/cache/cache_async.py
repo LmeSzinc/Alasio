@@ -10,8 +10,9 @@ from .cache import InstanceCacheOperation
 # be awaited on any coroutine framework, on any event loop, or without any event loop at all, and
 # unlike a coroutine or an asyncio.Future, it can be awaited multiple times.
 # 2. **Not deduplicated**
-# Like the plain cached_property under threads, concurrent first awaits may calculate the value
-# more than once, because waiting for a calculation in progress requires an event loop primitive.
+# Like the plain cached_property under threads, concurrent first awaits of cached_property_async may calculate
+# the value more than once, because waiting for a calculation in progress requires an event loop primitive.
+# Use cached_property_async_asyncio_lock or cached_property_async_trio_lock to deduplicate them.
 # 3. **No threadsafe version**
 # A thread lock can't be held across an await, so there is no cached_property_async_threadsafe.
 
@@ -159,12 +160,10 @@ class _PendingResult(Generic[T]):
         instance = self._instance
         attrname = self._attrname
         cache = instance.__dict__
-        # Another await of this property may have calculated the value
-        # after this awaitable was created
-        try:
+        # The value may have been calculated after this awaitable was created,
+        # a pending awaitable is created on a cache miss
+        if attrname in cache:
             return await cache[attrname]
-        except KeyError:
-            pass
 
         # calculate
         value = await self._func(instance)
@@ -179,6 +178,74 @@ class _PendingResult(Generic[T]):
         return value
 
 
+class _PendingResultLocked(_PendingResult):
+    """
+    The awaitable returned by the lock variants of cached_property_async.
+    Unlike _PendingResult, concurrent first awaits wait for the calculation in
+    progress with a framework lock, so the coroutine function is called once.
+    """
+
+    __slots__ = ('_lock_factory',)
+
+    def __init__(self, func, instance, attrname, lock_factory):
+        """
+        Args:
+            func (Callable[[Any], Awaitable[T]]): Coroutine function of the cached property
+            instance (object): Instance to calculate the value on
+            attrname (str): Attribute name to cache the calculated value
+            lock_factory (Callable[[], Any]): Factory of the lock deduplicating concurrent first awaits
+        """
+        super().__init__(func, instance, attrname)
+        self._lock_factory = lock_factory
+
+    async def _calculate(self):
+        """
+        Calculate the value under the lock, or reuse the value calculated by another await.
+
+        Returns:
+            T: The calculated value
+        """
+        instance = self._instance
+        attrname = self._attrname
+        cache = instance.__dict__
+        # The value may have been calculated after this awaitable was created,
+        # a pending awaitable is created on a cache miss
+        if attrname in cache:
+            return await cache[attrname]
+
+        # The lock is created and stored before the first await,
+        # so other awaits can wait on it instead of calculating again
+        lock_name = f'_cached_property_lock_for_{attrname}'
+        lock = cache.get(lock_name, None)
+        if lock is None:
+            lock = self._lock_factory()
+            cache[lock_name] = lock
+
+        async with lock:
+            # Double checked locking, the value may have been calculated
+            # while this await was waiting for the lock
+            if attrname in cache:
+                value = await cache[attrname]
+            else:
+                value = await self._func(instance)
+                try:
+                    cache[attrname] = AwaitableResult(value)
+                except TypeError:
+                    msg = (
+                        f"The '__dict__' attribute on {type(instance).__name__!r} instance "
+                        f"does not support item assignment for caching {attrname!r} property."
+                    )
+                    raise TypeError(msg) from None
+
+            # cleanup, the lock will never be used again for this property on this instance
+            try:
+                del cache[lock_name]
+            except KeyError:
+                # this shouldn't happen
+                pass
+            return value
+
+
 class cached_property_async(Generic[T], AsyncCacheOperation):
     """
     A high-performance, non-thread-safe cached property for coroutine functions.
@@ -189,7 +256,8 @@ class cached_property_async(Generic[T], AsyncCacheOperation):
 
     It doesn't use any event loop primitive like Future or Task, so it works on any
     coroutine framework (asyncio, trio, ...). Meanwhile, like the plain cached_property
-    under threads, concurrent first awaits may calculate the value more than once.
+    under threads, concurrent first awaits may calculate the value more than once,
+    use cached_property_async_asyncio_lock or cached_property_async_trio_lock to deduplicate them.
 
     Use the coroutine AsyncCacheOperation.warm() to calculate the value in advance,
     and AsyncCacheOperation.set() to set a value manually.
@@ -198,6 +266,19 @@ class cached_property_async(Generic[T], AsyncCacheOperation):
     def __init__(self, func: Callable[[Any], "Awaitable[T]"]):
         self.func = func
         wraps(func)(self)
+
+    def _create_pending_result(self, instance, attrname):
+        """
+        Create the awaitable that calculates the value on await.
+
+        Args:
+            instance (object):
+            attrname (str):
+
+        Returns:
+            _PendingResult[T]:
+        """
+        return _PendingResult(self.func, instance, attrname)
 
     def __get__(self, instance, cls):
         """
@@ -231,4 +312,79 @@ class cached_property_async(Generic[T], AsyncCacheOperation):
             pass
 
         # calculate on await
-        return _PendingResult(self.func, instance, attrname)
+        return self._create_pending_result(instance, attrname)
+
+
+class cached_property_async_asyncio_lock(cached_property_async):
+    """
+    A cached_property_async that deduplicates concurrent first awaits on asyncio.
+
+    The first await calculates the value while the others wait for the calculation
+    in progress, so the coroutine function is called once. The lock is an asyncio.Lock
+    that is created on the first await and dropped after the calculation, so this
+    cached property must be used under asyncio until the value is cached, the cached
+    value itself can be awaited on any coroutine framework.
+
+    asyncio is imported on the first await, importing this module doesn't require it.
+    """
+
+    @staticmethod
+    def _create_lock():
+        """
+        Create a lock of asyncio, it must be created inside a running event loop,
+        as the lock binds the event loop on creation on python 3.8.
+
+        Returns:
+            asyncio.Lock:
+        """
+        # local import, the other cached properties don't require asyncio
+        import asyncio
+        return asyncio.Lock()
+
+    def _create_pending_result(self, instance, attrname):
+        """
+        Args:
+            instance (object):
+            attrname (str):
+
+        Returns:
+            _PendingResultLocked[T]:
+        """
+        return _PendingResultLocked(self.func, instance, attrname, self._create_lock)
+
+
+class cached_property_async_trio_lock(cached_property_async):
+    """
+    A cached_property_async that deduplicates concurrent first awaits on trio.
+
+    The first await calculates the value while the others wait for the calculation
+    in progress, so the coroutine function is called once. The lock is a trio.Lock
+    that is created on the first await and dropped after the calculation, so this
+    cached property must be used under trio until the value is cached, the cached
+    value itself can be awaited on any coroutine framework.
+
+    trio is imported on the first await, importing this module doesn't require it.
+    """
+
+    @staticmethod
+    def _create_lock():
+        """
+        Create a lock of trio.
+
+        Returns:
+            trio.Lock:
+        """
+        # local import, trio is an optional dependency
+        import trio
+        return trio.Lock()
+
+    def _create_pending_result(self, instance, attrname):
+        """
+        Args:
+            instance (object):
+            attrname (str):
+
+        Returns:
+            _PendingResultLocked[T]:
+        """
+        return _PendingResultLocked(self.func, instance, attrname, self._create_lock)

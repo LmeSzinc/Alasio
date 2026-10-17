@@ -5,7 +5,10 @@ import pytest
 import trio
 
 from alasio.ext.cache.cache import InstanceCacheOperation
-from alasio.ext.cache.cache_async import AsyncCacheOperation, AwaitableResult, cached_property_async
+from alasio.ext.cache.cache_async import (
+    AsyncCacheOperation, AwaitableResult, cached_property_async, cached_property_async_asyncio_lock,
+    cached_property_async_trio_lock
+)
 
 
 def drive(coro):
@@ -52,6 +55,37 @@ class MockAsyncInstance:
         if self.fail_count == 1:
             raise ValueError("calculation failed")
         return f"unstable_{self.fail_count}"
+
+
+class MockTrioLockInstance:
+    def __init__(self):
+        self.count = 0
+
+    @cached_property_async_trio_lock
+    async def value(self):
+        self.count += 1
+        # suspend, so a concurrent await overlaps the calculation
+        await trio.sleep(0)
+        return f"value_{self.count}"
+
+
+class MockAsyncioLockInstance:
+    def __init__(self):
+        self.count = 0
+        self.fail_count = 0
+
+    @cached_property_async_asyncio_lock
+    async def value(self):
+        self.count += 1
+        # suspend, so a concurrent await overlaps the calculation
+        await asyncio.sleep(0)
+        return f"value_{self.count}"
+
+    @cached_property_async_asyncio_lock
+    async def failing_value(self):
+        self.fail_count += 1
+        await asyncio.sleep(0)
+        raise ValueError("calculation failed")
 
 
 class TestAwaitableResult:
@@ -392,5 +426,109 @@ class TestCachedPropertyAsync:
         # calculated without any event loop
         assert drive(coro()) == "value_1"
         # and the cached value can be awaited under trio
+        assert await obj.value == "value_1"
+        assert obj.count == 1
+
+
+class TestCachedPropertyAsyncLock:
+    def test_lazy_imports(self):
+        # asyncio and trio are imported on the first await, not at module import
+        import alasio.ext.cache.cache_async as module
+        assert not hasattr(module, "asyncio")
+        assert not hasattr(module, "trio")
+
+    def test_asyncio_deduplicates_concurrent_first_await(self):
+        obj = MockAsyncioLockInstance()
+
+        async def coro():
+            return await asyncio.gather(obj.value, obj.value, obj.value)
+
+        # only the first await calculates, the others reuse the calculated value
+        assert asyncio.run(coro()) == ["value_1", "value_1", "value_1"]
+        assert obj.count == 1
+        # the lock is dropped after the calculation
+        assert "_cached_property_lock_for_value" not in obj.__dict__
+
+    def test_asyncio_reuses_cached_value(self):
+        obj = MockAsyncioLockInstance()
+
+        async def coro():
+            return await obj.value
+
+        assert asyncio.run(coro()) == "value_1"
+        # the cached value is not bound to the loop that calculated it
+        assert asyncio.run(coro()) == "value_1"
+        assert obj.count == 1
+
+    def test_asyncio_deduplicates_after_pop(self):
+        obj = MockAsyncioLockInstance()
+
+        async def coro():
+            return await asyncio.gather(obj.value, obj.value)
+
+        assert asyncio.run(coro()) == ["value_1", "value_1"]
+        cached_property_async_asyncio_lock.pop(obj, "value")
+
+        # recalculate once, and deduplicate the concurrent first awaits again
+        assert asyncio.run(coro()) == ["value_2", "value_2"]
+        assert obj.count == 2
+
+    def test_asyncio_exception_releases_the_lock(self):
+        obj = MockAsyncioLockInstance()
+
+        async def worker():
+            try:
+                await obj.failing_value
+            except ValueError:
+                return "failed"
+            return "ok"
+
+        async def coro():
+            return await asyncio.gather(worker(), worker())
+
+        assert asyncio.run(coro()) == ["failed", "failed"]
+        # the failed calculation is not cached, the waiters retry it one by one
+        assert obj.fail_count == 2
+        assert "_cached_property_lock_for_failing_value" in obj.__dict__
+        # the lock is released, the next await retries the calculation
+        assert asyncio.run(worker()) == "failed"
+        assert obj.fail_count == 3
+
+    def test_asyncio_sync_warm_returns_false(self):
+        obj = MockAsyncioLockInstance()
+        # the sync warmup can't calculate an async property
+        assert InstanceCacheOperation.warm(obj, "value") is False
+        assert cached_property_async_asyncio_lock.has(obj, "value") is False
+        assert obj.count == 0
+
+    @pytest.mark.trio
+    async def test_trio_deduplicates_concurrent_first_await(self):
+        obj = MockTrioLockInstance()
+        results = []
+
+        async def worker():
+            results.append(await obj.value)
+
+        async with trio.open_nursery() as nursery:
+            for _ in range(3):
+                nursery.start_soon(worker)
+
+        # only the first await calculates, the others reuse the calculated value
+        assert results == ["value_1", "value_1", "value_1"]
+        assert obj.count == 1
+        # the lock is dropped after the calculation
+        assert "_cached_property_lock_for_value" not in obj.__dict__
+
+    @pytest.mark.trio
+    async def test_trio_reuses_cached_value(self):
+        obj = MockTrioLockInstance()
+        assert await obj.value == "value_1"
+        assert await obj.value == "value_1"
+        assert obj.count == 1
+
+    @pytest.mark.trio
+    async def test_trio_warm(self):
+        obj = MockTrioLockInstance()
+        assert await cached_property_async_trio_lock.warm(obj, "value") is True
         assert await obj.value == "value_1"
         assert obj.count == 1
