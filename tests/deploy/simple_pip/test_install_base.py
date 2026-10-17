@@ -24,6 +24,7 @@ import pytest
 
 from alasio.config.entry.const import ModEntryInfo
 from alasio.deploy.pack.decode_base import PackDecodeBase
+from alasio.deploy.pack.job_unpack import UnpackJob
 from alasio.deploy.pack.server_file import LatestInfo
 from alasio.deploy.simple_pip import install_base, pip_pack
 from alasio.deploy.simple_pip.install_base import InstallBase
@@ -155,6 +156,39 @@ def make_mod(fake, content=None, root='/mod', **kwargs):
     return mod
 
 
+def snapshot(version, index):
+    """
+    The trusted snapshot of a dependency at a built pack.
+
+    Args:
+        version (str): Version of the pack
+        index (bytes): Index pack of the version
+
+    Returns:
+        LatestInfo: The snapshot a repo pack records for the dependency
+    """
+    return LatestInfo(version=version, checksum=PackDecodeBase(index).index_checksum)
+
+
+def patch_packdep(monkeypatch, **entries):
+    """
+    Patch the snapshot read of the packed tree.
+
+    Args:
+        monkeypatch (MonkeyPatch): The active monkeypatch
+        **entries (LatestInfo): PEP 503 name -> snapshot of the version
+
+    Returns:
+        dict[str, LatestInfo]: Mutable mapping PackDep.read returns, a test
+            can add an entry when the requirements of the mod change
+    """
+    snapshots = dict(entries)
+    monkeypatch.setattr(
+        install_base.PackDep, 'read',
+        staticmethod(lambda root: dict(snapshots)))
+    return snapshots
+
+
 def patch_servers(monkeypatch, expected_name, *dists):
     """
     Patch pip_pack.ServerFile with one in-memory channel server per
@@ -265,9 +299,9 @@ class TestInstallPack:
 
     @pytest.mark.trio
     async def test_every_declared_pin_is_reconciled(self, fs, app_folder, monkeypatch):
-        """Every declared pin is handed to its channel: a pin at another local
-        version is updated, a satisfied pin is validated, an undeclared pin is
-        not touched."""
+        """Every declared pin is reconciled from its snapshot: a pin at
+        another local version is updated, a satisfied pin is validated, an
+        undeclared pin is not touched."""
         site = site_packages(fs)
         fs.create_dir(site)
         create_dist(fs, {}, name='other', version='1.0')
@@ -281,12 +315,15 @@ plain==1.0
         servers = patch_servers(monkeypatch, 'alas', 'demo', 'other')
         servers['demo'].register_version('2.0', demo_full, demo_index)
         servers['other'].register_version('1.0', other_full, other_index)
+        patch_packdep(monkeypatch, demo=snapshot('2.0', demo_index),
+                      other=snapshot('1.0', other_index))
 
         install = InstallBase(mod, site)
         assert await install._dict_update == {'demo': '2.0', 'other': '1.0'}
         assert await install.install_pack() == {'demo': True, 'other': True}
 
-        # the files and the metadata of both channels landed, at their pins
+        # the files and the metadata of both dependencies landed, at their
+        # pins
         tree = read_tree(site)
         assert {path: content for path, content in tree.items() if path.startswith('demo')} == tree_of(demo_full)
         assert {path: content for path, content in tree.items() if path.startswith('other')} == tree_of(other_full)
@@ -294,47 +331,53 @@ plain==1.0
         assert file_read_bytes(f'{site}/.pack/other/index.pack') == other_index
         # the undeclared pin is left to pip
         assert not [path for path in tree if path.startswith('plain')]
-        # both channels were asked, the satisfied pin included
-        assert servers['demo'].requests[0] == f'{dep_channel("demo")}/latest.pack'
-        assert servers['other'].requests[0] == f'{dep_channel("other")}/latest.pack'
+        # every dependency was requested from its channel, latest.pack never:
+        # the snapshot is the version source
+        requests = servers['demo'].requests + servers['other'].requests
+        assert requests
+        assert not [url for url in requests if url.endswith('/latest.pack')]
 
     @pytest.mark.trio
     async def test_a_satisfied_pin_is_validated(self, fs, app_folder, monkeypatch):
-        """A declared pin the folder already satisfies goes through the
-        channel and is validated, not skipped locally."""
+        """A declared pin the folder already satisfies is validated from the
+        snapshot, not skipped locally."""
         site = site_packages(fs)
         fs.create_dir(site)
         mod = make_mod(fs, content='demo==1.0\n', pack_update_deps=['demo'])
         full, index = build_dist('demo', '1.0')
+        await UnpackJob(full, root=site, name='demo').run()
         servers = patch_servers(monkeypatch, 'alas', 'demo')
         servers['demo'].register_version('1.0', full, index)
+        patch_packdep(monkeypatch, demo=snapshot('1.0', index))
 
         assert await InstallBase(mod, site).install_pack() == {'demo': True}
-        assert servers['demo'].requests[0] == f'{dep_channel("demo")}/latest.pack'
+        assert servers['demo'].requests == []
 
     @pytest.mark.trio
     async def test_a_failed_dep_does_not_stop_the_others(self, fs, app_folder, monkeypatch):
-        """A channel that publishes another version fails its distribution
-        alone: it is reported False and the others are installed."""
+        """A snapshot of another version fails its distribution alone: it is
+        reported False and the others are installed."""
         site = site_packages(fs)
         fs.create_dir(site)
         mod = make_mod(fs, content='demo==2.0\nother==1.0\n', pack_update_deps=['demo', 'other'])
         full, index = build_dist('other', '1.0')
-        demo_full, demo_index = build_dist('demo', '3.0')
+        _, demo_index = build_dist('demo', '3.0')
         servers = patch_servers(monkeypatch, 'alas', 'demo', 'other')
-        # the demo channel publishes another version than the pin
-        servers['demo'].register_version('3.0', demo_full, demo_index)
         servers['other'].register_version('1.0', full, index)
+        # the snapshot records another version than the pin
+        patch_packdep(monkeypatch, demo=snapshot('3.0', demo_index),
+                      other=snapshot('1.0', index))
 
         with logger.mock_capture_writer() as capture:
             assert await InstallBase(mod, site).install_pack() == {'demo': False, 'other': True}
 
         # the refusal is the version check alone, nothing of demo was applied
-        assert servers['demo'].requests == [f'{dep_channel("demo")}/latest.pack']
+        # and its channel was never asked
+        assert servers['demo'].requests == []
         assert not [path for path in read_tree(site) if path.startswith('demo')]
-        # the other distribution was installed and its channel used
+        # the other distribution was installed from its snapshot
         assert file_read_bytes(f'{site}/other/core.py') == b"VERSION = '1.0'\n"
-        assert servers['other'].requests[0] == f'{dep_channel("other")}/latest.pack'
+        assert not [url for url in servers['other'].requests if url.endswith('/latest.pack')]
         # the failure is logged with the reason
         assert capture.fd.any_contains('Failed to install "demo==2.0"')
         assert capture.fd.any_contains('no valid update')
@@ -347,8 +390,11 @@ plain==1.0
         fs.create_dir(site)
         mod = make_mod(fs, content='demo==2.0\nother==1.0\n', pack_update_deps=['demo', 'other'])
         full, index = build_dist('other', '1.0')
+        _, demo_index = build_dist('demo', '2.0')
         servers = patch_servers(monkeypatch, 'alas', 'demo', 'other')
         servers['other'].register_version('1.0', full, index)
+        patch_packdep(monkeypatch, demo=snapshot('2.0', demo_index),
+                      other=snapshot('1.0', index))
         install_original = pip_pack.PipPack.install
 
         async def install_raising(self, name, version, latest_info=None):
@@ -386,6 +432,7 @@ plain==1.0
         full, index = build_dist('demo', '1.0')
         servers = patch_servers(monkeypatch, 'alas', 'demo')
         servers['demo'].register_version('1.0', full, index)
+        patch_packdep(monkeypatch, demo=snapshot('1.0', index))
         reads = []
         read_text = install_base.atomic_read_text
 
@@ -438,8 +485,8 @@ plain==1.0
 
 
 class TestInstallPackAllDeclared:
-    """The declared pins: every one goes through the channel, the satisfied
-    ones included."""
+    """The declared pins: every one is reconciled from the snapshot, the
+    satisfied ones included."""
 
     @pytest.mark.trio
     async def test_a_snapshot_skips_latest_pack(self, fs, app_folder, monkeypatch):
@@ -449,15 +496,11 @@ class TestInstallPackAllDeclared:
         fs.create_dir(site)
         mod = make_mod(fs, content='demo==1.0\n', pack_update_deps=['demo'])
         full, index = build_dist('demo', '1.0')
+        await UnpackJob(full, root=site, name='demo').run()
         servers = patch_servers(monkeypatch, 'alas', 'demo')
         servers['demo'].register_version('1.0', full, index)
-        assert await InstallBase(mod, site).install_pack() == {'demo': True}
+        patch_packdep(monkeypatch, demo=snapshot('1.0', index))
 
-        snapshot = LatestInfo(version='1.0', checksum=PackDecodeBase(index).index_checksum)
-        monkeypatch.setattr(
-            install_base.PackDep, 'read',
-            staticmethod(lambda root: {'demo': snapshot}))
-        servers['demo'].requests.clear()
         assert await InstallBase(mod, site).install_pack() == {'demo': True}
         assert servers['demo'].requests == []
 
@@ -465,6 +508,27 @@ class TestInstallPackAllDeclared:
         assert await InstallBase(mod, site).install_pack() == {'demo': True}
         assert servers['demo'].requests == [f'{dep_channel("demo")}/1.0/full.pack']
         assert file_read_bytes(f'{site}/demo/core.py') == b"VERSION = '1.0'\n"
+
+    @pytest.mark.trio
+    async def test_a_declared_dependency_without_a_snapshot_is_refused(
+            self, fs, app_folder, monkeypatch):
+        """A name the mod declares for pack updates but the tree records no
+        snapshot for cannot be installed: it is reported False and its
+        channel is never asked."""
+        site = site_packages(fs)
+        fs.create_dir(site)
+        mod = make_mod(fs, content='demo==1.0\n', pack_update_deps=['demo'])
+        full, index = build_dist('demo', '1.0')
+        servers = patch_servers(monkeypatch, 'alas', 'demo')
+        servers['demo'].register_version('1.0', full, index)
+        patch_packdep(monkeypatch)
+
+        with logger.mock_capture_writer() as capture:
+            assert await InstallBase(mod, site).install_pack() == {'demo': False}
+        assert servers['demo'].requests == []
+        assert not [path for path in read_tree(site) if path.startswith('demo')]
+        assert capture.fd.any_contains(
+            'Failed to install "demo==1.0": the packed tree records no dependency "demo"')
 
     @pytest.mark.trio
     async def test_the_packdep_is_read_once_per_instance(self, fs, monkeypatch):
@@ -484,14 +548,16 @@ class TestInstallPackAllDeclared:
     @pytest.mark.trio
     async def test_a_satisfied_pin_is_verified_and_repaired(self, fs, app_folder, monkeypatch):
         """A dependency the folder already satisfies is validated by the pack
-        job of its pin (the local index against the channel, every recorded
+        job of its pin (the local index against the snapshot, every recorded
         file against the index) and a damaged file is downloaded again."""
         site = site_packages(fs)
         fs.create_dir(site)
         mod = make_mod(fs, content='demo==1.0\n', pack_update_deps=['demo'])
         full, index = build_dist('demo', '1.0')
+        await UnpackJob(full, root=site, name='demo').run()
         servers = patch_servers(monkeypatch, 'alas', 'demo')
         servers['demo'].register_version('1.0', full, index)
+        patch_packdep(monkeypatch, demo=snapshot('1.0', index))
 
         install = InstallBase(mod, site)
         assert await install.install_pack() == {'demo': True}
@@ -502,12 +568,12 @@ class TestInstallPackAllDeclared:
 
         # a new instance reads the state of the folder as it is now: the pin
         # is satisfied (nothing to install), the file is validated against the
-        # channel and repaired with the range of the full pack
+        # snapshot and repaired with the range of the full pack
         install = InstallBase(mod, site)
         assert await install.install_pack() == {'demo': True}
         assert file_read_bytes(f'{site}/demo/core.py') == b"VERSION = '1.0'\n"
         channel = dep_channel('demo')
-        assert servers['demo'].requests == [f'{channel}/latest.pack', f'{channel}/1.0/full.pack']
+        assert servers['demo'].requests == [f'{channel}/1.0/full.pack']
 
     @pytest.mark.trio
     async def test_a_missing_pin_is_installed_by_the_same_call(self, fs, app_folder, monkeypatch):
@@ -521,18 +587,24 @@ class TestInstallPackAllDeclared:
         servers = patch_servers(monkeypatch, 'alas', 'demo', 'other')
         servers['demo'].register_version('1.0', demo_full, demo_index)
         servers['other'].register_version('2.0', other_full, other_index)
+        snapshots = patch_packdep(monkeypatch, demo=snapshot('1.0', demo_index))
         assert await InstallBase(mod, site).install_pack() == {'demo': True}
         servers['demo'].requests.clear()
 
         # the requirements of the mod changed (a new pin joined demo): the
-        # satisfied demo is verified, the missing other is installed
+        # satisfied demo is verified, the missing other is installed, and the
+        # tree snapshot of the new pin comes with the new tree
         file_write(f'{mod.root}/{mod.entry.requirements_file}', b'demo==1.0\nother==2.0\n')
+        snapshots['other'] = snapshot('2.0', other_index)
         install = InstallBase(mod, site)
         assert await install.install_pack() == {'demo': True, 'other': True}
         assert file_read_bytes(f'{site}/demo/core.py') == b"VERSION = '1.0'\n"
         assert file_read_bytes(f'{site}/other/core.py') == b"VERSION = '2.0'\n"
-        assert servers['demo'].requests == [f'{dep_channel("demo")}/latest.pack']
-        assert servers['other'].requests[0] == f'{dep_channel("other")}/latest.pack'
+        # the satisfied pin is local only, the new one comes from the channel
+        # with no latest.pack request either
+        assert servers['demo'].requests == []
+        assert servers['other'].requests
+        assert not [url for url in servers['other'].requests if url.endswith('/latest.pack')]
 
     @pytest.mark.trio
     async def test_nothing_declared_is_a_noop(self, fs, monkeypatch):
@@ -557,23 +629,27 @@ class TestInstallPackAllDeclared:
         assert capture.fd.any_contains('no requirements file')
 
     @pytest.mark.trio
-    async def test_a_channel_that_publishes_another_version(self, fs, app_folder, monkeypatch):
-        """The pinned version is the version the channel must publish: a
-        channel that moved on provides no valid update for a satisfied pin
-        either, the verification is reported as a failure."""
+    async def test_a_snapshot_that_publishes_another_version(self, fs, app_folder, monkeypatch):
+        """The pinned version is the version the snapshot must publish: a
+        snapshot that moved on provides no valid update for a satisfied pin
+        either, even when the channel still serves the pin."""
         site = site_packages(fs)
         fs.create_dir(site)
         create_dist(fs, {}, name='demo', version='1.0')
         mod = make_mod(fs, content='demo==1.0\n', pack_update_deps=['demo'])
-        full, index = build_dist('demo', '3.0')
+        pinned_full, pinned_index = build_dist('demo', '1.0')
+        _, index = build_dist('demo', '3.0')
         servers = patch_servers(monkeypatch, 'alas', 'demo')
-        servers['demo'].register_version('3.0', full, index)
+        servers['demo'].register_version('1.0', pinned_full, pinned_index)
+        patch_packdep(monkeypatch, demo=snapshot('3.0', index))
 
         with logger.mock_capture_writer() as capture:
             assert await InstallBase(mod, site).install_pack() == {'demo': False}
         assert capture.fd.any_contains('Failed to install "demo==1.0"')
         assert capture.fd.any_contains('no valid update')
-        # the refusal is the version check alone, the folder is untouched
+        # the refusal is the version check alone, the folder is untouched and
+        # the channel is not consulted for another version
+        assert servers['demo'].requests == []
         assert list_folders(site) == ['demo-1.0.dist-info']
 
     @pytest.mark.trio
@@ -590,6 +666,7 @@ class TestInstallPackAllDeclared:
         full, index = build_dist('demo', '1.0')
         servers = patch_servers(monkeypatch, 'alas', 'demo')
         servers['demo'].register_version('1.0', full, index)
+        patch_packdep(monkeypatch, demo=snapshot('1.0', index))
 
         assert await InstallBase(mod, site).install_pack() == {'demo': True}
         # the install itself does not touch the metadata of the old version

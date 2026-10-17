@@ -17,6 +17,8 @@ which a test must not touch: ``local_site_packages`` of the step layer is
 patched to a folder of the in-memory filesystem, everything else is the real
 code (the real channels, the real deploy job of the install).
 """
+from types import SimpleNamespace
+
 import pytest
 import trio
 
@@ -27,6 +29,7 @@ from alasio.deploy_dev.pack.pack_full import PackFull
 from alasio.deploy_dev.pack.pack_update import PackUpdate
 from alasio.deploy_dev.pack.pack_wheel import PackWheel
 from alasio.deploy_dev.pack.pack_wheel_update import PackWheelUpdate
+from alasio.ext import env
 from alasio.ext.path import PathStr
 from alasio.ext.path.atomic import file_read_bytes, file_write
 from alasio.logger import logger
@@ -49,11 +52,10 @@ REPO = make_repo({
         'requirements.txt': b'demo==2.0\nstable==1.0\n',
     },
 })
-FULL_T1 = b''.join(PackFull(REPO, commit='t1').iter_pack_data())
-INDEX_T1 = b''.join(PackFull(REPO, commit='t1').iter_packidx_data())
-FULL_T2 = b''.join(PackFull(REPO, commit='t2').iter_pack_data())
-INDEX_T2 = b''.join(PackFull(REPO, commit='t2').iter_packidx_data())
-UPDATE_T1_T2 = b''.join(PackUpdate(PackFull(REPO, commit='t2'), 't1').iter_pack_data())
+# The content of the builtin .gitattributes, read before the fake filesystem
+# is active: the tree packs are built inside the tests, where the pack
+# encoder reads it from the fake filesystem like the real one
+GITATTRIBUTES = file_read_bytes(env.ALASIO_ROOT.joinpath('.gitattributes'))
 
 # The path prefix of the deployment on the mock host, and the mirror of the
 # mod: the packrepo folder of its tree channel, the packdep folders of its
@@ -134,6 +136,45 @@ def dep_pack(version, name=DEP):
     return b''.join(pack.iter_pack_data()), bytes(pack.index_pack)
 
 
+def tree_pack(commit, snapshots=None):
+    """
+    The tree packs of a version and their packdep snapshots.
+
+    Args:
+        commit (str): Commit to pack
+        snapshots (dict[str, tuple[str, bytes]], optional): {name: (version,
+            20 bytes index checksum)} recorded in .pack/packdep.pack.
+            Defaults to None, a tree without packdep
+
+    Returns:
+        tuple[bytes, bytes, PackFull]: Full pack data, index pack data and
+            the PackFull that builds them (the new side of an update pack)
+    """
+    dep_gen = None
+    if snapshots is not None:
+        dep_gen = SimpleNamespace(published=snapshots)
+    pack = PackFull(REPO, commit=commit, dep_gen=dep_gen)
+    return b''.join(pack.iter_pack_data()), b''.join(pack.iter_packidx_data()), pack
+
+
+def dep_snapshots(demo_version, demo_index, stable_index):
+    """
+    The packdep snapshots of a tree version.
+
+    Args:
+        demo_version (str): Version of demo the tree pins
+        demo_index (bytes): Index pack of that demo version
+        stable_index (bytes): Index pack of stable 1.0
+
+    Returns:
+        dict[str, tuple[str, bytes]]: Snapshot of every dependency
+    """
+    return {
+        DEP: (demo_version, bytes.fromhex(PackDecodeBase(demo_index).index_checksum)),
+        STABLE: ('1.0', bytes.fromhex(PackDecodeBase(stable_index).index_checksum)),
+    }
+
+
 def dep_update(old, new, name=DEP):
     """
     The update pack of a version pair of a dependency.
@@ -165,16 +206,22 @@ async def test_a_tree_update_brings_the_dependencies_of_its_new_requirements(
     site = PathStr.new(site_packages(fs))
     monkeypatch.setattr(step_module, 'local_site_packages', lambda: site)
     mod_root = project.mod_root('DepsMod')
-    # the tree and the dependencies of the process this one replaces
-    await project.install('DepsMod', pack=FULL_T1)
+    # the tree and the dependencies of the process this one replaces; the
+    # tree predates packdep, the update brings the snapshot
+    fs.create_file(env.ALASIO_ROOT.joinpath('.gitattributes'), contents=GITATTRIBUTES)
+    full_t1, _, _ = tree_pack('t1')
+    await project.install('DepsMod', pack=full_t1)
     dep_1_full, dep_1_index = dep_pack('1.0')
     await UnpackJob(dep_1_full, root=site, name=DEP).run()
     stable_full, stable_index = dep_pack('1.0', STABLE)
     await UnpackJob(stable_full, root=site, name=STABLE).run()
-    server = servers.servers[UPDATE_HOST]
-    publish(server, f'{CHANNEL}/packrepo', 't2', FULL_T2, INDEX_T2)
-    publish_update(server, f'{CHANNEL}/packrepo', 't1', 't2', UPDATE_T1_T2)
     dep_2_full, dep_2_index = dep_pack('2.0')
+    full_t2, index_t2, pack_t2 = tree_pack(
+        't2', dep_snapshots('2.0', dep_2_index, stable_index))
+    update_t1_t2 = b''.join(PackUpdate(pack_t2, 't1').iter_pack_data())
+    server = servers.servers[UPDATE_HOST]
+    publish(server, f'{CHANNEL}/packrepo', 't2', full_t2, index_t2)
+    publish_update(server, f'{CHANNEL}/packrepo', 't1', 't2', update_t1_t2)
     publish(server, f'{CHANNEL}/packdep/{DEP}', '2.0', dep_2_full, dep_2_index)
     publish_update(server, f'{CHANNEL}/packdep/{DEP}', '1.0', '2.0', dep_update('1.0', '2.0'))
     publish(server, f'{CHANNEL}/packdep/{STABLE}', '1.0', stable_full, stable_index)
@@ -241,16 +288,19 @@ async def test_the_startup_check_verifies_a_dependency_without_an_update(
     site = PathStr.new(site_packages(fs))
     monkeypatch.setattr(step_module, 'local_site_packages', lambda: site)
     mod_root = project.mod_root('DepsMod')
-    await project.install('DepsMod', pack=FULL_T1)
     dep_1_full, dep_1_index = dep_pack('1.0')
-    await UnpackJob(dep_1_full, root=site, name=DEP).run()
     stable_full, stable_index = dep_pack('1.0', STABLE)
+    fs.create_file(env.ALASIO_ROOT.joinpath('.gitattributes'), contents=GITATTRIBUTES)
+    full_t1, index_t1, _ = tree_pack(
+        't1', dep_snapshots('1.0', dep_1_index, stable_index))
+    await project.install('DepsMod', pack=full_t1)
+    await UnpackJob(dep_1_full, root=site, name=DEP).run()
     await UnpackJob(stable_full, root=site, name=STABLE).run()
     # the file of the dependency is damaged after the install of the previous
     # process (nothing announces it: only the validation finds it)
     file_write(site.joinpath(f'{DEP}/core.py'), b'damaged\n')
     server = servers.servers[UPDATE_HOST]
-    publish(server, f'{CHANNEL}/packrepo', 't1', FULL_T1, INDEX_T1)
+    publish(server, f'{CHANNEL}/packrepo', 't1', full_t1, index_t1)
     publish(server, f'{CHANNEL}/packdep/{DEP}', '1.0', dep_1_full, dep_1_index)
     publish(server, f'{CHANNEL}/packdep/{STABLE}', '1.0', stable_full, stable_index)
 

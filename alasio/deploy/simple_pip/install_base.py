@@ -13,7 +13,10 @@ pins install with pip, by the flow of the caller. install_pack() hands every
 declared pin to the pack channel of the mod, one distribution at a time
 (PipPack and the deploy job machine): the job updates a different local
 version and validates the files when the version is already there, so a
-dependency without an update is checked all the same.
+dependency without an update is checked all the same. The version source is
+the packdep snapshot of the packed tree: a declared dependency without a
+usable snapshot entry is refused, and the dependency channel latest.pack is
+never requested.
 
 Usage:
     install = InstallBase(mod, site_packages)
@@ -46,8 +49,10 @@ class InstallBase:
     mod is at the version whose pins are installed -- the flow of a mod
     update applies the tree first, then installs the dependencies of its new
     version. install_pack() reconciles the declared pins of that same read;
-    a caller that wants to re-check after the installs (e.g. to report what
-    is left for pip) creates a new instance.
+    the snapshot is the only version source of those pins, so a missing or
+    damaged packdep refuses the declared dependencies instead of falling back
+    to the online channel. A caller that wants to re-check after the installs
+    (e.g. to report what is left for pip) creates a new instance.
     cleanup_dist_info() reconciles the metadata directories of the
     site-packages folder with the requirements pins after the whole
     dependency reconciliation, see the method.
@@ -127,8 +132,9 @@ class InstallBase:
         The file belongs to the tree of the mod, so its path follows the mod
         like the requirements file. PackDep.read() validates it against the
         local index pack before decoding; a missing, damaged or untrusted
-        file yields an empty mapping, and the installs use the online channel
-        flow. The read is blocking file IO and runs on a worker thread.
+        file yields an empty mapping, so install_pack() refuses the declared
+        dependencies instead of falling back to their online latest.pack.
+        The read is blocking file IO and runs on a worker thread.
 
         Returns:
             dict[str, LatestInfo]: PEP 503 name -> published version and
@@ -173,9 +179,10 @@ class InstallBase:
         at a time. The pack job updates a different local version and
         validates or repairs the files of an equal one, so every declared pin
         is checked even when there is no update. The mod's packdep snapshot is
-        used when it matches the pin, keeping the dependency latest.pack out
-        of the flow. A failure of one distribution is logged and reported
-        False; the others continue.
+        the only version source: a declared dependency without a usable
+        snapshot entry is reported False, and the dependency channel
+        latest.pack is never requested. A failure of one distribution is
+        logged and reported False; the others continue.
 
         Returns:
             dict[str, bool]: PEP 503 normalized name -> True when the
@@ -202,10 +209,15 @@ class InstallBase:
         out = {}
         for name, version in deps.items():
             entry = packdep.get(name)
-            if entry is not None and entry.version != version:
-                # the snapshot is of another version than the pin: it cannot
-                # confirm this install, leave the online check to decide
-                entry = None
+            if entry is None:
+                # the packed tree is the only version source of a declared
+                # dependency: without its record there is no trusted channel
+                logger.warning(
+                    f'Failed to install "{name}=={version}": '
+                    f'the packed tree records no dependency "{name}"'
+                )
+                out[name] = False
+                continue
             try:
                 ok = await pack.install(name, version, latest_info=entry)
             except (ValueError, httpx2.HTTPError, AllMirrorsFailedError) as e:
