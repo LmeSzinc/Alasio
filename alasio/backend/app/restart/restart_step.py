@@ -8,12 +8,11 @@ adds the entries and the lifespan run):
 - ``stop_all``: stop every running worker gracefully and freeze the resume list
   (the worker manager keeps the list, the handover writes it into the resume
   file);
-- ``update_mods`` / ``full_update``: apply the deploy jobs of the mods (one job
-  per mod, the phases drive the Update topic, a failure of one mod is isolated);
-- ``update_deps``: reconcile the dependencies the mods update by pack, the
-  step of the update and full update sequences after the trees were applied
-  (a dependency without an update is verified all the same, the dependency
-  snapshot of a tree that this run validated is used when it is available);
+- ``update_mods`` / ``full_update``: update the tree and then the pack
+  dependencies of every mod (``update_mod_repo`` / ``update_mod_dep``, one mod
+  at a time, the phases drive the Update topic, a failure of one mod is
+  isolated, a failed tree never reaches its dependency step and a failed
+  dependency step marks its mod 'error');
 - ``maybe_upgrade_to_daily``: turn a flow in flight into the daily maintenance
   when it crosses the target time;
 - ``handover``: publish the resume intent and ask the supervisor to replace the
@@ -349,16 +348,114 @@ class RestartStep(RestartBase):
     # Applying the updates
     # ------------------------------------------------------------------
 
+    async def update_mod_repo(self, name, flow=None) -> "Optional[bool]":
+        """
+        Update or validate the tree of one mod.
+
+        The job reports its phases on the Update topic and closes the flow's
+        cancellation window at its first real write. A failed or unmanaged
+        mod leaves its state on the topic and returns None.
+
+        Args:
+            name (str): Mod name
+            flow (Flow, optional): The flow running the step, see update_mods
+
+        Returns:
+            bool | None: True when the real files changed, False when the tree
+                completed without a change, None when the mod is unmanaged or
+                the update failed
+        """
+        mod = self.update_check.mods.get(name, None)
+        if mod is None or mod.mirrors is None:
+            # unknown mod, or unmanaged (no usable update source)
+            return None
+        logger.info(f'[Update] Updating mod "{name}"')
+
+        async def on_phase(phase, name=name):
+            if phase == 'updating' and flow is not None:
+                # the real files are about to be replaced: the flow cannot
+                # be cancelled any more, its handover ends it
+                flow.close_window()
+            self.update_check.set_state(name, phase)
+
+        try:
+            job = await mod.job()
+            completed = await job.update(on_phase)
+        except trio.Cancelled:
+            # the flow was cancelled: the job unwinds at its next checkpoint,
+            # no real file is touched and its temporary files are kept for the
+            # next run (see DeployJob.update)
+            raise
+        except Exception as e:
+            logger.error(f'[Update] Failed to update "{name}": {e}')
+            logger.exception(e)
+            mod.set_state('error', error=str(e))
+            return None
+        if not completed:
+            mod.set_state('error', error='Some files failed to update, retry the update')
+            return None
+        mod.set_state('uptodate')
+        if job.changed:
+            logger.info(f'[Update] Applied the update of "{name}"')
+            return True
+        return False
+
+    async def update_mod_dep(self, name) -> bool:
+        """
+        Reconcile the pack dependencies of one mod.
+
+        Call this only after update_mod_repo(name) succeeded: the packdep
+        snapshot of the tree is then anchored by the repo index this run
+        validated.
+
+        Args:
+            name (str): Mod name
+
+        Returns:
+            bool: True when every declared pin is in place (or the mod has
+                nothing to reconcile), False when the dependency update failed
+        """
+        check = self.update_check.mods.get(name, None)
+        if check is None or check.mirrors is None:
+            return True
+        mod = check.mod
+        if not mod.entry.pack_update_deps:
+            return True
+        logger.info(f'[Update] Updating the dependencies of "{name}"')
+        try:
+            install = InstallBase(
+                mod, local_site_packages(), client=self.update_check.client())
+            result = await install.install_pack()
+            try:
+                # the ordinary pip dependencies of the mod may still follow,
+                # so install_pack() does not clean the metadata directories
+                await install.cleanup_dist_info()
+            except Exception as e:
+                logger.warning(
+                    f'[Update] Failed to clean the metadata directories of "{name}": {e}')
+        except Exception as e:
+            logger.error(f'[Update] Failed to update the dependencies of "{name}": {e}')
+            logger.exception(e)
+            return False
+        failed = sorted(dep for dep, ok in result.items() if not ok)
+        if failed:
+            logger.error(f'[Update] The dependencies of "{name}" are not all in place: {failed}')
+            return False
+        logger.info(f'[Update] The dependencies of "{name}" are at their pinned versions')
+        return True
+
     async def update_mods(self, names, flow=None) -> "List[str]":
         """
-        Update the given mods: one deploy job per mod, run to the end.
+        Update the trees and the pack dependencies of the given mods.
 
-        The job reports the phases of its flow ('checking' / 'downloading' /
-        'updating'), this step binds them to the Update topic and closes the
-        cancellation window of the flow at its point of no return (the
-        'updating' phase: the real files are about to be replaced). A failure
-        of one mod is isolated: it is reported on the topic of that mod, the
-        other mods and the caller's handover are not affected.
+        Each mod goes through update_mod_repo first. A failed or unmanaged
+        tree stops there: update_mod_dep is not called, so the packdep snapshot
+        of a tree that this run did not validate is never used. A successful
+        tree, including one that was already up to date, then reconciles its
+        dependencies. A dependency failure marks the mod 'error' as well: the
+        mod update is incomplete even when its tree changed. A failure of one
+        mod is isolated; the other mods and the caller's handover are not
+        affected.
 
         Args:
             names (Iterable[str]): Mod names to update
@@ -370,123 +467,17 @@ class RestartStep(RestartBase):
         """
         changed = []
         for name in names:
-            mod = self.update_check.mods.get(name, None)
-            if mod is None or mod.mirrors is None:
-                # unknown mod, or unmanaged (no usable update source): nothing
-                # to apply
+            changed_mod = await self.update_mod_repo(name, flow=flow)
+            if changed_mod is None:
                 continue
-            logger.info(f'[Update] Updating mod "{name}"')
-
-            async def on_phase(phase, name=name):
-                if phase == 'updating' and flow is not None:
-                    # the real files are about to be replaced: the flow cannot
-                    # be cancelled any more, its handover ends it
-                    flow.close_window()
-                self.update_check.set_state(name, phase)
-
-            try:
-                job = await mod.job()
-                completed = await job.update(on_phase)
-            except trio.Cancelled:
-                # the flow was cancelled: the job unwinds at its next
-                # checkpoint, no real file is touched and its temporary files
-                # are kept for the next run (see DeployJob.update)
-                raise
-            except Exception as e:
-                logger.error(f'[Update] Failed to update "{name}": {e}')
-                logger.exception(e)
-                mod.set_state('error', error=str(e))
-                continue
-            if not completed:
-                mod.set_state('error', error='Some files failed to update, retry the update')
-                continue
-            if job.changed:
+            if changed_mod:
                 changed.append(name)
-                logger.info(f'[Update] Applied the update of "{name}"')
-            mod.set_state('uptodate')
+            if not await self.update_mod_dep(name):
+                mod = self.update_check.mods.get(name, None)
+                if mod is not None:
+                    mod.set_state(
+                        'error', error='Some dependencies failed to update, retry the update')
         return changed
-
-    async def update_deps(self, names) -> "Dict[str, Dict[str, bool]]":
-        """
-        Install and verify the pack updated dependencies of the given mods
-
-        A mod runs with the distributions its requirements file pins
-        (entry.requirements_file); the ones its entry declares for pack updates
-        (entry.pack_update_deps) draw from the pack channels of the mod. The
-        step reads that file of every mod as it is now and reconciles the
-        declared pins against the site-packages folder of the running
-        interpreter (local_site_packages): every declared pin is handed to the
-        channel of the mod, where its job updates a different local version
-        and validates and repairs the files of a version that is already
-        there -- a dependency that has no update is validated all the same
-        (InstallBase.install_pack()).
-
-        The dependency snapshot of each tree is read by InstallBase from the
-        mod path (the snapshot belongs to the tree, like its requirements
-        file), so the snapshot drives each dependency flow without a channel
-        ``latest.pack`` request: a matching local ledger is validated, another
-        version is updated toward the snapshot. After the installs, the
-        metadata directories are reconciled with the requirements pins, once
-        for the whole dependency set of the mod.
-
-        The step belongs after the trees of the mods were applied
-        (``update_mods``): the requirements file of a mod belongs to its tree,
-        so the pins to reconcile are the ones of the new version, and the
-        handover after the step is what makes an installed dependency effective
-        in the workers of the new process. Every mod without a usable update
-        source and every mod that declares no pack updated dependency is
-        skipped without a read. A failure of one mod is isolated: it is logged,
-        the other mods and the handover are not affected (the failures inside
-        one mod are isolated per distribution by InstallBase).
-
-        Args:
-            names (Iterable[str]): Mod names whose dependencies to reconcile
-
-        Returns:
-            dict[str, dict[str, bool]]: Mod name -> the install result of its
-                declared pins (PEP 503 normalized name -> True when the
-                distribution is at the pinned version after the call). A mod
-                that was skipped, or failed before its installs, is not in it
-        """
-        results = {}
-        site_packages = None
-        for name in names:
-            check = self.update_check.mods.get(name, None)
-            if check is None or check.mirrors is None:
-                # unknown mod, or unmanaged (no usable update source): no
-                # channel to install the dependencies from
-                continue
-            mod = check.mod
-            if not mod.entry.pack_update_deps:
-                # the mod declares no dependency for the pack channel: its
-                # pins install with pip, not here
-                continue
-            logger.info(f'[Update] Updating the dependencies of "{name}"')
-            try:
-                if site_packages is None:
-                    # resolved lazily: a flow whose mods declare no pack
-                    # updated dependency never asks for it
-                    site_packages = local_site_packages()
-                install = InstallBase(mod, site_packages, client=self.update_check.client())
-                result = await install.install_pack()
-                try:
-                    # the metadata directories are reconciled after the pack
-                    # installs: the ordinary pip dependencies of the mod may
-                    # still follow, so install_pack() does not clean them
-                    await install.cleanup_dist_info()
-                except Exception as e:
-                    logger.warning(
-                        f'[Update] Failed to clean the metadata directories of "{name}": {e}')
-            except Exception as e:
-                logger.error(f'[Update] Failed to update the dependencies of "{name}": {e}')
-                continue
-            results[name] = result
-            failed = sorted(dep for dep, ok in result.items() if not ok)
-            if failed:
-                logger.warning(f'[Update] The dependencies of "{name}" are not all in place: {failed}')
-            else:
-                logger.info(f'[Update] The dependencies of "{name}" are at their pinned versions')
-        return results
 
     async def full_update(self, flow=None) -> "List[str]":
         """
@@ -495,11 +486,12 @@ class RestartStep(RestartBase):
 
         The mods without an update source are skipped (they stay 'unmanaged'), a
         mod that is already up to date is validated and repaired by its job
-        instead of being applied -- the tree converges either way. The
-        dependencies the mods update by pack are reconciled after the trees
-        (``update_deps``), the ones without an update included: the full update
-        validates and repairs the whole environment of the mods, not only what
-        moved (the startup check runs one).
+        instead of being applied -- the tree converges either way. Every tree
+        that this run validated then reconciles its pack dependencies, the ones
+        without an update included: the full update validates and repairs the
+        whole environment of the mods, not only what moved (the startup check
+        runs one). A failed dependency step marks its mod 'error', like a
+        failed tree.
 
         The automatic mod updates off (Deploy.Update.AutoUpdate = false: every
         managed mod is 'disabled') and a backend without a live supervisor (an
@@ -530,10 +522,6 @@ class RestartStep(RestartBase):
             return []
         names = self.update_check.names()
         changed = await self.update_mods(names, flow=flow)
-        # the dependencies of the new trees, the ones without an update
-        # verified all the same: the full update validates and repairs the
-        # whole environment of the mods, not only what moved
-        await self.update_deps(names)
         self.daily.note_full_update()
         logger.info(f'[Update] Full update finished, changed mods: {changed}')
         return changed

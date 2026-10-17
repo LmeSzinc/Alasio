@@ -206,10 +206,13 @@ class FlowUpdate(Flow):
     applied it meanwhile) keeps its state and skips it, a failed mod is
     isolated, the other mods and the handover are not affected.
 
-    The dependencies of the applied mods are reconciled after their trees
-    (``update_deps``): the pins of the new requirements file are installed, the
-    declared ones the folder already satisfies are verified and repaired -- a
-    dependency that has no update is validated all the same.
+    The dependencies of every applied mod are reconciled by ``update_mods``
+    right after its tree: the pins of the new requirements file are installed,
+    the declared ones the folder already satisfies are verified and repaired --
+    a dependency that has no update is validated all the same. A failed tree
+    stops before its dependency step, so its packdep snapshot is never used; a
+    failed dependency step marks the mod 'error' as well, because the update is
+    incomplete even when its tree changed.
 
     The cancellable phase is the stop and the download: the apply step closes
     the window at the first real write (the deploy jobs report their 'updating'
@@ -252,9 +255,6 @@ class FlowUpdate(Flow):
                 for name in names:
                     manager.update_check.set_state(name, 'stopping')
                 changed = await manager.update_mods(names, flow=self)
-                # the dependencies of the trees just applied, the ones without
-                # an update verified all the same
-                await manager.update_deps(names)
                 await manager.maybe_upgrade_to_daily(self)
             await manager.handover(self, 'update', resume_list)
             handed_over = True

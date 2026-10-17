@@ -561,7 +561,7 @@ class FakeInstallBase:
 
 
 class TestUpdateMods:
-    """The apply step: one deploy job per mod, phases, failure isolation"""
+    """The mod step: repo first, then dependencies, failure isolation"""
 
     @staticmethod
     def _make(jobs, daily=None):
@@ -636,6 +636,37 @@ class TestUpdateMods:
         assert states == []
 
     @pytest.mark.trio
+    async def test_a_failed_repo_skips_its_dependencies(self, monkeypatch):
+        """The dependency step runs only after a successful tree update: the
+        packdep of a failed tree is never used."""
+        monkeypatch.setattr(step_module, 'InstallBase', FakeInstallBase)
+        FakeInstallBase.set_result('a', {'demo': True})
+        FakeInstallBase.set_result('b', {'other': True})
+        update_check = FakeUpdateCheck()
+        update_check.mods['a'] = FakePerMod(
+            'a', FakeDeployJob(error=OSError('mirror is down')), update_check.states,
+            pack_deps=['demo'])
+        update_check.mods['b'] = FakePerMod(
+            'b', FakeDeployJob(changed=True), update_check.states, pack_deps=['other'])
+        manager = make_manager(update_check=update_check)
+        assert await manager.update_mods(['a', 'b']) == ['b']
+        assert [install.mod.name for install in FakeInstallBase.instances] == ['b']
+
+    @pytest.mark.trio
+    async def test_a_failed_dependency_marks_the_mod_error(self, monkeypatch):
+        """A failed dependency step makes the whole mod update incomplete,
+        even when the tree itself changed."""
+        monkeypatch.setattr(step_module, 'InstallBase', FakeInstallBase)
+        FakeInstallBase.set_result('m', {'demo': False})
+        update_check = FakeUpdateCheck()
+        update_check.mods['m'] = FakePerMod(
+            'm', FakeDeployJob(changed=True), update_check.states, pack_deps=['demo'])
+        manager = make_manager(update_check=update_check)
+        assert await manager.update_mods(['m']) == ['m']
+        assert ('m', 'error', 'Some dependencies failed to update, retry the update') \
+            in update_check.states
+
+    @pytest.mark.trio
     async def test_full_update_notes_the_completion(self):
         manager, _ = self._make({'m': FakeDeployJob(changed=True)})
         assert await manager.full_update() == ['m']
@@ -701,8 +732,8 @@ class TestUpdateMods:
         assert flow.upgraded is False
 
 
-class TestUpdateDeps:
-    """The dependency step: the declared pins of every mod, installed or verified"""
+class TestUpdateModDep:
+    """The dependency step of one mod: installed or verified"""
 
     @staticmethod
     def _make(mods):
@@ -728,7 +759,7 @@ class TestUpdateDeps:
         FakeInstallBase.set_result('m', {'demo': True})
         mod = FakePerMod('m', FakeDeployJob(), [], pack_deps=['demo'])
         manager = self._make({'m': mod})
-        assert await manager.update_deps(['m']) == {'m': {'demo': True}}
+        assert await manager.update_mod_dep('m') is True
         install = FakeInstallBase.instances[-1]
         assert install.mod is mod.mod
         assert install.client is manager.update_check.client_object
@@ -742,7 +773,7 @@ class TestUpdateDeps:
         read of its dependencies."""
         monkeypatch.setattr(step_module, 'InstallBase', FakeInstallBase)
         manager = self._make({'m': FakePerMod('m', FakeDeployJob(), [])})
-        assert await manager.update_deps(['m']) == {}
+        assert await manager.update_mod_dep('m') is True
         assert FakeInstallBase.instances == []
 
     @pytest.mark.trio
@@ -751,22 +782,20 @@ class TestUpdateDeps:
         an unknown name has no mod at all."""
         monkeypatch.setattr(step_module, 'InstallBase', FakeInstallBase)
         manager = self._make({'m': FakePerMod('m', None, [], pack_deps=['demo'])})
-        assert await manager.update_deps(['m', 'nope']) == {}
+        assert await manager.update_mod_dep('m') is True
+        assert await manager.update_mod_dep('nope') is True
         assert FakeInstallBase.instances == []
 
     @pytest.mark.trio
-    async def test_a_failed_mod_is_isolated(self, monkeypatch):
-        """A mod whose install raises is logged and the other mods are
-        processed."""
+    async def test_a_failed_install_is_reported(self, monkeypatch):
+        """A mod whose install raises is logged and returns None."""
         monkeypatch.setattr(step_module, 'InstallBase', FakeInstallBase)
         FakeInstallBase.set_result('a', OSError('mirror is down'))
-        FakeInstallBase.set_result('b', {'other': True})
         manager = self._make({
             'a': FakePerMod('a', FakeDeployJob(), [], pack_deps=['demo']),
-            'b': FakePerMod('b', FakeDeployJob(), [], pack_deps=['other']),
         })
         with logger.mock_capture_writer() as capture:
-            assert await manager.update_deps(['a', 'b']) == {'b': {'other': True}}
+            assert await manager.update_mod_dep('a') is False
         assert capture.fd.any_contains('Failed to update the dependencies of "a"')
         assert capture.fd.any_contains('mirror is down')
 
@@ -778,7 +807,7 @@ class TestUpdateDeps:
         FakeInstallBase.set_result('m', {'a': True, 'b': False})
         manager = self._make({'m': FakePerMod('m', FakeDeployJob(), [], pack_deps=['a', 'b'])})
         with logger.mock_capture_writer() as capture:
-            assert await manager.update_deps(['m']) == {'m': {'a': True, 'b': False}}
+            assert await manager.update_mod_dep('m') is False
         assert capture.fd.any_contains('The dependencies of "m" are not all in place: [\'b\']')
 
     @pytest.mark.trio

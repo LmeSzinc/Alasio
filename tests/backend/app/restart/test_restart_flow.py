@@ -186,10 +186,6 @@ class FakeManager:
         self.calls.append(('update_mods', list(names)))
         return list(self.changed)
 
-    async def update_deps(self, names):
-        self.calls.append(('update_deps', list(names)))
-        return {}
-
     async def stop_all(self, flow=None, timeout=None):
         self.calls.append(('stop_all', flow.name if flow is not None else ''))
         return self.stop_result
@@ -365,7 +361,7 @@ class TestFlowUpdate:
         manager = FakeManager(changed=['m'])
         await FlowUpdate(manager).run()
         assert manager.calls == [
-            ('stop_all', 'update'), ('update_mods', ['m']), ('update_deps', ['m']),
+            ('stop_all', 'update'), ('update_mods', ['m']),
             'maybe_upgrade_to_daily', ('handover', 'update', ['cfg_a'])]
         assert ('set_state', 'm', 'queued') in manager.update_check.calls
         assert ('set_state', 'm', 'stopping') in manager.update_check.calls
@@ -378,7 +374,7 @@ class TestFlowUpdate:
         # no mod of the scope: no pre-check, the maintenance degenerates into
         # the stop + handover of a plain restart
         assert manager.calls == [
-            ('stop_all', 'update'), ('update_mods', []), ('update_deps', []),
+            ('stop_all', 'update'), ('update_mods', []),
             'maybe_upgrade_to_daily', ('handover', 'update', ['cfg_a'])]
 
     @pytest.mark.trio

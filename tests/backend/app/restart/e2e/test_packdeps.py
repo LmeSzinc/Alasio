@@ -8,7 +8,9 @@ draw from the pack channel of the mod (``packdep/{dep}``, a sibling of the
 ``packrepo`` channel of its tree). The full update of the startup reconciles
 the dependencies of every managed mod after their trees: a pin the environment
 does not satisfy is installed, a pin it satisfies is verified and repaired --
-a dependency that has no update is validated all the same.
+a dependency that has no update is validated all the same. The second
+dependency of the scenario keeps its version across the tree update and is
+validated in place.
 
 The environment the dependencies land in is the site-packages of the process,
 which a test must not touch: ``local_site_packages`` of the step layer is
@@ -36,15 +38,15 @@ from .conftest import UPDATE_HOST, assert_logs, at
 
 # The tree of the scenario: its requirements file is part of it, so an update
 # of the tree brings the pins of its dependencies. t1 pins demo 1.0, t2 pins
-# demo 2.0
+# demo 2.0; stable stays at 1.0 in both versions.
 REPO = make_repo({
     't1': {
         'module/main.py': b'print("t1")\n',
-        'requirements.txt': b'demo==1.0\n',
+        'requirements.txt': b'demo==1.0\nstable==1.0\n',
     },
     't2': {
         'module/main.py': b'print("t2")\n',
-        'requirements.txt': b'demo==2.0\n',
+        'requirements.txt': b'demo==2.0\nstable==1.0\n',
     },
 })
 FULL_T1 = b''.join(PackFull(REPO, commit='t1').iter_pack_data())
@@ -58,8 +60,9 @@ UPDATE_T1_T2 = b''.join(PackUpdate(PackFull(REPO, commit='t2'), 't1').iter_pack_
 # dependencies are derived from it
 CHANNEL = '/alas/LmeSzinc_Alasio_master'
 MIRROR = f'http://{UPDATE_HOST}{CHANNEL}/packrepo'
-# The dist-key of the dependency channel (the PEP 503 normalized name)
+# The dist-keys of the dependency channels (the PEP 503 normalized names)
 DEP = 'demo'
+STABLE = 'stable'
 
 
 def publish(server, prefix, version, full, index):
@@ -94,53 +97,57 @@ def publish_update(server, prefix, old, new, update):
     server.static.register_file(f'{prefix}/{new}/from_{old}.pack', update)
 
 
-def dep_wheel(version):
+def dep_wheel(version, name=DEP):
     """
-    Build the wheel of the dependency at a version (on the fake filesystem).
+    Build the wheel of a dependency at a version (on the fake filesystem).
 
     Args:
         version (str): Version of the dependency
+        name (str): Distribution name. Defaults to DEP
 
     Returns:
         str: Path of the .whl file
     """
     return build_wheel(
-        f'/w/{DEP}-{version}-py3-none-any.whl',
+        f'/w/{name}-{version}-py3-none-any.whl',
         {
-            f'{DEP}/__init__.py': b'',
-            f'{DEP}/core.py': f"VERSION = '{version}'\n".encode(),
+            f'{name}/__init__.py': b'',
+            f'{name}/core.py': f"VERSION = '{version}'\n".encode(),
         },
-        name=DEP,
+        name=name,
         version=version,
     )
 
 
-def dep_pack(version):
+def dep_pack(version, name=DEP):
     """
-    The pack data of the dependency at a version.
+    The pack data of a dependency at a version.
 
     Args:
         version (str): Version of the dependency
+        name (str): Distribution name. Defaults to DEP
 
     Returns:
         tuple[bytes, bytes]: The full pack and the index pack
     """
-    pack = PackWheel(dep_wheel(version))
+    pack = PackWheel(dep_wheel(version, name))
     return b''.join(pack.iter_pack_data()), bytes(pack.index_pack)
 
 
-def dep_update(old, new):
+def dep_update(old, new, name=DEP):
     """
-    The update pack of a version pair of the dependency.
+    The update pack of a version pair of a dependency.
 
     Args:
         old (str): Version the update applies to
         new (str): Version the update installs
+        name (str): Distribution name. Defaults to DEP
 
     Returns:
         bytes: Update pack of the pair
     """
-    return b''.join(PackWheelUpdate(PackWheel(dep_wheel(new)), PackWheel(dep_wheel(old))).iter_pack_data())
+    return b''.join(PackWheelUpdate(
+        PackWheel(dep_wheel(new, name)), PackWheel(dep_wheel(old, name))).iter_pack_data())
 
 
 @pytest.mark.trio
@@ -148,24 +155,29 @@ async def test_a_tree_update_brings_the_dependencies_of_its_new_requirements(
         fs, project, servers, make_backend, monkeypatch):
     """
     A cold start finds an update of the mod: the tree is applied and its
-    dependencies are reconciled after it -- the pin of the new requirements
-    file is installed from the packdep channel of the deployment, then the flow
-    hands the process over (the new packages are imported by the new process)
+    dependencies are reconciled after it -- the updated pin is installed from
+    its packdep channel, the unchanged pin is validated in place, then the
+    flow hands the process over (the new packages are imported by the new
+    process)
     """
-    backend = make_backend(mods={'DepsMod': MIRROR}, configs={}, pack_deps={'DepsMod': [DEP]})
+    backend = make_backend(
+        mods={'DepsMod': MIRROR}, configs={}, pack_deps={'DepsMod': [DEP, STABLE]})
     site = PathStr.new(site_packages(fs))
     monkeypatch.setattr(step_module, 'local_site_packages', lambda: site)
     mod_root = project.mod_root('DepsMod')
-    # the tree and the dependency of the process this one replaces
+    # the tree and the dependencies of the process this one replaces
     await project.install('DepsMod', pack=FULL_T1)
     dep_1_full, dep_1_index = dep_pack('1.0')
     await UnpackJob(dep_1_full, root=site, name=DEP).run()
+    stable_full, stable_index = dep_pack('1.0', STABLE)
+    await UnpackJob(stable_full, root=site, name=STABLE).run()
     server = servers.servers[UPDATE_HOST]
     publish(server, f'{CHANNEL}/packrepo', 't2', FULL_T2, INDEX_T2)
     publish_update(server, f'{CHANNEL}/packrepo', 't1', 't2', UPDATE_T1_T2)
     dep_2_full, dep_2_index = dep_pack('2.0')
     publish(server, f'{CHANNEL}/packdep/{DEP}', '2.0', dep_2_full, dep_2_index)
     publish_update(server, f'{CHANNEL}/packdep/{DEP}', '1.0', '2.0', dep_update('1.0', '2.0'))
+    publish(server, f'{CHANNEL}/packdep/{STABLE}', '1.0', stable_full, stable_index)
 
     with logger.mock_capture_writer() as capture:
         async with trio.open_nursery() as nursery:
@@ -190,6 +202,13 @@ INFO | Updating files to "{site}", name="demo"
 INFO | Replacing files to "{site}", name="demo"
 INFO | Update done
 INFO | Installed "demo==2.0"
+INFO | Installing "stable==1.0" to "{site}"
+INFO | [CurrentVersion] 1.0
+INFO | [LatestVersion] 1.0
+INFO | Already up to date: 1.0
+INFO | Resetting files to "{site}", name="stable"
+INFO | Reset done
+INFO | Installed "stable==1.0"
 INFO | [Update] The dependencies of "DepsMod" are at their pinned versions
 INFO | [Update] Full update finished, changed mods: ['DepsMod']
 INFO | [Restart] Resume credential announced to the supervisor
@@ -198,35 +217,42 @@ INFO | [Restart] Handover of the "startup" flow (startup convergence): 0 configs
 INFO | [Restart] Flow "startup" finished
 """)
             nursery.cancel_scope.cancel()
-    # the dependency of the new requirements file landed in the environment,
-    # and no metadata directory of the old version stays next to it
+    # the updated dependency landed in the environment, and no metadata
+    # directory of its old version stays next to it
     assert file_read_bytes(f'{site}/{DEP}/core.py') == b"VERSION = '2.0'\n"
     folders = list_folders(site)
     assert [folder for folder in folders if folder.startswith(f'{DEP}-')] == [f'{DEP}-2.0.dist-info']
+    # the second dependency kept its version and was validated in place
+    assert file_read_bytes(f'{site}/{STABLE}/core.py') == b"VERSION = '1.0'\n"
+    assert [folder for folder in folders if folder.startswith(f'{STABLE}-')] == [f'{STABLE}-1.0.dist-info']
 
 
 @pytest.mark.trio
 async def test_the_startup_check_verifies_a_dependency_without_an_update(
         fs, project, servers, make_backend, monkeypatch):
     """
-    A cold start with nothing to apply: the tree is validated and the
-    dependency -- which has no update either -- is verified by its channel all
-    the same, a damaged file is downloaded again. The flows of a mod update
-    validate the whole environment, not only what moved
+    A cold start with nothing to apply: the tree is validated and both
+    dependencies -- neither has an update -- are verified by their channels
+    all the same, a damaged file is downloaded again. The flows of a mod
+    update validate the whole environment, not only what moved
     """
-    backend = make_backend(mods={'DepsMod': MIRROR}, configs={}, pack_deps={'DepsMod': [DEP]})
+    backend = make_backend(
+        mods={'DepsMod': MIRROR}, configs={}, pack_deps={'DepsMod': [DEP, STABLE]})
     site = PathStr.new(site_packages(fs))
     monkeypatch.setattr(step_module, 'local_site_packages', lambda: site)
     mod_root = project.mod_root('DepsMod')
     await project.install('DepsMod', pack=FULL_T1)
     dep_1_full, dep_1_index = dep_pack('1.0')
     await UnpackJob(dep_1_full, root=site, name=DEP).run()
+    stable_full, stable_index = dep_pack('1.0', STABLE)
+    await UnpackJob(stable_full, root=site, name=STABLE).run()
     # the file of the dependency is damaged after the install of the previous
     # process (nothing announces it: only the validation finds it)
     file_write(site.joinpath(f'{DEP}/core.py'), b'damaged\n')
     server = servers.servers[UPDATE_HOST]
     publish(server, f'{CHANNEL}/packrepo', 't1', FULL_T1, INDEX_T1)
     publish(server, f'{CHANNEL}/packdep/{DEP}', '1.0', dep_1_full, dep_1_index)
+    publish(server, f'{CHANNEL}/packdep/{STABLE}', '1.0', stable_full, stable_index)
 
     with logger.mock_capture_writer() as capture:
         async with trio.open_nursery() as nursery:
@@ -248,6 +274,13 @@ INFO | Already up to date: 1.0
 INFO | Resetting files to "{site}", name="demo"
 INFO | Reset done
 INFO | Installed "demo==1.0"
+INFO | Installing "stable==1.0" to "{site}"
+INFO | [CurrentVersion] 1.0
+INFO | [LatestVersion] 1.0
+INFO | Already up to date: 1.0
+INFO | Resetting files to "{site}", name="stable"
+INFO | Reset done
+INFO | Installed "stable==1.0"
 INFO | [Update] The dependencies of "DepsMod" are at their pinned versions
 INFO | [Update] Full update finished, changed mods: []
 INFO | [Restart] Flow "startup" finished
@@ -256,3 +289,5 @@ INFO | [Restart] The resume queue is empty, nothing to start
             nursery.cancel_scope.cancel()
     # the damaged file was downloaded again from the channel
     assert file_read_bytes(f'{site}/{DEP}/core.py') == b"VERSION = '1.0'\n"
+    # the unchanged dependency was validated and left at its version
+    assert file_read_bytes(f'{site}/{STABLE}/core.py') == b"VERSION = '1.0'\n"
