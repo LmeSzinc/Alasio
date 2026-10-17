@@ -1,0 +1,274 @@
+import cv2
+import numpy as np
+
+from alasio.base.image.color import color_similar, color_similarity_2d, rgb2gray
+from alasio.base.timer import Timer
+from alasio.logger import logger
+
+from module.exception import HardNotSatisfied
+from module.map.assets import *
+from module.map.fleet_bar import FleetBarDetector
+
+
+class FleetOperator:
+    FLEET_IN_USE_STD = 27  # In use 52, not in use (3, 6).
+
+    OFFSET = (-20, -80, 20, 5)
+
+    def __init__(self, choose, advice, bar, clear, in_use, hard_satisfied, main):
+        """
+        Args:
+            choose (Button): Button to activate or deactivate dropdown menu.
+            advice (Button): Button to recommend ships.
+            bar (Button): Dropdown menu for fleet selection。
+            clear (Button): Button to clear current fleet.
+            in_use (Button): Button to detect if it's using current fleet.
+            hard_satisfied (Button): Area to detect if fleet satiesfies hard restrictions.
+            main (InfoHandler): Alas module.
+        """
+        self._choose = choose
+        self._advice = advice
+        self._bar = bar
+        self._clear = clear
+        self._in_use = in_use
+        self._hard_satisfied = hard_satisfied
+        self.main = main
+        self.options = {}
+
+        if main.appear(clear, offset=FleetOperator.OFFSET):
+            choose.load_offset(clear)
+            bar.load_offset(clear)
+            in_use.load_offset(clear)
+            hard_satisfied.load_offset(clear)
+
+    def __str__(self):
+        return str(self._choose)[:-7]
+
+    def allow(self):
+        """
+        Returns:
+            bool: If current fleet is allow to be chosen.
+        """
+        return self.main.appear(self._clear, offset=FleetOperator.OFFSET)
+
+    def is_hard(self):
+        """
+        Returns:
+            bool: Whether to have a recommend. If so, this stage is a hard campaign.
+        """
+        return self.main.appear(self._advice, offset=FleetOperator.OFFSET)
+
+    def is_hard_satisfied(self):
+        """
+        Detect how many light orange lines are there.
+        Having lines means current map has stat limits and user has satisfied at least one of them,
+        so this is a hard map.
+
+        Returns:
+            bool: If current fleet satisfies hard restrictions.
+                Or None if this is not a hard mode
+        """
+        if not self.is_hard():
+            return None
+
+        # The game script imports scipy at the top of the file, only the hard mode
+        # detection below needs it, so it is imported here: a screenshot test of
+        # the fleet bar runs without scipy
+        from scipy import signal
+
+        area = self._hard_satisfied.button
+        image = color_similarity_2d(self.main.image_crop(area, copy=False), color=(249, 199, 0))
+        height = cv2.reduce(image, 1, cv2.REDUCE_AVG).flatten()
+        parameters = {'height': 180, 'distance': 5}
+        peaks, _ = signal.find_peaks(height, **parameters)
+        lines = len(peaks)
+        # logger.attr('Light_orange_line', lines)
+        return lines > 0
+
+    def raise_hard_not_satisfied(self):
+        if self.is_hard_satisfied() is False:
+            stage = self.main.config.Campaign.Name
+            logger.critical(f'Stage "{stage}" is a hard mode, '
+                            f'please prepare your fleet "{str(self)}" in game before running Alas')
+            raise HardNotSatisfied
+
+    def clear(self):
+        """
+        Clear chosen fleet.
+        """
+        main = self.main
+        click_timer = Timer(3, count=6)
+        for _ in main.loop():
+            # Popups when clearing hard fleets
+            if self.main.handle_popup_confirm(str(self._clear)):
+                continue
+
+            # check CLEAR button to avoid early stopped at popup showing animation
+            if self.allow():
+                # End
+                if not self.in_use():
+                    break
+
+                # Click
+                if click_timer.reached():
+                    main.device.click(self._clear)
+                    click_timer.reset()
+
+    def recommend(self):
+        """
+        Recommend fleet
+        """
+        main = self.main
+        click_timer = Timer(3, count=6)
+        for _ in main.loop():
+            # End
+            if self.in_use():
+                break
+
+            # Click
+            if click_timer.reached():
+                main.device.click(self._choose)
+                click_timer.reset()
+
+    def update_options(self):
+        det = FleetBarDetector(self.main, bar=self._bar, choose=self._choose)
+        self.options = det.options
+
+    def open(self, skip_first_screenshot=True):
+        """
+        Activate dropdown menu for fleet selection.
+        """
+        main = self.main
+        click_timer = Timer(3, count=6)
+        # TODO: Simplify if `for state in main.loop(): if state.first:` is available
+        # TODO: Simplify if `@cached_on_screenshot` is available
+        # TODO: write tests for FleetBarDetector
+
+        while 1:
+            if skip_first_screenshot:
+                skip_first_screenshot = False
+            else:
+                main.device.screenshot()
+                self.update_options()
+
+            # End
+            if self.options:
+                break
+
+            # Click
+            if click_timer.reached():
+                main.device.click(self._choose)
+                click_timer.reset()
+
+    def close(self, skip_first_screenshot=True):
+        """
+        Deactivate dropdown menu for fleet selection.
+        """
+        main = self.main
+        click_timer = Timer(3, count=6)
+        while 1:
+            if skip_first_screenshot:
+                skip_first_screenshot = False
+            else:
+                main.device.screenshot()
+                self.update_options()
+
+            # End
+            if not self.options:
+                break
+
+            # Click
+            if click_timer.reached():
+                main.device.click(self._choose)
+                click_timer.reset()
+
+    def click(self, index, skip_first_screenshot=True):
+        """
+        Choose a fleet on dropdown menu, and dropdown deactivated.
+
+        Args:
+            index (int): Fleet index, 1-6.
+            skip_first_screenshot (bool):
+        """
+        main = self.main
+        click_timer = Timer(3, count=6)
+        while 1:
+            if skip_first_screenshot:
+                skip_first_screenshot = False
+            else:
+                main.device.screenshot()
+                self.update_options()
+
+            if not self.options:
+                # End
+                if self.in_use():
+                    break
+                else:
+                    self.open()
+
+            button = self.options.get(index)
+            if button is None:
+                if click_timer.reached():
+                    logger.error(f'No fleet option {index} to select')
+                    self.close()
+                    break
+                else:
+                    # clicked just now, maybe click animation covers the option and dropdown menu didn't close that fast
+                    continue
+            if button.selected:
+                logger.info(f'Fleet option {index} is already selected')
+                self.close()
+                break
+
+            # Click
+            if click_timer.reached():
+                main.device.click(button)
+                click_timer.reset()
+
+    def in_use(self):
+        """
+        Returns:
+            bool: If has selected to any fleet.
+        """
+        # Handle the info bar of auto search info.
+        # if area_cross_area(self._in_use.area, INFO_BAR_1.area):
+        #     self.main.handle_info_bar()
+
+        # Cropping FLEET_*_IN_USE to avoid detecting info_bar, also do the trick.
+        # It also avoids wasting time on handling the info_bar.
+        image = self.main.image_crop(self._in_use.button, copy=False)
+
+        # special fix for Perseus skin, which color is so flat
+        # https://github.com/LmeSzinc/AzurLaneAutoScript/issues/5678
+        # no ship is in color (71, 70, 63)
+        color = cv2.mean(image)[:3]
+        # Perseus skin
+        if color_similar(color, (224, 154, 114), threshold=30):
+            return True
+
+        # Akane Shinjo skin: Room of Secrets
+        # special fix for fleet card bottom area having a bluish background color
+        if color_similar(color, (124, 141, 171), threshold=30):
+            return True
+
+        gray = rgb2gray(image)
+        return np.std(gray.flatten(), ddof=1) > self.FLEET_IN_USE_STD
+
+    def ensure_to_be(self, index):
+        """
+        Set to a specific fleet.
+
+        Args:
+            index (int): Fleet index, 1-6.
+        """
+        logger.info(f'Fleet {self} set to {index}')
+        self.open()
+        self.click(index)
+
+
+# The task class of the game script, `class FleetPreparation(InfoHandler)`, is not
+# copied here: it is the task that drives the whole fleet preparation flow, and it
+# needs the InfoHandler base class of the game script. The recognition code under
+# test is FleetOperator above, on the screenshot of the fleet preparation page.
+
+
