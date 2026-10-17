@@ -2,8 +2,10 @@ from .cache import (
     CacheOperation, ClassCacheOperation, InstanceCacheOperation, cached_class_property,
     cached_class_property_threadsafe, cached_property, cached_property_threadsafe
 )
+from .cache_async import AsyncCacheOperation, AwaitableResult, cached_property_async
 
 __all__ = (
-    "CacheOperation", "ClassCacheOperation", "InstanceCacheOperation", "cached_class_property",
-    "cached_class_property_threadsafe", "cached_property", "cached_property_threadsafe",
+    "AsyncCacheOperation", "AwaitableResult", "CacheOperation", "ClassCacheOperation", "InstanceCacheOperation",
+    "cached_class_property", "cached_class_property_threadsafe", "cached_property", "cached_property_async",
+    "cached_property_threadsafe",
 )

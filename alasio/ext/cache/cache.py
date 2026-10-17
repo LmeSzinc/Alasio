@@ -16,13 +16,11 @@ from typing import Any, Callable, Generic, TypeVar
 # We separate another function threaded_cached_property, use it if you do care thread safety.
 # On py3.8 every decorated function withs the same name share the lock resulting in bad performance.
 # On py3.12 cached_property may be calculated twice on race condition.
-# 3. **Drop async support**
-# It would be unclear if you decorate an async function and the decorator somehow awaited the future which you are
-# completely unaware. It's also weird to do `await obj.attr` while obj.attr is already a static value.
-# So we just drop it, you shouldn't use cached_property on async function, if you do need to cache an async result, do:
-# @cached_property
-# def result(self):
-#     return await self.calculate_result()
+# 3. **Async support**
+# Don't decorate an async function with cached_property, it's not aware of await and would cache the coroutine
+# object, which can only be awaited once. Use cached_property_async in cache_async.py instead, it calculates the
+# value on the first `await obj.attr`, then caches the value as an AwaitableResult, so later awaits return the
+# cached value without yielding to the event loop, working on any coroutine framework (asyncio, trio, ...).
 
 T = TypeVar("T")
 
@@ -38,6 +36,9 @@ class InstanceCacheOperation(CacheOperation):
     """
     Helper functions to manage INSTANCE cached property.
     """
+    # True if the value is calculated on await, so it can't be warmed up synchronously,
+    # set to True by AsyncCacheOperation, e.g. cached_property_async
+    calculated_on_await = False
 
     @staticmethod
     def pop(instance, attrname, default=None):
@@ -126,7 +127,7 @@ class InstanceCacheOperation(CacheOperation):
 
         Returns:
             bool: True if warmup or already warmup
-                False if failed
+                False if failed, or if the property is calculated on await
         """
         try:
             if attrname in instance.__dict__:
@@ -149,6 +150,10 @@ class InstanceCacheOperation(CacheOperation):
             if descriptor is not None:
                 break
         if descriptor is None:
+            return False
+
+        # an async cached property can't be calculated synchronously
+        if getattr(descriptor, 'calculated_on_await', False):
             return False
 
         # call __get__ function
