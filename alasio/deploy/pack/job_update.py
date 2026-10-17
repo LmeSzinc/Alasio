@@ -6,7 +6,7 @@ from alasio.deploy.pack.decode_base import PackDecodeBase, PackDecodeError
 from alasio.deploy.pack.job_base import JobBase, PendingFile
 from alasio.deploy.pack.job_reset import ResetJob
 from alasio.deploy.pack.pack_model import IdxInfo
-from alasio.ext.cache import InstanceCacheOperation
+from alasio.ext.cache import InstanceCacheOperation, cached_property_async
 from alasio.ext.path.atomic import atomic_read_bytes, atomic_write, file_write
 from alasio.logger import logger
 
@@ -21,6 +21,15 @@ class SourceError(Exception):
 
     The record is kept in self.error, download() fetches its content
     from the new full pack instead.
+    """
+
+
+class IndexChecksumError(ValueError):
+    """
+    Raised when the prepared index pack cannot be bound to the trusted one.
+
+    The update pack is not a resume base for the rebuild that follows: the
+    workspace is discarded instead of leaving its records as a deletion base.
     """
 
 
@@ -77,7 +86,12 @@ class UpdateJob(JobBase):
        by ResetJob. Records that cannot be downloaded or fail the
        size + sha1 check stay in self.error, this is an unsolvable
        problem per the draft of PackEncodeBase.
-    3. replace() moves every tmp file to the target path atomically,
+    3. _get_validated_index compares the prepared index pack with the
+       caller's trusted checksum, when it names one. The prepared index
+       is workspace/new_index.tmp, or the local index when the index record
+       was skipped. _validate_remaining() verifies the files the update pack
+       does not cover against that same cached index.
+    4. replace() moves every tmp file to the target path atomically,
        removes the deleted markers and the renamed sources, and
        commits the new index pack last (replace_index()), only when
        every record landed.
@@ -137,7 +151,9 @@ class UpdateJob(JobBase):
         # version of the update pack, used to download the index pack
         self._version = ''
         # expected index checksum of the version, '' when the caller has no
-        # trusted snapshot; the fallback index download validates it
+        # trusted snapshot; the fallback index download validates it and the
+        # prepared index is compared with it before replace(). It must be set
+        # before _get_validated_index is awaited, DeployJob sets it before run
         self.index_checksum = ''
         # the data was read back from the job file (the kept pack the server
         # confirmed, see DeployJob._get_update_pack): write() keeps the file
@@ -148,8 +164,9 @@ class UpdateJob(JobBase):
         """
         Execute the full update flow.
 
-        Writes the job file first, then unpacks, downloads the failed records, verifies the
-        remaining local files and replaces all files in one pass. The
+        Writes the job file first, then unpacks, downloads the failed
+        records, binds the prepared index to the expected checksum, verifies
+        the remaining local files and replaces all files in one pass. The
         new index pack is committed last and only when every record
         landed, see replace_index(). The network phases await on the
         event loop, the local phases run in a worker thread (see
@@ -157,9 +174,11 @@ class UpdateJob(JobBase):
         run resumes the job: errors during write() and unpack() are
         safe because no real file was written and are logged as
         warning, errors during replace() leave partially replaced
-        files and are logged as error. The workspace is cleaned up
-        only when every record landed, no record stayed in self.error
-        and the new index pack was committed.
+        files and are logged as error. An index checksum mismatch discards
+        the workspace instead: a pack that cannot be the trusted target is
+        not a resume base for the rebuild that follows. The workspace is
+        cleaned up only when every record landed, no record stayed in
+        self.error and the new index pack was committed.
 
         Returns:
             bool: True if every file is updated, False otherwise
@@ -173,7 +192,19 @@ class UpdateJob(JobBase):
             logger.info(f'Updating files to {self.described_target}')
             await trio.to_thread.run_sync(self.unpack)
             await self.download()
+            if self.index_checksum:
+                await self._get_validated_index
             await self._validate_remaining()
+        except IndexChecksumError as e:
+            # the update pack prepares another index than the trusted one:
+            # no target file was written, and its records must not become the
+            # deletion base of the rebuild that follows
+            logger.warning(f'Failed to update: {e}, discarding the workspace')
+            try:
+                await trio.to_thread.run_sync(self.cleanup)
+            except Exception as cleanup_error:
+                logger.warning(f'Failed to discard the workspace: {cleanup_error}')
+            return False
         except Exception as e:
             # no real file was written: the workspace (the job file
             # and the tmp files written so far) is kept as the resume
@@ -233,6 +264,82 @@ class UpdateJob(JobBase):
                 f'The update pack installs "{decoder.current_version}", '
                 f'expected "{expected}"'
             )
+
+    @cached_property_async
+    async def _get_validated_index(self):
+        """
+        The index pack the update prepares, checked against the trusted one.
+
+        The index pack is the commit record of the flow. When the caller
+        names the checksum of the trusted index (the packdep snapshot of a
+        dependency, or the latest index of the mod tree), the index prepared
+        by the update pack must be exactly that index: the update pack is
+        self-consistent on its own, it can still carry another index for the
+        same version. The read and validation run on the first await, after
+        the index is prepared and before any target file is replaced; a
+        mismatch fails the flow, the caller rebuilds from the trusted version
+        and checksum. The validated decoder is cached on the instance, so
+        _validate_remaining() reuses exactly the index the commit is bound to.
+
+        The prepared index is workspace/new_index.tmp when the update pack
+        has an index record. Without an index record the local index is the
+        prepared one (the record was skipped because it already matches).
+        index_checksum must be set before the first await, DeployJob sets it
+        before run(). The returned decoder is localized to the target
+        namespace and cached, so later users see the same records.
+
+        Without a trusted checksum this is the legacy view: a missing index
+        yields None and a decoded index is returned without the trusted
+        checksum / version checks. _validate_remaining() only needs the
+        records then.
+
+        Returns:
+            PackDecodeBase | None: The prepared index pack, localized, None
+                when the caller has no trusted checksum and the file is
+                missing
+
+        Raises:
+            IndexChecksumError: If a trusted checksum is set and the index
+                pack is missing, malformed, records another version, or its
+                checksum is not the expected one
+            PackDecodeError: If no trusted checksum is set and the index pack
+                cannot be decoded
+        """
+        expected = self.index_checksum
+        if self.pending_index is not None:
+            file = self.workspace.joinpath(self.NEW_INDEX)
+        else:
+            file = self.index_file
+        try:
+            data = await trio.to_thread.run_sync(atomic_read_bytes, file)
+        except FileNotFoundError as e:
+            if not expected:
+                return None
+            raise IndexChecksumError(
+                f'Failed to validate the index pack of the update: '
+                f'the file is missing: "{file}"') from e
+        try:
+            decoder = await trio.to_thread.run_sync(PackDecodeBase, data)
+            if expected:
+                await trio.to_thread.run_sync(decoder.validate_index)
+        except PackDecodeError as e:
+            if not expected:
+                raise
+            raise IndexChecksumError(
+                f'Failed to validate the index pack of the update: {e}') from e
+        if expected:
+            if decoder.index_checksum != expected:
+                raise IndexChecksumError(
+                    f'The update pack produces an index pack with checksum '
+                    f'"{decoder.index_checksum}", expected "{expected}"'
+                )
+            expected_version = self.expected_new_version
+            if expected_version and decoder.current_version != expected_version:
+                raise IndexChecksumError(
+                    f'The index pack records version "{decoder.current_version}", '
+                    f'expected "{expected_version}"'
+                )
+        return self.localize(decoder)
 
     def write(self):
         """
@@ -496,7 +603,9 @@ class UpdateJob(JobBase):
         are filtered out of the index view passed to ResetJob: the
         local index pack is committed by replace_index() after the
         data files, so the new index is passed in directly with only
-        the remaining files. The repaired records are merged into
+        the remaining files. When index_checksum was set, the index is
+        the decoder _get_validated_index bound to it, not a second read of
+        the prepared file. The repaired records are merged into
         self.pending, replace_data() applies them together with the
         update records, so the real files are touched only once. The
         missing files are downloaded by the nested ResetJob, its
@@ -520,18 +629,12 @@ class UpdateJob(JobBase):
             logger.warning('Failed to validate the remaining files: '
                            'the index pack record failed')
             return
-        # the new index pack: the fixed tmp file prepared in unpack()
-        # or download(), or the local index when the index record was
-        # skipped (it is already the new one then)
-        try:
-            data = await trio.to_thread.run_sync(
-                atomic_read_bytes, self.workspace.joinpath(self.NEW_INDEX))
-        except FileNotFoundError:
-            try:
-                data = await trio.to_thread.run_sync(atomic_read_bytes, self.index_file)
-            except FileNotFoundError:
-                return
-        new_index = self.localize(PackDecodeBase(data))
+        # the new index pack: the one whose checksum was validated, the fixed
+        # tmp file prepared in unpack() or download(), or the local index when
+        # the index record was skipped (it is already the new one then)
+        new_index = await self._get_validated_index
+        if new_index is None:
+            return
         # the new index records every file of the new version, the
         # emptiness base of replace(). The dict is bound before the
         # decoder cache is replaced with the filtered view below: the

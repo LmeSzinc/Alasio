@@ -20,7 +20,9 @@ import os
 
 import httpx2
 import pytest
+import trio
 
+from alasio.deploy.pack import job_update
 from alasio.deploy.pack.decode_base import PackDecodeBase, PackDecodeError
 from alasio.deploy.pack.job_rebuild import RebuildJob
 from alasio.deploy.pack.job_reset import ResetJob
@@ -147,6 +149,16 @@ UPDATE = b''.join(PackUpdate(
 # version and the old one as the old version, which is what tells an
 # update pack from a full pack
 UPDATE_DECODER = PackDecodeBase(UPDATE)
+# a self-consistent update pack of the right version pair but another new
+# index: its old tree is the scenario one, so its index record applies to the
+# local old index
+WRONG_INDEX_NEW = dict(NEW)
+WRONG_INDEX_NEW['other.txt'] = b'other\n'
+WRONG_INDEX_REPO = make_repo({'old': OLD, 'new': WRONG_INDEX_NEW})
+WRONG_INDEX_UPDATE = b''.join(PackUpdate(
+    PackFull(WRONG_INDEX_REPO, commit='new'), 'old').iter_pack_data())
+WRONG_INDEX_CHECKSUM = PackDecodeBase(
+    b''.join(PackFull(WRONG_INDEX_REPO, commit='new').iter_pack_data())).index_checksum
 SERVER = MockServerFile()
 SERVER.register_version('old', OLD_PACK, bytes(OLD_DECODER.extract_index_pack()))
 SERVER.register_version('new', NEW_PACK, bytes(NEW_DECODER.extract_index_pack()))
@@ -925,6 +937,61 @@ WARNING | Failed to update: 1 file(s) stayed in error, the workspace is kept for
         # the flow did not succeed: the workspace is kept as the resume
         # base of the next run
         assert file_read_bytes(env.PROJECT_ROOT / '.pack/workspace/job.pack') == UPDATE
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  index checksum
+# ════════════════════════════════════════════════════════════════════════════
+
+
+class TestIndexChecksum:
+    """The index pack prepared by the update is bound to the trusted one."""
+
+    @pytest.mark.trio
+    async def test_the_validated_index_is_cached(self, app_folder, monkeypatch):
+        """The index is read and validated on the first await only, later
+        awaits return the same decoder."""
+        await setup_app()
+        job = UpdateJob(UPDATE, server=SERVER)
+        await job.tmp_manager_init()
+        job.write()
+        await trio.to_thread.run_sync(job.unpack)
+        await job.download()
+        job.index_checksum = NEW_DECODER.index_checksum
+        reads = []
+        read_bytes = job_update.atomic_read_bytes
+
+        def counting_read_bytes(path, *args, **kwargs):
+            reads.append(path)
+            return read_bytes(path, *args, **kwargs)
+
+        monkeypatch.setattr(job_update, 'atomic_read_bytes', counting_read_bytes)
+        assert reads == []
+        first = await job._get_validated_index
+        assert first.index_checksum == NEW_DECODER.index_checksum
+        assert reads == [job.workspace.joinpath(job.NEW_INDEX)]
+        assert await job._get_validated_index is first
+        assert reads == [job.workspace.joinpath(job.NEW_INDEX)]
+
+    @pytest.mark.trio
+    async def test_another_index_is_refused_before_replace(self, app_folder):
+        """A pack that carries the right version pair but another index fails
+        after preparing the records and before any target file changes."""
+        await setup_app()
+        job = UpdateJob(
+            WRONG_INDEX_UPDATE, server=SERVER,
+            expected_old_version='old', expected_new_version='new')
+        job.index_checksum = NEW_DECODER.index_checksum
+        with logger.mock_capture_writer() as capture:
+            assert not await job.run()
+        assert capture.concat() == f"""\
+INFO | Updating files to "{env.PROJECT_ROOT}"
+WARNING | Failed to update: The update pack produces an index pack with checksum "{WRONG_INDEX_CHECKSUM}", expected "{NEW_DECODER.index_checksum}", discarding the workspace
+"""
+        assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
+        assert read_tree() == OLD_TREE
+        assert file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack') == \
+            bytes(OLD_DECODER.extract_index_pack())
 
 
 # ════════════════════════════════════════════════════════════════════════════

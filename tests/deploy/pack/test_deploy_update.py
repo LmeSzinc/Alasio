@@ -118,6 +118,21 @@ OTHER_UPDATE = b''.join(PackUpdate(
         'old': {'other.txt': b'old\n'},
         'new': {'other.txt': b'new\n'},
     }), commit='new'), 'old').iter_pack_data())
+# a self-consistent update pack of the right version pair but another new
+# index: its old tree is the scenario one, so its index record applies to the
+# local old index and the wrong index reaches the commit check
+WRONG_INDEX_NEW = dict(FULL_SCENARIO_NEW)
+WRONG_INDEX_NEW['other.txt'] = b'other\n'
+WRONG_INDEX_REPO = make_repo({
+    'old': FULL_SCENARIO_OLD,
+    'new': WRONG_INDEX_NEW,
+})
+WRONG_INDEX_UPDATE = b''.join(PackUpdate(
+    PackFull(WRONG_INDEX_REPO, commit='new'), 'old').iter_pack_data())
+# the index checksum the update pack produces (the checksum of its new full
+# pack), not the checksum of the update pack's own index section
+WRONG_INDEX_CHECKSUM = PackDecodeBase(
+    b''.join(PackFull(WRONG_INDEX_REPO, commit='new').iter_pack_data())).index_checksum
 # a self-consistent update pack of another version pair, served under the
 # path of the pair the client asks for
 MISMATCHED_UPDATE = b''.join(PackUpdate(
@@ -303,6 +318,34 @@ INFO | Downloading the full pack of new
 INFO | Rebuild done
 """
         assert read_tree() == NEW_TREE
+        decoder = PackDecodeBase(file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack'))
+        assert decoder.current_version == 'new'
+        assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
+
+    @pytest.mark.trio
+    async def test_update_pack_of_another_index_falls_back(self, app_folder):
+        """A self-consistent update pack of the right version pair but another
+        index is refused before any target file changes: the prepared index
+        checksum is bound to the latest one, then the tree is rebuilt."""
+        server = make_server()
+        server.register_update('old', 'new', WRONG_INDEX_UPDATE)
+        await UnpackJob(OLD_PACK).run()
+        other_checksum = WRONG_INDEX_CHECKSUM
+        with logger.mock_capture_writer() as capture:
+            assert await DeployJob(server=server).update()
+        assert capture.concat() == f"""\
+INFO | [CurrentVersion] old
+INFO | [LatestVersion] new
+INFO | Update available: old -> new
+INFO | Updating files to "{env.PROJECT_ROOT}"
+WARNING | Failed to update: The update pack produces an index pack with checksum "{other_checksum}", expected "{NEW_DECODER.index_checksum}", discarding the workspace
+WARNING | Failed to apply the update pack, rebuilding from the latest index
+INFO | Rebuilding files to "{env.PROJECT_ROOT}"
+INFO | Downloading the full pack of new
+INFO | Rebuild done
+"""
+        assert read_tree() == NEW_TREE
+        assert 'other.txt' not in read_tree()
         decoder = PackDecodeBase(file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack'))
         assert decoder.current_version == 'new'
         assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')

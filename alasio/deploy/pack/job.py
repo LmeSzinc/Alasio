@@ -449,9 +449,11 @@ class DeployJob(DeployTarget):
            /{new_version}/from_{old_version}.pack and applies it with
            UpdateJob, a missing update pack (out of the update window
            or removed) falls back to RebuildJob, a failed update also
-           falls back to RebuildJob. The download reuses the pack kept in
-           the workspace when the server still serves it: the trailing 20
-           bytes digests of the two packs are compared and only they
+           falls back to RebuildJob. The index the update prepares must
+           match the trusted index checksum before it is committed, a
+           mismatch is such a failure. The download reuses the pack kept
+           in the workspace when the server still serves it: the trailing
+           20 bytes digests of the two packs are compared and only they
            travel, see _get_update_pack
         3. the same version continues with ResetJob: the local index
            pack is checked against the latest checksum (an outdated
