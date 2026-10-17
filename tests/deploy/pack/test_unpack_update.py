@@ -19,6 +19,7 @@ functions too (the client awaits them).
 import os
 
 import httpx2
+import msgspec
 import pytest
 import trio
 
@@ -27,8 +28,8 @@ from alasio.deploy.pack.decode_base import PackDecodeBase, PackDecodeError
 from alasio.deploy.pack.job_rebuild import RebuildJob
 from alasio.deploy.pack.job_reset import ResetJob
 from alasio.deploy.pack.job_unpack import UnpackJob
-from alasio.deploy.pack.job_update import UpdateJob
-from alasio.deploy.pack.pack_model import IdxInfo
+from alasio.deploy.pack.job_update import UpdateJob, UpdateRecordError
+from alasio.deploy.pack.pack_model import IdxInfo, RefInfo
 from alasio.deploy_dev.pack.pack_full import PackFull
 from alasio.deploy_dev.pack.pack_update import PackUpdate
 from alasio.ext import env
@@ -942,6 +943,132 @@ WARNING | Failed to update: 1 file(s) stayed in error, the workspace is kept for
 # ════════════════════════════════════════════════════════════════════════════
 #  index checksum
 # ════════════════════════════════════════════════════════════════════════════
+
+
+async def prepare_record_check():
+    """
+    A job whose update records are prepared and whose trusted index is ready.
+
+    Returns:
+        UpdateJob: The job, its update pack decoded in unpack()
+    """
+    await setup_app()
+    job = UpdateJob(UPDATE, server=SERVER)
+    await job.tmp_manager_init()
+    job.write()
+    await trio.to_thread.run_sync(job.unpack)
+    await job.download()
+    job.index_checksum = NEW_DECODER.index_checksum
+    return job
+
+
+class TestUpdateRecords:
+    """The update pack records cross-checked against the trusted index."""
+
+    @pytest.mark.trio
+    async def test_a_valid_pack_matches(self, app_folder):
+        """The pack generated from the same old and new versions passes."""
+        job = await prepare_record_check()
+        assert await job._validate_update_records()
+
+    @pytest.mark.trio
+    async def test_a_wrong_file_record_is_refused(self, app_folder):
+        """A new-side record that differs from the trusted index is refused."""
+        job = await prepare_record_check()
+        path = next(
+            path for path, info in job._decoder.fileinfo.items()
+            if path != job.index_rel and info.edit != 2)
+        info = job._decoder.fileinfo[path]
+        job._decoder.fileinfo[path] = msgspec.structs.replace(info, size=info.size + 1)
+        with pytest.raises(UpdateRecordError, match='does not match the trusted index'):
+            await job._validate_update_records()
+
+    @pytest.mark.trio
+    async def test_a_deletion_outside_the_old_index_is_refused(self, app_folder):
+        """A deletion of a file neither the old index nor a previous run owns
+        is refused: an update pack may never delete a user file."""
+        job = await prepare_record_check()
+        job._decoder.fileinfo['user.txt'] = IdxInfo(path='user.txt', edit=2)
+        with pytest.raises(UpdateRecordError, match='not a file of the old index'):
+            await job._validate_update_records()
+
+    @pytest.mark.trio
+    async def test_a_deletion_of_a_trusted_file_is_refused(self, app_folder):
+        """A deletion record for a path the trusted index keeps is refused."""
+        job = await prepare_record_check()
+        path = next(path for path in NEW_DECODER.fileinfo if path != job.index_rel)
+        job._decoder.fileinfo[path] = IdxInfo(path=path, edit=2)
+        with pytest.raises(UpdateRecordError, match='trusted index keeps'):
+            await job._validate_update_records()
+
+    @pytest.mark.trio
+    async def test_a_wrong_refinfo_is_refused(self, app_folder):
+        """The old side of the update must describe the local old index."""
+        job = await prepare_record_check()
+        job._decoder.refinfo['user.txt'] = RefInfo(
+            path='user.txt', size=1, sha1=b'\x01' * 20)
+        with pytest.raises(UpdateRecordError, match='does not match the old index'):
+            await job._validate_update_records()
+
+    @pytest.mark.trio
+    async def test_a_wrong_record_fails_before_replace(self, app_folder):
+        """A record mismatch fails the run, keeps the old tree and discards
+        the workspace of the bad pack."""
+
+        class WrongRecordJob(UpdateJob):
+            """An update whose new-side record is altered after unpacking."""
+
+            def unpack(self):
+                super().unpack()
+                path = next(
+                    path for path, info in self._decoder.fileinfo.items()
+                    if path != self.index_rel and info.edit != 2)
+                info = self._decoder.fileinfo[path]
+                self._decoder.fileinfo[path] = msgspec.structs.replace(
+                    info, size=info.size + 1)
+
+        await setup_app()
+        job = WrongRecordJob(
+            UPDATE, server=SERVER,
+            expected_old_version='old', expected_new_version='new')
+        job.index_checksum = NEW_DECODER.index_checksum
+        with logger.mock_capture_writer() as capture:
+            assert not await job.run()
+        assert capture.fd.any_contains('does not match the trusted index')
+        assert capture.fd.any_contains('discarding the workspace')
+        assert read_tree() == OLD_TREE
+        assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
+
+    @pytest.mark.trio
+    async def test_a_dropped_deletion_is_added_from_the_old_index(self, app_folder):
+        """A pack that forgets a deletion cannot leave an old file behind:
+        _validate_remaining() adds the old index path the trusted index lost."""
+
+        class DroppedDeletionJob(UpdateJob):
+            """An update whose deletion record is removed after unpacking."""
+
+            def unpack(self):
+                super().unpack()
+                path = next(
+                    path for path, info in self._decoder.fileinfo.items()
+                    if info.edit == 2 and path != self.index_rel)
+                self._dropped = path
+                del self._decoder.fileinfo[path]
+                self.pending = [
+                    pending for pending in self.pending
+                    if not (pending.info.edit == 2 and pending.info.path == path)
+                ]
+
+        await setup_app()
+        job = DroppedDeletionJob(
+            UPDATE, server=SERVER,
+            expected_old_version='old', expected_new_version='new')
+        job.index_checksum = NEW_DECODER.index_checksum
+        assert await job.run()
+        assert job._dropped in OLD_TREE
+        assert job._dropped not in NEW_TREE
+        assert job._dropped not in read_tree()
+        assert read_tree() == NEW_TREE
 
 
 class TestIndexChecksum:
