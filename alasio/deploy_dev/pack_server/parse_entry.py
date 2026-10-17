@@ -14,9 +14,14 @@ updates. The declaration lives in the mod entry, the module-level variable
 
 The pack server reads the source from the git blob of a commit, not from a
 working tree, and it must not execute code of the repo it packs. This module
-parses the declaration with ast: the source is never imported, compiled into
-a callable or evaluated. Only the `pack_update_deps` argument of the entry is
-read, the other arguments and the other statements of the module are ignored.
+provides the reader of the blob and the parser of the declaration:
+
+- PackRepoEntry.pack_update_deps(commit) reads module/config/const.py from
+the commit and parses it, caching the result by the blob sha1;
+- parse_pack_update_deps(source) parses the source itself, with ast: the
+source is never imported, compiled into a callable or evaluated. Only the
+`pack_update_deps` argument of the entry is read, the other arguments and the
+other statements of the module are ignored.
 
 The declaration may be the keyword of the entry construction or an attribute
 assignment after it:
@@ -44,9 +49,10 @@ or a declaration outside the module level. A pack must never silently lose a
 dependency channel because this parser could not read the declaration.
 
 Usage:
-    from alasio.deploy_dev.pack_server.parse_entry import parse_pack_update_deps
+    from alasio.deploy_dev.pack_server.parse_entry import PackRepoEntry, parse_pack_update_deps
 
     names = parse_pack_update_deps(source, source_name='module/config/const.py at c3')
+    names = PackRepoEntry(repo).pack_update_deps(commit)
 """
 
 import ast
@@ -135,6 +141,76 @@ def _with_source_name(source_name, message):
     if source_name:
         return f'{source_name}: {message}'
     return message
+
+
+class PackRepoEntry:
+    """
+    Read the pack_update_deps of a mod entry from the commits of a git repo.
+
+    The entry file is read from the git blob of a commit, never from a
+    working tree: the pack server clones a repo without a working tree. The
+    parse result is cached by the blob sha1, so commits that share the entry
+    file parse it once.
+
+    Usage:
+        entry = PackRepoEntry(repo)
+        names = entry.pack_update_deps(commit)
+    """
+
+    def __init__(self, repo):
+        """
+        Args:
+            repo (GitRepo | MockGitRepo): Repo to read; its object index is
+                read lazily when the caller did not read it
+        """
+        self.repo = repo
+        # blob sha1 -> {name: None}
+        self._cache = {}
+
+    def pack_update_deps(self, commit):
+        """
+        Read the pack_update_deps declaration of an entry from a commit.
+
+        Args:
+            commit (str): Commit sha1 to read the entry from
+
+        Returns:
+            dict[str, None]: Declared names in source order, empty when the
+                commit has no entry file or the entry declares no name
+
+        Raises:
+            ValueError: If the entry source is not valid Python, its
+                declaration cannot be read, or the entry path is a symlink
+        """
+        self._read_repo()
+        file = self.repo.get_file(commit, ENTRY_FILE)
+        if file is None:
+            return {}
+        if file.mode == b'120000':
+            raise ValueError(
+                f'{ENTRY_FILE} at commit {commit} is a symlink, not a file')
+        cached = self._cache.get(file.sha1)
+        if cached is not None:
+            return cached
+        source = self.repo.cat(file.sha1).decoded
+        names = parse_pack_update_deps(
+            source, source_name=f'{ENTRY_FILE} at commit {commit}')
+        self._cache[file.sha1] = names
+        return names
+
+    def _read_repo(self):
+        """
+        Read the object index of the repo when the caller did not.
+
+        GitRepo reads its objects with read_lazy(); an unread repo has no
+        object to look up. MockGitRepo keeps its objects in memory and its
+        read_lazy() is a no-op, the check is harmless for it.
+        """
+        if not (
+                getattr(self.repo, 'dict_object', None)
+                or getattr(self.repo, 'dict_object_unread', None)
+        ):
+            self.repo.read_lazy()
 
 
 def _is_dict_fromkeys(node):

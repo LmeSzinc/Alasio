@@ -44,12 +44,14 @@ the lookback window, sampled by LookbackWheel: the pin of the latest commit is
 the target of the dependency (the version a client updates to, the only
 version latest.pack publishes), the pins of the old commits are the versions a
 client may still be on, every one of them gets an update path to the target (a
-full pack is only built of the target). Only the names of
-PythonDeps.PackUpdate are built; a name of
-the list that no commit of the window pins yields no wheel and no pack and is
-reported with a warning (a range constraint builds nothing, the version must
-be pinned with '=='). A name the latest commit does not pin has no target:
-nothing is built of it this run and its historical packs are kept.
+full pack is only built of the target). The names to build are the
+pack_update_deps of the mod entry at the latest commit, read from its source
+by PackRepoEntry: a name the entry does not declare is not fetched and gets no
+pack, and a declared name that no commit of the window pins yields no wheel
+and no pack and is reported with a warning (a range constraint builds nothing,
+the version must be pinned with '=='). A name the latest commit does not pin
+has no target: nothing is built of it this run and its historical packs are
+kept.
 
 The bytes of a pack only depend on the wheel of its version, so the pack of an
 earlier run is kept as it is: the identity of the file is read back
@@ -95,6 +97,7 @@ from alasio.deploy_dev.pack_server.gate import check_run_dir
 from alasio.deploy_dev.pack_server.lookback_wheel import LookbackWheel
 from alasio.deploy_dev.pack_server.pack_check import PackChecksum, kept_pack
 from alasio.deploy_dev.pack_server.parse_dep import normalize_name
+from alasio.deploy_dev.pack_server.parse_entry import ENTRY_FILE, PackRepoEntry
 from alasio.ext import env
 from alasio.ext.cache import cached_property
 from alasio.ext.path.atomic import (
@@ -158,8 +161,7 @@ class DepGen:
                 of a dependency file is read from it
             config (PackRepoModel): Config of the repo, read from a
                 PackRepoConfig: the PythonDeps group holds the files to
-                sample, the dependencies to build and the mirror to fetch
-                from
+                sample and the mirror to fetch from
             client (httpx2.Client, optional): Client the wheel fetches are
                 sent with, e.g. the injected client of a test. Its lifetime
                 belongs to the caller. Defaults to None, every fetch creates
@@ -180,6 +182,9 @@ class DepGen:
         # the pins of the dependency files over the lookback window, the
         # latest commit first, see LookbackWheel
         self.wheel = LookbackWheel(repo, config)
+        # the pack_update_deps of the mod entry at the latest commit, read
+        # from its source when the sample needs it
+        self.entry = PackRepoEntry(repo)
         # the folder name is checked before anything is written, see repo_folder
         _ = self.repo_folder
 
@@ -230,36 +235,73 @@ class DepGen:
         return self.repo_folder.joinpath(PACKDEP_FOLDER)
 
     @cached_property
+    def managed(self):
+        """
+        The dependency names the mod entry declares for pack updates.
+
+        The names come from the pack_update_deps of the entry at the latest
+        commit of the repo, the version a client updates to: the client reads
+        the entry of the updated tree before it reconciles its dependencies.
+        The names are PEP 503 normalized and deduplicated, keeping the order
+        of the declaration.
+
+        Returns:
+            dict[str, None]: PEP 503 normalized names
+
+        Raises:
+            ValueError: If the repo has no branch to pack, the entry cannot
+                be read, or its pack_update_deps is written in a form the
+                parser does not support, see PackRepoEntry
+        """
+        commit = self.wheel.lookback.latest_commit
+        names = self.entry.pack_update_deps(commit)
+        if not names:
+            logger.info(
+                f'No pack_update_deps declared by {ENTRY_FILE} at {commit}, '
+                f'no dependency pack is built')
+            return {}
+        logger.info(
+            f'Using pack_update_deps of {ENTRY_FILE} at {commit}: {", ".join(names)}')
+        return dict.fromkeys(normalize_name(name) for name in names)
+
+    @cached_property
     def sample(self):
         """
         The dependencies to build: the pins of the window, managed names only.
 
-        Only the names of PythonDeps.PackUpdate are kept (PEP 503
-        normalized): a dependency the list does not name is not fetched and
-        gets no pack. The pins of the latest commit come first (the target of
-        an update), then the pins of the lookback commits, in the order the
-        sampler answered; a dependency is in the mapping once, with its
-        versions as one list.
+        Only the names of the mod entry pack_update_deps are kept (PEP 503
+        normalized): a dependency the entry does not declare is not fetched
+        and gets no pack. The pins of the latest commit come first (the
+        target of an update), then the pins of the lookback commits, in the
+        order the sampler answered; a dependency is in the mapping once, with
+        its versions as one list.
 
         Returns:
             dict[str, list[DepVersion]]: {PEP 503 name: versions to build},
                 the target of the name first when the name has one
 
         Raises:
-            ValueError: If the repo has no branch to pack, or a dependency
-                file of the window cannot be read, see LookbackWheel
+            ValueError: If the repo has no branch to pack, a dependency file
+                of the window cannot be read (see LookbackWheel), or the mod
+                entry cannot be read (see managed)
         """
-        # the names of PythonDeps.PackUpdate, normalized and deduplicated, in
-        # the order of the config: only these are fetched and packed
-        managed = dict.fromkeys(
-            normalize_name(name) for name in self.config.PythonDeps.PackUpdate)
+        # a config without a dependency file has nothing to sample, the
+        # entry does not need to be read
+        if not self.wheel.files:
+            return {}
+
+        # the window is sampled first: it reads the repo index the entry
+        # lookup needs, see PackRepoLookback
+        latest = self.wheel.latest_deps
+        lookback = self.wheel.lookback_deps
+        managed = self.managed
 
         sample = {}
-        for (name, version), commit in self.wheel.latest_deps.items():
+        for (name, version), commit in latest.items():
             if name in managed:
                 sample.setdefault(name, []).append(
                     DepVersion(name=name, version=version, commit=commit, target=True))
-        for (name, version), commit in self.wheel.lookback_deps.items():
+        for (name, version), commit in lookback.items():
             if name in managed:
                 sample.setdefault(name, []).append(
                     DepVersion(name=name, version=version, commit=commit, target=False))
@@ -267,8 +309,8 @@ class DepGen:
             if name not in sample:
                 logger.warning(
                     f'Dependency "{name}" is not pinned to a version in the lookback window, '
-                    f'nothing is built of it; a dependency of PythonDeps.PackUpdate must be '
-                    f'pinned with "==" in a dependency file of the config')
+                    f'nothing is built of it; a dependency of the mod entry pack_update_deps '
+                    f'must be pinned with "==" in a dependency file of the config')
         return sample
 
     def run(self):

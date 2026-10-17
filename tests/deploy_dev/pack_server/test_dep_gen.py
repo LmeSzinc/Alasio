@@ -30,6 +30,7 @@ from alasio.deploy_dev.pack_server.model import (
     LookbackConfig, PackRepoModel, PythonDepsConfig, PythonMirrorInfo, RepoConfig
 )
 from alasio.deploy_dev.pack_server.pack_gen import PackRepoGen
+from alasio.deploy_dev.pack_server.parse_entry import ENTRY_FILE
 from alasio.ext import env
 from alasio.ext.path import PathStr
 from alasio.ext.path.atomic import atomic_write, file_read_bytes
@@ -54,6 +55,28 @@ REQUIREMENTS = {
     'c2': 'httpx==0.27.8\ndemo==1.0\n',
     'c3': 'httpx==0.28.1\ndemo==1.0\n',
 }
+
+# entry of the mock repo: by default it declares the dependency the tests
+# build a channel of, see entry_source
+DEFAULT_ENTRY = "entry = ModEntryInfo(name='m', pack_update_deps={'httpx': None})\n"
+
+
+def entry_source(*names):
+    """
+    Build the source of a mod entry declaring pack_update_deps.
+
+    Args:
+        *names (str): Names to declare, none for an entry without the
+            declaration
+
+    Returns:
+        str: Source of the entry module
+    """
+    if not names:
+        return "entry = ModEntryInfo(name='m')\n"
+    body = ', '.join(f"'{name}': None" for name in names)
+    return f"entry = ModEntryInfo(name='m', pack_update_deps={{{body}}})\n"
+
 
 # folder of the packs of the config in the run directory, see PackRepoModel
 REPO_FOLDER = 'pack/Author_Repo_master'
@@ -129,7 +152,7 @@ def join_path(root, *parts):
     return path
 
 
-def make_repo(requirements, branch='master'):
+def make_repo(requirements, branch='master', entry=DEFAULT_ENTRY):
     """
     Build a mock repo of a linear commit chain with a requirements file.
 
@@ -137,6 +160,10 @@ def make_repo(requirements, branch='master'):
         requirements (dict): {commit: content of requirements.txt}, the
             oldest commit first, the parent of a commit is the one before it
         branch (str): Branch of the head. Defaults to 'master'.
+        entry (str | dict | None): Source of the mod entry. A str is
+            registered at every commit, a dict is {commit: source} (a commit
+            without an entry is not registered), None registers no entry.
+            Defaults to DEFAULT_ENTRY, an entry declaring httpx.
 
     Returns:
         MockGitRepo: Repo, the head of the branch is the newest commit
@@ -145,6 +172,9 @@ def make_repo(requirements, branch='master'):
     parent = None
     for index, (commit, content) in enumerate(requirements.items()):
         repo.register_file(commit, 'requirements.txt', content.encode('utf-8'))
+        source = entry.get(commit) if isinstance(entry, dict) else entry
+        if source is not None:
+            repo.register_file(commit, ENTRY_FILE, source.encode('utf-8'))
         repo.register_commit(
             commit, parents=[parent] if parent else None,
             author_name='Author', author_time=index, message=f'commit {commit}')
@@ -154,14 +184,12 @@ def make_repo(requirements, branch='master'):
     return repo
 
 
-def make_config(mirror, pack_update=('httpx',), requirement_files=('requirements.txt',)):
+def make_config(mirror, requirement_files=('requirements.txt',)):
     """
     Build a pack config with the PythonDeps group of the tests.
 
     Args:
         mirror (str | list): PythonDepsConfig.PypiMirror
-        pack_update (Iterable[str]): PythonDepsConfig.PackUpdate. Defaults to
-            ('httpx',)
         requirement_files (Iterable[str]): PythonDepsConfig.RequirementFiles.
             Defaults to ('requirements.txt',)
 
@@ -179,7 +207,6 @@ def make_config(mirror, pack_update=('httpx',), requirement_files=('requirements
         PythonDeps=PythonDepsConfig(
             RequirementFiles=list(requirement_files),
             PypiMirror=mirror,
-            PackUpdate=list(pack_update),
         ),
     )
 
@@ -293,26 +320,75 @@ class TestSample:
         ]
 
     def test_unmanaged_name(self, fs, run_dir, mirror):
-        """A pinned name that PackUpdate does not list is not sampled."""
-        gen = DepGen(make_repo(REQUIREMENTS), make_config(mirror.base, pack_update=['demo']))
+        """A pinned name the mod entry does not declare is not sampled."""
+        gen = DepGen(
+            make_repo(REQUIREMENTS, entry=entry_source('demo')),
+            make_config(mirror.base))
         assert list(gen.sample) == ['demo']
         assert [dep.version for dep in gen.sample['demo']] == ['1.0']
 
     def test_name_without_pin(self, fs, run_dir, mirror):
-        """A managed name the window does not pin is reported, nothing is built of it."""
+        """A declared name the window does not pin is reported, nothing is built of it."""
         with logger.mock_capture_writer() as capture:
-            gen = DepGen(make_repo(REQUIREMENTS), make_config(mirror.base, pack_update=['requests']))
+            gen = DepGen(
+                make_repo(REQUIREMENTS, entry=entry_source('requests')),
+                make_config(mirror.base))
             assert gen.sample == {}
         assert capture.fd.any_contains(
             'Dependency "requests" is not pinned to a version in the lookback window')
 
     def test_name_is_normalized(self, fs, run_dir, mirror):
-        """The names of the config and of the files are compared PEP 503 normalized."""
+        """The names of the entry and of the files are compared PEP 503 normalized."""
         requirements = {'c1': 'ruamel.yaml==0.18.6\n'}
-        gen = DepGen(make_repo(requirements), make_config(mirror.base, pack_update=['ruamel_yaml']))
+        gen = DepGen(
+            make_repo(requirements, entry=entry_source('ruamel_yaml')),
+            make_config(mirror.base))
         sample = gen.sample
         assert list(sample) == ['ruamel-yaml']
         assert [(dep.version, dep.target) for dep in sample['ruamel-yaml']] == [('0.18.6', True)]
+
+    def test_entry_without_pack_update_deps(self, fs, run_dir, mirror):
+        """An entry without pack_update_deps declares no dependency."""
+        gen = DepGen(
+            make_repo(REQUIREMENTS, entry=entry_source()),
+            make_config(mirror.base))
+        assert gen.sample == {}
+
+    def test_entry_missing(self, fs, run_dir, mirror):
+        """A repo without an entry builds no dependency, the reason is logged."""
+        with logger.mock_capture_writer() as capture:
+            gen = DepGen(make_repo(REQUIREMENTS, entry=None), make_config(mirror.base))
+            assert gen.sample == {}
+        assert capture.fd.any_contains('No pack_update_deps declared by module/config/const.py')
+
+    def test_entry_broken(self, fs, run_dir, mirror):
+        """A dynamic declaration fails the sample, no dependency is silently dropped."""
+        entry = "entry = ModEntryInfo(name='m', pack_update_deps=get_deps())\n"
+        gen = DepGen(make_repo(REQUIREMENTS, entry=entry), make_config(mirror.base))
+        with pytest.raises(ValueError, match='unsupported call'):
+            _ = gen.sample
+
+    def test_entry_latest_only(self, fs, run_dir, mirror):
+        """The names are declared by the entry of the latest commit only."""
+        entries = {
+            'c1': entry_source('demo'),
+            'c2': entry_source('httpx'),
+            'c3': entry_source('httpx'),
+        }
+        gen = DepGen(make_repo(REQUIREMENTS, entry=entries), make_config(mirror.base))
+        assert list(gen.sample) == ['httpx']
+
+    def test_no_requirement_files(self, fs, run_dir, mirror, monkeypatch):
+        """A config without dependency files does not read the entry."""
+        gen = DepGen(
+            make_repo(REQUIREMENTS),
+            make_config(mirror.base, requirement_files=()))
+
+        def fail(commit):
+            raise AssertionError('the entry must not be read')
+
+        monkeypatch.setattr(gen.entry, 'pack_update_deps', fail)
+        assert gen.sample == {}
 
 
 class TestMirror:
@@ -499,9 +575,9 @@ class TestRun:
         assert entries['httpx'].index_checksum == bytes(dep_full.extract_index_pack())[-20:]
 
     def test_no_dependency(self, fs, run_dir, mirror):
-        """A config with no managed dependency writes nothing and removes nothing."""
+        """A repo whose entry declares no dependency writes nothing and removes nothing."""
         with logger.mock_capture_writer() as capture:
-            gen = DepGen(make_repo(REQUIREMENTS), make_config(mirror.base, pack_update=[]))
+            gen = DepGen(make_repo(REQUIREMENTS, entry=None), make_config(mirror.base))
             assert gen.run() is None
         assert capture.fd.any_contains('No dependency to build')
         assert gen.published == {}
@@ -565,9 +641,12 @@ class TestRun:
                 PythonMirrorInfo(Url='http://mirror-a', Deps=['httpx']),
                 PythonMirrorInfo(Url='http://mirror-b', Deps=['demo']),
             ],
-            pack_update=['httpx', 'demo'],
         )
-        DepGen(make_repo({'c1': 'httpx==0.28.1\ndemo==1.0\n'}), config, client=mirror.client).run()
+        DepGen(
+            make_repo(
+                {'c1': 'httpx==0.28.1\ndemo==1.0\n'},
+                entry=entry_source('httpx', 'demo')),
+            config, client=mirror.client).run()
 
         # every request of a dependency goes to the url of its entry
         assert mirror.requests
@@ -750,7 +829,7 @@ class TestCleanup:
         # of the target only)
         fs.create_file(pack_file(run_dir, '0.26.0', 'full.pack'), contents=b'stale')
         fs.create_file(pack_file(run_dir, '0.27.8', 'full.pack'), contents=b'stale')
-        # a dependency of another config (or of a removed PackUpdate entry)
+        # a dependency of another config (or of a name removed from pack_update_deps)
         fs.create_file(join_path(run_dir, REPO_FOLDER, 'packdep', 'other', 'latest.pack'), contents=b'stale')
         fs.create_file(join_path(
             run_dir, REPO_FOLDER, 'packdep', 'other', '1.0', 'full.pack'), contents=b'stale')
@@ -799,6 +878,7 @@ class TestCleanup:
         # the pin of the dependency moves to a new version
         register_wheel(mirror, '0.28.2', CORE_V2 + b'NEWER = True\n')
         repo.register_file('c4', 'requirements.txt', b'httpx==0.28.2\ndemo==1.0\n')
+        repo.register_file('c4', ENTRY_FILE, DEFAULT_ENTRY.encode('utf-8'))
         repo.register_commit(
             'c4', parents=['c3'], author_name='Author', author_time=3, message='commit c4')
         repo.register_branch('master', 'c4')

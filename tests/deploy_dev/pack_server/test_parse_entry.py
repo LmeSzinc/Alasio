@@ -9,7 +9,9 @@ channel because the declaration could not be read.
 """
 import pytest
 
-from alasio.deploy_dev.pack_server.parse_entry import parse_pack_update_deps
+from alasio.deploy_dev.pack_server import parse_entry
+from alasio.deploy_dev.pack_server.parse_entry import ENTRY_FILE, PackRepoEntry, parse_pack_update_deps
+from alasio.git.mock.mock_repo import MockGitRepo
 
 
 def parse(source):
@@ -221,6 +223,127 @@ import alasio.config.entry.const as const
 entry = const.ModEntryInfo(name='m')
 """
         assert parse(source) == {}
+
+
+class TestPackRepoEntry:
+    """Read the entry from the git blob of a commit."""
+
+    @staticmethod
+    def make_repo(entries):
+        """
+        Build a mock repo with an entry source per commit.
+
+        Args:
+            entries (dict[str, str | None]): {commit: entry source}, a None
+                value leaves the commit without an entry file
+
+        Returns:
+            MockGitRepo: Repo, the head of master is the last commit
+        """
+        repo = MockGitRepo()
+        parent = None
+        for index, (commit, source) in enumerate(entries.items()):
+            if source is not None:
+                repo.register_file(commit, ENTRY_FILE, source.encode('utf-8'))
+            repo.register_commit(
+                commit, parents=[parent] if parent else None,
+                author_name='Author', author_time=index, message=f'commit {commit}')
+            parent = commit
+        repo.register_branch('master', parent)
+        repo.register_head(parent)
+        return repo
+
+    def test_missing(self):
+        """A commit without an entry file declares no dependency."""
+        repo = self.make_repo({'c1': None})
+        assert PackRepoEntry(repo).pack_update_deps('c1') == {}
+
+    def test_read(self):
+        """The declaration is read from the entry blob of the commit."""
+        source = "entry = ModEntryInfo(name='m', pack_update_deps=['httpx'])\n"
+        repo = self.make_repo({'c1': source})
+        assert PackRepoEntry(repo).pack_update_deps('c1') == {'httpx': None}
+
+    def test_cache_by_blob(self, monkeypatch):
+        """Commits that share the entry blob parse it once."""
+        source = "entry = ModEntryInfo(name='m', pack_update_deps=['httpx'])\n"
+        repo = self.make_repo({'c1': source, 'c2': source})
+        calls = []
+        real = parse_entry.parse_pack_update_deps
+
+        def counting(source, source_name=''):
+            calls.append(source_name)
+            return real(source, source_name=source_name)
+
+        monkeypatch.setattr(parse_entry, 'parse_pack_update_deps', counting)
+        entry = PackRepoEntry(repo)
+        assert entry.pack_update_deps('c1') == {'httpx': None}
+        assert entry.pack_update_deps('c2') == {'httpx': None}
+        assert len(calls) == 1
+
+    def test_different_blobs(self, monkeypatch):
+        """A changed entry file is parsed again."""
+        first = "entry = ModEntryInfo(name='m', pack_update_deps=['httpx'])\n"
+        second = "entry = ModEntryInfo(name='m', pack_update_deps=['starlette'])\n"
+        repo = self.make_repo({'c1': first, 'c2': second})
+        calls = []
+        real = parse_entry.parse_pack_update_deps
+
+        def counting(source, source_name=''):
+            calls.append(source_name)
+            return real(source, source_name=source_name)
+
+        monkeypatch.setattr(parse_entry, 'parse_pack_update_deps', counting)
+        entry = PackRepoEntry(repo)
+        assert entry.pack_update_deps('c1') == {'httpx': None}
+        assert entry.pack_update_deps('c2') == {'starlette': None}
+        assert len(calls) == 2
+
+    def test_error_names_the_commit(self):
+        """A broken entry reports the file and the commit."""
+        source = "entry = ModEntryInfo(name='m', pack_update_deps=get_deps())\n"
+        repo = self.make_repo({'c1': source})
+        with pytest.raises(ValueError, match='module/config/const.py at commit c1'):
+            PackRepoEntry(repo).pack_update_deps('c1')
+
+    def test_symlink(self):
+        """An entry path that is a symlink is refused, its blob is a path."""
+
+        class FakeFile:
+            sha1 = 'x'
+            mode = b'120000'
+
+        class FakeRepo:
+            dict_object = {'c1': object()}
+
+            def get_file(self, commit, path):
+                return FakeFile()
+
+            def cat(self, sha1):
+                raise AssertionError('the symlink blob must not be read')
+
+        with pytest.raises(ValueError, match='is a symlink'):
+            PackRepoEntry(FakeRepo()).pack_update_deps('c1')
+
+    def test_repo_is_read_lazily(self):
+        """A repo that was not read is read before the entry is looked up."""
+
+        class LazyRepo:
+            def __init__(self):
+                self.read = False
+
+            def read_lazy(self):
+                self.read = True
+                self.dict_object = {}
+                return self
+
+            def get_file(self, commit, path):
+                assert self.read
+                return None
+
+        repo = LazyRepo()
+        assert PackRepoEntry(repo).pack_update_deps('c1') == {}
+        assert repo.read is True
 
 
 class TestPackUpdateDepsErrors:

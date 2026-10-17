@@ -92,9 +92,9 @@ class PythonDepsConfig(Struct):
 
     The dependency files of RequirementFiles are sampled over the lookback
     window, the wheels of the versions the repo asked for are fetched from
-    PypiMirror, and the packs of the names of PackUpdate are built. An empty
-    group builds nothing, the packs of the project tree are the same as
-    without it.
+    PypiMirror, and the packs of the names the mod entry declares in
+    pack_update_deps are built. An empty group builds nothing, the packs of
+    the project tree are the same as without it.
     """
     RequirementFiles: Annotated[List[str], Meta(extra={"help": [
         "Dependency files to sample, paths relative to the root of the repo",
@@ -108,11 +108,6 @@ class PythonDepsConfig(Struct):
         "[list] Download the dependencies of each entry from its own Url, e.g. a private index",
         "[list] A dependency that no entry lists is downloaded from the official PyPI",
     ]})] = 'https://pypi.org/simple'
-    PackUpdate: Annotated[List[str], Meta(extra={"help": [
-        "Dependencies to build packs of, PEP 503 normalized names",
-        "A dependency that is not listed is not fetched and gets no pack",
-        "Example: ['httpx2', 'starlette']",
-    ]})] = field(default_factory=list)
 
 
 class PackRepoModel(Struct):

@@ -113,19 +113,17 @@ class TestPythonDepsConfig:
     """The python dependencies to build packs of."""
 
     def test_default(self):
-        """The default group is empty: no dependency file, the official PyPI, no pack."""
+        """The default group is empty: no dependency file, the official PyPI."""
         deps = PythonDepsConfig()
         assert deps.RequirementFiles == []
         assert deps.PypiMirror == 'https://pypi.org/simple'
-        assert deps.PackUpdate == []
+        assert not hasattr(deps, 'PackUpdate')
 
     def test_default_not_shared(self):
-        """The default lists are not shared among instances, a filled one stays empty."""
+        """The default list is not shared among instances, a filled one stays empty."""
         first = PythonDepsConfig()
         first.RequirementFiles.append('requirements.txt')
-        first.PackUpdate.append('httpx')
         assert PythonDepsConfig().RequirementFiles == []
-        assert PythonDepsConfig().PackUpdate == []
 
 
 class TestPackRepoModel:
@@ -257,7 +255,7 @@ Lookback:
         assert config.data.Lookback.AdditionalCommit == ['4f3a8b2c1d5e6f708192a3b4c5d6e7f8091a2b3c']
 
     def test_read_python_deps(self, fs, run_dir):
-        """The PythonDeps group is read: the files, the list form of the mirror and the packs to build."""
+        """The PythonDeps group is read: the files and the list form of the mirror."""
         fs.create_file(config_file(run_dir), contents="""\
 Repo:
   Remote: https://github.com/LmeSzinc/AzurLaneAutoScript
@@ -276,9 +274,6 @@ PythonDeps:
       Deps:
         - httpx2
         - starlette
-  PackUpdate:
-    - requests
-    - httpx2
 """)
         config = PackRepoConfig(FILE)
         assert config.errors == []
@@ -288,7 +283,27 @@ PythonDeps:
             PythonMirrorInfo(Url='https://mirrors.aliyun.com/pypi/simple', Deps=['requests']),
             PythonMirrorInfo(Url='https://pack.example.com/pypi', Deps=['httpx2', 'starlette']),
         ]
-        assert deps.PackUpdate == ['requests', 'httpx2']
+        assert not hasattr(deps, 'PackUpdate')
+
+    def test_stale_pack_update_is_ignored(self, fs, run_dir):
+        """The PackUpdate key of a config of an earlier version is ignored."""
+        fs.create_file(config_file(run_dir), contents="""\
+Repo:
+  Remote: https://github.com/LmeSzinc/AzurLaneAutoScript
+  Author: LmeSzinc
+  Repo: AzurLaneAutoScript
+  Branch: master
+PythonDeps:
+  RequirementFiles:
+    - requirements.txt
+  PackUpdate:
+    - requests
+""")
+        config = PackRepoConfig(FILE)
+        assert config.errors == []
+        deps = config.data.PythonDeps
+        assert deps.RequirementFiles == ['requirements.txt']
+        assert not hasattr(deps, 'PackUpdate')
 
     def test_read_python_deps_mirror_url(self, fs, run_dir):
         """PypiMirror accepts one url string, every dependency is downloaded from it."""
