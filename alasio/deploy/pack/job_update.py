@@ -33,11 +33,18 @@ class UpdateJob(JobBase):
     unpacking, so a killed process leaves the record of the task in
     flight:
 
-        job = UpdateJob(data, server=server)
+        job = UpdateJob(
+            data, server=server,
+            expected_old_version='c1', expected_new_version='c2',
+        )
         await job.run()
 
     The update pack upgrades the local working tree from the old
-    version to the new version, every file follows the same flow:
+    version to the new version; the caller can name that pair with
+    expected_old_version / expected_new_version and a pack of another pair is
+    rejected before unpack() prepares any target record. DeployJob.update()
+    always names the pair it checked, so the path of the server cannot decide
+    the versions on its own. Every file follows the same flow:
     read - verify - decompress to a tmp file, file content never
     stays in memory. The index pack (index.pack in the ledger folder
     of the target) is a normal record of the update:
@@ -89,7 +96,9 @@ class UpdateJob(JobBase):
     this job must take it itself.
     """
 
-    def __init__(self, data, server=None, root=None, name=''):
+    def __init__(
+            self, data, server=None, root=None, name='',
+            expected_old_version='', expected_new_version=''):
         """
         Args:
             data (PackDecodeBase | bytes): Update pack data: the validated
@@ -102,6 +111,10 @@ class UpdateJob(JobBase):
                 env.PROJECT_ROOT
             name (str, optional): Ledger key of the target. Defaults to
                 '', the project tree target
+            expected_old_version (str, optional): Version the pack must
+                update from. Defaults to '', no verification
+            expected_new_version (str, optional): Version the pack must
+                install. Defaults to '', no verification
         """
         if isinstance(data, PackDecodeBase):
             # the pack of ServerFile.get_update_pack(), already validated: the
@@ -112,6 +125,10 @@ class UpdateJob(JobBase):
             self._decoder = None
         super().__init__(data, root=root, name=name)
         self.server = server
+        # the version pair the caller expects, checked before unpack() writes
+        # the records; '' skips the check, the deploy flow always names it
+        self.expected_old_version = expected_old_version
+        self.expected_new_version = expected_new_version
         self.error: "list[PendingFile]" = []
         # paths of the records of the update pack, the filter base of
         # _validate_remaining(): the nested reset validates exactly the
@@ -188,6 +205,35 @@ class UpdateJob(JobBase):
         logger.info(f'Update done')
         return True
 
+    def _validate_version_pair(self, decoder):
+        """
+        Check the version pair recorded inside the update pack.
+
+        The pack path names the pair, but the file itself is the only proof
+        of what it updates; a self-consistent pack of another pair cannot be
+        applied to these files. The check runs before unpack() prepares any
+        record and before replace() can touch a real file.
+
+        Args:
+            decoder (PackDecodeBase): Decoder of the update pack
+
+        Raises:
+            ValueError: If the pack updates from another version or installs
+                another version than the expected one
+        """
+        expected = self.expected_old_version
+        if expected and decoder.old_version != expected:
+            raise ValueError(
+                f'The update pack updates from "{decoder.old_version}", '
+                f'expected "{expected}"'
+            )
+        expected = self.expected_new_version
+        if expected and decoder.current_version != expected:
+            raise ValueError(
+                f'The update pack installs "{decoder.current_version}", '
+                f'expected "{expected}"'
+            )
+
     def write(self):
         """
         Write the data to the job file, so that the file is the record of
@@ -227,6 +273,7 @@ class UpdateJob(JobBase):
             decoder.validate()
         if not decoder.old_version:
             raise ValueError('UpdateJob requires an update pack, got a full pack')
+        self._validate_version_pair(decoder)
         # rewrite the pack area paths of the pack into the ledger
         # folder of the target before any comparison
         self.localize(decoder)

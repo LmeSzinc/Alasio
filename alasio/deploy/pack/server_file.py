@@ -357,12 +357,15 @@ class ServerFile(AsyncHttpProbe):
         {mirror}/{new_version}/from_{old_version}.pack.
 
         The pack is validated before it is returned (validate()): the checksums
-        of both sections of the format are checked, a mirror that serves a
-        broken update pack is dropped and the download is retried once on
-        another one - the flow applies the validity of the pack next, it
-        must not decode it a second time. A missing update pack (a 404) is the
-        answer of the server and is raised as-is: another mirror would answer
-        the same, the caller falls back to a rebuild (see DeployJob.update()).
+        of both sections of the format are checked, and the version pair
+        recorded inside the pack must be the requested one - the path names the
+        pair, a pack of another pair can be self-consistent but cannot update
+        these files. A mirror that serves a broken or foreign update pack is
+        dropped and the download is retried once on another one - the flow
+        applies the validity of the pack next, it must not decode it a second
+        time. A missing update pack (a 404) is the answer of the server and is
+        raised as-is: another mirror would answer the same, the caller falls
+        back to a rebuild (see DeployJob.update()).
 
         Args:
             old_version (str): Version of the local files
@@ -372,7 +375,8 @@ class ServerFile(AsyncHttpProbe):
             PackDecodeBase: Decoder of the update pack, validated
 
         Raises:
-            PackDecodeError: If the pack does not decode or validate
+            PackDecodeError: If the pack does not decode or validate, or its
+                internal version pair is not the requested one
             httpx2.HTTPError: If the request fails
             AllMirrorsFailedError: If no mirror is usable
         """
@@ -382,6 +386,12 @@ class ServerFile(AsyncHttpProbe):
             data = await self.get_bytes(url, path)
             decoder = PackDecodeBase(data)
             decoder.validate()
+            if decoder.old_version != old_version or decoder.current_version != new_version:
+                raise PackDecodeError(
+                    f'Failed to download the update pack: it is '
+                    f'"{decoder.old_version}" -> "{decoder.current_version}", '
+                    f'expected "{old_version}" -> "{new_version}"'
+                )
             return decoder
 
         return await self.fetch(path, work)

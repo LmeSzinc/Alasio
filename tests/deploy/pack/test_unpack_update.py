@@ -928,6 +928,26 @@ WARNING | Failed to update: 1 file(s) stayed in error, the workspace is kept for
 
 
 # ════════════════════════════════════════════════════════════════════════════
+#  expected version pair
+# ════════════════════════════════════════════════════════════════════════════
+
+
+class TestVersionPair:
+    """The version pair the update pack records inside."""
+
+    @pytest.mark.parametrize("old, new, message", [
+        ('other', 'new', 'updates from'),
+        ('old', 'other', 'installs'),
+    ])
+    def test_an_update_pack_of_another_pair_is_rejected(self, old, new, message):
+        """A self-consistent pack of another version pair is refused before
+        any record is prepared."""
+        job = UpdateJob(UPDATE, expected_old_version=old, expected_new_version=new)
+        with pytest.raises(ValueError, match=message):
+            job.unpack()
+
+
+# ════════════════════════════════════════════════════════════════════════════
 #  source repair
 # ════════════════════════════════════════════════════════════════════════════
 

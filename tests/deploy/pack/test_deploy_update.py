@@ -118,6 +118,14 @@ OTHER_UPDATE = b''.join(PackUpdate(
         'old': {'other.txt': b'old\n'},
         'new': {'other.txt': b'new\n'},
     }), commit='new'), 'old').iter_pack_data())
+# a self-consistent update pack of another version pair, served under the
+# path of the pair the client asks for
+MISMATCHED_UPDATE = b''.join(PackUpdate(
+    PackFull(make_repo({
+        'old': {'other.txt': b'old\n'},
+        'other': {'other.txt': b'other\n'},
+        'new': {'other.txt': b'new\n'},
+    }), commit='new'), 'other').iter_pack_data())
 
 
 def make_server():
@@ -266,6 +274,30 @@ INFO | [CurrentVersion] old
 INFO | [LatestVersion] new
 INFO | Update available: old -> new
 WARNING | Failed to get the update pack old -> new: Failed to decode header: not a pack file: b'garb', rebuilding from the latest index
+INFO | Rebuilding files to "{env.PROJECT_ROOT}"
+INFO | Downloading the full pack of new
+INFO | Rebuild done
+"""
+        assert read_tree() == NEW_TREE
+        decoder = PackDecodeBase(file_read_bytes(env.PROJECT_ROOT / '.pack/index.pack'))
+        assert decoder.current_version == 'new'
+        assert not os.path.exists(env.PROJECT_ROOT / '.pack/workspace')
+
+    @pytest.mark.trio
+    async def test_update_pack_of_another_pair_falls_back(self, app_folder):
+        """The server serves a self-consistent update pack of another version
+        pair under the requested path: the pair is refused and the tree is
+        rebuilt from the latest index."""
+        server = make_server()
+        server.register_update('old', 'new', MISMATCHED_UPDATE)
+        await UnpackJob(OLD_PACK).run()
+        with logger.mock_capture_writer() as capture:
+            assert await DeployJob(server=server).update()
+        assert capture.concat() == f"""\
+INFO | [CurrentVersion] old
+INFO | [LatestVersion] new
+INFO | Update available: old -> new
+WARNING | Failed to get the update pack old -> new: Failed to download the update pack: it is "other" -> "new", expected "old" -> "new", rebuilding from the latest index
 INFO | Rebuilding files to "{env.PROJECT_ROOT}"
 INFO | Downloading the full pack of new
 INFO | Rebuild done

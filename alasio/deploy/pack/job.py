@@ -567,7 +567,11 @@ class DeployJob(DeployTarget):
             # the download is over, the local changes start: the workers are
             # stopped before them (the manager phase)
             await self._job_phase(on_job_phase, 'updating')
-            job = UpdateJob(decoder, server=server, root=self.root, name=self.name)
+            job = UpdateJob(
+                decoder, server=server, root=self.root, name=self.name,
+                # the pack is of the pair the server was asked for, the
+                # internal versions are checked before any target file changes
+                expected_old_version=local, expected_new_version=info.version)
             # the index fallback download of the job must converge to the
             # checksum of this flow, not to another index of the version
             job.index_checksum = info.checksum
