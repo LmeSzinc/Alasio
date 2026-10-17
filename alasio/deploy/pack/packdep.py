@@ -1,11 +1,16 @@
 import re
+from hashlib import sha1
 from typing import List
 
 import msgspec
 from msgspec import Struct
 
-from alasio.deploy.pack.decode_base import PackDecodeError
+from alasio.deploy.pack.decode_base import PackDecodeBase, PackDecodeError
+from alasio.deploy.pack.job_base import DeployTarget
+from alasio.deploy.pack.server_file import LatestInfo
+from alasio.ext.path.atomic import atomic_read_bytes
 from alasio.ext.path.validate import validate_filename
+from alasio.logger import logger
 
 # the path of the generated dependency snapshot of a repo tree, a file of the
 # pack area like .pack/history.pack
@@ -125,3 +130,72 @@ def decode_packdep(data):
                 f'Failed to decode packdep: duplicate dependency {entry.name!r}')
         out[entry.name] = entry
     return out
+
+
+class PackDep:
+    """
+    The dependency snapshot of a packed tree.
+
+    The file is authenticated by the index pack of the tree: its record in
+    the index is the size and sha1 of the whole file, and the index itself is
+    authenticated by the server that published the tree. A file that does not
+    match its record is unusable as a whole; the caller falls back to the
+    online dependency flow.
+    """
+
+    @classmethod
+    def read(cls, root):
+        """
+        Read and verify {root}/.pack/packdep.pack.
+
+        The file is read only when the index pack of the tree is valid and
+        records it. The size and sha1 of the file must match that record;
+        any failure returns an empty mapping, so a caller never uses a
+        snapshot from a tree whose index or file is damaged.
+
+        This is blocking file IO and decoding, run it in a worker thread.
+
+        Args:
+            root (str | PathStr): Root of the tree target
+
+        Returns:
+            dict[str, LatestInfo]: PEP 503 name -> published version and
+                index checksum, empty when the tree has no usable snapshot
+        """
+        target = DeployTarget(root=root)
+        try:
+            index_data = atomic_read_bytes(target.index_file)
+        except FileNotFoundError:
+            logger.debug(f'No packdep: the tree has no index pack: "{target.index_file}"')
+            return {}
+        try:
+            index = PackDecodeBase(index_data)
+            index.validate_index()
+            record = index.fileinfo.get(PACKDEP_PATH)
+        except PackDecodeError as e:
+            logger.warning(f'Failed to read the packdep of "{root}": invalid index pack: {e}')
+            return {}
+        if record is None or record.edit == 2:
+            logger.debug(f'No packdep record in the index pack of "{root}"')
+            return {}
+
+        path = target.root.joinpath(PACKDEP_PATH)
+        try:
+            data = atomic_read_bytes(path)
+        except FileNotFoundError:
+            logger.warning(f'Failed to read the packdep of "{root}": file is missing: "{path}"')
+            return {}
+        if len(data) != record.size or sha1(data).digest() != record.sha1:
+            logger.warning(
+                f'Failed to read the packdep of "{root}": the file does not match its index record'
+            )
+            return {}
+        try:
+            entries = decode_packdep(data)
+        except PackDecodeError as e:
+            logger.warning(f'Failed to read the packdep of "{root}": {e}')
+            return {}
+        return {
+            name: LatestInfo(version=entry.version, checksum=entry.index_checksum.hex())
+            for name, entry in entries.items()
+        }

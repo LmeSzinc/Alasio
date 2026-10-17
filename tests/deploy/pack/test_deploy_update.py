@@ -28,6 +28,7 @@ from alasio.deploy.pack.job import DeployJob
 from alasio.deploy.pack.job_rebuild import RebuildJob
 from alasio.deploy.pack.job_unpack import UnpackJob
 from alasio.deploy.pack.job_update import UpdateJob
+from alasio.deploy.pack.server_file import LatestInfo
 from alasio.deploy_dev.pack.pack_full import PackFull
 from alasio.deploy_dev.pack.pack_update import PackUpdate
 from alasio.ext import env
@@ -928,6 +929,51 @@ INFO | Update done
         job.job_file_kept = True
         job.write()
         assert file_read_bytes(workspace_file('job.pack')) == b'kept bytes'
+
+    @pytest.mark.trio
+    async def test_a_matching_snapshot_skips_latest(self, app_folder, monkeypatch):
+        """A local index that is exactly the trusted snapshot is validated
+        without a latest.pack request."""
+        await UnpackJob(NEW_PACK).run()
+        info = LatestInfo(version='new', checksum=NEW_DECODER.index_checksum)
+
+        async def unexpected():
+            raise AssertionError('latest.pack must not be requested')
+
+        monkeypatch.setattr(SERVER, 'get_latest_info', unexpected)
+        with logger.mock_capture_writer() as capture:
+            assert await DeployJob(server=SERVER).update(latest_info=info)
+        assert capture.concat() == f"""\
+INFO | [CurrentVersion] new
+INFO | [LatestVersion] new
+INFO | Already up to date: new
+INFO | Resetting files to "{env.PROJECT_ROOT}"
+INFO | Reset done
+"""
+
+    @pytest.mark.trio
+    async def test_a_snapshot_drives_the_update(self, app_folder):
+        """A snapshot is the target of the flow: a local version different
+        from it is updated, and latest.pack is never requested."""
+        server = make_server()
+        await UnpackJob(OLD_PACK).run()
+        info = LatestInfo(version='new', checksum=NEW_DECODER.index_checksum)
+
+        async def unexpected():
+            raise AssertionError('latest.pack must not be requested')
+
+        server.get_latest_info = unexpected
+        with logger.mock_capture_writer() as capture:
+            assert await DeployJob(server=server).update(latest_info=info)
+        assert capture.concat() == f"""\
+INFO | [CurrentVersion] old
+INFO | [LatestVersion] new
+INFO | Update available: old -> new
+INFO | Updating files to "{env.PROJECT_ROOT}"
+INFO | Replacing files to "{env.PROJECT_ROOT}"
+INFO | Update done
+"""
+        assert read_tree() == NEW_TREE
 
     @pytest.mark.trio
     async def test_without_a_kept_pack_downloads(self, app_folder):

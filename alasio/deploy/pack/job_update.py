@@ -119,6 +119,9 @@ class UpdateJob(JobBase):
         self._pack_paths: "set[str]" = set()
         # version of the update pack, used to download the index pack
         self._version = ''
+        # expected index checksum of the version, '' when the caller has no
+        # trusted snapshot; the fallback index download validates it
+        self.index_checksum = ''
         # the data was read back from the job file (the kept pack the server
         # confirmed, see DeployJob._get_update_pack): write() keeps the file
         # as-is instead of rewriting the same bytes
@@ -363,7 +366,7 @@ class UpdateJob(JobBase):
                 # the client validates the index pack it returns (the trailing
                 # checksum covers the header, the length and the whole index
                 # section) and reselects the mirror when it is broken
-                new_index = await server.get_index_pack(self._version)
+                new_index = await server.get_index_pack(self._version, self.index_checksum)
             except (PackDecodeError, httpx2.HTTPError) as e:
                 # cannot be downloaded or fails the size + sha1 check,
                 # the record stays in error, this is unsolvable

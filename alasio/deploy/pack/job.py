@@ -9,7 +9,7 @@ from alasio.deploy.pack.job_rebuild import RebuildJob
 from alasio.deploy.pack.job_reset import ResetJob
 from alasio.deploy.pack.job_unpack import UnpackJob
 from alasio.deploy.pack.job_update import UpdateJob
-from alasio.deploy.pack.server_file import LatestInfo
+from alasio.deploy.pack.server_file import LatestInfo, ServerFileWithLatestInfo
 from alasio.ext.file.filelock import SQLiteFileLock
 from alasio.ext.path.atomic import atomic_read_bytes
 from alasio.logger import logger
@@ -241,17 +241,19 @@ class DeployJob(DeployTarget):
             return ''
         return decoder.current_version
 
-    async def check(self, version=''):
+    async def check(self, version='', server=None):
         """
         Check the local version of this target against the server of the
-        instance (self.server, set in __init__):
+        instance (self.server, set in __init__), or the server given by the
+        caller:
 
             check = await DeployJob(server=server).check()
             check = await DeployJob(server=server).check(version='0.28.1')
 
         Read-only: the local version comes from the local index pack
         (index.pack in the ledger folder of the target), the target comes
-        from latest.pack on the server. Nothing is written and no lock
+        from latest.pack on the server, or from the snapshot of a
+        ServerFileWithLatestInfo. Nothing is written and no lock
         is taken - a check never conflicts with an update of the same
         target (the index pack of a target being updated is read
         atomically, it is never seen half written). The version pair is
@@ -272,22 +274,28 @@ class DeployJob(DeployTarget):
             version (str, optional): Version the server must publish as its
                 latest, verified additionally, see the docstring. Defaults
                 to '', no extra verification
+            server (ServerFile, optional): Server to check, defaults to the
+                server of the instance. The update flow passes the snapshot
+                wrapper here
 
         Returns:
             DeployCheck: The local version and the latest info of the
                 server
 
         Raises:
-            ValueError: If the target was created without a server, or the
-                server does not publish the given version
+            ValueError: If the target was created without a server and no
+                snapshot is given, or the server does not publish the given
+                version
             httpx2.HTTPError: If the request fails
             AllMirrorsFailedError: If no mirror is usable
         """
-        if self.server is None:
+        if server is None:
+            server = self.server
+        if server is None:
             raise ValueError('Failed to check: no server provided')
         local = await trio.to_thread.run_sync(self._local_version)
         logger.attr('CurrentVersion', local)
-        info = await self.server.get_latest_info()
+        info = await server.get_latest_info()
         logger.attr('LatestVersion', info.version)
         if version and info.version != version:
             # the extra verification of a given version: the server must
@@ -321,7 +329,7 @@ class DeployJob(DeployTarget):
             return
         await on_job_phase(phase)
 
-    async def _get_update_pack(self, old_version, new_version):
+    async def _get_update_pack(self, old_version, new_version, server=None):
         """
         Get the update pack of the flow, reusing the kept one when the server
         confirms it.
@@ -344,6 +352,8 @@ class DeployJob(DeployTarget):
         Args:
             old_version (str): Version of the local files
             new_version (str): Version to update to
+            server (ServerFile, optional): Server to read the pack from,
+                defaults to the server of the instance
 
         Returns:
             tuple[PackDecodeBase, bool]: Decoder of the update pack, validated,
@@ -355,11 +365,13 @@ class DeployJob(DeployTarget):
             httpx2.HTTPStatusError: If the request fails
         """
         import httpx2
+        if server is None:
+            server = self.server
         kept, checksum = await trio.to_thread.run_sync(
             self._load_kept_pack, old_version, new_version)
         if kept is not None:
             try:
-                server_checksum = await self.server.get_update_pack_checksum(
+                server_checksum = await server.get_update_pack_checksum(
                     old_version, new_version, len(kept.data))
             except httpx2.HTTPError as e:
                 # the probe failed (a missing pack, a mirror that went down):
@@ -372,7 +384,7 @@ class DeployJob(DeployTarget):
                 logger.info(f'Update pack unchanged, reusing the kept pack: '
                             f'{old_version} -> {new_version}')
                 return kept, True
-        return await self.server.get_update_pack(old_version, new_version), False
+        return await server.get_update_pack(old_version, new_version), False
 
     def _load_kept_pack(self, old_version, new_version):
         """
@@ -409,7 +421,7 @@ class DeployJob(DeployTarget):
             return None, ''
         return decoder, data[-20:].hex()
 
-    async def update(self, on_job_phase=None, version=''):
+    async def update(self, on_job_phase=None, version='', latest_info=None):
         """
         Update the local working tree of this target to the latest version
         of the server of the instance (self.server, set in __init__):
@@ -429,7 +441,8 @@ class DeployJob(DeployTarget):
         PackEncodeBase
 
         1. the latest version and its index pack checksum are read
-           from latest.pack by check(), the local version comes from the
+           from latest.pack by check(), or from the snapshot of a
+           ServerFileWithLatestInfo, the local version comes from the
            local index pack (index.pack in the ledger folder of the
            target); both are logged as in check()
         2. a version mismatch downloads the update pack
@@ -445,11 +458,10 @@ class DeployJob(DeployTarget):
            self-consistent index is downloaded again), then every
            recorded file is verified and repaired
 
-        The latest info fetched by check() is handed to the job created
+        The latest info resolved by check() is handed to the job created
         for the chosen path (the _latest_info attribute of the job is
-        seeded with it): latest.pack is requested once per flow and the
-        flow converges to this snapshot, a version published mid-flow
-        is picked up by the next update.
+        seeded with it): latest.pack is requested once per online flow, or
+        not at all for a snapshot, and the flow converges to this info.
 
         A missing or malformed local index pack has an unknown
         version, the update cannot be incremental: RebuildJob
@@ -482,6 +494,12 @@ class DeployJob(DeployTarget):
                 docstring (the dependency install of a mod passes the pin
                 of its requirements file). Defaults to '', no extra
                 verification
+            latest_info (LatestInfo, optional): Trusted snapshot of the
+                target, e.g. the one a packed tree records for a dependency.
+                The flow wraps the server with ServerFileWithLatestInfo, so
+                latest.pack is never requested and the local index decides
+                whether the snapshot is an update or a validation. Defaults
+                to None, the online flow
 
         Returns:
             bool: True if every file is up to date, False if some
@@ -494,12 +512,15 @@ class DeployJob(DeployTarget):
         import httpx2
         if self.server is None:
             raise ValueError('Failed to update: no server provided')
+        server = self.server
+        if latest_info is not None:
+            server = ServerFileWithLatestInfo.create(server=server, latest_info=latest_info)
         async with self.alocked():
             # the version check opens the flow: its phase is reported before
             # the first request, see _job_phase
             await self._job_phase(on_job_phase, 'checking')
 
-            check = await self.check(version)
+            check = await self.check(version, server=server)
             local = check.local
             info = check.info
 
@@ -507,7 +528,7 @@ class DeployJob(DeployTarget):
                 # the same version: check the index and the files, the local
                 # repair path (nothing to download, no version to compare)
                 await self._job_phase(on_job_phase, 'updating')
-                job = ResetJob(self.server, root=self.root, name=self.name)
+                job = ResetJob(server, root=self.root, name=self.name)
                 job._latest_info = info
                 return await self._run_job(job)
             if not local:
@@ -517,7 +538,7 @@ class DeployJob(DeployTarget):
                 # apply (its own index download happens inside it)
                 logger.warning('Failed to read the local version, rebuilding from the latest index')
                 await self._job_phase(on_job_phase, 'updating')
-                job = RebuildJob(self.server, root=self.root, name=self.name)
+                job = RebuildJob(server, root=self.root, name=self.name)
                 job._latest_info = info
                 return await self._run_job(job)
 
@@ -528,7 +549,7 @@ class DeployJob(DeployTarget):
             # when the server still serves it, see _get_update_pack
             await self._job_phase(on_job_phase, 'downloading')
             try:
-                decoder, kept = await self._get_update_pack(local, info.version)
+                decoder, kept = await self._get_update_pack(local, info.version, server=server)
             except (httpx2.HTTPStatusError, PackDecodeError) as e:
                 # the update pack of the local version is not on the server (out
                 # of the update window or removed), or the server serves a
@@ -540,13 +561,16 @@ class DeployJob(DeployTarget):
                     f'rebuilding from the latest index'
                 )
                 await self._job_phase(on_job_phase, 'updating')
-                job = RebuildJob(self.server, root=self.root, name=self.name)
+                job = RebuildJob(server, root=self.root, name=self.name)
                 job._latest_info = info
                 return await self._run_job(job)
             # the download is over, the local changes start: the workers are
             # stopped before them (the manager phase)
             await self._job_phase(on_job_phase, 'updating')
-            job = UpdateJob(decoder, server=self.server, root=self.root, name=self.name)
+            job = UpdateJob(decoder, server=server, root=self.root, name=self.name)
+            # the index fallback download of the job must converge to the
+            # checksum of this flow, not to another index of the version
+            job.index_checksum = info.checksum
             # the pack came back from the job file (the server confirmed the
             # kept one): the file already holds it, write() keeps it as-is
             job.job_file_kept = kept
@@ -556,6 +580,6 @@ class DeployJob(DeployTarget):
             # corrupt pack is bypassed, the latest index and the files are
             # downloaded directly
             logger.warning('Failed to apply the update pack, rebuilding from the latest index')
-            job = RebuildJob(self.server, root=self.root, name=self.name)
+            job = RebuildJob(server, root=self.root, name=self.name)
             job._latest_info = info
             return await self._run_job(job)

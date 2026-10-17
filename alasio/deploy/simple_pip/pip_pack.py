@@ -104,7 +104,7 @@ class PipPack:
             raise ValueError(f'The mod declares no update source: "{mod.name}"')
         self.mirrors = Mirrors.from_input(mirrors)
 
-    async def install(self, name, version):
+    async def install(self, name, version, latest_info=None):
         """
         Install a distribution at a version into the site-packages folder,
         from the pack channel of the mod.
@@ -124,6 +124,12 @@ class PipPack:
         latest version only (the pins of the latest commit of the repo built
         it), which is exactly the version the check accepted.
 
+        With latest_info, the job wraps the channel server with
+        ServerFileWithLatestInfo, so no latest.pack request is made. The
+        local ledger decides the path: the same version is validated and
+        repaired, another version is updated toward the snapshot. A missing
+        update pack or index is a normal update error.
+
         Args:
             name (str): Name of the distribution, e.g. 'httpx' or
                 'ruamel.yaml', any case and separator style (the PEP 503
@@ -131,6 +137,9 @@ class PipPack:
             version (str): Display version to install, e.g. '0.28.1' (the
                 Version of the METADATA of the wheel), the pin of the
                 requirements file of the mod
+            latest_info (LatestInfo, optional): Trusted snapshot of the
+                dependency channel, e.g. the record of the packed tree of the
+                mod. Defaults to None, the online channel check
 
         Returns:
             bool: True when every recorded file is at the version, False
@@ -166,7 +175,7 @@ class PipPack:
         try:
             job = DeployJob(root=self.site_packages, name=dist_key, server=server)
             logger.info(f'Installing "{name}=={version}" to "{self.site_packages}"')
-            ok = await job.update(version=version)
+            ok = await job.update(version=version, latest_info=latest_info)
         finally:
             # the client a server created for itself goes with the install;
             # an injected client belongs to the caller and is never closed

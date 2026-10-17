@@ -512,7 +512,8 @@ class Backend:
         servers (MockUpdateBackend): The mock update servers of the mirrors
     """
 
-    def __init__(self, project, servers, mods=None, configs=None, restart_error=None, monkeypatch=None):
+    def __init__(self, project, servers, mods=None, configs=None, restart_error=None, monkeypatch=None,
+                 pack_deps=None):
         """
         Args:
             project (Project): The project root of the run
@@ -522,6 +523,10 @@ class Backend:
                 'WorkerTestScheduler'
             configs (dict[str, str]): {config name: mod name}; Defaults to
                 'cfg_a' on the default mod
+            pack_deps (dict[str, Iterable[str]]): {mod name: the names the
+                entry declares for pack updates}, see
+                ModEntryInfo.pack_update_deps. Defaults to None, every mod
+                declares none
             monkeypatch: The pytest monkeypatch fixture (the manager spawn is
                 watched through it)
         """
@@ -529,8 +534,11 @@ class Backend:
         self.servers = servers
         if mods is None:
             mods = {'WorkerTestScheduler': f'http://{UPDATE_HOST}'}
+        pack_deps = pack_deps or {}
         self.mods = {
-            name: Mod(ModEntryInfo(name=name, root=str(project.mod_root(name)), mirrors=mirrors))
+            name: Mod(ModEntryInfo(
+                name=name, root=str(project.mod_root(name)), mirrors=mirrors,
+                pack_update_deps=dict.fromkeys(pack_deps.get(name, ()))))
             for name, mirrors in mods.items()
         }
         if configs is None:
@@ -801,9 +809,10 @@ def make_backend(project, servers, monkeypatch):
     """
     created = []
 
-    def factory(mods=None, configs=None, restart_error=None):
+    def factory(mods=None, configs=None, restart_error=None, pack_deps=None):
         backend = Backend(project, servers, mods=mods, configs=configs,
-                          restart_error=restart_error, monkeypatch=monkeypatch)
+                          restart_error=restart_error, monkeypatch=monkeypatch,
+                          pack_deps=pack_deps)
         created.append(backend)
         return backend
 

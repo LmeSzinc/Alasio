@@ -11,7 +11,7 @@ import pytest
 
 from alasio.deploy.httpclient.probe_mirrors import RangeUnsupportedError
 from alasio.deploy.pack.decode_base import PackDecodeBase, PackDecodeError
-from alasio.deploy.pack.server_file import LatestInfo, ServerFile
+from alasio.deploy.pack.server_file import LatestInfo, ServerFile, ServerFileWithLatestInfo
 from tests.deploy_dev.pack.conftest import (
     COMMIT, WEBSITE_FULL_PACK, WEBSITE_INDEX_PACK, WEBSITE_SERVER, FakeMirrorTable, make_server_file
 )
@@ -362,3 +362,27 @@ class TestRequestTimeout:
             'pool': AsyncHttpClient.PROBE_TIMEOUT,
         }]
         assert AsyncHttpClient.DEFAULT_TIMEOUT.read > AsyncHttpClient.PROBE_TIMEOUT
+
+
+class TestServerFileWithLatestInfo:
+    """The server view whose latest info is a preset snapshot."""
+
+    @pytest.mark.trio
+    async def test_returns_the_snapshot_and_keeps_the_server_state(self):
+        """get_latest_info returns the preset without a request; the copied
+        server state keeps the inherited pack requests working."""
+        info = LatestInfo(version='preset', checksum='11' * 20)
+        server = ServerFileWithLatestInfo.create(server=WEBSITE_SERVER, latest_info=info)
+        assert isinstance(server, ServerFile)
+        assert await server.get_latest_info() is info
+
+        decoder = await server.get_index_pack(COMMIT)
+        assert decoder.data.tobytes() == WEBSITE_INDEX_PACK
+
+    def test_create_validates_the_arguments(self):
+        """The factory refuses a non-server and a missing snapshot."""
+        info = LatestInfo(version='preset', checksum='11' * 20)
+        with pytest.raises(TypeError, match='Expected a ServerFile'):
+            ServerFileWithLatestInfo.create(server=object(), latest_info=info)
+        with pytest.raises(ValueError, match='latest_info'):
+            ServerFileWithLatestInfo.create(server=WEBSITE_SERVER, latest_info=None)

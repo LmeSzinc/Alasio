@@ -6,6 +6,7 @@ steps only drive their interface, the sequences (stop, hand over, resume the
 queue, wrap up) are what these tests pin.
 """
 import datetime
+from types import SimpleNamespace
 
 import pytest
 
@@ -14,9 +15,10 @@ from alasio.backend.app.restart.daily import DailyState
 from alasio.backend.app.restart.restart_base import FlowRefused
 from alasio.backend.app.restart.restart_flow import FlowDaily, FlowRestart, FlowStartup, FlowUpdate
 from alasio.backend.app.restart.restart_manager import RestartManager
-from alasio.backend.app.restart.restart_step import HandoverFailed
+from alasio.backend.app.restart.restart_step import HandoverFailed, local_site_packages
 from alasio.backend.app.restart.resume_file import OWNER_RESTART
 from alasio.backend.topic.restart import RestartSource
+from alasio.logger import logger
 
 NOW = datetime.datetime.now()
 
@@ -132,6 +134,14 @@ class FakeUpdateCheck:
         self.required = []
         # the master switch of the mod updates (Deploy.Update.AutoUpdate)
         self.auto = True
+        # the shared client of the update domain, handed to the dependency
+        # installs (the real module creates one lazily)
+        self.client_object = object()
+        self.client_calls = 0
+
+    def client(self):
+        self.client_calls += 1
+        return self.client_object
 
     def names(self, managed=True):
         return list(self.mods)
@@ -216,10 +226,12 @@ def make_manager(worker_manager=None, update_check=None, daily=None, files=None,
 
 @pytest.fixture(autouse=True)
 def clean_state():
-    """Drop the Restart topic and the fake scan state around every test"""
+    """Drop the Restart topic, the fake scan state and the fake installs around every test"""
     RestartSource.singleton_clear()
     FakeScan.data = {}
     FakeScan.forces = []
+    FakeInstallBase.results = {}
+    FakeInstallBase.instances = []
     yield
     RestartSource.singleton_clear()
 
@@ -474,20 +486,78 @@ class FakeDeployJob:
 
 
 class FakePerMod:
-    """ModUpdateCheck stand-in of the apply step"""
+    """ModUpdateCheck stand-in of the apply and dependency steps"""
 
-    def __init__(self, name, job, states):
+    def __init__(self, name, job, states, pack_deps=()):
+        """
+        Args:
+            name (str): Mod name
+            job (FakeDeployJob | None): The job of the tree, None for a mod
+                without a usable update source
+            states (list): The recorded states of the mod
+            pack_deps (Iterable[str]): The names the entry declares for pack
+                updates (entry.pack_update_deps)
+        """
         self.name = name
         self._job = job
         self._states = states
         # the update source: None makes the mod unmanaged (the step skips it)
         self.mirrors = object() if job is not None else None
+        # the mounted mod: the dependency step reads the declared names of
+        # its entry
+        self.mod = SimpleNamespace(
+            name=name,
+            root=f'/mod-{name}',
+            entry=SimpleNamespace(pack_update_deps=dict.fromkeys(pack_deps)),
+        )
 
     async def job(self):
         return self._job
 
     def set_state(self, state, error='', **kwargs):
         self._states.append((self.name, state, error))
+
+
+class FakeInstallBase:
+    """
+    InstallBase stand-in of the dependency step: the declared pins of a mod are
+    not installed, the install is recorded and answered with the result set for
+    the mod (see set_result).
+    """
+
+    # {mod name: result of install_pack}, an Exception to raise
+    results = {}
+    # every install the step built, in call order
+    instances = []
+
+    @classmethod
+    def set_result(cls, name, result):
+        """
+        Prepare what the install of a mod returns (or raises)
+
+        Args:
+            name (str): Mod name
+            result (dict | Exception): The result of install_pack, an
+                Exception to raise
+        """
+        cls.results[name] = result
+
+    def __init__(self, mod, site_packages, client=None):
+        self.mod = mod
+        self.site_packages = site_packages
+        self.client = client
+        self.cleaned = False
+        FakeInstallBase.instances.append(self)
+
+    async def install_pack(self):
+        result = FakeInstallBase.results.get(self.mod.name, {})
+        if isinstance(result, Exception):
+            raise result
+        return dict(result)
+
+    async def cleanup_dist_info(self):
+        self.cleaned = True
+        return []
 
 
 class TestUpdateMods:
@@ -629,6 +699,101 @@ class TestUpdateMods:
         flow = FlowRestart(manager)
         assert await manager.maybe_upgrade_to_daily(flow) is False
         assert flow.upgraded is False
+
+
+class TestUpdateDeps:
+    """The dependency step: the declared pins of every mod, installed or verified"""
+
+    @staticmethod
+    def _make(mods):
+        """
+        A manager whose check module carries the given mods
+
+        Args:
+            mods (dict[str, FakePerMod]): The stand-in of every mod
+
+        Returns:
+            RestartManager: The manager
+        """
+        update_check = FakeUpdateCheck()
+        update_check.mods.update(mods)
+        return make_manager(update_check=update_check)
+
+    @pytest.mark.trio
+    async def test_installs_the_declared_pins(self, monkeypatch):
+        """Every mod that declares pack updated dependencies gets one install:
+        a dependency the folder already satisfies is validated by the channel
+        of the mod too."""
+        monkeypatch.setattr(step_module, 'InstallBase', FakeInstallBase)
+        FakeInstallBase.set_result('m', {'demo': True})
+        mod = FakePerMod('m', FakeDeployJob(), [], pack_deps=['demo'])
+        manager = self._make({'m': mod})
+        assert await manager.update_deps(['m']) == {'m': {'demo': True}}
+        install = FakeInstallBase.instances[-1]
+        assert install.mod is mod.mod
+        assert install.client is manager.update_check.client_object
+        assert install.cleaned is True
+        # the folder is the site-packages of the interpreter the backend runs in
+        assert install.site_packages == local_site_packages()
+
+    @pytest.mark.trio
+    async def test_a_mod_without_declared_deps_is_skipped(self, monkeypatch):
+        """A mod that declares no pack updated dependency is skipped without a
+        read of its dependencies."""
+        monkeypatch.setattr(step_module, 'InstallBase', FakeInstallBase)
+        manager = self._make({'m': FakePerMod('m', FakeDeployJob(), [])})
+        assert await manager.update_deps(['m']) == {}
+        assert FakeInstallBase.instances == []
+
+    @pytest.mark.trio
+    async def test_an_unmanaged_or_unknown_mod_is_skipped(self, monkeypatch):
+        """A mod without a usable update source has no channel to install from,
+        an unknown name has no mod at all."""
+        monkeypatch.setattr(step_module, 'InstallBase', FakeInstallBase)
+        manager = self._make({'m': FakePerMod('m', None, [], pack_deps=['demo'])})
+        assert await manager.update_deps(['m', 'nope']) == {}
+        assert FakeInstallBase.instances == []
+
+    @pytest.mark.trio
+    async def test_a_failed_mod_is_isolated(self, monkeypatch):
+        """A mod whose install raises is logged and the other mods are
+        processed."""
+        monkeypatch.setattr(step_module, 'InstallBase', FakeInstallBase)
+        FakeInstallBase.set_result('a', OSError('mirror is down'))
+        FakeInstallBase.set_result('b', {'other': True})
+        manager = self._make({
+            'a': FakePerMod('a', FakeDeployJob(), [], pack_deps=['demo']),
+            'b': FakePerMod('b', FakeDeployJob(), [], pack_deps=['other']),
+        })
+        with logger.mock_capture_writer() as capture:
+            assert await manager.update_deps(['a', 'b']) == {'b': {'other': True}}
+        assert capture.fd.any_contains('Failed to update the dependencies of "a"')
+        assert capture.fd.any_contains('mirror is down')
+
+    @pytest.mark.trio
+    async def test_a_failed_distribution_is_reported(self, monkeypatch):
+        """A distribution the install reports False for is the failure of the
+        mod, the successful ones are kept."""
+        monkeypatch.setattr(step_module, 'InstallBase', FakeInstallBase)
+        FakeInstallBase.set_result('m', {'a': True, 'b': False})
+        manager = self._make({'m': FakePerMod('m', FakeDeployJob(), [], pack_deps=['a', 'b'])})
+        with logger.mock_capture_writer() as capture:
+            assert await manager.update_deps(['m']) == {'m': {'a': True, 'b': False}}
+        assert capture.fd.any_contains('The dependencies of "m" are not all in place: [\'b\']')
+
+    @pytest.mark.trio
+    async def test_the_full_update_reconciles_every_managed_mod(self, monkeypatch):
+        """
+        The full update reconciles the dependencies of every managed mod, the
+        mods whose tree is up to date included: a dependency without an update
+        is verified all the same (the startup check)
+        """
+        monkeypatch.setattr(step_module, 'InstallBase', FakeInstallBase)
+        FakeInstallBase.set_result('m', {'demo': True})
+        manager = self._make({'m': FakePerMod('m', FakeDeployJob(), [], pack_deps=['demo'])})
+        assert await manager.full_update() == []
+        assert FakeInstallBase.instances
+        assert manager.daily.updated_all_at > 0
 
 
 class TestWrapUp:
