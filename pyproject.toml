@@ -78,7 +78,13 @@ packages = ["alasio"]
 # in-memory fake filesystem (alasio.testing.filesystem.fs), and the plugin's
 # "fs" fixture would silently inject pyfakefs into tests. The project fixture
 # is imported explicitly in test modules, never registered by the plugin.
-addopts = ["-p", "no:fakefs", "-p", "no:tmpdir"]
+# The screenshot golden test harness is a pytest plugin too, it is loaded by
+# module path instead of an installed entry point, so a plain checkout runs the
+# tests without installing the package, see alasio/testing/screenshot.py.
+addopts = ["-p", "no:fakefs", "-p", "no:tmpdir", "-p", "alasio.testing.screenshot"]
+# Add the repository root to sys.path, so the plugin loaded above and the tests
+# import alasio and ExampleMod from a plain checkout.
+pythonpath = ["."]
 tmp_path_retention_count = 1
 tmp_path_retention_policy = "failed"
 markers = [
