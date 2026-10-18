@@ -128,7 +128,7 @@ INFO | Updating files to "{mod_root}"
 INFO | Replacing files to "{mod_root}"
 INFO | Update done
 INFO | [Update] Applied the update of "WorkerTestScheduler"
-INFO | [Update] Full update finished, changed mods: ['WorkerTestScheduler']
+INFO | [Update] Full update finished, changed mods: ['WorkerTestScheduler'], failed mods: []
 INFO | [Restart] Resume credential announced to the supervisor
 INFO | [Restart] Resume file written: {backend.resume_file} (owner=restart, 0 configs, 0 actions, updated_all_at={at(2, 0):.0f})
 INFO | [Restart] Handover of the "startup" flow (startup convergence): 0 configs to resume
@@ -172,7 +172,7 @@ INFO | Rebuilding files to "{mod_root}"
 INFO | Downloading the full pack of v2
 INFO | Rebuild done
 INFO | [Update] Applied the update of "WorkerTestScheduler"
-INFO | [Update] Full update finished, changed mods: ['WorkerTestScheduler']
+INFO | [Update] Full update finished, changed mods: ['WorkerTestScheduler'], failed mods: []
 INFO | [Restart] Resume credential announced to the supervisor
 INFO | [Restart] Resume file written: {backend.resume_file} (owner=restart, 0 configs, 0 actions, updated_all_at={at(2, 0):.0f})
 INFO | [Restart] Handover of the "startup" flow (startup convergence): 0 configs to resume

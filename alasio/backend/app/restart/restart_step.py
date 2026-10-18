@@ -38,6 +38,7 @@ gate and pushing in two steps.
 from typing import Callable, Dict, List, Optional
 
 import trio
+from msgspec import Struct
 
 from alasio.backend.app.lifespan import SHUTDOWN_EVENT, lifespan_restart
 from alasio.backend.app.restart.daily import DAILY, DailyState
@@ -155,6 +156,20 @@ def local_site_packages():
     import sysconfig
 
     return PathStr.new(sysconfig.get_paths()['purelib'])
+
+
+class UpdateResult(Struct):
+    """
+    The outcome of one update_mods() pass.
+
+    Attributes:
+        changed (List[str]): The mods whose real files changed, a restart
+            applies them
+        failed (List[str]): The mods whose tree or dependencies did not
+            complete
+    """
+    changed: List[str]
+    failed: List[str]
 
 
 class RestartStep(RestartBase):
@@ -444,7 +459,7 @@ class RestartStep(RestartBase):
         logger.info(f'[Update] The dependencies of "{name}" are at their pinned versions')
         return True
 
-    async def update_mods(self, names, flow=None) -> "List[str]":
+    async def update_mods(self, names, flow=None) -> UpdateResult:
         """
         Update the trees and the pack dependencies of the given mods.
 
@@ -454,8 +469,7 @@ class RestartStep(RestartBase):
         tree, including one that was already up to date, then reconciles its
         dependencies. A dependency failure marks the mod 'error' as well: the
         mod update is incomplete even when its tree changed. A failure of one
-        mod is isolated; the other mods and the caller's handover are not
-        affected.
+        mod is isolated; the other mods are still processed.
 
         Args:
             names (Iterable[str]): Mod names to update
@@ -463,21 +477,28 @@ class RestartStep(RestartBase):
                 closes at the first write; None keeps the caller's own handling
 
         Returns:
-            List[str]: The mods whose real files changed (a restart applies them)
+            UpdateResult: The changed mods and the failed mods
         """
         changed = []
+        failed = []
         for name in names:
+            mod = self.update_check.mods.get(name, None)
+            if mod is None or mod.mirrors is None:
+                # unknown mod, or unmanaged (no usable update source)
+                continue
             changed_mod = await self.update_mod_repo(name, flow=flow)
             if changed_mod is None:
+                failed.append(name)
                 continue
             if changed_mod:
                 changed.append(name)
             if not await self.update_mod_dep(name):
+                failed.append(name)
                 mod = self.update_check.mods.get(name, None)
                 if mod is not None:
                     mod.set_state(
                         'error', error='Some dependencies failed to update, retry the update')
-        return changed
+        return UpdateResult(changed, failed)
 
     async def full_update(self, flow=None) -> "List[str]":
         """
@@ -491,7 +512,9 @@ class RestartStep(RestartBase):
         without an update included: the full update validates and repairs the
         whole environment of the mods, not only what moved (the startup check
         runs one). A failed dependency step marks its mod 'error', like a
-        failed tree.
+        failed tree. The completion is recorded even when a mod failed: the
+        timestamp only throttles the next startup check, and a retry right away
+        would most likely fail again.
 
         The automatic mod updates off (Deploy.Update.AutoUpdate = false: every
         managed mod is 'disabled') and a backend without a live supervisor (an
@@ -521,10 +544,14 @@ class RestartStep(RestartBase):
             logger.info('[Update] The backend runs without a supervisor, the full update is empty')
             return []
         names = self.update_check.names()
-        changed = await self.update_mods(names, flow=flow)
+        result = await self.update_mods(names, flow=flow)
+        # The completion is recorded even when a mod failed: the timestamp only
+        # throttles the next startup check, and a retry right away would most
+        # likely fail again.
         self.daily.note_full_update()
-        logger.info(f'[Update] Full update finished, changed mods: {changed}')
-        return changed
+        logger.info(f'[Update] Full update finished, changed mods: {result.changed}, '
+                    f'failed mods: {result.failed}')
+        return result.changed
 
     async def maybe_upgrade_to_daily(self, flow) -> bool:
         """

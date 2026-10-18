@@ -55,7 +55,7 @@ INFO | Updating files to "{mod_root}"
 INFO | Replacing files to "{mod_root}"
 INFO | Update done
 INFO | [Update] Applied the update of "WorkerTestScheduler"
-INFO | [Update] Full update finished, changed mods: ['WorkerTestScheduler']
+INFO | [Update] Full update finished, changed mods: ['WorkerTestScheduler'], failed mods: []
 INFO | [Restart] Resume credential announced to the supervisor
 INFO | [Restart] Resume file written: {backend.resume_file} (owner=restart, 1 configs, 0 actions, updated_all_at={at(4, 0):.0f})
 INFO | [Restart] Daily action covered by the full update of this process
@@ -147,7 +147,7 @@ INFO | [LatestVersion] v2
 INFO | Already up to date: v2
 INFO | Resetting files to "{mod_root}"
 INFO | Reset done
-INFO | [Update] Full update finished, changed mods: []
+INFO | [Update] Full update finished, changed mods: [], failed mods: []
 INFO | [Restart] Resume credential announced to the supervisor
 INFO | [Restart] Resume file written: {backend.resume_file} (owner=restart, 1 configs, 0 actions, updated_all_at={at(4, 0):.0f})
 INFO | [Restart] Daily action covered by the full update of this process
@@ -195,7 +195,7 @@ INFO | Updating files to "{mod_root}"
 INFO | Replacing files to "{mod_root}"
 INFO | Update done
 INFO | [Update] Applied the update of "WorkerTestScheduler"
-INFO | [Update] Full update finished, changed mods: ['WorkerTestScheduler']
+INFO | [Update] Full update finished, changed mods: ['WorkerTestScheduler'], failed mods: []
 INFO | [Restart] Resume credential announced to the supervisor
 INFO | [Restart] Resume file written: {backend.resume_file} (owner=restart, 0 configs, 0 actions, updated_all_at={at(4, 0):.0f})
 INFO | [Restart] Handover of the "startup" flow (startup convergence): 0 configs to resume
@@ -241,7 +241,7 @@ INFO | Updating files to "{mod_root}"
 INFO | Replacing files to "{mod_root}"
 INFO | Update done
 INFO | [Update] Applied the update of "WorkerTestScheduler"
-INFO | [Update] Full update finished, changed mods: ['WorkerTestScheduler']
+INFO | [Update] Full update finished, changed mods: ['WorkerTestScheduler'], failed mods: []
 INFO | [Restart] Resume credential announced to the supervisor
 INFO | [Restart] Resume file written: {backend.resume_file} (owner=restart, 1 configs, 0 actions, updated_all_at={at(4, 0):.0f})
 INFO | [Restart] Daily action covered by the full update of this process

@@ -212,7 +212,12 @@ class FlowUpdate(Flow):
     a dependency that has no update is validated all the same. A failed tree
     stops before its dependency step, so its packdep snapshot is never used; a
     failed dependency step marks the mod 'error' as well, because the update is
-    incomplete even when its tree changed.
+    incomplete even when its tree changed. Any failed mod keeps the backend
+    running: the flow wraps up and resumes every config it stopped, including
+    the configs of the failed mod, because an update failure does not prove
+    that their files are unusable -- a broken one reports its own error when it
+    starts. The daily upgrade is the exception: it turns the request into the
+    daily maintenance, whose restart is not blocked by an update failure.
 
     The cancellable phase is the stop and the download: the apply step closes
     the window at the first real write (the deploy jobs report their 'updating'
@@ -254,8 +259,19 @@ class FlowUpdate(Flow):
                     return
                 for name in names:
                     manager.update_check.set_state(name, 'stopping')
-                changed = await manager.update_mods(names, flow=self)
-                await manager.maybe_upgrade_to_daily(self)
+                result = await manager.update_mods(names, flow=self)
+                changed = result.changed
+                upgraded = await manager.maybe_upgrade_to_daily(self)
+                if result.failed and not upgraded:
+                    # The files of a failed mod may already be written, but a
+                    # user update must not restart the backend into an
+                    # incomplete environment. The flow wraps up below and the
+                    # stopped configs are resumed: a file that still works is
+                    # not taken away from its running state, and a broken one
+                    # reports its own error when it starts.
+                    logger.error(f'[Update] The update failed for {result.failed}, '
+                                'the backend keeps running')
+                    return
             await manager.handover(self, 'update', resume_list)
             handed_over = True
         except HandoverFailed as e:

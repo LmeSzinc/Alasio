@@ -257,7 +257,7 @@ INFO | Resetting files to "{site}", name="stable"
 INFO | Reset done
 INFO | Installed "stable==1.0"
 INFO | [Update] The dependencies of "DepsMod" are at their pinned versions
-INFO | [Update] Full update finished, changed mods: ['DepsMod']
+INFO | [Update] Full update finished, changed mods: ['DepsMod'], failed mods: []
 INFO | [Restart] Resume credential announced to the supervisor
 INFO | [Restart] Resume file written: {backend.resume_file} (owner=restart, 0 configs, 0 actions, updated_all_at={at(2, 0):.0f})
 INFO | [Restart] Handover of the "startup" flow (startup convergence): 0 configs to resume
@@ -332,7 +332,7 @@ INFO | Resetting files to "{site}", name="stable"
 INFO | Reset done
 INFO | Installed "stable==1.0"
 INFO | [Update] The dependencies of "DepsMod" are at their pinned versions
-INFO | [Update] Full update finished, changed mods: []
+INFO | [Update] Full update finished, changed mods: [], failed mods: []
 INFO | [Restart] Flow "startup" finished
 INFO | [Restart] The resume queue is empty, nothing to start
 """)

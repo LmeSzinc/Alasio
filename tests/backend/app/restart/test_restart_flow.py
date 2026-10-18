@@ -15,7 +15,7 @@ from alasio.backend.app.restart import daily as daily_module, restart_flow as fl
 from alasio.backend.app.restart.daily import DailyState
 from alasio.backend.app.restart.restart_base import FLOW_NAMES, INIT_FLOW, STARTING_UP, FlowCancelled
 from alasio.backend.app.restart.restart_flow import FlowDaily, FlowRestart, FlowStartup, FlowUpdate
-from alasio.backend.app.restart.restart_step import HandoverFailed
+from alasio.backend.app.restart.restart_step import HandoverFailed, UpdateResult
 from alasio.backend.app.restart.resume_file import ResumeRecord
 
 NOW = datetime.datetime.now()
@@ -141,13 +141,14 @@ class FakeManager:
     executed
     """
 
-    def __init__(self, record=None, stop_result=(True, ['cfg_a']), changed=(), handover_error=None,
-                 available=('m',), uptodate=False):
+    def __init__(self, record=None, stop_result=(True, ['cfg_a']), changed=(), failed=(),
+                 handover_error=None, available=('m',), uptodate=False):
         """
         Args:
             record (ResumeRecord): The resume intent the startup flow reads
             stop_result (tuple[bool, list[str]]): The result of stop_all
             changed (list[str]): The mods the update steps report as changed
+            failed (list[str]): The mods the update steps report as failed
             handover_error (Exception): Raised by the handover step
             available (list[str]): The mods with an available update
             uptodate (bool): The pre-check verdict of the available mods
@@ -156,6 +157,7 @@ class FakeManager:
         self.record = record
         self.stop_result = stop_result
         self.changed = list(changed)
+        self.failed = list(failed)
         self.handover_error = handover_error
         self.handed_over = []
         self.views = 0
@@ -184,7 +186,7 @@ class FakeManager:
 
     async def update_mods(self, names, flow=None):
         self.calls.append(('update_mods', list(names)))
-        return list(self.changed)
+        return UpdateResult(list(self.changed), list(self.failed))
 
     async def stop_all(self, flow=None, timeout=None):
         self.calls.append(('stop_all', flow.name if flow is not None else ''))
@@ -365,6 +367,39 @@ class TestFlowUpdate:
             'maybe_upgrade_to_daily', ('handover', 'update', ['cfg_a'])]
         assert ('set_state', 'm', 'queued') in manager.update_check.calls
         assert ('set_state', 'm', 'stopping') in manager.update_check.calls
+        assert manager.handed_over == ['update']
+
+    @pytest.mark.trio
+    async def test_a_failed_update_keeps_the_backend_running_and_resumes_the_configs(self):
+        """
+        A failed update is reported without a handover: the backend keeps
+        running, and every config the flow stopped is resumed, including the
+        config that belongs to the failed mod (a file that still works must not
+        lose its running state; a broken one reports its own error on start)
+        """
+        manager = FakeManager(changed=['m'], failed=['m'])
+        await FlowUpdate(manager).run()
+        assert manager.calls == [
+            ('stop_all', 'update'), ('update_mods', ['m']),
+            'maybe_upgrade_to_daily', ('wrap_up', ['cfg_a'])]
+        assert manager.handed_over == []
+        assert manager.update_check.required == []
+
+    @pytest.mark.trio
+    async def test_a_failed_update_upgraded_to_daily_still_hands_over(self):
+        """
+        A user update crossing the daily target becomes the daily maintenance:
+        its restart is not blocked by the failed mod
+        """
+        manager = FakeManager(changed=['m'], failed=['m'])
+
+        async def upgrade(flow):
+            flow.upgrade_to_daily()
+            return True
+
+        manager.maybe_upgrade_to_daily = upgrade
+        await FlowUpdate(manager).run()
+        assert manager.calls[-1] == ('handover', 'update', ['cfg_a'])
         assert manager.handed_over == ['update']
 
     @pytest.mark.trio

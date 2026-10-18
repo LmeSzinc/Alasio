@@ -54,7 +54,7 @@ INFO | Updating files to "{mod_root}"
 INFO | Replacing files to "{mod_root}"
 INFO | Update done
 INFO | [Update] Applied the update of "WorkerTestScheduler"
-INFO | [Update] Full update finished, changed mods: ['WorkerTestScheduler']
+INFO | [Update] Full update finished, changed mods: ['WorkerTestScheduler'], failed mods: []
 INFO | [Restart] Resume credential announced to the supervisor
 INFO | [Restart] Resume file written: {backend.resume_file} (owner=restart, 0 configs, 0 actions, updated_all_at={at(2, 0):.0f})
 INFO | [Restart] Handover of the "startup" flow (startup convergence): 0 configs to resume
@@ -87,7 +87,7 @@ INFO | [LatestVersion] v1
 INFO | Already up to date: v1
 INFO | Resetting files to "{mod_root}"
 INFO | Reset done
-INFO | [Update] Full update finished, changed mods: []
+INFO | [Update] Full update finished, changed mods: [], failed mods: []
 INFO | [Restart] Flow "startup" finished
 INFO | [Restart] The resume queue is empty, nothing to start
 """)
@@ -208,7 +208,7 @@ INFO | [LatestVersion] v1
 INFO | Already up to date: v1
 INFO | Resetting files to "{mod_root}"
 INFO | Reset done
-INFO | [Update] Full update finished, changed mods: []
+INFO | [Update] Full update finished, changed mods: [], failed mods: []
 INFO | [Restart] Flow "startup" finished
 INFO | [Restart] Resume queue: 1 configs, starting them one by one
 INFO | [WorkerManager] Resuming worker: cfg_a
@@ -293,7 +293,7 @@ WARNING | Request to "http://broken.mock/latest.pack" failed (attempt 1/3): HTTP
 ERROR | [Update] Failed to update "WorkerTestScheduler": Client error '404 Not Found' for url 'http://broken.mock/latest.pack'
 ERROR | HTTPStatusError: Client error '404 Not Found' for url 'http://broken.mock/latest.pack'
 <traceback>
-INFO | [Update] Full update finished, changed mods: []
+INFO | [Update] Full update finished, changed mods: [], failed mods: ['WorkerTestScheduler']
 INFO | [Restart] Flow "startup" finished
 INFO | [Restart] The resume queue is empty, nothing to start
 """)
@@ -338,7 +338,7 @@ INFO | Updating files to "{mod_root}"
 INFO | Replacing files to "{mod_root}"
 INFO | Update done
 INFO | [Update] Applied the update of "WorkerTestScheduler"
-INFO | [Update] Full update finished, changed mods: ['WorkerTestScheduler']
+INFO | [Update] Full update finished, changed mods: ['WorkerTestScheduler'], failed mods: []
 INFO | [Restart] Resume credential announced to the supervisor
 INFO | [Restart] Resume file written: {backend.resume_file} (owner=restart, 0 configs, 0 actions, updated_all_at={at(2, 0):.0f})
 INFO | [Restart] Handover of the "startup" flow (startup convergence): 0 configs to resume

@@ -586,8 +586,9 @@ class TestUpdateMods:
     async def test_success_drives_the_phases_and_reports_the_change(self):
         manager, states = self._make({'m': FakeDeployJob(changed=True)})
         flow = FlowUpdate(manager)
-        changed = await manager.update_mods(['m'], flow=flow)
-        assert changed == ['m']
+        result = await manager.update_mods(['m'], flow=flow)
+        assert result.changed == ['m']
+        assert result.failed == []
         assert states == [('m', 'checking', ''), ('m', 'downloading', ''), ('m', 'updating', ''),
                           ('m', 'uptodate', '')]
 
@@ -610,7 +611,9 @@ class TestUpdateMods:
     @pytest.mark.trio
     async def test_a_job_without_change_still_reports_uptodate(self):
         manager, states = self._make({'m': FakeDeployJob(changed=False)})
-        assert await manager.update_mods(['m']) == []
+        result = await manager.update_mods(['m'])
+        assert result.changed == []
+        assert result.failed == []
         assert states[-1] == ('m', 'uptodate', '')
 
     @pytest.mark.trio
@@ -619,20 +622,25 @@ class TestUpdateMods:
             'a': FakeDeployJob(error=OSError('mirror is down')),
             'b': FakeDeployJob(changed=True),
         })
-        changed = await manager.update_mods(['a', 'b'])
-        assert changed == ['b']
+        result = await manager.update_mods(['a', 'b'])
+        assert result.changed == ['b']
+        assert result.failed == ['a']
         assert ('a', 'error', 'mirror is down') in states
 
     @pytest.mark.trio
     async def test_an_incomplete_job_is_an_error(self):
         manager, states = self._make({'m': FakeDeployJob(completed=False)})
-        assert await manager.update_mods(['m']) == []
+        result = await manager.update_mods(['m'])
+        assert result.changed == []
+        assert result.failed == ['m']
         assert states[-1] == ('m', 'error', 'Some files failed to update, retry the update')
 
     @pytest.mark.trio
     async def test_an_unknown_or_unmanaged_mod_is_skipped(self):
         manager, states = self._make({'m': None})
-        await manager.update_mods(['m', 'nope'])
+        result = await manager.update_mods(['m', 'nope'])
+        assert result.changed == []
+        assert result.failed == []
         assert states == []
 
     @pytest.mark.trio
@@ -649,7 +657,9 @@ class TestUpdateMods:
         update_check.mods['b'] = FakePerMod(
             'b', FakeDeployJob(changed=True), update_check.states, pack_deps=['other'])
         manager = make_manager(update_check=update_check)
-        assert await manager.update_mods(['a', 'b']) == ['b']
+        result = await manager.update_mods(['a', 'b'])
+        assert result.changed == ['b']
+        assert result.failed == ['a']
         assert [install.mod.name for install in FakeInstallBase.instances] == ['b']
 
     @pytest.mark.trio
@@ -662,7 +672,9 @@ class TestUpdateMods:
         update_check.mods['m'] = FakePerMod(
             'm', FakeDeployJob(changed=True), update_check.states, pack_deps=['demo'])
         manager = make_manager(update_check=update_check)
-        assert await manager.update_mods(['m']) == ['m']
+        result = await manager.update_mods(['m'])
+        assert result.changed == ['m']
+        assert result.failed == ['m']
         assert ('m', 'error', 'Some dependencies failed to update, retry the update') \
             in update_check.states
 
@@ -670,6 +682,23 @@ class TestUpdateMods:
     async def test_full_update_notes_the_completion(self):
         manager, _ = self._make({'m': FakeDeployJob(changed=True)})
         assert await manager.full_update() == ['m']
+        assert manager.daily.updated_all_at > 0
+
+    @pytest.mark.trio
+    async def test_full_update_notes_the_completion_even_when_a_dependency_fails(
+            self, monkeypatch):
+        """
+        The completion time is a throttle for the next startup, not a claim
+        that every mod succeeded: a retry right away would most likely fail
+        again
+        """
+        monkeypatch.setattr(step_module, 'InstallBase', FakeInstallBase)
+        FakeInstallBase.set_result('m', {'demo': False})
+        update_check = FakeUpdateCheck()
+        update_check.mods['m'] = FakePerMod(
+            'm', FakeDeployJob(changed=False), update_check.states, pack_deps=['demo'])
+        manager = make_manager(update_check=update_check)
+        assert await manager.full_update() == []
         assert manager.daily.updated_all_at > 0
 
     @pytest.mark.trio

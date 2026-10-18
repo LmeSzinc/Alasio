@@ -233,8 +233,9 @@ INFO | [Restart] The resume queue is empty, nothing to start
 async def test_a_broken_mirror_is_isolated_and_the_rest_are_applied(make_backend):
     """
     One mirror dies after the check: its mod is reported on its own card (the
-    apply fails), the other mod is still applied and the flow still hands the
-    backend over
+    apply fails), the other mod is still applied, but the failed update keeps
+    the backend running: every stopped config is resumed, including the config
+    of a mod whose files may be broken (it reports its own error on start)
     """
     backend = make_backend(
         mods={'WorkerTestScheduler': 'http://update.mock', 'WorkerTestSleep': 'http://dying.mock'},
@@ -276,14 +277,19 @@ WARNING | Request to "http://dying.mock/latest.pack" failed (attempt 1/3): HTTPS
 ERROR | [Update] Failed to update "WorkerTestSleep": Client error '404 Not Found' for url 'http://dying.mock/latest.pack'
 ERROR | HTTPStatusError: Client error '404 Not Found' for url 'http://dying.mock/latest.pack'
 <traceback>
-INFO | [Restart] Resume credential announced to the supervisor
-INFO | [Restart] Resume file written: {backend.resume_file} (owner=restart, 1 configs, 0 actions, updated_all_at={at(2, 0):.0f})
-INFO | [Restart] Handover of the "update" flow (update): 1 configs to resume
+ERROR | [Update] The update failed for ['WorkerTestSleep'], the backend keeps running
+INFO | [Restart] The "update" flow wraps up: releasing the queued workers
 INFO | [Restart] Flow "update" finished
+INFO | [Restart] Resume queue: 1 configs, starting them one by one
+INFO | [WorkerManager] Resuming worker: cfg_a
+INFO | [Restart] Worker resumed: cfg_a
 """)
         assert backend.update_check.state_of('WorkerTestScheduler') == 'uptodate'
         assert backend.update_check.state_of('WorkerTestSleep') == 'error'
-        assert read_record(backend).configs == ['cfg_a']
+        assert backend.restart.calls == 0
+        assert backend.manager.frozen is False
+        assert await trio.to_thread.run_sync(
+            backend.worker_manager.worker_wait_running, 'cfg_a', 2.0)
         nursery.cancel_scope.cancel()
 
 
