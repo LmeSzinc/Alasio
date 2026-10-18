@@ -314,7 +314,7 @@ async def test_the_user_requests_are_refused_while_the_backend_starts_up(make_ba
     backend.servers.publish_update()
     gate = trio.Event()
     # the full update of the startup hangs on the mirror
-    backend.servers.hold('from_v1.pack', gate)
+    backend.servers.hold('update_v1.pack', gate)
     mod_root = backend.project.mod_root('WorkerTestScheduler')
     with logger.mock_capture_writer() as capture:
         async with trio.open_nursery() as nursery:

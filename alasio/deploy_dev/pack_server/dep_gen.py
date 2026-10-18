@@ -26,7 +26,7 @@ The channel of a dependency is the layout the client reads (ServerFile):
 
     pack/{Author}_{Repo}_{Branch}/packdep/{name}/latest.pack
     pack/{Author}_{Repo}_{Branch}/packdep/{name}/{new}/full.pack
-    pack/{Author}_{Repo}_{Branch}/packdep/{name}/{new}/from_{old}.pack
+    pack/{Author}_{Repo}_{Branch}/packdep/{name}/{new}/update_{old}.pack
 
 Only the target version has a full pack, the rule the git flow keeps for the
 latest commit: a client downloads the full pack of the version it updates to
@@ -506,7 +506,7 @@ class DepGen:
         for dep in deps:
             if dep.target:
                 continue
-            file = dep_folder.joinpath(target.version).joinpath(f'from_{dep.version}.pack')
+            file = dep_folder.joinpath(target.version).joinpath(f'update_{dep.version}.pack')
             identity = kept_pack(file, PackWheel.PACK_VERSION, target.version, dep.version)
             if identity is not None:
                 logger.info(f'Update pack exists, skipped: "{file}"')
@@ -629,9 +629,9 @@ class DepGen:
                 if updated is None:
                     continue
                 for filename in version_folder.iter_filenames(ext='.pack'):
-                    if not filename.startswith('from_'):
+                    if not filename.startswith('update_'):
                         continue
-                    old = filename[len('from_'):-len('.pack')]
+                    old = filename[len('update_'):-len('.pack')]
                     if old in updated:
                         continue
                     file = version_folder.joinpath(filename)

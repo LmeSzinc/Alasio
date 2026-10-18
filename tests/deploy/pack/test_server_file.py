@@ -186,7 +186,7 @@ class TestPackRequests:
 
     @pytest.mark.trio
     async def test_get_update_pack(self):
-        """The update pack url is {new}/from_{old}.pack, the pack is validated
+        """The update pack url is {new}/update_{old}.pack, the pack is validated
         before it is returned."""
         requests = []
 
@@ -197,7 +197,7 @@ class TestPackRequests:
         server = ServerFile('http://test', client=make_aclient(handler))
         with pytest.raises(PackDecodeError):
             await server.get_update_pack('old', 'new')
-        assert str(requests[0].url) == 'http://test/new/from_old.pack'
+        assert str(requests[0].url) == 'http://test/new/update_old.pack'
 
     @pytest.mark.trio
     async def test_get_update_pack_error(self):
@@ -220,7 +220,7 @@ class TestPackRequests:
             client=make_aclient(range_handler(requests, WEBSITE_FULL_PACK)))
         checksum = await server.get_update_pack_checksum('old', 'new', size)
         assert checksum == WEBSITE_FULL_PACK[-20:].hex()
-        assert str(requests[0].url) == 'http://test/new/from_old.pack'
+        assert str(requests[0].url) == 'http://test/new/update_old.pack'
         assert requests[0].headers['Range'] == f'bytes={size - 20}-{size - 1}'
 
 

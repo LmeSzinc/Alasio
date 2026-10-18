@@ -152,8 +152,8 @@ INFO | Update available: c1 -> c2
 INFO | [CurrentVersion] c1
 INFO | [LatestVersion] c2
 INFO | Update available: c1 -> c2
-WARNING | Request to "http://mock/c2/from_c1.pack" failed (attempt 1/3): HTTPStatusError: Client error '404 Not Found' for url 'http://mock/c2/from_c1.pack'
-WARNING | Failed to get the update pack c1 -> c2: Client error '404 Not Found' for url 'http://mock/c2/from_c1.pack', rebuilding from the latest index
+WARNING | Request to "http://mock/c2/update_c1.pack" failed (attempt 1/3): HTTPStatusError: Client error '404 Not Found' for url 'http://mock/c2/update_c1.pack'
+WARNING | Failed to get the update pack c1 -> c2: Client error '404 Not Found' for url 'http://mock/c2/update_c1.pack', rebuilding from the latest index
 INFO | Rebuilding files to "{env.PROJECT_ROOT}"
 INFO | Rebuild done
 """
@@ -184,8 +184,8 @@ INFO | Update available: c1 -> c2
 INFO | [CurrentVersion] c1
 INFO | [LatestVersion] c2
 INFO | Update available: c1 -> c2
-WARNING | Request to "http://mock/c2/from_c1.pack" failed (attempt 1/3): HTTPStatusError: Client error '404 Not Found' for url 'http://mock/c2/from_c1.pack'
-WARNING | Failed to get the update pack c1 -> c2: Client error '404 Not Found' for url 'http://mock/c2/from_c1.pack', rebuilding from the latest index
+WARNING | Request to "http://mock/c2/update_c1.pack" failed (attempt 1/3): HTTPStatusError: Client error '404 Not Found' for url 'http://mock/c2/update_c1.pack'
+WARNING | Failed to get the update pack c1 -> c2: Client error '404 Not Found' for url 'http://mock/c2/update_c1.pack', rebuilding from the latest index
 INFO | Rebuilding files to "{env.PROJECT_ROOT}"
 INFO | Rebuild done
 """

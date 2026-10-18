@@ -116,6 +116,9 @@ UPDATE_HOST = 'update.mock'
 # a mirror the test can break between the check and the apply
 DYING_HOST = 'dying.mock'
 BROKEN_HOST = 'broken.mock'
+# a mirror whose files are the output of a real pack generator, registered
+# under the names the generator wrote
+GENERATED_HOST = 'generated.mock'
 
 # The one-shot credential token of the resume files (secrets.token_hex is
 # patched to it: the real token is random by design)
@@ -135,7 +138,7 @@ class MockUpdateServer:
 
     The layout is the one of a deployment: latest.pack (the version and the
     checksum of its index pack), {version}/full.pack and
-    {new_version}/from_{old_version}.pack. Nothing registered means every
+    {new_version}/update_{old_version}.pack. Nothing registered means every
     request is a 404: a mirror that is down.
     """
 
@@ -153,7 +156,25 @@ class MockUpdateServer:
 
     def register_update(self, old, new, data):
         """Publish the update pack of a version pair"""
-        self.static.register_file(f'{new}/from_{old}.pack', data)
+        self.static.register_file(f'{new}/update_{old}.pack', data)
+
+    def register_folder(self, prefix, folder):
+        """
+        Publish every file below a folder at its relative path.
+
+        The names on the disk are kept: a deployment serves exactly the files
+        a generator wrote, so a client that reads another name gets a 404
+        instead of a test that maps the names by hand.
+
+        Args:
+            prefix (str): Path prefix of the channel below the host
+            folder (PathStr): Folder to publish
+        """
+        folder = PathStr.new(folder)
+        root = str(folder).rstrip('/\\')
+        for path in folder.iter_files(recursive=True):
+            relative = str(path)[len(root):].replace('\\', '/').lstrip('/')
+            self.static.register_file(f'{prefix}/{relative}', path.atomic_read_bytes())
 
 
 class MockUpdateBackend:
@@ -177,7 +198,7 @@ class MockUpdateBackend:
     def __init__(self):
         self.servers = {
             host: MockUpdateServer(f'http://{host}')
-            for host in (UPDATE_HOST, DYING_HOST, BROKEN_HOST)
+            for host in (UPDATE_HOST, DYING_HOST, BROKEN_HOST, GENERATED_HOST)
         }
         # every publishing mirror starts on the installed version V1
         for host in (UPDATE_HOST, DYING_HOST):
@@ -215,7 +236,7 @@ class MockUpdateBackend:
         run of the test.
 
         Args:
-            match (str): Path fragment, e.g. '/latest.pack' or 'from_v1.pack'
+            match (str): Path fragment, e.g. '/latest.pack' or 'update_v1.pack'
             gate (trio.Event): The gate the test opens
         """
         self.hold_match = match

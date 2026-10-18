@@ -4,7 +4,7 @@ Tests for DeployJob.update: the unified entry of the update flow.
 The server is an in-memory MockServerFile serving two versions and the
 update pack between them. The flow follows the draft in PackEncodeBase:
 latest.pack is compared with the local version, a version mismatch
-downloads the update pack /{new}/from_{old}.pack and applies it with
+downloads the update pack /{new}/update_{old}.pack and applies it with
 UpdateJob, the same version continues with ResetJob. The update(version)
 form, covered by TestVersionDrivenUpdate, adds one verification: latest.pack
 must publish the given version, otherwise the server provides no valid
@@ -266,8 +266,8 @@ INFO | Rebuild done
 INFO | [CurrentVersion] old
 INFO | [LatestVersion] new
 INFO | Update available: old -> new
-WARNING | Request to "http://mock/new/from_old.pack" failed (attempt 1/3): HTTPStatusError: Client error '404 Not Found' for url 'http://mock/new/from_old.pack'
-WARNING | Failed to get the update pack old -> new: Client error '404 Not Found' for url 'http://mock/new/from_old.pack', rebuilding from the latest index
+WARNING | Request to "http://mock/new/update_old.pack" failed (attempt 1/3): HTTPStatusError: Client error '404 Not Found' for url 'http://mock/new/update_old.pack'
+WARNING | Failed to get the update pack old -> new: Client error '404 Not Found' for url 'http://mock/new/update_old.pack', rebuilding from the latest index
 INFO | Rebuilding files to "{env.PROJECT_ROOT}"
 INFO | Downloading the full pack of new
 INFO | Rebuild done
@@ -474,8 +474,8 @@ INFO | Rebuild done
 INFO | [CurrentVersion] old
 INFO | [LatestVersion] new
 INFO | Update available: old -> new
-WARNING | Request to "http://mock/new/from_old.pack" failed (attempt 1/3): HTTPStatusError: Client error '404 Not Found' for url 'http://mock/new/from_old.pack'
-WARNING | Failed to get the update pack old -> new: Client error '404 Not Found' for url 'http://mock/new/from_old.pack', rebuilding from the latest index
+WARNING | Request to "http://mock/new/update_old.pack" failed (attempt 1/3): HTTPStatusError: Client error '404 Not Found' for url 'http://mock/new/update_old.pack'
+WARNING | Failed to get the update pack old -> new: Client error '404 Not Found' for url 'http://mock/new/update_old.pack', rebuilding from the latest index
 INFO | Rebuilding files to "{env.PROJECT_ROOT}"
 INFO | Downloading the full pack of new
 INFO | Rebuild done
@@ -614,8 +614,8 @@ INFO | Update done
 INFO | [CurrentVersion] old
 INFO | [LatestVersion] new
 INFO | Update available: old -> new
-WARNING | Request to "http://mock/new/from_old.pack" failed (attempt 1/3): HTTPStatusError: Client error '404 Not Found' for url 'http://mock/new/from_old.pack'
-WARNING | Failed to get the update pack old -> new: Client error '404 Not Found' for url 'http://mock/new/from_old.pack', rebuilding from the latest index
+WARNING | Request to "http://mock/new/update_old.pack" failed (attempt 1/3): HTTPStatusError: Client error '404 Not Found' for url 'http://mock/new/update_old.pack'
+WARNING | Failed to get the update pack old -> new: Client error '404 Not Found' for url 'http://mock/new/update_old.pack', rebuilding from the latest index
 INFO | Rebuilding files to "{env.PROJECT_ROOT}"
 INFO | Downloading the full pack of new
 INFO | Rebuild done
@@ -808,8 +808,8 @@ INFO | Reset done
 INFO | [CurrentVersion] old
 INFO | [LatestVersion] new
 INFO | Update available: old -> new
-WARNING | Request to "http://mock/new/from_old.pack" failed (attempt 1/3): HTTPStatusError: Client error '404 Not Found' for url 'http://mock/new/from_old.pack'
-WARNING | Failed to get the update pack old -> new: Client error '404 Not Found' for url 'http://mock/new/from_old.pack', rebuilding from the latest index
+WARNING | Request to "http://mock/new/update_old.pack" failed (attempt 1/3): HTTPStatusError: Client error '404 Not Found' for url 'http://mock/new/update_old.pack'
+WARNING | Failed to get the update pack old -> new: Client error '404 Not Found' for url 'http://mock/new/update_old.pack', rebuilding from the latest index
 INFO | Rebuilding files to "{env.PROJECT_ROOT}"
 INFO | Downloading the full pack of new
 INFO | Rebuild done

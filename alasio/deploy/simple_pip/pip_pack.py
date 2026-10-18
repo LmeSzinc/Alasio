@@ -118,7 +118,7 @@ class PipPack:
         the local ledger version is compared with the version, the same
         version is verified and repaired against the published index
         (ResetJob), a version mismatch is applied incrementally from
-        /{version}/from_{local}.pack (UpdateJob), a missing update pack or
+        /{version}/update_{local}.pack (UpdateJob), a missing update pack or
         local ledger falls back to a rebuild from the index of the version
         (RebuildJob). The channel of a dependency publishes the packs of its
         latest version only (the pins of the latest commit of the repo built

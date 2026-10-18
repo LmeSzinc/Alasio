@@ -154,7 +154,7 @@ async def test_a_cancel_during_the_download_resumes_the_worker(make_backend):
         backend.servers.publish_update()
         assert await backend.update_check.update_check('WorkerTestScheduler') == ''
         # the update pack of the apply hangs on the mirror
-        backend.servers.hold('from_v1.pack', gate)
+        backend.servers.hold('update_v1.pack', gate)
         with logger.mock_capture_writer() as capture:
             flow = backend.manager.update_apply()
             await backend.servers.hold_entered.wait()
@@ -353,7 +353,7 @@ async def test_the_user_restart_is_refused_while_the_update_runs(make_backend):
         await backend.start_worker('cfg_a')
         backend.servers.publish_update()
         assert await backend.update_check.update_check('WorkerTestScheduler') == ''
-        backend.servers.hold('from_v1.pack', gate)
+        backend.servers.hold('update_v1.pack', gate)
         mod_root = backend.project.mod_root('WorkerTestScheduler')
         with logger.mock_capture_writer() as capture:
             backend.manager.update_apply()

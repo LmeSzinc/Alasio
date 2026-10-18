@@ -65,7 +65,7 @@ def run_dir(fs, monkeypatch):
     packrepo = folder.joinpath(serve.PACKREPO_FOLDER)
     version = packrepo.joinpath('c3')
     fs.create_dir(version)
-    fs.create_file(version.joinpath('full_c3.pack'), contents=FULL_PACK)
+    fs.create_file(version.joinpath('full.pack'), contents=FULL_PACK)
     fs.create_file(version.joinpath('update_c2.pack'), contents=UPDATE_PACK)
     fs.create_file(packrepo.joinpath('latest.pack'), contents=LATEST_PACK)
     monkeypatch.setattr(env, 'PROJECT_ROOT', root)
@@ -165,7 +165,7 @@ class TestPackRoutes:
 
     def test_full_pack(self, client):
         """The full pack of a version is served under the name it has on the disk."""
-        response = client.get(pack_url('c3', 'full_c3.pack'))
+        response = client.get(pack_url('c3', 'full.pack'))
         assert response.status_code == 200
         assert response.content == FULL_PACK
         # the client walks the packs of a version with range requests
@@ -179,7 +179,7 @@ class TestPackRoutes:
 
     def test_range_request(self, client):
         """A range request is a 206 of the requested bytes."""
-        response = client.get(pack_url('c3', 'full_c3.pack'), headers={'Range': 'bytes=2-5'})
+        response = client.get(pack_url('c3', 'full.pack'), headers={'Range': 'bytes=2-5'})
         assert response.status_code == 206
         assert response.content == FULL_PACK[2:6]
         assert response.headers['content-range'] == f'bytes 2-5/{len(FULL_PACK)}'
@@ -190,7 +190,7 @@ class TestPackRoutes:
                 # no update pack of the old version c1 in the folder
                 pack_url('c3', 'update_c1.pack'),
                 # no folder of another version
-                pack_url('c4', 'full_c4.pack'),
+                pack_url('c4', 'full.pack'),
                 # no folder of another config
                 '/'.join((serve.PACK_URL, 'Author_Repo_dev', serve.PACKREPO_FOLDER, 'latest.pack')),
                 # latest.pack is per repo, the pack folder itself has none

@@ -5,7 +5,7 @@ The generator reads a git repo and writes the packs of the run directory,
 the output layout is fixed by PackRepoModel:
 
 1. the full pack of the latest commit to
-   pack/{Author}_{Repo}_{Branch}/packrepo/{commit}/full_{commit}.pack
+   pack/{Author}_{Repo}_{Branch}/packrepo/{commit}/full.pack
    only the latest commit has a full pack: a client downloads a full pack
    once and updates with update packs afterwards, the packs of the older
    versions do not need one. The pack carries the generated files of the
@@ -176,12 +176,12 @@ class PackRepoGen:
     @cached_property
     def full_pack_file(self):
         """
-        File of the full pack of the latest version: {version folder}/full_{commit}.pack
+        File of the full pack of the latest version: {version folder}/full.pack
 
         Returns:
             PathStr: Absolute path of the file
         """
-        return self.version_folder.joinpath(f'full_{self.lookback.latest_commit}.pack')
+        return self.version_folder.joinpath('full.pack')
 
     def run(self):
         """

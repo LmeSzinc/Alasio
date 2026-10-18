@@ -9,11 +9,11 @@ see PackRepoGen.
 
 The url mirrors the path under the run directory: the file
 
-    {run directory}/pack/{Author}_{Repo}_{Branch}/packrepo/{version}/full_{version}.pack
+    {run directory}/pack/{Author}_{Repo}_{Branch}/packrepo/{version}/full.pack
 
 is served at
 
-    /pack/{Author}_{Repo}_{Branch}/packrepo/{version}/full_{version}.pack
+    /pack/{Author}_{Repo}_{Branch}/packrepo/{version}/full.pack
 
 and latest.pack, an update pack (update_{old_version}.pack) and every other
 file of a pack folder are served the same way. The packs of a version are

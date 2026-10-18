@@ -296,7 +296,7 @@ def mock_serving_app(server, app):
 
             await app(scope, receive, counting_send)
             return
-        if not name.startswith('from_'):
+        if not name.startswith('update_'):
             await app(scope, receive, send)
             return
 
@@ -321,7 +321,7 @@ class MockServerFile(ServerFile):
     register_version() / register_update() keep the packs in memory, the app
     of the instance serves them the way a deployment serves them:
     {base url}/latest.pack, {base url}/{version}/full.pack and
-    {base url}/{new_version}/from_{old_version}.pack (the path of the base url
+    {base url}/{new_version}/update_{old_version}.pack (the path of the base url
     is the mount point, so the channel base of a deployment works as it is).
     The files are served by MockStaticFile, the in-memory static file server
     of the tests: the range requests, the 404s and the headers the client sees
@@ -431,7 +431,7 @@ class MockServerFile(ServerFile):
             for version, content in self.full_packs.items()
         }
         packs.update({
-            f'{new_version}/from_{old_version}.pack': content
+            f'{new_version}/update_{old_version}.pack': content
             for (old_version, new_version), content in self.update_packs.items()
         })
         # latest.pack: the version in bytes, then the 20 bytes checksum of the

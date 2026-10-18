@@ -17,7 +17,7 @@ The server layout follows the draft in PackEncodeBase:
   checksum of the index pack of that version
 - {mirror}/{version}/full.pack: full pack of a version, the front part of it is
   the index pack of that version
-- {mirror}/{new_version}/from_{old_version}.pack: update pack from the old
+- {mirror}/{new_version}/update_{old_version}.pack: update pack from the old
   version to the new version
 
 The public methods return the business types of the pack format and validate
@@ -354,7 +354,7 @@ class ServerFile(AsyncHttpProbe):
     async def get_update_pack(self, old_version, new_version):
         """
         Get the update pack from an old version to a new version from
-        {mirror}/{new_version}/from_{old_version}.pack.
+        {mirror}/{new_version}/update_{old_version}.pack.
 
         The pack is validated before it is returned (validate()): the checksums
         of both sections of the format are checked, and the version pair
@@ -380,7 +380,7 @@ class ServerFile(AsyncHttpProbe):
             httpx2.HTTPError: If the request fails
             AllMirrorsFailedError: If no mirror is usable
         """
-        path = f'/{new_version}/from_{old_version}.pack'
+        path = f'/{new_version}/update_{old_version}.pack'
 
         async def work(name, url):
             data = await self.get_bytes(url, path)
@@ -399,7 +399,7 @@ class ServerFile(AsyncHttpProbe):
     async def get_update_pack_checksum(self, old_version, new_version, size):
         """
         Get the whole-pack checksum of the update pack from
-        {mirror}/{new_version}/from_{old_version}.pack.
+        {mirror}/{new_version}/update_{old_version}.pack.
 
         The pack format keeps a 20 bytes digest as the trailing bytes of the
         pack file, the sha1 of everything before it (PackDecodeBase validates it
@@ -426,7 +426,7 @@ class ServerFile(AsyncHttpProbe):
                 downloads the pack as usual
             AllMirrorsFailedError: If no mirror is usable
         """
-        path = f'/{new_version}/from_{old_version}.pack'
+        path = f'/{new_version}/update_{old_version}.pack'
 
         async def work(name, url):
             headers = {'Range': f'bytes={size - 20}-{size - 1}'}

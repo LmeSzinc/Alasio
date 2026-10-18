@@ -308,7 +308,7 @@ class TestPackdep:
         PackRepoGen(repo, CONFIG, dep_gen=FakeDepGen(PACKDEP_ENTRIES)).run()
 
         full = PackDecodeBase(file_read_bytes(
-            join_path(run_dir, PACK_ROOT, 'c3', 'full_c3.pack')))
+            join_path(run_dir, PACK_ROOT, 'c3', 'full.pack')))
         full.validate()
         info = full.fileinfo[PACKDEP_PATH]
         assert info.edit != 2
@@ -336,7 +336,7 @@ class TestPackdep:
         PackRepoGen(repo, CONFIG, dep_gen=FakeDepGen(PACKDEP_ENTRIES_SECOND)).run()
 
         full = PackDecodeBase(file_read_bytes(
-            join_path(run_dir, PACK_ROOT, 'c3', 'full_c3.pack')))
+            join_path(run_dir, PACK_ROOT, 'c3', 'full.pack')))
         assert bytes(full.catfile(full.fileinfo[PACKDEP_PATH])) == PACKDEP_DATA_SECOND
         update = PackDecodeBase(file_read_bytes(
             join_path(run_dir, PACK_ROOT, 'c3', 'update_c1.pack')))
@@ -349,7 +349,7 @@ class TestPackdep:
         PackRepoGen(repo, CONFIG).run()
 
         full = PackDecodeBase(file_read_bytes(
-            join_path(run_dir, PACK_ROOT, 'c3', 'full_c3.pack')))
+            join_path(run_dir, PACK_ROOT, 'c3', 'full.pack')))
         assert PACKDEP_PATH not in full.fileinfo
         update = PackDecodeBase(file_read_bytes(
             join_path(run_dir, PACK_ROOT, 'c3', 'update_c1.pack')))
@@ -360,7 +360,7 @@ class TestPackdep:
         """A client that does not read packdep still unpacks it as a normal file."""
         repo = make_repo(VERSIONS)
         PackRepoGen(repo, CONFIG, dep_gen=FakeDepGen(PACKDEP_ENTRIES)).run()
-        data = file_read_bytes(join_path(run_dir, PACK_ROOT, 'c3', 'full_c3.pack'))
+        data = file_read_bytes(join_path(run_dir, PACK_ROOT, 'c3', 'full.pack'))
         client = make_client(monkeypatch, fs)
         with logger.mock_capture_writer():
             assert await UnpackJob(data).run()
@@ -394,7 +394,7 @@ class TestRun:
         repo = make_repo(VERSIONS)
         PackRepoGen(repo, CONFIG).run()
 
-        file = join_path(run_dir, PACK_ROOT, 'c3', 'full_c3.pack')
+        file = join_path(run_dir, PACK_ROOT, 'c3', 'full.pack')
         assert file.isfile()
         decoder = PackDecodeBase(file_read_bytes(file))
         decoder.validate()
@@ -465,7 +465,7 @@ class TestRun:
         info = LatestInfo.parse(data)
         assert info.version == 'c3'
         full = PackDecodeBase(file_read_bytes(
-            join_path(run_dir, PACK_ROOT, 'c3', 'full_c3.pack')))
+            join_path(run_dir, PACK_ROOT, 'c3', 'full.pack')))
         assert info.checksum == full.index_checksum
         # the checksum of the index pack, the bytes the clients hold in
         # .pack/index.pack after unpacking the full pack
@@ -477,7 +477,7 @@ class TestRun:
         PackRepoGen(repo, CONFIG).run()
 
         assert join_path(run_dir, PACK_ROOT, 'latest.pack').isfile()
-        assert list(join_path(run_dir, PACK_ROOT, 'c1').iter_filenames()) == ['full_c1.pack']
+        assert list(join_path(run_dir, PACK_ROOT, 'c1').iter_filenames()) == ['full.pack']
 
     def test_lookback_window(self, fs, run_dir):
         """Only the commits of the lookback window have an update pack."""
@@ -497,7 +497,7 @@ class TestRun:
         PackRepoGen(repo, CONFIG).run()
         assert join_path(run_dir, PACK_ROOT, 'c3').isdir()
         # a folder of an earlier run that no latest.pack links anymore
-        fs.create_file(join_path(run_dir, PACK_ROOT, 'stale', 'full_stale.pack'), contents=b'x')
+        fs.create_file(join_path(run_dir, PACK_ROOT, 'stale', 'full.pack'), contents=b'x')
 
         # a new commit is pushed to the branch
         push_commit(repo, 'c4', VERSIONS['c3'], parents=['c3'], author_time=4)
@@ -505,7 +505,7 @@ class TestRun:
 
         # only the folder of the latest commit is kept
         assert list(join_path(run_dir, PACK_ROOT).iter_foldernames()) == ['c4']
-        assert join_path(run_dir, PACK_ROOT, 'c4', 'full_c4.pack').isfile()
+        assert join_path(run_dir, PACK_ROOT, 'c4', 'full.pack').isfile()
         assert join_path(run_dir, PACK_ROOT, 'c4', 'update_c3.pack').isfile()
         assert not join_path(run_dir, PACK_ROOT, 'c3').isdir()
         assert not join_path(run_dir, PACK_ROOT, 'stale').isdir()
@@ -527,7 +527,7 @@ class TestRun:
             PackRepoGen(repo, CONFIG).run()
         assert capture.fd.any_contains('Failed to remove stale pack folder')
         # the new version is published, the stale folder is left to the next run
-        assert join_path(run_dir, PACK_ROOT, 'c4', 'full_c4.pack').isfile()
+        assert join_path(run_dir, PACK_ROOT, 'c4', 'full.pack').isfile()
         assert join_path(run_dir, PACK_ROOT, 'c3').isdir()
         info = LatestInfo.parse(file_read_bytes(join_path(run_dir, PACK_ROOT, 'latest.pack')))
         assert info.version == 'c4'
@@ -551,7 +551,7 @@ class TestRun:
         # latest.pack still points at the old version and its folder is kept,
         # the clients are not switched to the partial version
         assert file_read_bytes(join_path(run_dir, PACK_ROOT, 'latest.pack')) == before
-        assert join_path(run_dir, PACK_ROOT, 'c3', 'full_c3.pack').isfile()
+        assert join_path(run_dir, PACK_ROOT, 'c3', 'full.pack').isfile()
 
 
 class TestExistingPacks:
@@ -625,7 +625,7 @@ class TestExistingPacks:
         PackRepoGen(repo, CONFIG).run()
 
         folder = join_path(run_dir, PACK_ROOT, 'c3')
-        names = ('full_c3.pack', 'update_c1.pack', 'update_c2.pack')
+        names = ('full.pack', 'update_c1.pack', 'update_c2.pack')
         for name in names:
             file = folder.joinpath(name)
             data = bytearray(file_read_bytes(file))
@@ -639,7 +639,7 @@ class TestExistingPacks:
             assert file_read_bytes(folder.joinpath(name))[4] == 0
         # latest.pack is built from the full pack this run wrote
         info = LatestInfo.parse(file_read_bytes(join_path(run_dir, PACK_ROOT, 'latest.pack')))
-        full = PackDecodeBase(file_read_bytes(folder.joinpath('full_c3.pack')))
+        full = PackDecodeBase(file_read_bytes(folder.joinpath('full.pack')))
         assert info.checksum == full.index_checksum
 
     def test_pack_that_is_not_a_pack_is_written_again(self, fs, run_dir):
@@ -686,7 +686,7 @@ class TestUpdateApplies:
 
         # the tree of the generated full pack, the expected result of the update
         full = PackDecodeBase(file_read_bytes(
-            join_path(run_dir, PACK_ROOT, 'c3', 'full_c3.pack')))
+            join_path(run_dir, PACK_ROOT, 'c3', 'full.pack')))
         expected = expected_tree(full)
 
         # the client that has been running the old version
@@ -711,7 +711,7 @@ class TestUpdateApplies:
         repo = make_repo(VERSIONS)
         PackRepoGen(repo, CONFIG).run()
         full = PackDecodeBase(file_read_bytes(
-            join_path(run_dir, PACK_ROOT, 'c3', 'full_c3.pack')))
+            join_path(run_dir, PACK_ROOT, 'c3', 'full.pack')))
         expected = expected_tree(full)
 
         for index, old in enumerate(('c1', 'c2')):

@@ -446,7 +446,7 @@ class DeployJob(DeployTarget):
            local index pack (index.pack in the ledger folder of the
            target); both are logged as in check()
         2. a version mismatch downloads the update pack
-           /{new_version}/from_{old_version}.pack and applies it with
+           /{new_version}/update_{old_version}.pack and applies it with
            UpdateJob, a missing update pack (out of the update window
            or removed) falls back to RebuildJob, a failed update also
            falls back to RebuildJob. The index the update prepares must

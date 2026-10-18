@@ -290,7 +290,7 @@ class TestInstall:
         # satisfy its sources
         assert server.requests == [
             f'{dep_channel("demo")}/latest.pack',
-            f'{dep_channel("demo")}/2.0/from_1.0.pack',
+            f'{dep_channel("demo")}/2.0/update_1.0.pack',
         ]
 
     @pytest.mark.trio

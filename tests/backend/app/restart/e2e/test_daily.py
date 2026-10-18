@@ -171,7 +171,7 @@ async def test_the_crossing_is_skipped_while_the_backend_starts_up(make_backend,
     await backend.install('WorkerTestScheduler')
     backend.servers.publish_update()
     gate = trio.Event()
-    backend.servers.hold('from_v1.pack', gate)
+    backend.servers.hold('update_v1.pack', gate)
     mod_root = backend.project.mod_root('WorkerTestScheduler')
     with logger.mock_capture_writer() as capture:
         async with trio.open_nursery() as nursery:

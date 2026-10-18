@@ -169,11 +169,11 @@ INFO | [Mirror `repo`] b
                 # the request sequence (HEAD probe, then the GET)
                 await server.get_update_pack('old', 'new')
         assert requests == [
-            ('HEAD', 'http://a/new/from_old.pack'),
-            ('GET', 'http://a/new/from_old.pack'),
+            ('HEAD', 'http://a/new/update_old.pack'),
+            ('GET', 'http://a/new/update_old.pack'),
         ]
         assert capture.concat() == """\
-INFO | Probing `repo` for "/new/from_old.pack": a, b
+INFO | Probing `repo` for "/new/update_old.pack": a, b
 INFO | Mirror "a" responded in 0ms
 INFO | [Mirror `repo`] a
 """
@@ -198,13 +198,13 @@ INFO | [Mirror `repo`] a
                 # the request sequence (the HEAD, its fallback, the real request)
                 await server.get_update_pack('old', 'new')
         assert requests == [
-            ('HEAD', '/new/from_old.pack', ''),
-            ('GET', '/new/from_old.pack', 'bytes=0-0'),
-            ('GET', '/new/from_old.pack', ''),
+            ('HEAD', '/new/update_old.pack', ''),
+            ('GET', '/new/update_old.pack', 'bytes=0-0'),
+            ('GET', '/new/update_old.pack', ''),
         ]
         assert capture.concat() == """\
-INFO | Probing `repo` for "/new/from_old.pack": a, b
-WARNING | Request to "http://a/new/from_old.pack" failed (attempt 1/3): HTTPStatusError: Client error '405 Method Not Allowed' for url 'http://a/new/from_old.pack'
+INFO | Probing `repo` for "/new/update_old.pack": a, b
+WARNING | Request to "http://a/new/update_old.pack" failed (attempt 1/3): HTTPStatusError: Client error '405 Method Not Allowed' for url 'http://a/new/update_old.pack'
 INFO | Mirror "a" responded in 0ms
 INFO | [Mirror `repo`] a
 """
@@ -237,10 +237,10 @@ INFO | [Mirror `repo`] a
             ('GET', 'b'),
         ]
         assert capture.concat() == """\
-INFO | Probing `repo` for "/new/from_old.pack": a, b
-WARNING | Request to "http://a/new/from_old.pack" failed (attempt 1/3): HTTPStatusError: Client error '405 Method Not Allowed' for url 'http://a/new/from_old.pack'
-WARNING | Request to "http://a/new/from_old.pack" failed (attempt 1/3): HTTPStatusError: Client error '404 Not Found' for url 'http://a/new/from_old.pack'
-WARNING | Mirror "a" is not usable: HTTPStatusError: Client error '404 Not Found' for url 'http://a/new/from_old.pack'
+INFO | Probing `repo` for "/new/update_old.pack": a, b
+WARNING | Request to "http://a/new/update_old.pack" failed (attempt 1/3): HTTPStatusError: Client error '405 Method Not Allowed' for url 'http://a/new/update_old.pack'
+WARNING | Request to "http://a/new/update_old.pack" failed (attempt 1/3): HTTPStatusError: Client error '404 Not Found' for url 'http://a/new/update_old.pack'
+WARNING | Mirror "a" is not usable: HTTPStatusError: Client error '404 Not Found' for url 'http://a/new/update_old.pack'
 INFO | Mirror "b" responded in 0ms
 INFO | [Mirror `repo`] b
 """
@@ -379,15 +379,15 @@ INFO | [Mirror `repo`] b
         with logger.mock_capture_writer() as capture:
             with pytest.raises(httpx2.HTTPStatusError):
                 await server.get_update_pack('old', 'new')
-        assert requests == ['http://a/new/from_old.pack', 'http://a/new/from_old.pack', 'http://b/new/from_old.pack']
+        assert requests == ['http://a/new/update_old.pack', 'http://a/new/update_old.pack', 'http://b/new/update_old.pack']
         assert capture.concat() == """\
-WARNING | Request to "http://a/new/from_old.pack" failed (attempt 1/3): HTTPStatusError: Client error '404 Not Found' for url 'http://a/new/from_old.pack'
-INFO | Probing `repo` for "/new/from_old.pack": a, b
-WARNING | Request to "http://a/new/from_old.pack" failed (attempt 1/3): HTTPStatusError: Client error '404 Not Found' for url 'http://a/new/from_old.pack'
-WARNING | Mirror "a" is not usable: HTTPStatusError: Client error '404 Not Found' for url 'http://a/new/from_old.pack'
-WARNING | Request to "http://b/new/from_old.pack" failed (attempt 1/3): HTTPStatusError: Client error '404 Not Found' for url 'http://b/new/from_old.pack'
-WARNING | Mirror "b" is not usable: HTTPStatusError: Client error '404 Not Found' for url 'http://b/new/from_old.pack'
-ERROR | Failed to probe `repo` for "/new/from_old.pack": no mirror is usable
+WARNING | Request to "http://a/new/update_old.pack" failed (attempt 1/3): HTTPStatusError: Client error '404 Not Found' for url 'http://a/new/update_old.pack'
+INFO | Probing `repo` for "/new/update_old.pack": a, b
+WARNING | Request to "http://a/new/update_old.pack" failed (attempt 1/3): HTTPStatusError: Client error '404 Not Found' for url 'http://a/new/update_old.pack'
+WARNING | Mirror "a" is not usable: HTTPStatusError: Client error '404 Not Found' for url 'http://a/new/update_old.pack'
+WARNING | Request to "http://b/new/update_old.pack" failed (attempt 1/3): HTTPStatusError: Client error '404 Not Found' for url 'http://b/new/update_old.pack'
+WARNING | Mirror "b" is not usable: HTTPStatusError: Client error '404 Not Found' for url 'http://b/new/update_old.pack'
+ERROR | Failed to probe `repo` for "/new/update_old.pack": no mirror is usable
 """
         assert table.select_one(scene='repo', name='').result == 'a'
 

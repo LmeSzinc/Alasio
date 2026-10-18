@@ -41,7 +41,7 @@ Usage:
     from alasio.ext.path.atomic import atomic_write_stream
 
     update = PackWheelUpdate(PackWheel(new_wheel), PackWheel(old_wheel))
-    atomic_write_stream(f'packdep/httpx/{update.current_version}/from_{update.old_version}.pack',
+    atomic_write_stream(f'packdep/httpx/{update.current_version}/update_{update.old_version}.pack',
                         update.iter_pack_data())
 """
 

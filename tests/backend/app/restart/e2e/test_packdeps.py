@@ -96,7 +96,7 @@ def publish_update(server, prefix, old, new, update):
         new (str): Version the update installs
         update (bytes): Update pack of the pair
     """
-    server.static.register_file(f'{prefix}/{new}/from_{old}.pack', update)
+    server.static.register_file(f'{prefix}/{new}/update_{old}.pack', update)
 
 
 def dep_wheel(version, name=DEP):
