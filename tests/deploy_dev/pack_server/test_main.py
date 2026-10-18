@@ -244,6 +244,19 @@ class TestRunConfig:
         assert calls[2][1] is calls[0][1]
         assert calls[2][3] is calls[1][3]
 
+    def test_dependency_failure_skips_the_tree(self, fs, run_dir, monkeypatch):
+        """A failed dependency generation stops the config before the tree is published."""
+        make_config(run_dir)
+        calls = []
+        monkeypatch.setattr(main, 'PackRepo', fake_repo(calls))
+        monkeypatch.setattr(main, 'PackRepoGen', fake_gen(calls))
+        monkeypatch.setattr(
+            main, 'DepGen', fake_dep_gen(calls, fail=('AzurLaneAutoScript',)))
+
+        with pytest.raises(RuntimeError, match='dependency packs'):
+            main.PackServer().run_config(FILE)
+        assert [step for step, *_ in calls] == ['repo']
+
     def test_invalid_config(self, fs, run_dir, monkeypatch):
         """A config with an empty value fails in the reader, no step is run."""
         write_config(run_dir, FILE, 'Repo:\n  Remote: https://github.com/LmeSzinc/Repo\n  Repo: Repo\n  Branch: master\n')

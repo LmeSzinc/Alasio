@@ -9,10 +9,9 @@ of the build, and every dependency gets a channel of its own:
 1. fetch the wheel of every version of every dependency from the PyPI simple
    index (PEP 503) of the config to
    pack/{Author}_{Repo}_{Branch}/wheel/{name}/{version}/{filename}.whl, see
-   WheelFetcher. A version the mirror has no pure python wheel of (a
-   distribution with compiled extensions, a version the mirror does not hold)
-   is skipped with a warning: such a distribution is updated with pip, not
-   with a pack
+   WheelFetcher. Every wheel is required, the target and the historical
+   versions alike: a run that cannot fetch one of them fails, no repo pack is
+   published, so a published channel never lacks an update side
 2. remove the wheel folders the lookback window does not ask for: the window
    is the retention boundary of the wheel cache
 3. build the full pack of the target version and the update pack from every
@@ -66,9 +65,10 @@ instance (the published attribute): the version and index checksum of every
 dependency whose latest commit pin has a target. The snapshots are built from
 the target full pack itself, never from latest.pack: the per dependency
 latest.pack is a legacy marker for old clients and is going to be removed. It
-is still written for now, the packdep flow does not read it. A dependency
-whose target full pack is not built (e.g. the mirror has no wheel of the
-target) is left out, the client falls back to the channel.
+is still written for now, the packdep flow does not read it. Every wheel is
+mandatory, the target and the historical versions alike: a dependency that
+cannot be fetched fails the run, so a published repo tree never references a
+dependency whose channel is incomplete.
 
 The pack encoder receives the DepGen object and encodes the snapshots into
 .pack/packdep.pack when the version extras are built.
@@ -332,6 +332,9 @@ class DepGen:
             ValueError: If the repo has no branch to pack, a dependency file
                 of the config cannot be read, or a wheel is not a pack target
                 (see PackWheel)
+            WheelNotFoundError: If a wheel of a dependency cannot be fetched,
+                the target and the historical versions alike: every update
+                path of the published channel must be complete
             httpx2.HTTPError: If a wheel cannot be fetched
             OSError: If a wheel or a pack cannot be written
         """
@@ -379,9 +382,11 @@ class DepGen:
         """
         Fetch the wheel of every version of every dependency.
 
-        A version the mirror has no pure python wheel of is skipped with a
-        warning, see the module docstring: the version has no wheel file
-        then, no pack is built of it, and the client falls back to a rebuild.
+        Every wheel is required, the target and the historical versions alike:
+        a missing wheel fails the run instead of publishing a channel with a
+        missing update pack. The client of the channel would otherwise have to
+        rebuild from the target, and the channel would not be the complete
+        publication the packdep snapshot describes.
 
         Args:
             targets (dict[str, list[DepVersion]]): Dependencies to fetch
@@ -412,9 +417,11 @@ class DepGen:
                     try:
                         out[(name, dep.version)] = fetcher.fetch()
                     except WheelNotFoundError as e:
-                        logger.warning(
-                            f'No pure python wheel to pack of "{name}=={dep.version}", '
-                            f'the distribution must be updated with pip, skipped: {e}')
+                        role = 'target' if dep.target else 'historical'
+                        raise WheelNotFoundError(
+                            f'No usable wheel of the {role} dependency "{name}=={dep.version}", '
+                            f'the dependency packs cannot be generated: {e}'
+                        ) from e
         return out
 
     def _write_packs(self, targets, wheel_files):
@@ -469,12 +476,9 @@ class DepGen:
         else:
             wheel_file = wheel_files.get((name, target.version))
             if wheel_file is None:
-                # the wheel of the target version could not be fetched: there
-                # is no new side for the update packs and nothing to publish
-                logger.warning(
-                    f'No wheel of "{name}=={target.version}", the packs are not built, '
-                    f'latest.pack is not written, the published version is kept')
-                return
+                raise WheelNotFoundError(
+                    f'No usable wheel of the target dependency "{name}=={target.version}", '
+                    f'the full pack cannot be built')
             target_pack = PackWheel(wheel_file)
             logger.info(f'Writing full pack: "{file}"')
             atomic_write_stream(file, target_pack.iter_pack_data())
@@ -513,19 +517,18 @@ class DepGen:
                 continue
             old_wheel = wheel_files.get((name, dep.version))
             if old_wheel is None:
-                logger.warning(
-                    f'No wheel of "{name}=={dep.version}", the update pack is not '
-                    f'built: "{file}"')
-                continue
+                raise WheelNotFoundError(
+                    f'No usable wheel of the historical dependency "{name}=={dep.version}", '
+                    f'the update pack cannot be built')
             if new_pack is None:
                 new_wheel = wheel_files.get((name, target.version))
                 if new_wheel is None:
-                    # every update pack needs the new side; the target full
-                    # pack of an earlier run is on the disk but the wheel is
-                    # not: the packs cannot be rebuilt
-                    logger.warning(
-                        f'No wheel of "{name}=={target.version}", the update packs are not built')
-                    break
+                    # every update pack needs the new side: the target full
+                    # pack of an earlier run is on the disk but its wheel is
+                    # not, so the update packs cannot be completed
+                    raise WheelNotFoundError(
+                        f'No usable wheel of the target dependency "{name}=={target.version}", '
+                        f'the update packs cannot be built')
                 new_pack = PackWheel(new_wheel)
             old_pack = PackWheel(old_wheel)
             logger.info(f'Writing update pack: {dep.version} -> {target.version}, "{file}"')

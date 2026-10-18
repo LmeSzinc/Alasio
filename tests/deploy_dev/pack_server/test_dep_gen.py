@@ -26,6 +26,7 @@ from alasio.deploy_dev.pack.encode_packdep import encode_packdep
 from alasio.deploy_dev.pack.pack_wheel import PackWheel
 from alasio.deploy_dev.pack_server import dep_gen
 from alasio.deploy_dev.pack_server.dep_gen import DepGen
+from alasio.deploy_dev.pack_server.fetch_wheel import WheelNotFoundError
 from alasio.deploy_dev.pack_server.model import (
     LookbackConfig, PackRepoModel, PythonDepsConfig, PythonMirrorInfo, RepoConfig
 )
@@ -608,24 +609,39 @@ class TestRun:
         assert file_read_bytes(pack_file(run_dir, 'latest.pack')) == b'old latest'
         assert wheel_file(run_dir, '0.27.7').exists()
 
-    def test_no_pure_wheel(self, fs, run_dir, mirror):
-        """A version the mirror has no pure python wheel of is skipped, the others build."""
+    def test_historical_wheel_missing_fails(self, fs, run_dir, mirror):
+        """A historical version without a usable wheel fails the complete build."""
         register_wheel(mirror, '0.27.8', CORE_V1)
         register_wheel(mirror, '0.28.1', CORE_V2)
         mirror.register('httpx', '0.27.7', tags='cp38-cp38-win_amd64', content=b'compiled')
         repo = make_repo(REQUIREMENTS)
-        with logger.mock_capture_writer() as capture:
+
+        with pytest.raises(
+                WheelNotFoundError, match='historical dependency "httpx==0.27.7"'):
             DepGen(repo, make_config(mirror.base), client=mirror.client).run()
 
-        assert capture.fd.any_contains('No pure python wheel to pack of "httpx==0.27.7"')
-        # the skipped version has no wheel file, no full pack and no update pack
-        assert not wheel_file(run_dir, '0.27.7').exists()
-        assert not pack_file(run_dir, '0.27.7', 'full.pack').exists()
+        # every version of the channel is required: nothing of the target is
+        # published when an update side is missing
+        assert not pack_file(run_dir, '0.28.1', 'full.pack').exists()
         assert not pack_file(run_dir, '0.28.1', 'update_0.27.7.pack').exists()
-        # the other versions are complete and latest.pack is published
-        assert pack_file(run_dir, '0.28.1', 'full.pack').isfile()
-        assert pack_file(run_dir, '0.28.1', 'update_0.27.8.pack').isfile()
-        assert LatestInfo.parse(file_read_bytes(pack_file(run_dir, 'latest.pack'))).version == '0.28.1'
+        assert not pack_file(run_dir, '0.28.1', 'update_0.27.8.pack').exists()
+        assert not pack_file(run_dir, 'latest.pack').exists()
+
+    def test_target_wheel_missing_fails(self, fs, run_dir, mirror):
+        """A target without a usable wheel fails the run, no pack is published."""
+        register_wheel(mirror, '0.27.8', CORE_V1)
+        mirror.register('httpx', '0.28.1', tags='cp38-cp38-win_amd64', content=b'compiled')
+        repo = make_repo(REQUIREMENTS)
+
+        with pytest.raises(
+                WheelNotFoundError, match='target dependency "httpx==0.28.1"'):
+            DepGen(repo, make_config(mirror.base), client=mirror.client).run()
+
+        # the run stopped before any pack of the target was written
+        assert not wheel_file(run_dir, '0.28.1').exists()
+        assert not pack_file(run_dir, '0.28.1', 'full.pack').exists()
+        assert not pack_file(run_dir, '0.28.1', 'update_0.27.8.pack').exists()
+        assert not pack_file(run_dir, 'latest.pack').exists()
 
     def test_mirror_list(self, fs, run_dir, mirror):
         """A list mirror fetches each dependency from its own url."""
