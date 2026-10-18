@@ -1,9 +1,9 @@
 """
 Tests for PackRepoGen: generate the packs of a repo to the run directory.
 
-The output layout is fixed by PackRepoModel: the full pack of the latest
-commit, an update pack from every lookback commit to it, latest.pack, and
-only the folder of the latest commit is kept.
+The output layout is fixed by PackRepoModel: run() writes the full pack of
+the latest commit and an update pack from every lookback commit to it,
+commit() writes latest.pack and removes every folder except the latest one.
 
 Every output is verified with the decode side of the library
 (alasio/deploy/pack): the packs are decoded and their checksums validated,
@@ -267,6 +267,19 @@ def expected_tree(full):
     return tree
 
 
+def generate(repo, config=CONFIG, dep_gen=None):
+    """
+    Run and commit a PackRepoGen, the normal flow of a publication.
+
+    Returns:
+        PackRepoGen: The generator that ran
+    """
+    gen = PackRepoGen(repo, config, dep_gen=dep_gen)
+    gen.run()
+    gen.commit()
+    return gen
+
+
 class TestConfigAndFolders:
     """The run directory paths of the generator.
 
@@ -457,11 +470,15 @@ class TestRun:
         assert '.pack/index.pack' in decoder.refinfo
 
     def test_latest_pack(self, fs, run_dir):
-        """latest.pack is written with the latest version and its index checksum."""
+        """latest.pack is written by commit, from the full pack of the run."""
         repo = make_repo(VERSIONS)
-        PackRepoGen(repo, CONFIG).run()
+        gen = PackRepoGen(repo, CONFIG)
+        gen.run()
+        latest = join_path(run_dir, PACK_ROOT, 'latest.pack')
+        assert not latest.exists()
 
-        data = file_read_bytes(join_path(run_dir, PACK_ROOT, 'latest.pack'))
+        gen.commit()
+        data = file_read_bytes(latest)
         info = LatestInfo.parse(data)
         assert info.version == 'c3'
         full = PackDecodeBase(file_read_bytes(
@@ -471,10 +488,16 @@ class TestRun:
         # .pack/index.pack after unpacking the full pack
         assert data == b'c3' + bytes(full.extract_index_pack())[-20:]
 
+    def test_commit_requires_run(self, fs, run_dir):
+        """commit() before run() cannot publish a stale or partial version."""
+        gen = PackRepoGen(make_repo(VERSIONS), CONFIG)
+        with pytest.raises(RuntimeError, match='run\\(\\) must be called'):
+            gen.commit()
+
     def test_single_commit(self, fs, run_dir):
         """A repo of a single commit has the full pack only, no update pack."""
         repo = make_repo({'c1': VERSIONS['c1']})
-        PackRepoGen(repo, CONFIG).run()
+        generate(repo)
 
         assert join_path(run_dir, PACK_ROOT, 'latest.pack').isfile()
         assert list(join_path(run_dir, PACK_ROOT, 'c1').iter_filenames()) == ['full.pack']
@@ -492,16 +515,24 @@ class TestRun:
         assert not join_path(run_dir, PACK_ROOT, 'c3', 'update_c1.pack').isfile()
 
     def test_stale_folders_removed(self, fs, run_dir):
-        """A new latest commit keeps its folder only, the older folders are removed."""
+        """commit() removes the older folders, run() only writes the new packs."""
         repo = make_repo(VERSIONS)
-        PackRepoGen(repo, CONFIG).run()
+        gen = PackRepoGen(repo, CONFIG)
+        gen.run()
+        gen.commit()
         assert join_path(run_dir, PACK_ROOT, 'c3').isdir()
         # a folder of an earlier run that no latest.pack links anymore
         fs.create_file(join_path(run_dir, PACK_ROOT, 'stale', 'full.pack'), contents=b'x')
 
         # a new commit is pushed to the branch
         push_commit(repo, 'c4', VERSIONS['c3'], parents=['c3'], author_time=4)
-        PackRepoGen(repo, CONFIG).run()
+        gen = PackRepoGen(repo, CONFIG)
+        gen.run()
+        assert join_path(run_dir, PACK_ROOT, 'c4', 'full.pack').isfile()
+        assert join_path(run_dir, PACK_ROOT, 'c3').isdir()
+        assert join_path(run_dir, PACK_ROOT, 'stale').isdir()
+
+        gen.commit()
 
         # only the folder of the latest commit is kept
         assert list(join_path(run_dir, PACK_ROOT).iter_foldernames()) == ['c4']
@@ -516,7 +547,7 @@ class TestRun:
     def test_stale_folder_removal_is_best_effort(self, fs, run_dir, monkeypatch):
         """A stale folder that cannot be removed does not fail the generation."""
         repo = make_repo(VERSIONS)
-        PackRepoGen(repo, CONFIG).run()
+        generate(repo)
         push_commit(repo, 'c4', VERSIONS['c3'], parents=['c3'], author_time=4)
 
         def fail(folder):
@@ -524,7 +555,7 @@ class TestRun:
 
         monkeypatch.setattr(pack_gen, 'atomic_rmtree', fail)
         with logger.mock_capture_writer() as capture:
-            PackRepoGen(repo, CONFIG).run()
+            generate(repo)
         assert capture.fd.any_contains('Failed to remove stale pack folder')
         # the new version is published, the stale folder is left to the next run
         assert join_path(run_dir, PACK_ROOT, 'c4', 'full.pack').isfile()
@@ -535,7 +566,7 @@ class TestRun:
     def test_failed_run_keeps_latest_pack(self, fs, run_dir, monkeypatch):
         """A failed generation does not publish the partial version."""
         repo = make_repo(VERSIONS)
-        PackRepoGen(repo, CONFIG).run()
+        generate(repo)
         before = file_read_bytes(join_path(run_dir, PACK_ROOT, 'latest.pack'))
 
         # a new commit arrives, but building its update packs fails
@@ -560,7 +591,7 @@ class TestExistingPacks:
     def test_existing_packs_are_kept(self, fs, run_dir, monkeypatch):
         """A complete output folder is kept as it is: nothing is built again."""
         repo = make_repo(VERSIONS)
-        PackRepoGen(repo, CONFIG).run()
+        generate(repo)
         tree = read_tree(join_path(run_dir, PACK_ROOT))
 
         # no pack of the version may be built again: the encoder of the
@@ -574,7 +605,7 @@ class TestExistingPacks:
         monkeypatch.setattr(pack_gen, 'PackUpdate', NoPackUpdate)
         monkeypatch.setattr(
             pack_gen, 'atomic_write_stream', lambda file, data: written.append(str(file)))
-        PackRepoGen(repo, CONFIG).run()
+        generate(repo)
 
         assert written == []
         # latest.pack is written again, from the checksum of the kept full
@@ -582,14 +613,14 @@ class TestExistingPacks:
         assert read_tree(join_path(run_dir, PACK_ROOT)) == tree
 
     def test_latest_pack_is_written_again(self, fs, run_dir):
-        """latest.pack is written on every run, from the checksum of the kept full pack."""
+        """latest.pack is written on every commit, from the checksum of the kept full pack."""
         repo = make_repo(VERSIONS)
-        PackRepoGen(repo, CONFIG).run()
+        generate(repo)
         latest = join_path(run_dir, PACK_ROOT, 'latest.pack')
         data = file_read_bytes(latest)
         os.remove(latest)
 
-        PackRepoGen(repo, CONFIG).run()
+        generate(repo)
 
         assert file_read_bytes(latest) == data
 
@@ -622,7 +653,7 @@ class TestExistingPacks:
     def test_pack_of_another_format_is_written_again(self, fs, run_dir):
         """A pack of another pack format is not kept: a version folder mixes no formats."""
         repo = make_repo(VERSIONS)
-        PackRepoGen(repo, CONFIG).run()
+        generate(repo)
 
         folder = join_path(run_dir, PACK_ROOT, 'c3')
         names = ('full.pack', 'update_c1.pack', 'update_c2.pack')
@@ -633,7 +664,7 @@ class TestExistingPacks:
             data[4] = 1
             atomic_write(file, bytes(data))
 
-        PackRepoGen(repo, CONFIG).run()
+        generate(repo)
 
         for name in names:
             assert file_read_bytes(folder.joinpath(name))[4] == 0

@@ -14,11 +14,12 @@ The modules below do one step of the work each, this module chains them:
    pack/{Author}_{Repo}_{Branch}/packdep, the wheel channel of the
    PythonDeps group of the config; a config without PythonDeps builds
    nothing there. The run leaves the published dependency snapshots on
-   the DepGen instance
+   the DepGen instance. Its cleanup is deferred to commit()
 4. PackRepoGen generates the packs of the repo into
    pack/{Author}_{Repo}_{Branch}/packrepo, with the DepGen instance: the
    published snapshots are encoded into .pack/packdep.pack when the version
-   pack is built
+   pack is built. commit() writes latest.pack, the publication barrier, and
+   only then does DepGen.commit() remove the old dependency packs
 
 The configs are run one by one, sorted by name. A config that fails is
 logged with its traceback and left out, the other configs still run: a
@@ -105,9 +106,10 @@ class PackServer:
 
         The dependency channels are generated first: their target versions and
         index checksums are the packdep payload the project tree pack carries.
-        PackRepoGen then generates the tree packs and publishes latest.pack;
-        a failure of either step fails the config and keeps the previous
-        latest.pack serving the clients.
+        PackRepoGen then generates the tree packs and writes repo
+        latest.pack; only after that publication does DepGen remove the old
+        dependency packs. A failure of either generation step fails the
+        config and keeps the previous latest.pack serving the clients.
 
         Args:
             file (str): Name of the config file in the config folder
@@ -124,10 +126,15 @@ class PackServer:
         config = PackRepoConfig(file)
         repo = PackRepo(config.data).run()
         dep = DepGen(repo, config.data)
+        dep.run()
         # the dependency channels are published before the repo pack: the
         # DepGen carries the snapshots the tree version encodes into packdep
-        dep.run()
-        PackRepoGen(repo, config.data, dep_gen=dep).run()
+        gen = PackRepoGen(repo, config.data, dep_gen=dep)
+        gen.run()
+        # repo latest.pack is the publication barrier: the old dependency
+        # packs stay on the disk until it is written
+        gen.commit()
+        dep.commit()
 
     def run(self):
         """

@@ -4,18 +4,18 @@ Generate the packs of a repo for the pack server.
 The generator reads a git repo and writes the packs of the run directory,
 the output layout is fixed by PackRepoModel:
 
-1. the full pack of the latest commit to
+1. run(): the full pack of the latest commit to
    pack/{Author}_{Repo}_{Branch}/packrepo/{commit}/full.pack
    only the latest commit has a full pack: a client downloads a full pack
    once and updates with update packs afterwards, the packs of the older
    versions do not need one. The pack carries the generated files of the
    version: .pack/history.pack always, and .pack/packdep.pack when a DepGen
    with published snapshots is passed to the generator
-2. an update pack from every lookback commit to
+2. run(): an update pack from every lookback commit to
    pack/{Author}_{Repo}_{Branch}/packrepo/{commit}/update_{old}.pack
-3. the latest info to pack/{Author}_{Repo}_{Branch}/packrepo/latest.pack
+3. commit(): the latest info to pack/{Author}_{Repo}_{Branch}/packrepo/latest.pack
    the latest version and the checksum of its index pack
-4. the folders that do not match the latest commit are removed
+4. commit(): the folders that do not match the latest commit are removed
 
 Every pack of a version lives in the folder of the latest commit, an older
 folder is the folder of the version that was the latest one in an earlier
@@ -23,19 +23,18 @@ run.
 
 The bytes of a pack only depend on the version it packs, so a pack that
 already exists is kept as it is: the run of an output folder that is already
-complete builds nothing again and only rewrites latest.pack. A kept file is
-the pack of the version pair, encoded with the current
-PackEncodeBase.PACK_VERSION, see kept_pack: a file of
-another format, of another version pair, or a file that cannot be read as a
-pack is written again.
+complete builds nothing again. A kept file is the pack of the version pair,
+encoded with the current PackEncodeBase.PACK_VERSION, see kept_pack: a file
+of another format, of another version pair, or a file that cannot be read as
+a pack is written again.
 
-latest.pack is written after every pack of the version is on the disk, and on
-every run: it is the small file the clients read the published version from.
-When the full pack was kept, the run never emitted its index pack and the
-checksum of the file is read back from the pack, see
-PackDecodeBase.read_index_checksum. An error of a pack build is raised to the
-caller: the previous latest.pack keeps serving the clients and the next run
-starts over, the atomic writes never leave a truncated pack at its final path.
+latest.pack is written by commit(), after every pack of the version is on the
+disk: it is the small file the clients read the published version from. When
+the full pack was kept, run() did not emit its index pack and the checksum of
+the file is read back from the pack, see PackDecodeBase.read_index_checksum.
+An error of a pack build is raised to the caller: the previous latest.pack
+keeps serving the clients and the next run starts over, the atomic writes
+never leave a truncated pack at its final path.
 
 The repo of a config is an input of the generator, not cloned here: the
 caller opens the git repo of the config and passes it in, the generation
@@ -49,7 +48,9 @@ Usage:
 
     config = PackRepoConfig('LmeSzinc_AzurLaneAutoScript_master.yaml')
     repo = GitRepo(repo_path).read_lazy()
-    PackRepoGen(repo, config.data).run()
+    gen = PackRepoGen(repo, config.data)
+    gen.run()
+    gen.commit()
 """
 
 from hashlib import sha1
@@ -85,6 +86,8 @@ class PackRepoGen:
     Usage:
         gen = PackRepoGen(repo, config, dep_gen=dep_gen)
         gen.run()
+        # publish latest.pack after every pack of the version is written
+        gen.commit()
     """
 
     def __init__(self, repo, config, dep_gen=None):
@@ -108,6 +111,10 @@ class PackRepoGen:
         self.repo = repo
         self.config = config
         self.dep_gen = dep_gen
+        # the pack and the kept checksum of the last run(), the input of
+        # commit(): latest.pack is written only from a completed run
+        self._pack = None
+        self._kept_checksum = None
         # the folder name is checked before anything is written, see repo_folder
         _ = self.repo_folder
         self.lookback = PackRepoLookback(repo, config)
@@ -185,20 +192,17 @@ class PackRepoGen:
 
     def run(self):
         """
-        Generate and publish the packs of the latest version.
+        Generate the packs of the latest version.
 
-        Writes the full pack of the latest commit, an update pack from every
-        lookback commit to it, then latest.pack, then removes the folders of
-        the other versions. A pack of that version that already exists is
-        kept, see kept_pack: the run of an output folder that is complete
-        builds nothing and only rewrites latest.pack. The kept check also
-        verifies the generated .pack/packdep.pack record, so a changed (or
-        removed) dependency snapshot writes the packs again.
+        Writes the full pack of the latest commit and an update pack from
+        every lookback commit to it. A pack of that version that already
+        exists is kept, see kept_pack: the kept check also verifies the
+        generated .pack/packdep.pack record, so a changed (or removed)
+        dependency snapshot writes the packs again.
 
-        latest.pack is written after every pack of the version, and an
-        exception is raised to the caller instead of publishing a partial
-        version: the previous latest.pack keeps serving the clients and the
-        next run starts over, see the module docstring.
+        latest.pack is not written here: commit() writes it after every pack
+        of the version is on the disk, and uses it as the publication barrier
+        of the version.
 
         Raises:
             RunDirError: If env.PROJECT_ROOT is not a run directory of the
@@ -206,6 +210,9 @@ class PackRepoGen:
             ValueError: If the repo has no branch to pack, or a pack fails to
                 build
         """
+        # a run is a new publication set, also when the instance is reused
+        self._pack = None
+        self._kept_checksum = None
         check_run_dir()
         latest = self.lookback.latest_commit
         # the lookback commits are computed before the packs are built: it
@@ -228,14 +235,31 @@ class PackRepoGen:
         kept_checksum = self._write_full_pack(pack)
         # 2. an update pack from every lookback commit to the latest one
         self._write_update_packs(pack)
-        # 3. latest.pack, after every pack of the version is written, so the
-        # clients only switch to a version whose packs are complete. The full
-        # pack of an earlier run was kept: this run never emitted its index
-        # pack, the checksum of the kept file is published
-        self._write_latest_pack(pack, kept_checksum)
-        # 4. the folders that do not match the latest commit
-        self._remove_stale_folders()
+        # the inputs of commit(): latest.pack is written only after both
+        # steps above completed
+        self._pack = pack
+        self._kept_checksum = kept_checksum
         logger.info(f'Packs of "{self.repo_folder.name}" generated, latest={latest}')
+
+    def commit(self):
+        """
+        Publish latest.pack and remove the folders of the other versions.
+
+        latest.pack is written after every pack of the version is on the
+        disk, so the clients only switch to a version whose packs are
+        complete. The folders of the other versions are removed only after
+        latest.pack is written.
+
+        Raises:
+            RuntimeError: If run() was not called
+            OSError: If latest.pack cannot be written
+        """
+        pack = self._pack
+        if pack is None:
+            raise RuntimeError('PackRepoGen.run() must be called before commit()')
+        self._write_latest_pack(pack, self._kept_checksum)
+        self._remove_stale_folders()
+        logger.info(f'Packs of "{self.repo_folder.name}" committed, latest={pack.current_version}')
 
     def _write_full_pack(self, pack):
         """
@@ -244,7 +268,7 @@ class PackRepoGen:
         The full pack of an earlier run is kept as it is, see kept_pack: the
         encoding of a full pack is the most expensive step of a run, and the
         bytes of a pack only depend on the version. latest.pack is built from
-        the checksum of the kept file, see run().
+        the checksum of the kept file, see commit().
 
         Args:
             pack (PackFull): Pack of the latest version
@@ -297,9 +321,9 @@ class PackRepoGen:
         """
         Write latest.pack: the latest version and its index pack checksum.
 
-        The file is written on every run: it is the small file the clients
+        The file is written on every commit: it is the small file the clients
         read the published version from. A run that kept the full pack of an
-        earlier run passes the checksum of the kept file, see run().
+        earlier run passes the checksum of the kept file, see commit().
 
         Args:
             pack (PackFull): Pack of the latest version

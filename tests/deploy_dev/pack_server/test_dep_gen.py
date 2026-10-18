@@ -7,9 +7,8 @@ the wheels of the pinned versions are served by an in-memory PyPI mirror
 come from the memory, no socket is bound. The channel is verified with the
 decode side of the library: the full pack of the target decodes to the install
 tree of its wheel, the update packs are applied to an unpacked old version
-with UpdateJob and compared against the tree of the new version, and
-latest.pack carries the version and the index pack checksum of the full pack.
-Only the target version has a full pack, see the module docstring of dep_gen.
+with UpdateJob and compared against the tree of the new version. Only the
+target version has a full pack, see the module docstring of dep_gen.
 """
 import os
 
@@ -19,7 +18,6 @@ from alasio.deploy.pack.decode_base import PackDecodeBase
 from alasio.deploy.pack.job_unpack import UnpackJob
 from alasio.deploy.pack.job_update import UpdateJob
 from alasio.deploy.pack.packdep import PACKDEP_PATH, decode_packdep
-from alasio.deploy.pack.server_file import LatestInfo
 from alasio.deploy_dev.pack import pack_wheel
 from alasio.deploy_dev.pack._pack_cache import PackCache
 from alasio.deploy_dev.pack.encode_packdep import encode_packdep
@@ -283,6 +281,19 @@ def pack_file(run_dir, *parts):
     return join_path(run_dir, DEP_FOLDER, *parts)
 
 
+def run_commit(repo, config, client):
+    """
+    Run and commit a DepGen, the normal flow after the repo is published.
+
+    Returns:
+        DepGen: The generator that ran
+    """
+    gen = DepGen(repo, config, client=client)
+    gen.run()
+    gen.commit()
+    return gen
+
+
 def read_tree(root):
     """
     Read a folder of the test as {relative path: content}.
@@ -448,8 +459,9 @@ class TestRun:
             assert decoder.current_version == '0.28.1'
             assert decoder.old_version == old
 
-        # the channel is exactly the latest info, the full pack of the target
-        # and the update packs: the versions of the window have no full pack
+        # the channel is exactly the full pack of the target and the update
+        # packs: the versions of the window have no full pack, and the per
+        # dependency latest.pack is no longer written
         assert sorted(
             os.path.relpath(path, join_path(run_dir, DEP_FOLDER)).replace(os.sep, '/')
             for path in iter_files(join_path(run_dir, DEP_FOLDER), recursive=True)
@@ -457,20 +469,14 @@ class TestRun:
             '0.28.1/full.pack',
             '0.28.1/update_0.27.7.pack',
             '0.28.1/update_0.27.8.pack',
-            'latest.pack',
         ]
         assert not pack_file(run_dir, '0.27.7').exists()
         assert not pack_file(run_dir, '0.27.8').exists()
+        assert not pack_file(run_dir, 'latest.pack').exists()
 
-        # latest.pack: the target version and the checksum of its full pack
-        data = file_read_bytes(pack_file(run_dir, 'latest.pack'))
-        info = LatestInfo.parse(data)
         full = PackDecodeBase(file_read_bytes(pack_file(run_dir, '0.28.1', 'full.pack')))
-        assert info.version == '0.28.1'
-        assert info.checksum == full.index_checksum
-        assert data == b'0.28.1' + bytes(full.extract_index_pack())[-20:]
 
-        # the packdep payload carries the published target snapshot
+        # the packdep payload carries the generated target snapshot
         assert payload is not None
         entries = decode_packdep(payload)
         assert list(entries) == ['httpx']
@@ -483,7 +489,13 @@ class TestRun:
         assert capture.fd.any_contains(
             '[1/1] Building dependency packs of "httpx": 3 versions, target=0.28.1')
         assert capture.fd.any_contains('Writing update pack: 0.27.7 -> 0.28.1')
-        assert capture.fd.any_contains('Writing latest info: version=0.28.1')
+        assert not capture.fd.any_contains('Writing latest info')
+
+    def test_commit_requires_run(self, fs, run_dir, mirror):
+        """commit() before run() cannot clean a channel that was not generated."""
+        gen = DepGen(make_repo(REQUIREMENTS), make_config(mirror.base), client=mirror.client)
+        with pytest.raises(RuntimeError, match='run\\(\\) must be called'):
+            gen.commit()
 
     @pytest.mark.trio
     async def test_full_pack_is_the_install_tree(self, fs, run_dir, mirror):
@@ -530,27 +542,15 @@ class TestRun:
         assert not os.path.exists(f'{site}/httpx/version-0.27.8.txt')
         assert file_read_bytes(f'{site}/.pack/httpx/index.pack') == new.index_pack
 
-    def test_packdep_does_not_need_latest_pack(self, fs, run_dir, mirror):
-        """The payload is built from the full packs, the per dependency latest.pack is not read."""
+    def test_no_per_dependency_latest_pack(self, fs, run_dir, mirror):
+        """Neither run() nor commit() writes a per dependency latest.pack."""
         register_wheels(mirror)
         repo = make_repo(REQUIREMENTS)
-        config = make_config(mirror.base)
-        first = DepGen(repo, config, client=mirror.client)
-        first.run()
-        first_published = dict(first.published)
-        assert first_published
-        # the legacy marker is removed: a run over the kept channel still
-        # produces the same packdep from the full pack
-        os.remove(pack_file(run_dir, 'latest.pack'))
-
-        gen = DepGen(repo, config, client=mirror.client)
+        gen = DepGen(repo, make_config(mirror.base), client=mirror.client)
         assert gen.run() is None
-        assert gen.published == first_published
-        assert gen.published == {
-            'httpx': ('0.28.1', bytes(PackDecodeBase(
-                file_read_bytes(pack_file(run_dir, '0.28.1', 'full.pack'))
-            ).extract_index_pack())[-20:]),
-        }
+        assert not pack_file(run_dir, 'latest.pack').exists()
+        gen.commit()
+        assert not pack_file(run_dir, 'latest.pack').exists()
 
     def test_packdep_is_carried_by_the_repo_pack(self, fs, run_dir, mirror):
         """The payload of DepGen is a generated file of the repo version."""
@@ -676,9 +676,9 @@ class TestRun:
             run_dir, REPO_FOLDER, 'packdep', 'httpx', '0.28.1', 'full.pack').isfile()
         assert join_path(
             run_dir, REPO_FOLDER, 'packdep', 'demo', '1.0', 'full.pack').isfile()
-        assert pack_file(run_dir, 'latest.pack').isfile()
-        assert join_path(
-            run_dir, REPO_FOLDER, 'packdep', 'demo', 'latest.pack').isfile()
+        assert not pack_file(run_dir, 'latest.pack').exists()
+        assert not join_path(
+            run_dir, REPO_FOLDER, 'packdep', 'demo', 'latest.pack').exists()
 
 
 class TestExistingPacks:
@@ -712,19 +712,6 @@ class TestExistingPacks:
         # index data files and the wheels are used as they are
         assert mirror.requests == requests
         assert read_tree(join_path(run_dir, REPO_FOLDER)) == tree
-
-    def test_latest_pack_is_written_again(self, fs, run_dir, mirror):
-        """latest.pack is written on every run, from the checksum of the kept full pack."""
-        register_wheels(mirror)
-        repo = make_repo(REQUIREMENTS)
-        DepGen(repo, make_config(mirror.base), client=mirror.client).run()
-        latest = pack_file(run_dir, 'latest.pack')
-        data = file_read_bytes(latest)
-        os.remove(latest)
-
-        DepGen(repo, make_config(mirror.base), client=mirror.client).run()
-
-        assert file_read_bytes(latest) == data
 
     def test_missing_pack_is_built_again(self, fs, run_dir, mirror, monkeypatch):
         """Only the pack that is missing is built again."""
@@ -768,10 +755,7 @@ class TestExistingPacks:
         # the packs are written again, byte for byte the packs of the version
         for parts in names:
             assert file_read_bytes(pack_file(run_dir, *parts)) == original[parts]
-        # latest.pack is built from the full pack this run wrote
-        info = LatestInfo.parse(file_read_bytes(pack_file(run_dir, 'latest.pack')))
-        full = PackDecodeBase(file_read_bytes(pack_file(run_dir, '0.28.1', 'full.pack')))
-        assert info.checksum == full.index_checksum
+        assert not pack_file(run_dir, 'latest.pack').exists()
 
     def test_pack_that_is_not_a_pack_is_written_again(self, fs, run_dir, mirror):
         """A kept file that cannot be read as a pack is overwritten, the run goes on."""
@@ -827,7 +811,7 @@ class TestCleanup:
             contents=b'stale')
 
         with logger.mock_capture_writer() as capture:
-            DepGen(make_repo(REQUIREMENTS), make_config(mirror.base), client=mirror.client).run()
+            run_commit(make_repo(REQUIREMENTS), make_config(mirror.base), mirror.client)
 
         assert capture.fd.any_contains('Removing stale wheel folder')
         assert not join_path(run_dir, REPO_FOLDER, 'wheel', 'httpx', '0.26.0').exists()
@@ -851,17 +835,26 @@ class TestCleanup:
             run_dir, REPO_FOLDER, 'packdep', 'other', '1.0', 'full.pack'), contents=b'stale')
 
         with logger.mock_capture_writer() as capture:
-            DepGen(make_repo(REQUIREMENTS), make_config(mirror.base), client=mirror.client).run()
+            gen = DepGen(
+                make_repo(REQUIREMENTS), make_config(mirror.base), client=mirror.client)
+            gen.run()
+        # run() only generates: the old packs stay until commit()
+        assert pack_file(run_dir, '0.26.0', 'full.pack').isfile()
+        assert join_path(run_dir, REPO_FOLDER, 'packdep', 'other').isdir()
+        assert not capture.fd.any_contains('Removing stale pack folder')
+
+        with logger.mock_capture_writer() as capture:
+            gen.commit()
 
         assert capture.fd.any_contains('Removing stale pack folder')
         assert capture.fd.any_contains('Removing stale dependency folder')
         assert not pack_file(run_dir, '0.26.0').exists()
         assert not pack_file(run_dir, '0.27.8').exists()
         assert not join_path(run_dir, REPO_FOLDER, 'packdep', 'other').exists()
-        # the channel of the dependency is kept: latest.pack, the full pack of
-        # the target and its update packs
+        # the channel of the dependency is kept: the full pack of the target
+        # and its update packs
         assert pack_file(run_dir, '0.28.1', 'full.pack').isfile()
-        assert pack_file(run_dir, 'latest.pack').isfile()
+        assert not pack_file(run_dir, 'latest.pack').exists()
 
     def test_stale_update_packs_removed(self, fs, run_dir, mirror):
         """An update pack of another target folder, or of a version out of the window, is removed."""
@@ -874,7 +867,7 @@ class TestCleanup:
         fs.create_file(pack_file(run_dir, '0.28.1', 'update_0.26.0.pack'), contents=b'stale')
 
         with logger.mock_capture_writer() as capture:
-            DepGen(repo, make_config(mirror.base), client=mirror.client).run()
+            run_commit(repo, make_config(mirror.base), mirror.client)
 
         assert capture.fd.any_contains('Removing stale update pack')
         assert not pack_file(run_dir, '0.27.8').exists()
@@ -900,14 +893,12 @@ class TestCleanup:
         repo.register_branch('master', 'c4')
         repo.register_head('c4')
 
-        DepGen(repo, make_config(mirror.base), client=mirror.client).run()
+        run_commit(repo, make_config(mirror.base), mirror.client)
 
         # the new target holds the only full pack and an update pack of every
-        # other version, and latest.pack points at it
+        # other version
         for old in ('0.27.7', '0.27.8', '0.28.1'):
             assert pack_file(run_dir, '0.28.2', f'update_{old}.pack').isfile()
-        assert LatestInfo.parse(
-            file_read_bytes(pack_file(run_dir, 'latest.pack'))).version == '0.28.2'
         # the folder of the old target is gone as a whole: the channel has the
         # folder of the target only
         assert not pack_file(run_dir, '0.28.1').exists()
@@ -923,10 +914,9 @@ class TestCleanup:
         fs.create_file(pack_file(run_dir, '0.26.0', 'full.pack'), contents=b'stale')
 
         with logger.mock_capture_writer() as capture:
-            DepGen(make_repo(REQUIREMENTS), make_config(mirror.base), client=mirror.client).run()
+            run_commit(make_repo(REQUIREMENTS), make_config(mirror.base), mirror.client)
 
         assert capture.fd.any_contains('Failed to remove stale pack folder')
         assert pack_file(run_dir, '0.26.0', 'full.pack').isfile()
         # the channel is complete, the stale folder is left to the next run
         assert pack_file(run_dir, '0.28.1', 'full.pack').isfile()
-        assert pack_file(run_dir, 'latest.pack').isfile()

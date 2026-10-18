@@ -91,7 +91,9 @@ async def prepare_generated(fs, project, omit_update=False):
     repo = build_repo()
     full_v1 = b''.join(PackFull(repo, commit=V1).iter_pack_data())
     await project.install('WorkerTestScheduler', pack=full_v1)
-    PackRepoGen(repo, CONFIG).run()
+    gen = PackRepoGen(repo, CONFIG)
+    gen.run()
+    gen.commit()
     if omit_update:
         project.root.joinpath(CHANNEL_FOLDER).joinpath(V2).joinpath(
             f'update_{V1}.pack').file_remove()

@@ -159,6 +159,9 @@ def fake_gen(calls, fail=()):
                 raise RuntimeError(f'fake failure of the packs of "{name}"')
             calls.append(('gen', self.config, self.repo, self.dep_gen))
 
+        def commit(self):
+            calls.append(('gen-commit', self.config, self.repo, self.dep_gen))
+
     return FakeGen
 
 
@@ -187,6 +190,9 @@ def fake_dep_gen(calls, fail=()):
             if name in fail:
                 raise RuntimeError(f'fake failure of the dependency packs of "{name}"')
             calls.append(('dep', self.config, self.repo, self))
+
+        def commit(self):
+            calls.append(('dep-commit', self.config, self.repo, self))
 
     return FakeDepGen
 
@@ -234,6 +240,8 @@ class TestRunConfig:
             ('repo', 'AzurLaneAutoScript', 'repo AzurLaneAutoScript'),
             ('dep', 'AzurLaneAutoScript', 'repo AzurLaneAutoScript'),
             ('gen', 'AzurLaneAutoScript', 'repo AzurLaneAutoScript'),
+            ('gen-commit', 'AzurLaneAutoScript', 'repo AzurLaneAutoScript'),
+            ('dep-commit', 'AzurLaneAutoScript', 'repo AzurLaneAutoScript'),
         ]
         # the generators get the repo object of PackRepo.run and the config
         # the reader returned, not a copy of it; the DepGen instance of the
@@ -243,6 +251,8 @@ class TestRunConfig:
         assert calls[2][2] == calls[0][2]
         assert calls[2][1] is calls[0][1]
         assert calls[2][3] is calls[1][3]
+        assert calls[3][3] is calls[1][3]
+        assert calls[4][3] is calls[1][3]
 
     def test_dependency_failure_skips_the_tree(self, fs, run_dir, monkeypatch):
         """A failed dependency generation stops the config before the tree is published."""
@@ -283,10 +293,13 @@ class TestPackServerRun:
             main.PackServer().run()
 
         assert [step for step, *_ in calls] == [
-            'repo', 'dep', 'gen', 'repo', 'dep', 'gen']
+            'repo', 'dep', 'gen', 'gen-commit', 'dep-commit',
+            'repo', 'dep', 'gen', 'gen-commit', 'dep-commit']
         assert [config.Repo.Repo for _, config, *_ in calls] == [
             'AzurLaneAutoScript', 'AzurLaneAutoScript', 'AzurLaneAutoScript',
-            'StarRailCopilot', 'StarRailCopilot', 'StarRailCopilot']
+            'AzurLaneAutoScript', 'AzurLaneAutoScript',
+            'StarRailCopilot', 'StarRailCopilot', 'StarRailCopilot',
+            'StarRailCopilot', 'StarRailCopilot']
         assert capture.fd.any_contains('Ran 2 configs: 2 done, 0 failed')
 
     def test_failed_config_does_not_stop_the_rest(self, fs, run_dir, monkeypatch):
@@ -311,6 +324,7 @@ class TestPackServerRun:
         # of the third config is fetched, then its repo packs fail
         assert [(step, config.Repo.Repo) for step, config, *_ in calls] == [
             ('repo', 'Alasio'), ('dep', 'Alasio'), ('gen', 'Alasio'),
+            ('gen-commit', 'Alasio'), ('dep-commit', 'Alasio'),
             ('repo', 'StarRailCopilot'), ('dep', 'StarRailCopilot')]
         assert capture.fd.any_contains(f'Config "{FILE}" failed')
         assert capture.fd.any_contains(f'Config "{OTHER}" failed')
@@ -345,7 +359,8 @@ class TestPackServerRun:
             main.PackServer().run()
         assert not capture.fd.any_contains('Write config')
         assert [step for step, *_ in calls] == [
-            'repo', 'dep', 'gen', 'repo', 'dep', 'gen']
+            'repo', 'dep', 'gen', 'gen-commit', 'dep-commit',
+            'repo', 'dep', 'gen', 'gen-commit', 'dep-commit']
 
     def test_run_dir_is_a_mod(self, fs, run_dir, monkeypatch):
         """The run refuses a mod directory, like the modules it chains."""
@@ -370,7 +385,7 @@ class TestMain:
         monkeypatch.setattr(sys, 'argv', ['main', '--root', str(run_dir)])
         main.main()
         assert env.PROJECT_ROOT == str(run_dir)
-        assert [step for step, *_ in calls] == ['repo', 'dep', 'gen']
+        assert [step for step, *_ in calls] == ['repo', 'dep', 'gen', 'gen-commit', 'dep-commit']
 
     def test_main_bad_args(self, fs, run_dir, monkeypatch):
         """An argument that is not known raises SystemExit."""

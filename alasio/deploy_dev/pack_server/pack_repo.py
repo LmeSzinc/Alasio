@@ -185,7 +185,9 @@ class PackRepo:
 
     Usage:
         repo = PackRepo(config).run()
-        PackRepoGen(repo, config).run()
+        gen = PackRepoGen(repo, config)
+        gen.run()
+        gen.commit()
     """
 
     def __init__(self, config):
