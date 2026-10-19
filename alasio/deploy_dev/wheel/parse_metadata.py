@@ -8,6 +8,7 @@ from alasio.deploy_dev.get_version import get_version_from_source
 from alasio.deploy_dev.wheel.repo_path import RepoPath
 from alasio.ext.cache import cached_property
 from alasio.ext.deep import deep_get
+from alasio.ext.file.tomlfile import toml_loads
 
 # pyproject_metadata calls the module level getters while from_pyproject()
 # runs. The patch is global to the module, so metadata builds are serialized.
@@ -73,15 +74,7 @@ class RepoStandardMetadata:
         except FileNotFoundError:
             raise ValueError(f'Missing pyproject.toml at commit {self.commit}') from None
 
-        try:
-            import tomllib
-        except ImportError:
-            try:
-                import tomli as tomllib
-            except ImportError:
-                raise ImportError('Dependency `tomli` is required on Python < 3.11') from None
-
-        return tomllib.loads(content.decode('utf-8'))
+        return toml_loads(content)
 
     @cached_property
     def canonical_name(self):

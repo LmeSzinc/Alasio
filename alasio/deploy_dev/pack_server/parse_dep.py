@@ -47,35 +47,7 @@ from alasio.deploy.simple_pip.parse_req import Requirements, build_pins, parse_r
 # e.g. fetch_wheel and dep_gen. The release side uses packaging; the client
 # keeps its own normalize_name in alasio.deploy.simple_pip.pip_list.
 from alasio.ext.cache import cached_property
-
-
-def _load_toml(content):
-    """
-    Load a TOML document from its content.
-
-    tomllib is the standard library module of Python 3.11+, tomli is the
-    backport with the same API for the older versions, like the import of
-    build_wheel.
-
-    Args:
-        content (str): Content of the document
-
-    Returns:
-        dict: Parsed document
-
-    Raises:
-        ImportError: If tomllib is not available and tomli is not installed
-        ValueError: If the content is not a TOML document, TOMLDecodeError is
-            a ValueError
-    """
-    try:
-        import tomllib
-    except ImportError:
-        try:
-            import tomli as tomllib
-        except ImportError:
-            raise ImportError('Dependency `tomli` is required on Python < 3.11') from None
-    return tomllib.loads(content)
+from alasio.ext.file.tomlfile import toml_loads
 
 
 def _parse_requirement_list(items):
@@ -242,7 +214,7 @@ class PyprojectParser:
                 tomli is not installed
             ValueError: If the content is not a TOML document
         """
-        return _load_toml(self.content)
+        return toml_loads(self.content)
 
     @cached_property
     def dict_deps(self):
