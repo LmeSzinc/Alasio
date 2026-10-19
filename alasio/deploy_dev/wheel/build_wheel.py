@@ -1,4 +1,3 @@
-import copy
 import io
 import tarfile
 import time
@@ -6,8 +5,8 @@ import zipfile
 
 from alasio.backport import removesuffix
 from alasio.deploy.simple_pip.whl_record import RecordManager
-from alasio.deploy_dev.get_version import get_version_from_source
 from alasio.deploy_dev.wheel.alasio_wheel import RepoWithStatics
+from alasio.deploy_dev.wheel.parse_metadata import RepoStandardMetadata
 from alasio.ext.cache import cached_property
 from alasio.ext.deep import deep_get
 from alasio.ext.path import PathStr
@@ -54,6 +53,16 @@ class BuildWheel:
         return repo
 
     @cached_property
+    def repo_metadata(self):
+        """
+        Standard metadata parsed from the commit.
+
+        Returns:
+            RepoStandardMetadata:
+        """
+        return RepoStandardMetadata(self.repo, self.folder, commit=self.head)
+
+    @cached_property
     def package_files(self):
         """
         Files of the library tree in the commit.
@@ -71,7 +80,7 @@ class BuildWheel:
         Returns:
             dict[str, FileEntry]: {filepath: FileEntry}
         """
-        return self.repo.list_repo_files(self.head)
+        return self.repo_metadata.repo_files
 
     @cached_property
     def all_files(self):
@@ -90,21 +99,6 @@ class BuildWheel:
         out = {k: v for k, v in sorted(out.items())}
         return out
 
-    def _read_repo_file(self, path):
-        """
-        Read a file of the commit being built.
-
-        Args:
-            path (str): Repository relative path, POSIX style
-
-        Returns:
-            bytes | None: File content, None when the commit has no such file
-        """
-        entry = self.repo.get_file(self.head, path)
-        if entry is None:
-            return None
-        return self.repo.cat(entry.sha1).decoded
-
     """
     Wheel files
     """
@@ -114,53 +108,30 @@ class BuildWheel:
         """
         Project table parsed from pyproject.toml of the commit being built.
 
-        The working tree file is never read: the content comes from
-        repo.get_file(self.head, 'pyproject.toml').
-
         Returns:
             dict: Parsed pyproject.toml
         """
-        content = self._read_repo_file('pyproject.toml')
-        if content is None:
-            raise ValueError(f'Missing pyproject.toml at commit {self.head}')
-
-        try:
-            import tomllib
-        except ImportError:
-            try:
-                import tomli as tomllib
-            except ImportError:
-                raise ImportError('Dependency `tomli` is required on Python < 3.11') from None
-
-        return tomllib.loads(content.decode('utf-8'))
+        return self.repo_metadata.project_data
 
     @cached_property
     def metaname(self):
         """
-        Distribution Name
-        根据 PEP 427 规范，在 Wheel 的文件名和目录名中，分发名称中的 连字符 -、下划线 _ 和点 . 都应该被统一替换为 下划线 _。
+        Distribution name used by the wheel file and the dist-info folder.
+
+        Returns:
+            str: Normalized distribution name
         """
-        name = str(deep_get(self.project_data, keys='project.name', default=''))
-        name = name.replace('-', '_').replace('.', '_')
-        if not name:
-            raise ValueError(f'Empty project.name in pyproject.toml at commit {self.head}')
-        return name
+        return self.repo_metadata.metaname
 
     @cached_property
     def version(self):
-        version = deep_get(self.project_data, keys='project.version', default='')
-        if version:
-            return version
+        """
+        Project version.
 
-        # try to get from __init__.py of the commit
-        content = self._read_repo_file(f'{self.folder}/__init__.py')
-        if content is not None:
-            version = get_version_from_source(content.decode('utf-8'))
-            if version:
-                return version
-
-        raise ValueError(
-            f'Empty version in pyproject.toml and {self.folder}/__init__.py at commit {self.head}')
+        Returns:
+            str: Version string
+        """
+        return self.repo_metadata.version
 
     @cached_property
     def data_metadata(self):
@@ -170,67 +141,7 @@ class BuildWheel:
         Returns:
             bytes:
         """
-        from pyproject_metadata import StandardMetadata
-
-        # 解析元数据
-        # 如果你的版本号是动态生成的，可以在这里手动传入 version
-        # StandardMetadata needs project_dir only for file-backed fields
-        # (readme, license). The readme is inlined from the commit, so
-        # pyproject.toml is never read from the working tree.
-        metadata = StandardMetadata.from_pyproject(
-            self._metadata_project_data, project_dir=self.root)
-        metadata.version = self.version
-
-        # 转换为标准的 RFC822 消息格式（即 Wheel 里的 METADATA 内容）
-        return metadata.as_rfc822().as_bytes()
-
-    @cached_property
-    def _metadata_project_data(self):
-        """
-        project_data with the readme file of the commit inlined.
-
-        StandardMetadata reads a readme file from project_dir, which is the
-        working tree, while the wheel is built from the commit. Inlining the
-        content of the commit keeps the metadata on the revision being built.
-
-        Returns:
-            dict: Project data for StandardMetadata
-        """
-        data = copy.deepcopy(self.project_data)
-        project = data.get('project')
-        if not isinstance(project, dict):
-            return data
-
-        readme = project.get('readme')
-        if isinstance(readme, str):
-            filename = readme
-            content_type = None
-        elif isinstance(readme, dict) and readme.get('file'):
-            filename = readme['file']
-            content_type = readme.get('content-type')
-            if not content_type:
-                raise ValueError(f'Missing content-type of readme file: "{filename}"')
-        else:
-            # no readme, or the text is already inline
-            return data
-
-        content = self._read_repo_file(filename)
-        if content is None:
-            raise ValueError(f'Missing readme file at commit {self.head}: "{filename}"')
-
-        if not content_type:
-            if filename.endswith('.md'):
-                content_type = 'text/markdown'
-            elif filename.endswith('.rst'):
-                content_type = 'text/x-rst'
-            else:
-                raise ValueError(f'Cannot infer the content type of readme file: "{filename}"')
-
-        project['readme'] = {
-            'text': content.decode('utf-8'),
-            'content-type': content_type,
-        }
-        return data
+        return self.repo_metadata.data_metadata
 
     @cached_property
     def data_top_level_txt(self):
@@ -276,6 +187,8 @@ class BuildWheel:
         record.add_content(f'{folder}/METADATA', self.data_metadata)
         record.add_content(f'{folder}/WHEEL', self.data_wheel)
         record.add_content(f'{folder}/top_level.txt', self.data_top_level_txt)
+        for path, content in self.repo_metadata.license_files.items():
+            record.add_content(f'{folder}/licenses/{path}', content)
         record.add_content(f'{folder}/RECORD', None)
 
         return record.dump_bytes()
@@ -338,6 +251,9 @@ class BuildWheel:
                 continue
             out[path] = self.repo.cat(entry.sha1).decoded
 
+        # License files are project files and must be in the sdist
+        out.update(self.repo_metadata.license_files)
+
         # Add PKG-INFO to root
         out['PKG-INFO'] = self.data_metadata
 
@@ -393,13 +309,16 @@ class BuildWheel:
 
         def write_all(filename):
             with zipfile.ZipFile(filename, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=9) as zf:
-                # Package files, including the generated pack files
+                # Package files
                 for path, content in self.all_files.items():
                     zf.writestr(path, content)
                 # Metadata files
                 zf.writestr(f'{dist_info}/METADATA', self.data_metadata)
                 zf.writestr(f'{dist_info}/WHEEL', self.data_wheel)
                 zf.writestr(f'{dist_info}/top_level.txt', self.data_top_level_txt)
+                # License files, PEP 639
+                for path, content in self.repo_metadata.license_files.items():
+                    zf.writestr(f'{dist_info}/licenses/{path}', content)
                 zf.writestr(f'{dist_info}/RECORD', self.data_record)
 
         try:
