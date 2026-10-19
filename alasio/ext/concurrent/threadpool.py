@@ -6,7 +6,7 @@ from typing import Callable, Generic, TypeVar, Union
 from typing_extensions import ParamSpec
 
 from alasio.ext.concurrent.cmd import CmdlineResultStr, run_cmd
-from alasio.ext.concurrent.threadpool_wrapper import GatherJobsWrapper, WaitJobsWrapper
+from alasio.ext.concurrent.threadpool_wrapper import BatchJobsWrapper, GatherJobsWrapper, WaitJobsWrapper
 from alasio.logger import logger
 
 ParamP = ParamSpec("ParamP")
@@ -498,6 +498,25 @@ class ThreadPool:
             print(pool.results)
         """
         return GatherJobsWrapper(self)
+
+    def batch_jobs(self, batch: int = 10) -> "BatchJobsWrapper":
+        """
+        Submit jobs in batches
+
+        The queued jobs do not run until their total size reaches ``batch``.
+
+        Args:
+            batch (int): Total size of the queued jobs that triggers a submit.
+                Defaults to 10.
+
+        Returns:
+            BatchJobsWrapper:
+
+        Examples:
+            with THREAD_POOL.batch_jobs(batch=10) as pool:
+                pool.submit(...)
+        """
+        return BatchJobsWrapper(self, batch)
 
     def thread_map(self, func, iterables):
         """
