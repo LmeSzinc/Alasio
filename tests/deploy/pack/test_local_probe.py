@@ -166,6 +166,12 @@ SKEW_FILES = {path: random_bytes(30000, 100 + i) for i, path in enumerate(SKEW_B
 SKEW_FILES.update({f'small{i}.txt': f'small content {i}\n'.encode() for i in range(100)})
 SKEW_DECODER = PackDecodeBase(make_pack(SKEW_FILES))
 
+# the last-block pack: ten equal stored blocks plus the small history
+# record. Two of the ten are present, so the ratio bound is crossed on
+# the very last block of the scan and no block is left unchecked
+LAST_FILES = {f'f{i}.bin': random_bytes(1000, 700 + i) for i in range(10)}
+LAST_DECODER = PackDecodeBase(make_pack(LAST_FILES))
+
 
 class TestStoredBlocks:
     """stored_blocks(): the records of one stored block are grouped into
@@ -386,6 +392,28 @@ class TestEarlyStop:
         assert result.missing_blocks == len(GUARD_MISSING)
         assert result.complete is True
         assert result.prefer_full_pack() is False
+
+    def test_stop_on_the_last_block_is_complete(self, fs, monkeypatch):
+        """A decision that becomes certain on the last block skips no
+        block: the accounting is complete, not a lower bound."""
+        for i in (3, 7):
+            fs.create_file(f'{ROOT}/f{i}.bin', contents=LAST_FILES[f'f{i}.bin'])
+        calls = []
+        original = os.stat
+
+        def _counting(path, *args, **kwargs):
+            calls.append(str(path))
+            return original(path, *args, **kwargs)
+        monkeypatch.setattr(os, 'stat', _counting)
+
+        probe = LocalProbe(LAST_DECODER)
+        result = probe.presence(ROOT)
+        # every block was checked, the ratio bound is crossed by the last
+        # one of them
+        assert len(calls) == len(probe.blocks)
+        assert result.present_ratio < PRESENT_RATIO
+        assert result.complete is True
+        assert result.prefer_full_pack() is True
 
 
 class TestPreferFullPack:

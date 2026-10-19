@@ -214,7 +214,8 @@ class LocalProbe:
         Both stops only skip the blocks behind the large ones the
         decision is made of; the returned accounting is flagged partial
         (complete is False) and its counters are lower bounds of the
-        full accounting.
+        full accounting. A decision that only becomes certain on the
+        last block skips nothing: the accounting is complete then.
 
         The caller runs this in a worker thread: one os.stat per record
         path is the io of the estimate, thousands of stats on a large
@@ -245,6 +246,10 @@ class LocalProbe:
                 present_bytes += block.data_size
             else:
                 missing_blocks += 1
+            if remaining <= 0:
+                # the last block was checked: nothing is left to skip, the
+                # accounting is complete whatever the bounds below say
+                continue
             if missing_blocks > REQUEST_BUDGET:
                 # one range request per missing block: over the budget
                 # the full pack is certain, the unchecked blocks cannot
