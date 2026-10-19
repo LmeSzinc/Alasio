@@ -11,6 +11,7 @@ server stubs they monkeypatch are async functions too (the client
 awaits them).
 """
 import os
+import time
 
 import pytest
 
@@ -271,6 +272,97 @@ class TestValidateFiles:
             assert item.tmp == ''
             # 644 records, the rewrite with mode 666 needs no chmod
             assert item.mode is None
+
+    @pytest.mark.trio
+    async def test_parallel_order(self, app_folder, fs):
+        """The worker pool keeps the verdict and the order of the index."""
+        await setup_app(fs)
+        os.remove(env.PROJECT_ROOT / 'backend/__init__.py')
+        with open(env.PROJECT_ROOT / 'backend/main.py', 'wb') as f:
+            f.write(b'wrong')
+        job = ResetJob(WEBSITE_SERVER)
+        # force a pool batch per record on the small fixture tree: the
+        # records are validated by the thread pool, not inline
+        job.VALIDATE_BATCH = 1
+        assert not job.validate_files()
+        # every record is still checked once, in the order of the index
+        # pack, whatever worker it ran on
+        assert [item.info.path for item in job.error] == [
+            path for path in job._index_pack.fileinfo
+            if path in ('backend/__init__.py', 'backend/main.py')
+        ]
+
+    @pytest.mark.trio
+    async def test_parallel_mode_fix(self, app_folder, fs):
+        """A mode mismatch is fixed by a worker of the pool."""
+        await setup_app(fs)
+        target = env.PROJECT_ROOT / 'backend/main.py'
+        # pyfakefs does not apply os.chmod on Windows, recreate the file
+        fs.remove(target)
+        fs.create_file(target, st_mode=0o100755, contents=WEBSITE_FILES['backend/main.py'][0])
+        job = ResetJob(WEBSITE_SERVER)
+        # force a pool batch per record on the small fixture tree: the
+        # record is checked by the thread pool, not inline
+        job.VALIDATE_BATCH = 1
+        await job.tmp_manager_init()
+        assert not job.validate_files()
+        error = job.error[0]
+        assert error.info.path == 'backend/main.py'
+        # the tmp file is written by the worker that checked the record
+        assert error.tmp
+        assert file_read_bytes(error.tmp) == WEBSITE_FILES['backend/main.py'][0]
+
+    @pytest.mark.trio
+    async def test_parallel_shared_content_tmp(self, app_folder, fs):
+        """Records sharing one stored block get a tmp file of their own."""
+        await setup_app(fs)
+        # config.py, settings.py and utils.py share one stored block; all
+        # three are written with CRLF against eol=0 records, so the workers
+        # of the three records apply for a tmp file of the same content at
+        # the same time
+        same = ['backend/config.py', 'backend/settings.py', 'backend/utils.py']
+        for path in same:
+            with open(env.PROJECT_ROOT / path, 'wb') as f:
+                f.write(WEBSITE_FILES[path][0].replace(b'\n', b'\r\n'))
+        job = ResetJob(WEBSITE_SERVER)
+        job.VALIDATE_BATCH = 1
+        await job.tmp_manager_init()
+        assert not job.validate_files()
+        assert [item.info.path for item in job.error] == same
+        # every record owns its tmp file and the converted content in it,
+        # no two records share the name of a tmp file
+        tmps = [item.tmp for item in job.error]
+        assert len(set(tmps)) == len(same)
+        for item in job.error:
+            assert file_read_bytes(item.tmp) == WEBSITE_FILES[item.info.path][0]
+
+    @pytest.mark.trio
+    async def test_parallel_error_waits_the_workers(self, app_folder, fs, monkeypatch):
+        """An error of one worker reaches the caller after every worker
+        finished, no worker keeps writing a tmp file behind the caller."""
+        await setup_app(fs)
+        job = ResetJob(WEBSITE_SERVER)
+        paths = list(job._index_pack.fileinfo)
+        # the first record of the index fails at once, the second one is
+        # still running when the failure is known
+        failing, slow = paths[0], paths[1]
+        original = ResetJob._validate_file
+        done = []
+
+        def _validate(self, path, info):
+            if path == failing:
+                raise PermissionError('locked')
+            if path == slow:
+                time.sleep(0.2)
+            done.append(path)
+            return original(self, path, info)
+        monkeypatch.setattr(ResetJob, '_validate_file', _validate)
+        job.VALIDATE_BATCH = 1
+        with pytest.raises(PermissionError, match='locked'):
+            job.validate_files()
+        # every other record was checked, the slow worker included, before
+        # the error left validate_files()
+        assert sorted(done) == sorted(set(paths) - {failing})
 
     def test_files_without_index_raises(self, app_folder):
         """validate_files() assumes the caller validated the index pack."""

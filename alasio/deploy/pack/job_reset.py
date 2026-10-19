@@ -4,6 +4,7 @@ from alasio.deploy.pack.decode_base import PackDecodeBase, PackDecodeError
 from alasio.deploy.pack.job_base import JobBase, PendingFile
 from alasio.deploy.pack.pack_model import IdxInfo
 from alasio.ext.cache import InstanceCacheOperation, cached_property
+from alasio.ext.concurrent.threadpool import THREAD_POOL
 from alasio.ext.path.atomic import atomic_read_bytes, atomic_write, file_write
 from alasio.logger import logger
 
@@ -35,7 +36,8 @@ class ResetJob(JobBase):
     instead of replacing the local index directly, replace_index()
     commits it after the repaired files, so the real files are
     touched only once. Then validate_files() checks every file
-    recorded in the index, failed files are downloaded to tmp files
+    recorded in the index (the records are checked in parallel by the
+    thread pool, see VALIDATE_BATCH), failed files are downloaded to tmp files
     by download() and replaced to the real files by replace(). Files
     that cannot be downloaded or fail the size + sha1 check stay in
     self.error with an empty tmp, this is an unsolvable problem per
@@ -57,6 +59,13 @@ class ResetJob(JobBase):
 
     # marker of a validation task in the job file
     MARK = b'REST\x00'
+
+    # Bytes of the records queued before the next batch of validation jobs
+    # is sent to the thread pool, see validate_files(). Reading and hashing
+    # a file is cpu and io bound, so the records of a pack are spread over
+    # the workers of the pool; the batch keeps the dispatch over the many
+    # small records of a pack to about one round per 1MB of them.
+    VALIDATE_BATCH = 1024 * 1024
 
     def __init__(self, server, root=None, name=''):
         """
@@ -294,50 +303,125 @@ class ResetJob(JobBase):
         files are collected in self.error with an empty tmp, the caller
         repairs them.
 
+        The records are checked in parallel: every record is one job of
+        the thread pool, queued in index order and sent to the pool once
+        the queued records reach VALIDATE_BATCH bytes (see
+        batch_jobs()). The tasks share the tmp manager of the run, which
+        is thread safe (see TmpManager), and change no state of the job:
+        each task returns the change its record needs and the results
+        are collected here in submission order, so self.error keeps the
+        order of the index pack whatever worker finished first.
+
         Returns:
             bool: True if every file matches its record, False
                 otherwise
         """
         self.error = []
-        for path, info in self._index_pack.fileinfo.items():
-            current = self._read_current(self.root.joinpath(path))
-            if info.edit == 2:
-                # deleted marker, the file should not exist
-                if current.exist:
-                    # the file should be removed by the caller
-                    self.error.append(PendingFile(info=info, tmp=''))
-                continue
-            result = self._matches(info, current)
-            if result.match and result.mode_matched:
-                # the content and the mode are verified, the record needs
-                # no tmp file and applies for no tmp name
-                continue
-            if result.match:
-                # only the mode differs, the content is verified:
-                # write the current content to a tmp file, download()
-                # moves it to pending without a download, replace()
-                # chmod-ed the target to the record mode
-                tmp = self.tmp_file(path, info)
-                if not self._matches(info, self._read_current(tmp)).match:
-                    file_write(tmp, current.data)
-                self.register_tmp(path, info, tmp)
-                self.error.append(PendingFile(info=info, tmp=tmp, mode=info.mode_decoded))
-                continue
-            if result.match_data:
-                # only the EOL differs, write the converted content
-                # to a tmp file, download() moves it to pending
-                tmp = self.tmp_file(path, info)
-                file_write(tmp, result.match_data)
-                self.register_tmp(path, info, tmp)
-                self.error.append(PendingFile(
-                    info=info, tmp=tmp, mode=info.mode_decoded if info.mode == 1 else None))
-                continue
-            # missing or wrong size + sha1, the file is rewritten
-            # by python with the default mode 666; download() applies for
-            # the tmp file of the record and writes the content there
-            self.error.append(PendingFile(
-                info=info, tmp='', mode=info.mode_decoded if info.mode == 1 else None))
+        fileinfo = self._index_pack.fileinfo
+        if not fileinfo:
+            return True
+        batch = THREAD_POOL.batch_jobs(self.VALIDATE_BATCH)
+        for path, info in fileinfo.items():
+            # size is the work a record costs to check (its content is read
+            # and hashed), the queued records are sent to the pool every
+            # VALIDATE_BATCH bytes; an empty record costs at least 100
+            batch.submit(self._validate_file, path, info, size=max(info.size, 100))
+        self.error = self._wait_validation(batch)
         return not self.error
+
+    def _validate_file(self, path, info):
+        """
+        Validate one record against the working tree, the task of
+        validate_files() run by the thread pool.
+
+        The task reads the target of its own record and writes the tmp
+        file of its own record only: the tmp file names come from the
+        thread safe tmp manager of the run (see TmpManager), so the
+        workers of a batch never write the same file, and no state of
+        the job is touched (the result is collected by the caller).
+
+        Args:
+            path (str): Path of the record, local namespace of the target
+            info (IdxInfo): Record to validate
+
+        Returns:
+            PendingFile: The change the record needs, None when the file
+                already matches the record
+        """
+        current = self._read_current(self.root.joinpath(path))
+        if info.edit == 2:
+            # deleted marker, the file should not exist
+            if current.exist:
+                # the file should be removed by the caller
+                return PendingFile(info=info, tmp='')
+            return None
+        result = self._matches(info, current)
+        if result.match and result.mode_matched:
+            # the content and the mode are verified, the record needs
+            # no tmp file and applies for no tmp name
+            return None
+        if result.match:
+            # only the mode differs, the content is verified:
+            # write the current content to a tmp file, download()
+            # moves it to pending without a download, replace()
+            # chmod-ed the target to the record mode
+            tmp = self.tmp_file(path, info)
+            if not self._matches(info, self._read_current(tmp)).match:
+                file_write(tmp, current.data)
+            self.register_tmp(path, info, tmp)
+            return PendingFile(info=info, tmp=tmp, mode=info.mode_decoded)
+        if result.match_data:
+            # only the EOL differs, write the converted content
+            # to a tmp file, download() moves it to pending
+            tmp = self.tmp_file(path, info)
+            file_write(tmp, result.match_data)
+            self.register_tmp(path, info, tmp)
+            return PendingFile(
+                info=info, tmp=tmp, mode=info.mode_decoded if info.mode == 1 else None)
+        # missing or wrong size + sha1, the file is rewritten
+        # by python with the default mode 666; download() applies for
+        # the tmp file of the record and writes the content there
+        return PendingFile(
+            info=info, tmp='', mode=info.mode_decoded if info.mode == 1 else None)
+
+    @staticmethod
+    def _wait_validation(batch):
+        """
+        Wait for the validation jobs of a batch and collect their results.
+
+        The results are read in the order the jobs were submitted, which
+        is the order of the index pack, so the error list keeps the order
+        of the pack whatever worker finished first. Every job is waited
+        for, even after one of them failed: no worker may still be
+        writing a tmp file when the caller gets the error.
+
+        Args:
+            batch (BatchJobsWrapper): Batch of validation jobs of
+                validate_files()
+
+        Returns:
+            list[PendingFile]: The changes the records need, in index
+                order
+
+        Raises:
+            BaseException: The error of the first failed job, raised
+                after every job of the batch finished
+        """
+        batch.flush()
+        results = []
+        error = None
+        for job in batch.jobs:
+            try:
+                pending = job.get()
+            except BaseException as e:
+                if error is None:
+                    error = e
+                continue
+            if pending is not None:
+                results.append(pending)
+        if error is not None:
+            raise error
+        return results
 
     async def download_index(self):
         """
