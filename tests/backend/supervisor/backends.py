@@ -112,7 +112,9 @@ class TestSupervisor(Supervisor):
             TestSupervisor._crash_after_success_backend()
         elif backend_type == "prefs":
             # 接收 stdin 转发来的 set_lang/set_theme 命令并持久化到 deploy.yaml
-            TestSupervisor._prefs_backend()
+            # args[1] is the disposable project root of the test, if given
+            root = args[1] if len(args) > 1 else ''
+            TestSupervisor._prefs_backend(root)
         else:
             print(f"[Backend] Unknown backend type: {backend_type}")
             sys.exit(1)
@@ -367,10 +369,14 @@ class TestSupervisor(Supervisor):
         sys.exit(1)
 
     @staticmethod
-    def _prefs_backend():
+    def _prefs_backend(root=''):
         """
         模拟真实后端：在 trio 环境中监听 pipe，处理 stdin 转发的
         set_lang/set_theme 命令（持久化到 config/deploy.yaml）
+
+        Args:
+            root (str): Project root to write the config under, empty for the
+                repository root
         """
         import builtins
         import os
@@ -386,8 +392,11 @@ class TestSupervisor(Supervisor):
         from alasio.logger import logger
         logger.mute(fd=True)
 
-        # Ensure the project root is resolved against the repository layout
-        set_project_root(PathStr.new(os.path.dirname(__file__)).uppath(3))
+        if root:
+            set_project_root(root)
+        else:
+            # Ensure the project root is resolved against the repository layout
+            set_project_root(PathStr.new(os.path.dirname(__file__)).uppath(3))
 
         print("[Backend] Prefs backend started, waiting for commands...")
         TestSupervisor._notify_startup_success()

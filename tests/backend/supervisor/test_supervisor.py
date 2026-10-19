@@ -1,33 +1,55 @@
 import os
 import re
+import shutil
 import time
+import uuid
 
 import psutil
+import pytest
 import yaml
 
 from alasio.ext import env
 from alasio.testing.managed_process import ManagedProcess
 
-# Absolute path of the real config/deploy.yaml. The stdin contract tests
-# exercise the full chain (stdin -> supervisor -> pipe -> backend ->
-# deploy.yaml) against the real config file and restore the original
-# values afterwards, so the file keeps its comments (the backend writes it
-# through YamlConfig, which preserves comments).
-DEPLOY_YAML = env.ALASIO_ROOT.joinpath('config/deploy.yaml')
+# Initial config of the prefs tests. The prefs backend is a spawned process,
+# so the in-memory fake filesystem of the test process can't intercept its
+# writes; each test gets a disposable project root under temp/ instead of
+# touching the repository config/deploy.yaml.
+DEPLOY_TEMPLATE = env.ALASIO_ROOT.joinpath('config/deploy.template.yaml')
 
 
-def create_supervisor_process(backend_type: str) -> ManagedProcess:
+@pytest.fixture
+def prefs_root():
+    """
+    Create a disposable project root for the prefs backend
+
+    The template is copied as config/deploy.yaml, so the backend writes a
+    realistic config with comments and every test starts from the defaults.
+
+    Yields:
+        PathStr: Project root of the test
+    """
+    root = env.ALASIO_ROOT.joinpath('temp').joinpath(f'supervisor_prefs_{os.getpid()}_{uuid.uuid4().hex}')
+    config_dir = root.joinpath('config')
+    config_dir.makedirs()
+    shutil.copyfile(DEPLOY_TEMPLATE, config_dir.joinpath('deploy.yaml'))
+    yield root
+    shutil.rmtree(root, ignore_errors=True)
+
+
+def create_supervisor_process(backend_type: str, *args: str) -> ManagedProcess:
     """
     便捷函数：创建supervisor进程
 
     Args:
         backend_type: 后端类型 (normal, immediate_error, etc.)
+        *args: 传给 backends.py 的额外参数（prefs 后端使用临时项目根）
 
     Returns:
         ManagedProcess实例
     """
     script_path = os.path.join(os.path.dirname(__file__), "backends.py")
-    return ManagedProcess(script_path, backend_type)
+    return ManagedProcess(script_path, backend_type, *args)
 
 
 class TestSupervisor:
@@ -331,11 +353,26 @@ class TestSupervisor:
 class TestStdinPrefsCommands:
     """
     stdin 契约端到端：set_lang/set_theme 经 supervisor 转发到后端并
-    幂等持久化到 config/deploy.yaml
+    幂等持久化到 deploy.yaml
+
+    The prefs backend runs in a spawned process, so the in-memory fake
+    filesystem of the test process can't intercept its writes. Each test
+    uses its own disposable project root (see prefs_root) instead of the
+    repository config/deploy.yaml.
     """
 
-    @staticmethod
-    def _read_webapp():
+    @pytest.fixture(autouse=True)
+    def prefs_config(self, prefs_root):
+        """
+        Point the helpers at the disposable deploy.yaml of this test
+
+        Args:
+            prefs_root (PathStr): Project root created by the prefs_root fixture
+        """
+        self.prefs_root = prefs_root
+        self.deploy_yaml = prefs_root.joinpath('config/deploy.yaml')
+
+    def _read_webapp(self):
         """
         Read Webapp.Lang / Webapp.Theme / Webapp.DpiScaling from deploy.yaml
 
@@ -349,15 +386,14 @@ class TestStdinPrefsCommands:
         from alasio.ext.path.atomic import atomic_read_text
 
         try:
-            text = atomic_read_text(DEPLOY_YAML)
+            text = atomic_read_text(self.deploy_yaml)
         except (FileNotFoundError, UnicodeDecodeError, PermissionError):
             text = ''
         data = yaml.safe_load(text) or {}
         webapp = data.get('Webapp', {}) or {}
         return webapp.get('Lang', 'system'), webapp.get('Theme', 'system'), webapp.get('DpiScaling', True)
 
-    @staticmethod
-    def _wait_for_lang(expected, timeout=10):
+    def _wait_for_lang(self, expected, timeout=10):
         """
         Wait until Webapp.Lang equals expected
 
@@ -367,14 +403,13 @@ class TestStdinPrefsCommands:
         """
         deadline = time.time() + timeout
         while time.time() < deadline:
-            lang, _, _ = TestStdinPrefsCommands._read_webapp()
+            lang, _, _ = self._read_webapp()
             if lang == expected:
                 return
             time.sleep(0.05)
         raise AssertionError(f'timeout waiting for Webapp.Lang == {expected}')
 
-    @staticmethod
-    def _wait_for_dpi_scaling(expected, timeout=10):
+    def _wait_for_dpi_scaling(self, expected, timeout=10):
         """
         Wait until Webapp.DpiScaling equals expected
 
@@ -384,14 +419,13 @@ class TestStdinPrefsCommands:
         """
         deadline = time.time() + timeout
         while time.time() < deadline:
-            _, _, dpi_scaling = TestStdinPrefsCommands._read_webapp()
+            _, _, dpi_scaling = self._read_webapp()
             if dpi_scaling == expected:
                 return
             time.sleep(0.05)
         raise AssertionError(f'timeout waiting for Webapp.DpiScaling == {expected}')
 
-    @staticmethod
-    def _wait_for_theme(expected, timeout=10):
+    def _wait_for_theme(self, expected, timeout=10):
         """
         Wait until Webapp.Theme equals expected
 
@@ -401,163 +435,125 @@ class TestStdinPrefsCommands:
         """
         deadline = time.time() + timeout
         while time.time() < deadline:
-            _, theme, _ = TestStdinPrefsCommands._read_webapp()
+            _, theme, _ = self._read_webapp()
             if theme == expected:
                 return
             time.sleep(0.05)
         raise AssertionError(f'timeout waiting for Webapp.Theme == {expected}')
 
-    @staticmethod
-    def _restore_prefs(lang, theme, dpi_scaling):
-        """
-        Restore Webapp.Lang/Theme/DpiScaling through a fresh prefs backend
-        so the yaml keeps its comments (YamlConfig write path)
-
-        Args:
-            lang (str):
-            theme (str):
-            dpi_scaling (bool):
-        """
-        with create_supervisor_process("prefs") as proc:
-            proc.wait_for_output("startup successful", timeout=10)
-            proc.process.stdin.write(f'command:set_lang:{lang}\n')
-            proc.process.stdin.flush()
-            TestStdinPrefsCommands._wait_for_lang(lang)
-            proc.process.stdin.write(f'command:set_theme:{theme}\n')
-            proc.process.stdin.flush()
-            TestStdinPrefsCommands._wait_for_theme(theme)
-            proc.process.stdin.write(f'command:set_dpi_scaling:{str(dpi_scaling).lower()}\n')
-            proc.process.stdin.flush()
-            TestStdinPrefsCommands._wait_for_dpi_scaling(dpi_scaling)
-            proc.process.stdin.write('command:stop\n')
-            proc.process.stdin.flush()
-            proc.wait_for_exit(timeout=5)
-
     def test_stdin_set_lang_persists_idempotent(self):
         """
         stdin set_lang 写入 deploy.yaml；重复写同值不写（mtime 不变）；
-        非法值不写；结束恢复原值
+        非法值不写；临时目录在测试结束后丢弃
         """
-        original_lang, original_theme, original_dpi_scaling = self._read_webapp()
-        try:
-            with create_supervisor_process("prefs") as proc:
-                proc.wait_for_output("startup successful", timeout=10)
-                proc.wait_for_output("Prefs backend started", timeout=5)
+        original_lang, _, _ = self._read_webapp()
+        with create_supervisor_process("prefs", str(self.prefs_root)) as proc:
+            proc.wait_for_output("startup successful", timeout=10)
+            proc.wait_for_output("Prefs backend started", timeout=5)
 
-                # 1. Set a value different from the current one. The value
-                #    change is observed by polling the file, which is the
-                #    event that the write has been processed.
-                target = 'zh-CN' if original_lang != 'zh-CN' else 'en-US'
-                proc.process.stdin.write(f'command:set_lang:{target}\n')
-                proc.process.stdin.flush()
-                self._wait_for_lang(target)
-                mtime1 = os.stat(DEPLOY_YAML).st_mtime_ns
+            # 1. Set a value different from the current one. The value
+            #    change is observed by polling the file, which is the
+            #    event that the write has been processed.
+            target = 'zh-CN' if original_lang != 'zh-CN' else 'en-US'
+            proc.process.stdin.write(f'command:set_lang:{target}\n')
+            proc.process.stdin.flush()
+            self._wait_for_lang(target)
+            mtime1 = os.stat(self.deploy_yaml).st_mtime_ns
 
-                # 2. Same value again -> no write. The invalid line sent
-                #    right after is the barrier: the pipe is FIFO and
-                #    mpipe_recv_loop (alasio/backend/app/lifespan.py) handles
-                #    messages strictly serially in one thread (recv ->
-                #    validate/persist -> next recv), so when the backend
-                #    logged the invalid value the idempotent line before it
-                #    has already been processed. Its log replaces a fixed
-                #    sleep before the mtime check.
-                proc.process.stdin.write(f'command:set_lang:{target}\n')
-                proc.process.stdin.flush()
-                proc.process.stdin.write('command:set_lang:fr-FR\n')
-                proc.process.stdin.flush()
-                proc.wait_for_output("Invalid set_lang value from stdin: 'fr-FR'", timeout=10)
-                assert os.stat(DEPLOY_YAML).st_mtime_ns == mtime1
-                assert self._read_webapp()[0] == target
+            # 2. Same value again -> no write. The invalid line sent
+            #    right after is the barrier: the pipe is FIFO and
+            #    mpipe_recv_loop (alasio/backend/app/lifespan.py) handles
+            #    messages strictly serially in one thread (recv ->
+            #    validate/persist -> next recv), so when the backend
+            #    logged the invalid value the idempotent line before it
+            #    has already been processed. Its log replaces a fixed
+            #    sleep before the mtime check.
+            proc.process.stdin.write(f'command:set_lang:{target}\n')
+            proc.process.stdin.flush()
+            proc.process.stdin.write('command:set_lang:fr-FR\n')
+            proc.process.stdin.flush()
+            proc.wait_for_output("Invalid set_lang value from stdin: 'fr-FR'", timeout=10)
+            assert os.stat(self.deploy_yaml).st_mtime_ns == mtime1
+            assert self._read_webapp()[0] == target
 
-                # 3. Any command:* line is forwarded verbatim; the backend
-                #    logs and ignores unknown commands, no write happens.
-                #    The log line is the barrier again.
-                proc.process.stdin.write('command:set_font:big\n')
-                proc.process.stdin.flush()
-                proc.wait_for_output("Backend received unknown msg from supervisor", timeout=10)
-                assert os.stat(DEPLOY_YAML).st_mtime_ns == mtime1
+            # 3. Any command:* line is forwarded verbatim; the backend
+            #    logs and ignores unknown commands, no write happens.
+            #    The log line is the barrier again.
+            proc.process.stdin.write('command:set_font:big\n')
+            proc.process.stdin.flush()
+            proc.wait_for_output("Backend received unknown msg from supervisor", timeout=10)
+            assert os.stat(self.deploy_yaml).st_mtime_ns == mtime1
 
-                # 4. Backend still alive, graceful stop works
-                assert proc.is_alive()
-                proc.process.stdin.write('command:stop\n')
-                proc.process.stdin.flush()
-                proc.wait_for_output('Received stop signal, shutting down gracefully', timeout=5)
-                proc.wait_for_exit(timeout=5)
-        finally:
-            if self._read_webapp()[0] != original_lang:
-                self._restore_prefs(original_lang, original_theme, original_dpi_scaling)
+            # 4. Backend still alive, graceful stop works
+            assert proc.is_alive()
+            proc.process.stdin.write('command:stop\n')
+            proc.process.stdin.flush()
+            proc.wait_for_output('Received stop signal, shutting down gracefully', timeout=5)
+            proc.wait_for_exit(timeout=5)
 
     def test_stdin_set_theme_persists(self):
         """
-        stdin set_theme 写入 deploy.yaml 并幂等；结束恢复原值
+        stdin set_theme 写入 deploy.yaml 并幂等；临时目录在测试结束后丢弃
         """
-        original_lang, original_theme, original_dpi_scaling = self._read_webapp()
-        try:
-            with create_supervisor_process("prefs") as proc:
-                proc.wait_for_output("startup successful", timeout=10)
-                proc.wait_for_output("Prefs backend started", timeout=5)
+        _, original_theme, _ = self._read_webapp()
+        with create_supervisor_process("prefs", str(self.prefs_root)) as proc:
+            proc.wait_for_output("startup successful", timeout=10)
+            proc.wait_for_output("Prefs backend started", timeout=5)
 
-                target = 'dark' if original_theme != 'dark' else 'light'
-                proc.process.stdin.write(f'command:set_theme:{target}\n')
-                proc.process.stdin.flush()
-                self._wait_for_theme(target)
-                mtime1 = os.stat(DEPLOY_YAML).st_mtime_ns
+            target = 'dark' if original_theme != 'dark' else 'light'
+            proc.process.stdin.write(f'command:set_theme:{target}\n')
+            proc.process.stdin.flush()
+            self._wait_for_theme(target)
+            mtime1 = os.stat(self.deploy_yaml).st_mtime_ns
 
-                # Idempotent: same value again -> no write. The invalid
-                # line is the FIFO barrier (mpipe_recv_loop is a single
-                # serial thread): its log proves the idempotent line before
-                # it has been processed.
-                proc.process.stdin.write(f'command:set_theme:{target}\n')
-                proc.process.stdin.flush()
-                proc.process.stdin.write('command:set_theme:blue\n')
-                proc.process.stdin.flush()
-                proc.wait_for_output("Invalid set_theme value from stdin: 'blue'", timeout=10)
-                assert os.stat(DEPLOY_YAML).st_mtime_ns == mtime1
+            # Idempotent: same value again -> no write. The invalid
+            # line is the FIFO barrier (mpipe_recv_loop is a single
+            # serial thread): its log proves the idempotent line before
+            # it has been processed.
+            proc.process.stdin.write(f'command:set_theme:{target}\n')
+            proc.process.stdin.flush()
+            proc.process.stdin.write('command:set_theme:blue\n')
+            proc.process.stdin.flush()
+            proc.wait_for_output("Invalid set_theme value from stdin: 'blue'", timeout=10)
+            assert os.stat(self.deploy_yaml).st_mtime_ns == mtime1
 
-                proc.process.stdin.write('command:stop\n')
-                proc.process.stdin.flush()
-                proc.wait_for_output('Received stop signal, shutting down gracefully', timeout=5)
-                proc.wait_for_exit(timeout=5)
-        finally:
-            if self._read_webapp()[1] != original_theme:
-                self._restore_prefs(original_lang, original_theme, original_dpi_scaling)
+            proc.process.stdin.write('command:stop\n')
+            proc.process.stdin.flush()
+            proc.wait_for_output('Received stop signal, shutting down gracefully', timeout=5)
+            proc.wait_for_exit(timeout=5)
 
     def test_stdin_set_dpi_scaling_persists_idempotent(self):
         """
         stdin set_dpi_scaling 写入 deploy.yaml；重复写同值不写（mtime 不变）；
-        非法值不写；结束恢复原值
+        非法值不写；临时目录在测试结束后丢弃
         """
-        original_lang, original_theme, original_dpi_scaling = self._read_webapp()
-        try:
-            with create_supervisor_process("prefs") as proc:
-                proc.wait_for_output("startup successful", timeout=10)
-                proc.wait_for_output("Prefs backend started", timeout=5)
+        _, _, original_dpi_scaling = self._read_webapp()
+        with create_supervisor_process("prefs", str(self.prefs_root)) as proc:
+            proc.wait_for_output("startup successful", timeout=10)
+            proc.wait_for_output("Prefs backend started", timeout=5)
 
-                # 1. Set a value different from the current one
-                target = (not original_dpi_scaling)
-                proc.process.stdin.write(f'command:set_dpi_scaling:{str(target).lower()}\n')
-                proc.process.stdin.flush()
-                self._wait_for_dpi_scaling(target)
-                mtime1 = os.stat(DEPLOY_YAML).st_mtime_ns
+            # 1. Set a value different from the current one
+            target = (not original_dpi_scaling)
+            proc.process.stdin.write(f'command:set_dpi_scaling:{str(target).lower()}\n')
+            proc.process.stdin.flush()
+            self._wait_for_dpi_scaling(target)
+            mtime1 = os.stat(self.deploy_yaml).st_mtime_ns
 
-                # 2. Same value again -> no write, mtime unchanged. The
-                #    invalid line is the FIFO barrier (mpipe_recv_loop is a
-                #    single serial thread): its log proves the idempotent
-                #    line before it has been processed.
-                proc.process.stdin.write(f'command:set_dpi_scaling:{str(target).lower()}\n')
-                proc.process.stdin.flush()
-                proc.process.stdin.write('command:set_dpi_scaling:yes\n')
-                proc.process.stdin.flush()
-                proc.wait_for_output("Invalid set_dpi_scaling value from stdin: 'yes'", timeout=10)
-                assert os.stat(DEPLOY_YAML).st_mtime_ns == mtime1
-                assert self._read_webapp()[2] == target
+            # 2. Same value again -> no write, mtime unchanged. The
+            #    invalid line is the FIFO barrier (mpipe_recv_loop is a
+            #    single serial thread): its log proves the idempotent
+            #    line before it has been processed.
+            proc.process.stdin.write(f'command:set_dpi_scaling:{str(target).lower()}\n')
+            proc.process.stdin.flush()
+            proc.process.stdin.write('command:set_dpi_scaling:yes\n')
+            proc.process.stdin.flush()
+            proc.wait_for_output("Invalid set_dpi_scaling value from stdin: 'yes'", timeout=10)
+            assert os.stat(self.deploy_yaml).st_mtime_ns == mtime1
+            assert self._read_webapp()[2] == target
 
-                # 3. Backend still alive, graceful stop works
-                assert proc.is_alive()
-                proc.process.stdin.write('command:stop\n')
-                proc.process.stdin.flush()
-                proc.wait_for_output('Received stop signal, shutting down gracefully', timeout=5)
-                proc.wait_for_exit(timeout=5)
-        finally:
-            if self._read_webapp()[2] != original_dpi_scaling:
-                self._restore_prefs(original_lang, original_theme, original_dpi_scaling)
+            # 3. Backend still alive, graceful stop works
+            assert proc.is_alive()
+            proc.process.stdin.write('command:stop\n')
+            proc.process.stdin.flush()
+            proc.wait_for_output('Received stop signal, shutting down gracefully', timeout=5)
+            proc.wait_for_exit(timeout=5)
