@@ -1,31 +1,13 @@
-import io
-import tarfile
-import time
-import zipfile
-
 from alasio.backport import removesuffix
 from alasio.deploy.simple_pip.whl_record import RecordManager
 from alasio.deploy_dev.wheel.alasio_wheel import RepoWithStatics
+from alasio.deploy_dev.wheel.archive import GzipFileExtend, ZipFileExtend
 from alasio.deploy_dev.wheel.parse_metadata import RepoStandardMetadata
 from alasio.ext.cache import cached_property
 from alasio.ext.deep import deep_get
 from alasio.ext.path import PathStr
-from alasio.ext.path.atomic import file_remove
 from alasio.git.stage.gitref import GitRef
 from alasio.logger import logger
-
-
-def _remove_tmp_file(file):
-    """
-    Remove the tmp file of a failed build, best effort.
-
-    Args:
-        file (str): Temporary file path
-    """
-    try:
-        file_remove(file)
-    except OSError:
-        pass
 
 
 class BuildWheel:
@@ -45,6 +27,28 @@ class BuildWheel:
     @cached_property
     def head(self):
         return GitRef(self.root).head_get()
+
+    @cached_property
+    def commit_time(self):
+        """
+        Committer time of the commit being built, in UTC+0.
+
+        Every member of the built artifacts is stamped with this time, so
+        building the same commit twice produces the same bytes.
+
+        Returns:
+            int: Unix timestamp
+
+        Raises:
+            ValueError: If the head does not point to a commit
+        """
+        obj = self.repo.cat(self.head)
+        # an annotated tag points to its object, a tag may tag another tag
+        while obj.type == 4:
+            obj = self.repo.cat(obj.decoded.object)
+        if obj.type != 1:
+            raise ValueError(f'HEAD is not a commit: {self.head}')
+        return int(obj.decoded.committer_time)
 
     @cached_property
     def repo(self):
@@ -304,30 +308,20 @@ class BuildWheel:
         """
         file = self.file_wheel
         dist_info = f'{self.metaname}-{self.version}.dist-info'
-        tmp = file.to_tmp_file()
-        file.uppath().makedirs(exist_ok=True)
 
-        def write_all(filename):
-            with zipfile.ZipFile(filename, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=9) as zf:
-                # Package files
-                for path, content in self.all_files.items():
-                    zf.writestr(path, content)
-                # Metadata files
-                zf.writestr(f'{dist_info}/METADATA', self.data_metadata)
-                zf.writestr(f'{dist_info}/WHEEL', self.data_wheel)
-                zf.writestr(f'{dist_info}/top_level.txt', self.data_top_level_txt)
-                # License files, PEP 639
-                for path, content in self.repo_metadata.license_files.items():
-                    zf.writestr(f'{dist_info}/licenses/{path}', content)
-                zf.writestr(f'{dist_info}/RECORD', self.data_record)
+        with ZipFileExtend(file, self.commit_time) as zf:
+            # Package files
+            for path, content in self.all_files.items():
+                zf.write_member(path, content)
+            # Metadata files
+            zf.write_member(f'{dist_info}/METADATA', self.data_metadata)
+            zf.write_member(f'{dist_info}/WHEEL', self.data_wheel)
+            zf.write_member(f'{dist_info}/top_level.txt', self.data_top_level_txt)
+            # License files, PEP 639
+            for path, content in self.repo_metadata.license_files.items():
+                zf.write_member(f'{dist_info}/licenses/{path}', content)
+            zf.write_member(f'{dist_info}/RECORD', self.data_record)
 
-        try:
-            write_all(tmp)
-        except BaseException:
-            _remove_tmp_file(tmp)
-            raise
-
-        tmp.atomic_replace(file)
         return file
 
     @cached_property
@@ -344,34 +338,15 @@ class BuildWheel:
         """
         file = self.file_targz
         base_dir = removesuffix(file.name, '.tar.gz')
-        tmp = file.to_tmp_file()
-        file.uppath().makedirs(exist_ok=True)
 
-        def write_all(filename):
-            with tarfile.open(filename, 'w:gz') as tar:
-                # Set mtime for reproducibility if possible
-                # although it might be better with commit time
-                mtime = int(time.time())
-                # Source files
-                for path, content in self.sdist_files.items():
-                    info = tarfile.TarInfo(name=f'{base_dir}/{path}')
-                    info.size = len(content)
-                    info.mtime = mtime
-                    tar.addfile(info, fileobj=io.BytesIO(content))
-                # Egg-info files
-                for path, content in self.egg_info_files.items():
-                    info = tarfile.TarInfo(name=f'{base_dir}/{path}')
-                    info.size = len(content)
-                    info.mtime = mtime
-                    tar.addfile(info, fileobj=io.BytesIO(content))
+        with GzipFileExtend(file, self.commit_time) as gz:
+            # Source files
+            for path, content in self.sdist_files.items():
+                gz.write_member(f'{base_dir}/{path}', content)
+            # Egg-info files
+            for path, content in self.egg_info_files.items():
+                gz.write_member(f'{base_dir}/{path}', content)
 
-        try:
-            write_all(tmp)
-        except BaseException:
-            _remove_tmp_file(tmp)
-            raise
-
-        tmp.atomic_replace(file)
         return file
 
     def build(self):
@@ -392,11 +367,12 @@ class BuildWheel:
         try:
             metaname = self.metaname
             version = self.version
+            commit_time = self.commit_time
         except ValueError as e:
             logger.error(str(e))
             return False
 
-        logger.info(f'Building {metaname}=={version} commit={self.head}')
+        logger.info(f'Building {metaname}=={version} commit={self.head} time={commit_time}')
         file_whl = self._build_wheel()
         logger.info(f'Wheel built at: {file_whl}')
         file_sdist = self._build_targz()
