@@ -6,7 +6,7 @@ import time
 
 import pytest
 
-from alasio.backend.supervisor import ParentProcessExited, Supervisor
+from alasio.backend.supervisor import ParentProcessExited, Supervisor, mprint
 
 
 def wait_stdin_listener(supervisor, timeout=2.0):
@@ -86,6 +86,21 @@ def fake_stdin_from_pipe(data=b''):
     return os.fdopen(read_fd, 'r', encoding='utf-8'), write_fd
 
 
+class BrokenStdout:
+    """
+    A stdout whose pipe has no reader left (the host process died).
+
+    Writing to a broken pipe raises OSError on Windows and BrokenPipeError
+    (an OSError subclass) on POSIX.
+    """
+
+    def write(self, data):
+        raise OSError(22, 'Invalid argument')
+
+    def flush(self):
+        raise OSError(22, 'Invalid argument')
+
+
 def make_supervisor_with_pipe():
     """
     Create a Supervisor with a real pipe attached as parent_conn.
@@ -115,6 +130,110 @@ def recv_with_timeout(conn, timeout=2.0):
         if conn.poll(timeout=0.05):
             return conn.recv_bytes()
     pytest.fail('no message received on pipe')
+
+
+class TestBrokenStdout:
+    """
+    The host process owns the read end of the supervisor's stdout pipe: its
+    death breaks stdout and stdin at the same time. A logging failure must
+    never prevent the parent-death shutdown.
+    """
+
+    def test_mprint_does_not_raise(self, monkeypatch):
+        monkeypatch.setattr(sys, 'stdout', BrokenStdout())
+
+        mprint('parent process exited')
+
+    def test_mprint_with_leading_newline_does_not_raise(self, monkeypatch):
+        monkeypatch.setattr(sys, 'stdout', BrokenStdout())
+
+        mprint('parent process exited', start='\n')
+
+    def test_mprint_without_stdout_does_not_raise(self, monkeypatch):
+        # pythonw has no stdout at all: print raises AttributeError
+        monkeypatch.setattr(sys, 'stdout', None)
+
+        mprint('parent process exited')
+
+    def test_stdin_eof_flags_shutdown_with_broken_stdout(self, replace_stdin, monkeypatch):
+        # Electron dying breaks stdin and stdout together: the EOF branch
+        # must still flag the shutdown even though its log line cannot be
+        # written. Before the fix the OSError killed the listener thread
+        # before _stdin_eof was set, so the supervisor never exited.
+        stream, write_fd = fake_stdin_from_pipe()
+        replace_stdin(stream)
+        monkeypatch.setattr(sys, 'stdout', BrokenStdout())
+        supervisor, _ = make_supervisor_with_pipe()
+        os.close(write_fd)
+
+        thread = supervisor.start_stdin_listener()
+        thread.join(timeout=2)
+
+        assert not thread.is_alive()
+        assert supervisor._stdin_eof.is_set()
+
+
+class TestRestartDelay:
+    """The supervisor must not respawn a backend after the host is gone."""
+
+    def test_parent_death_during_restart_delay_stops_the_loop(self, replace_stdin, monkeypatch):
+        import signal
+
+        stream, write_fd = fake_stdin_from_pipe()
+        replace_stdin(stream)
+        supervisor = Supervisor()
+        supervisor.backend_entry = staticmethod(lambda args: None)
+        supervisor.restart_delay = 0.5
+
+        keepalive = []
+        spawned = []
+
+        def fake_start_backend(args):
+            spawned.append(1)
+            supervisor.process = FakeProcess(alive=True, exit_on_join=True)
+            # run()'s cleanup() closed the pipe; restore it like a real
+            # spawn would, so the loop can continue. Keep the child end
+            # referenced: closing it breaks the duplex pipe on Windows.
+            parent, child = multiprocessing.Pipe()
+            supervisor.parent_conn = parent
+            keepalive.append(child)
+
+        monkeypatch.setattr(supervisor, 'start_backend', fake_start_backend)
+        # The backend exits successfully right away, so the only reason to
+        # reach start_backend again is the automatic restart delay.
+        monkeypatch.setattr(supervisor, 'recv_loop', lambda: True)
+        monkeypatch.setattr(supervisor, 'wait_for_backend', lambda: 0)
+
+        # The fake start_backend does not manage the listener (the real one
+        # restarts it after the backend announces command:spawned), so start
+        # it once up front.
+        listener = supervisor.start_stdin_listener()
+        assert listener.is_alive()
+
+        def parent_dies():
+            # Close the write end once the loop reached the restart delay
+            deadline = time.time() + 2
+            while time.time() < deadline:
+                if supervisor.restart_times:
+                    break
+                time.sleep(0.01)
+            os.close(write_fd)
+
+        killer = threading.Thread(target=parent_dies, daemon=True)
+        killer.start()
+        try:
+            supervisor.run([])
+        finally:
+            # run() installs custom signal handlers, restore the defaults
+            signal.signal(signal.SIGINT, signal.SIG_DFL)
+            signal.signal(signal.SIGTERM, signal.SIG_DFL)
+            if sys.platform == 'win32':
+                signal.signal(signal.SIGBREAK, signal.SIG_DFL)
+
+        killer.join(timeout=2)
+        assert supervisor._stdin_eof.is_set()
+        # No second spawn: the host died during the delay
+        assert len(spawned) == 1
 
 
 class TestStartStdinListener:

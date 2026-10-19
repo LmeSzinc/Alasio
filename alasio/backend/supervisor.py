@@ -23,7 +23,24 @@ def loop_until_timeout(timeout):
 
 
 def mprint(*args, start=''):
-    print(f'{start}[Supervisor]', *args)
+    """
+    Print a supervisor log line without ever raising on a broken stdout.
+
+    The host process (Electron) owns the read end of the supervisor's
+    stdout pipe. When the host dies, writing to the pipe raises OSError
+    (BrokenPipeError on POSIX, EINVAL on Windows). Logging must never
+    abort the supervision or shutdown flow, otherwise a dead host can
+    leave the supervisor and its backend running as orphans.
+
+    Args:
+        *args: Values printed after the [Supervisor] prefix
+        start (str): Prefix inserted before the [Supervisor] marker
+    """
+    try:
+        print(f'{start}[Supervisor]', *args)
+    except (AttributeError, OSError, ValueError):
+        # stdout is missing, closed or its pipe is broken: drop the line
+        pass
 
 
 class ParentProcessExited(Exception):
@@ -355,8 +372,12 @@ class Supervisor:
                     # The listener only detects, it never sends the stop
                     # itself.
                     if is_pipe:
-                        mprint("Parent process exited (stdin closed), shutting down")
+                        # Flag the parent death before logging: the host's
+                        # stdout pipe is broken at this point (the host is
+                        # gone), so the log line may fail. The flag is what
+                        # drives the shutdown and must be set regardless.
                         self._stdin_eof.set()
+                        mprint("Parent process exited (stdin closed), shutting down")
                     return
                 line_buffer += data
                 while b'\n' in line_buffer:
@@ -801,7 +822,13 @@ class Supervisor:
 
                 mprint(f"Restarting in {self.restart_delay} seconds...")
                 for _ in loop_until_timeout(timeout=self.restart_delay):
+                    # The host may die or request a stop during the delay:
+                    # never spawn a backend that nobody is left to manage.
+                    if self._stdin_eof.is_set() or self.stop_requested:
+                        break
                     time.sleep(0.2)
+                if self._stdin_eof.is_set() or self.stop_requested:
+                    break
                 continue
 
         except (KeyboardInterrupt, ParentProcessExited):
