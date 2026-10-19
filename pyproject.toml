@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "alasio"
-version = "0.1.0"
+version = "2.0.0"
 description = "Mobile game bot framework abstracted from AzurLaneAutoScript and StarRailCopilot"
 readme = "README.md"
 requires-python = ">=3.8"
@@ -12,9 +12,10 @@ authors = [
     { name = "LmeSzinc" }
 ]
 dependencies = [
-    # alasio
-    "exceptiongroup",
-    "typing-extensions",
+    # just to ensure not too old
+    "exceptiongroup>=1",
+    # just to ensure not too old
+    "typing-extensions>=4",
     # msgspec version is limited because we have msgspec_error to parse errors
     # 0.18.6 is the last version that support python3.8
     "msgspec>=0.18.6,<=0.22.0",
@@ -26,8 +27,9 @@ dependencies = [
     "PyYAML>=6.0",
     # httpx is no longer maintained, httpx2 is the pydantic fork of httpx
     # python 3.8 support comes from the py38deps backport wheels
-    "httpx2",
-    "psutil",
+    "httpx2>=2",
+    # just to ensure not too old
+    "psutil>=5.9",
     # alasio/log
     # rich version is limited because we patched rich.trackback to enable exceptiongroup tracebacks on py<3.11
     # 14.1.0 is the minimum version to have exceptiongroup support
@@ -37,15 +39,22 @@ dependencies = [
 
 [project.optional-dependencies]
 image = [
-    "numpy",
-    "opencv-python-headless",
+    # just to ensure not too old
+    "numpy>=1.16",
+    # use headless version by default, so alasio still works on server without GUI
+    # in fact, all 4 opencv-python versions are supported
+    # - opencv-python
+    # - opencv-python-headless
+    # - opencv-contrib-python
+    # - opencv-contrib-python-headless
+    "opencv-python-headless>=4.5",
 ]
 backend = [
     # 0.17.3 is the last version that support python3.8
     "hypercorn>=0.17.3",
     # 0.27.0 is the last version that support python3.8
     "trio>=0.27.0",
-    # 0.44.0 is the last version that support python3.8, the py38deps backport provides 1.6.0
+    # 0.44.0 is the last version that support python3.8, the py38deps backport provides 1.8.0
     # the backend and tests support both
     "starlette>=0.44.0",
     # 2.9.0 is the last version that support python3.8
@@ -58,8 +67,8 @@ pack = [
     "tomli>=2.0.1; python_version < '3.11'",
     # pyproject_metadata reads the wheel metadata. The wheel builder patches
     # its module level get_license() / get_license_files() / get_readme(),
-    # which became module functions in 0.11.0. 0.12.1 is the last release
-    # supporting Python 3.8; the newer main branch requires Python >=3.9.
+    # which became module functions in 0.11.0
+    # 0.12.1 is the last release supporting Python 3.8
     "pyproject-metadata>=0.11.0,<=0.12.1",
     # PEP 440 version and PEP 503 name normalization
     "packaging>=23.2",
@@ -75,6 +84,7 @@ test = [
     # alasio/codegen/ruff/ruff_format.py requires isort>=5.2.0
     "isort>=5.2.0",
 ]
+mod = ["alasio[image,backend]"]
 all = ["alasio[image,backend,pack,test]"]
 
 [tool.setuptools]
