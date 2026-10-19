@@ -72,6 +72,24 @@ def test_cache_operation_methods():
     assert obj.count == 2
 
 
+def test_cache_operation_replace():
+    obj = MockInstance()
+
+    # No cached value: old_default is returned and the new value is set
+    assert cached_property.replace(obj, "value", "first") is None
+    assert obj.value == "first"
+    assert obj.count == 0
+
+    # Cached value: the old value is returned
+    assert cached_property.replace(obj, "value", "second", old_default="missing") == "first"
+    assert obj.value == "second"
+
+    # The property still calculates after pop()
+    assert cached_property.pop(obj, "value") == "second"
+    assert obj.value == "value_1"
+    assert obj.count == 1
+
+
 def test_warmup():
     obj = MockInstance()
     assert cached_property.has(obj, "value") is False
@@ -157,6 +175,92 @@ def test_threadsafe_cached_property_concurrency():
     assert all(r == "slow_value_1" for r in results)
     # The function should be called only once
     assert obj.slow_count == 1
+
+
+def test_threadsafe_cache_operation_replace():
+    obj = MockInstance()
+
+    assert cached_property_threadsafe.replace(obj, "slow_value", "first") is None
+    assert obj.slow_value == "first"
+    assert obj.slow_count == 0
+
+    assert cached_property_threadsafe.replace(
+        obj, "slow_value", "second", old_default="missing") == "first"
+    assert obj.slow_value == "second"
+    assert obj.slow_count == 0
+
+
+def test_threadsafe_cache_operation_replace_concurrency():
+    obj = MockInstance()
+    cached_property_threadsafe.set(obj, "slow_value", -1)
+    count = 8
+    barrier = threading.Barrier(count)
+    old_values = []
+    results_lock = threading.Lock()
+
+    def replace_value(value):
+        barrier.wait()
+        old = cached_property_threadsafe.replace(obj, "slow_value", value)
+        with results_lock:
+            old_values.append(old)
+
+    threads = [threading.Thread(target=replace_value, args=(i,)) for i in range(count)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    # Every replacement saw a distinct previous value: no replacement was lost
+    assert len(old_values) == count
+    assert len(set(old_values)) == count
+    assert -1 in old_values
+    assert set(old_values) <= {-1, *range(count)}
+    assert obj.slow_value in range(count)
+    assert obj.slow_count == 0
+
+
+def test_threadsafe_cache_operation_replace_waits_for_calculation():
+    class SlowInstance:
+        def __init__(self):
+            self.started = threading.Event()
+            self.release = threading.Event()
+
+        @cached_property_threadsafe
+        def value(self):
+            self.started.set()
+            assert self.release.wait(2)
+            return "computed"
+
+    obj = SlowInstance()
+    calculated = []
+    replaced = []
+
+    def calculate():
+        calculated.append(obj.value)
+
+    calc_thread = threading.Thread(target=calculate)
+    calc_thread.start()
+    assert obj.started.wait(2)
+
+    attempted = threading.Event()
+
+    def replace_value():
+        attempted.set()
+        replaced.append(cached_property_threadsafe.replace(obj, "value", "replaced"))
+
+    replace_thread = threading.Thread(target=replace_value)
+    replace_thread.start()
+    assert attempted.wait(2)
+    time.sleep(0.05)
+    obj.release.set()
+    calc_thread.join(timeout=2)
+    replace_thread.join(timeout=2)
+
+    assert not calc_thread.is_alive()
+    assert not replace_thread.is_alive()
+    assert calculated == ["computed"]
+    assert replaced == ["computed"]
+    assert obj.value == "replaced"
 
 
 def test_slots_error():
@@ -359,6 +463,112 @@ def test_cache_class_operation_methods():
     # recalculate after pop
     assert cls.value == "val_2"
     assert TestClass.count == 2
+
+
+def test_class_cache_operation_replace():
+    class TestClass:
+        @cached_class_property
+        def value(cls):
+            return "computed"
+
+    cls = TestClass
+    assert cached_class_property.replace(cls, "value", "first") is None
+    assert cls.value == "first"
+    assert cached_class_property.replace(cls, "value", "second", old_default="missing") == "first"
+    assert cls.value == "second"
+
+
+def test_threadsafe_cached_class_property_replace():
+    class TestClassTS:
+        count = 0
+
+        @cached_class_property_threadsafe
+        def value(cls):
+            cls.count += 1
+            return f"value_{cls.count}"
+
+    cls = TestClassTS
+    assert cached_class_property_threadsafe.replace(cls, "value", "first") is None
+    assert cls.value == "first"
+    assert cached_class_property_threadsafe.replace(
+        cls, "value", "second", old_default="missing") == "first"
+    assert cls.value == "second"
+    assert cls.count == 0
+
+
+def test_threadsafe_cached_class_property_replace_concurrency():
+    class TestClassTS:
+        @cached_class_property_threadsafe
+        def value(cls):
+            return "computed"
+
+    cls = TestClassTS
+    assert cached_class_property_threadsafe.replace(cls, "value", -1) is None
+    count = 8
+    barrier = threading.Barrier(count)
+    old_values = []
+    results_lock = threading.Lock()
+
+    def replace_value(value):
+        barrier.wait()
+        old = cached_class_property_threadsafe.replace(cls, "value", value)
+        with results_lock:
+            old_values.append(old)
+
+    threads = [threading.Thread(target=replace_value, args=(i,)) for i in range(count)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    # Every replacement saw a distinct previous value: no replacement was lost
+    assert len(old_values) == count
+    assert len(set(old_values)) == count
+    assert -1 in old_values
+    assert set(old_values) <= {-1, *range(count)}
+    assert cls.value in range(count)
+
+
+def test_threadsafe_cached_class_property_replace_waits_for_calculation():
+    class SlowClass:
+        started = threading.Event()
+        release = threading.Event()
+
+        @cached_class_property_threadsafe
+        def value(cls):
+            cls.started.set()
+            assert cls.release.wait(2)
+            return "computed"
+
+    calculated = []
+    replaced = []
+
+    def calculate():
+        calculated.append(SlowClass.value)
+
+    calc_thread = threading.Thread(target=calculate)
+    calc_thread.start()
+    assert SlowClass.started.wait(2)
+
+    attempted = threading.Event()
+
+    def replace_value():
+        attempted.set()
+        replaced.append(cached_class_property_threadsafe.replace(SlowClass, "value", "replaced"))
+
+    replace_thread = threading.Thread(target=replace_value)
+    replace_thread.start()
+    assert attempted.wait(2)
+    time.sleep(0.05)
+    SlowClass.release.set()
+    calc_thread.join(timeout=2)
+    replace_thread.join(timeout=2)
+
+    assert not calc_thread.is_alive()
+    assert not replace_thread.is_alive()
+    assert calculated == ["computed"]
+    assert replaced == ["computed"]
+    assert SlowClass.value == "replaced"
 
 
 def test_class_warmup():

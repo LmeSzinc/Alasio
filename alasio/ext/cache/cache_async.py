@@ -78,6 +78,29 @@ class AsyncCacheOperation(InstanceCacheOperation):
         """
         InstanceCacheOperation.set(instance, attrname, AwaitableResult(value))
 
+    @classmethod
+    def replace(cls, instance, attrname, value, old_default=None):
+        """
+        Replace a cached property on an INSTANCE and return the old value.
+
+        The old AwaitableResult is unwrapped, the new value is wrapped like
+        set() does.
+
+        Args:
+            instance:
+            attrname (str):
+            value:
+            old_default: Default to return if property never cached
+
+        Returns:
+            The old cached value, or old_default when the property was not cached
+        """
+        old = InstanceCacheOperation.get(instance, attrname, old_default)
+        if isinstance(old, AwaitableResult):
+            old = old._value
+        cls.set(instance, attrname, value)
+        return old
+
     @staticmethod
     async def warm(instance, attrname):
         """

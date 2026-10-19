@@ -116,6 +116,24 @@ class InstanceCacheOperation(CacheOperation):
             )
             raise TypeError(msg) from None
 
+    @classmethod
+    def replace(cls, instance, attrname, value, old_default=None):
+        """
+        Replace a cached property on an INSTANCE and return the old value.
+
+        Args:
+            instance:
+            attrname (str):
+            value:
+            old_default: Default to return if property never cached
+
+        Returns:
+            The old cached value, or old_default when the property was not cached
+        """
+        old = cls.get(instance, attrname, old_default)
+        cls.set(instance, attrname, value)
+        return old
+
     @staticmethod
     def warm(instance, attrname):
         """
@@ -263,6 +281,24 @@ class ClassCacheOperation(CacheOperation):
             )
             raise TypeError(msg) from None
 
+    @classmethod
+    def replace(cls, target_cls, attrname, value, old_default=None):
+        """
+        Replace a cached property on a CLASS and return the old value.
+
+        Args:
+            target_cls (type):
+            attrname (str):
+            value:
+            old_default: Default to return if property never cached
+
+        Returns:
+            The old cached value, or old_default when the property was not cached
+        """
+        old = cls.get(target_cls, attrname, old_default)
+        cls.set(target_cls, attrname, value)
+        return old
+
     @staticmethod
     def warm(cls, attrname):
         """
@@ -356,6 +392,53 @@ class cached_property_threadsafe(Generic[T], InstanceCacheOperation):
         # per-property, cross-instance lock, shares among all instances
         self.create_lock = Lock()
         wraps(func)(self)
+
+    @classmethod
+    def replace(cls, instance, attrname, value, old_default=None):
+        """
+        Replace a cached property atomically and return the old value.
+
+        The replacement runs under the same per-instance lock that __get__
+        uses, so it can't be lost to a concurrent calculation.
+
+        Args:
+            instance:
+            attrname (str):
+            value:
+            old_default: Default to return if property never cached
+
+        Returns:
+            The old cached value, or old_default when the property was not cached
+        """
+        descriptor = getattr(type(instance), attrname, None)
+        if not isinstance(descriptor, cls):
+            return InstanceCacheOperation.replace(instance, attrname, value, old_default)
+
+        try:
+            cache = instance.__dict__
+        except AttributeError:
+            return InstanceCacheOperation.replace(instance, attrname, value, old_default)
+
+        lock_name = f"_cached_property_lock_for_{attrname}"
+        with descriptor.create_lock:
+            lock = cache.get(lock_name, None)
+            if lock is None:
+                lock = Lock()
+                try:
+                    cache[lock_name] = lock
+                except TypeError:
+                    return InstanceCacheOperation.replace(instance, attrname, value, old_default)
+
+        with lock:
+            old = cache.get(attrname, old_default)
+            try:
+                cache[attrname] = value
+            finally:
+                try:
+                    del cache[lock_name]
+                except KeyError:
+                    pass
+            return old
 
     def __get__(self, instance, cls) -> T:
         if instance is None:
@@ -474,6 +557,54 @@ class cached_class_property_threadsafe(Generic[T], ClassCacheOperation):
             wraps(func.__func__)(self)
         else:
             wraps(func)(self)
+
+    @classmethod
+    def replace(cls, target_cls, attrname, value, old_default=None):
+        """
+        Replace a cached class property atomically and return the old value.
+
+        The replacement runs under the same per-class lock that __get__ uses,
+        so it can't be lost to a concurrent calculation.
+
+        Args:
+            target_cls (type):
+            attrname (str):
+            value:
+            old_default: Default to return if property never cached
+
+        Returns:
+            The old cached value, or old_default when the property was not cached
+        """
+        descriptor = target_cls.__dict__.get(attrname)
+        if not isinstance(descriptor, cls):
+            # A cached value replaced the descriptor, the descriptor is kept
+            # under a backup key by __get__
+            descriptor = target_cls.__dict__.get(f"_cached_class_property_desc_for_{attrname}")
+        if not isinstance(descriptor, cls):
+            return ClassCacheOperation.replace(target_cls, attrname, value, old_default)
+
+        lock_name = f"_cached_class_property_lock_for_{attrname}"
+        with descriptor.create_lock:
+            lock = target_cls.__dict__.get(lock_name, None)
+            if lock is None:
+                lock = Lock()
+                try:
+                    type.__setattr__(target_cls, lock_name, lock)
+                except TypeError:
+                    return ClassCacheOperation.replace(target_cls, attrname, value, old_default)
+
+        with lock:
+            old = ClassCacheOperation.get(target_cls, attrname, old_default)
+            # Preserve the descriptor so pop() can restore it after the replace
+            type.__setattr__(target_cls, f"_cached_class_property_desc_for_{attrname}", descriptor)
+            try:
+                ClassCacheOperation.set(target_cls, attrname, value)
+            finally:
+                try:
+                    type.__delattr__(target_cls, lock_name)
+                except AttributeError:
+                    pass
+            return old
 
     def __get__(self, instance, cls) -> T:
         """

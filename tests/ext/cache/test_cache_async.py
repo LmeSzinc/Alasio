@@ -152,6 +152,23 @@ class TestAsyncCacheOperation:
         # the coroutine function was never called
         assert obj.count == 0
 
+    def test_replace(self):
+        obj = MockAsyncInstance()
+
+        # No cached value: old_default is returned and the new value is wrapped
+        assert AsyncCacheOperation.replace(obj, "value", "first") is None
+        assert isinstance(obj.__dict__["value"], AwaitableResult)
+
+        # Cached value: the old value is unwrapped
+        assert AsyncCacheOperation.replace(obj, "value", "second") == "first"
+
+        async def coro():
+            return await obj.value
+
+        assert drive(coro()) == "second"
+        # the coroutine function was never called
+        assert obj.count == 0
+
     def test_set_no_dict(self):
         with pytest.raises(TypeError, match="No '__dict__' attribute"):
             AsyncCacheOperation.set(1, "any", "value")
