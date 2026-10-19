@@ -62,16 +62,32 @@ class LogWriter(metaclass=Singleton):
         if self.create_date and self.create_date != date.today():
             self.close()
 
-    def close(self):
-        cached_property_threadsafe.pop(self, 'backend')
-        cached_property_threadsafe.pop(self, 'file')
-        cached_property_threadsafe.pop(self, 'stdout')
-        fd = cached_property_threadsafe.pop(self, 'fd')
+    @staticmethod
+    def _close_fd_value(fd):
+        """
+        Close a log file fd, if any.
+
+        The fd may be a PseudoStream while file output is muted; it has no
+        close(), the exception is ignored.
+        """
         if fd is not None:
             try:
                 fd.close()
             except Exception:
                 pass
+
+    def _close_fd(self):
+        """
+        Close and drop the cached log file fd, if any.
+        """
+        fd = cached_property_threadsafe.pop(self, 'fd', None)
+        self._close_fd_value(fd)
+
+    def close(self):
+        cached_property_threadsafe.pop(self, 'backend')
+        cached_property_threadsafe.pop(self, 'file')
+        cached_property_threadsafe.pop(self, 'stdout')
+        self._close_fd()
 
     def close_fd(self):
         """
@@ -84,12 +100,7 @@ class LogWriter(metaclass=Singleton):
         path and fd caches are dropped, stdout and backend stay intact.
         """
         cached_property_threadsafe.pop(self, 'file', None)
-        fd = cached_property_threadsafe.pop(self, 'fd', None)
-        if fd is not None:
-            try:
-                fd.close()
-            except Exception:
-                pass
+        self._close_fd()
 
     def mute(self, stdout=False, fd=False, backend=False, all=False):
         """
@@ -106,7 +117,14 @@ class LogWriter(metaclass=Singleton):
         if stdout:
             cached_property_threadsafe.set(self, 'stdout', PseudoStream())
         if fd:
-            cached_property_threadsafe.set(self, 'fd', PseudoStream())
+            # Replace under the cache lock, then close the previous handle:
+            # replacing without closing it leaks the handle, and Windows keeps
+            # the log file locked (it cannot be removed or rotated).
+            old_fd = cached_property_threadsafe.replace(self, 'fd', PseudoStream())
+            self._close_fd_value(old_fd)
+            # Drop the cached path too, so a later unmute follows a changed
+            # PROJECT_ROOT instead of reopening the old path.
+            cached_property_threadsafe.pop(self, 'file', None)
         if backend:
             cached_property_threadsafe.set(self, 'backend', PseudoBackendBridge())
 
@@ -115,7 +133,9 @@ class LogWriter(metaclass=Singleton):
         Clear all mutes.
         """
         cached_property_threadsafe.pop(self, 'stdout')
-        cached_property_threadsafe.pop(self, 'fd')
+        # A real fd may be cached when mute_clear() is called without a
+        # preceding mute(fd=True): close it instead of dropping the handle.
+        self.close_fd()
         cached_property_threadsafe.pop(self, 'backend')
 
     def __del__(self):
