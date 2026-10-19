@@ -40,8 +40,48 @@ class TestRepoStandardMetadata:
 
     def test_metaname_and_version(self, metadata):
         """The name is normalized and the static version is used."""
+        assert metadata.canonical_name == 'demo-pkg'
         assert metadata.metaname == 'demo_pkg'
         assert metadata.version == '1.0.0'
+
+    @pytest.mark.parametrize('name, canonical, metaname', [
+        ('demo-pkg', 'demo-pkg', 'demo_pkg'),
+        ('Demo.Pkg', 'demo-pkg', 'demo_pkg'),
+        ('demo__pkg', 'demo-pkg', 'demo_pkg'),
+        ('demo.-_pkg', 'demo-pkg', 'demo_pkg'),
+        ('DEMO_PKG', 'demo-pkg', 'demo_pkg'),
+    ])
+    def test_name_normalization(self, make_repo, name, canonical, metaname):
+        """Names are normalized by PEP 503 and PEP 427."""
+        repo = make_repo({
+            'pyproject.toml': f'[project]\nname = "{name}"\nversion = "1.0.0"\n'.encode(),
+        })
+        metadata = RepoStandardMetadata(repo, 'demo_pkg')
+        assert metadata.canonical_name == canonical
+        assert metadata.metaname == metaname
+
+    @pytest.mark.parametrize('version, expected', [
+        ('1.0.0', '1.0.0'),
+        ('1.0.0-alpha', '1.0.0a0'),
+        ('1.0.0-rc1', '1.0.0rc1'),
+        ('1.0.0.post1', '1.0.0.post1'),
+        ('1.0.0+Build.ABC', '1.0.0+build.abc'),
+    ])
+    def test_version_normalization(self, make_repo, version, expected):
+        """Versions are normalized by PEP 440."""
+        repo = make_repo({
+            'pyproject.toml': f'[project]\nname = "demo-pkg"\nversion = "{version}"\n'.encode(),
+        })
+        metadata = RepoStandardMetadata(repo, 'demo_pkg')
+        assert metadata.version == expected
+
+    def test_invalid_version(self, make_repo):
+        """An invalid version raises ValueError."""
+        repo = make_repo({
+            'pyproject.toml': b'[project]\nname = "demo-pkg"\nversion = "not a version"\n',
+        })
+        with pytest.raises(ValueError):
+            _ = RepoStandardMetadata(repo, 'demo_pkg').version
 
     def test_project_dir_is_cached_repo_path(self, metadata):
         """project_dir is a cached RepoPath root."""

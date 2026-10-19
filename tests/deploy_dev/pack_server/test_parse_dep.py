@@ -9,10 +9,10 @@ wildcard, a bare name, a URL, a local path, a pip option) is skipped, and two
 different versions of one name in one file raise a ValueError.
 """
 import pytest
+from packaging.utils import canonicalize_name
 
 from alasio.deploy.simple_pip import parse_req
 from alasio.deploy.simple_pip.parse_req import Requirements
-from alasio.deploy.simple_pip.pip_list import normalize_name
 from alasio.deploy_dev.pack_server import parse_dep
 from alasio.deploy_dev.pack_server.parse_dep import PyprojectParser, RequirementsParser
 
@@ -340,18 +340,21 @@ httpx = "==0.28.2"
 
 
 class TestClientRules:
-    """The rules of the client modules, reused by the release side."""
+    """The requirement rules reused by the release side."""
 
     def test_requirements_parser_is_the_client_parser(self):
         """A requirements file is parsed by the client class, the release name is it."""
         assert issubclass(RequirementsParser, Requirements)
         assert RequirementsParser('httpx==0.28.1').dict_deps == {'httpx': '0.28.1'}
 
-    def test_the_rules_are_the_client_ones(self):
-        """The pin rules and the dist-key of the release side are the client functions."""
+    def test_the_requirement_rules_are_the_client_ones(self):
+        """The pin rules of the release side are the client functions."""
         assert parse_dep.parse_requirement is parse_req.parse_requirement
         assert parse_dep.build_pins is parse_req.build_pins
-        assert parse_dep.normalize_name is normalize_name
+
+    def test_name_normalization_uses_packaging(self):
+        """The release side normalizes names with packaging, not a copy."""
+        assert parse_dep.normalize_name is canonicalize_name
 
     def test_no_copy_of_the_requirements_file_rules(self):
         """parse_dep holds no copy of the requirements file format rules."""

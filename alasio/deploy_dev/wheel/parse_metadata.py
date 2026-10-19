@@ -1,6 +1,9 @@
 from pathlib import Path
 from threading import Lock
 
+from packaging.utils import canonicalize_name
+from packaging.version import Version
+
 from alasio.deploy_dev.get_version import get_version_from_source
 from alasio.deploy_dev.wheel.repo_path import RepoPath
 from alasio.ext.cache import cached_property
@@ -81,33 +84,46 @@ class RepoStandardMetadata:
         return tomllib.loads(content.decode('utf-8'))
 
     @cached_property
-    def metaname(self):
+    def canonical_name(self):
         """
-        Distribution name used by the wheel file and the dist-info folder.
+        PEP 503 normalized distribution name.
 
-        PEP 427 normalizes the distribution name by replacing '-' and '.'
-        with '_' in the wheel filename and the dist-info folder name.
+        The name is lowercased and runs of '-', '_' and '.' are replaced by
+        a single '-'. This is also the name used by the sdist filename.
 
         Returns:
-            str: Normalized distribution name
+            str: Canonical distribution name
         """
-        name = str(deep_get(self.project_data, keys='project.name', default=''))
-        name = name.replace('-', '_').replace('.', '_')
+        name = canonicalize_name(
+            str(deep_get(self.project_data, keys='project.name', default='')))
         if not name:
             raise ValueError(f'Empty project.name in pyproject.toml at commit {self.commit}')
         return name
 
     @cached_property
-    def version(self):
+    def metaname(self):
         """
-        Project version, from project.version or {folder}/__init__.py.
+        Distribution name used by the wheel file and the dist-info folder.
+
+        PEP 427 uses the PEP 503 name with '-' replaced by '_'.
 
         Returns:
-            str: Version string
+            str: Normalized distribution name
+        """
+        return self.canonical_name.replace('-', '_')
+
+    @cached_property
+    def version(self):
+        """
+        PEP 440 normalized project version, from project.version or
+        {folder}/__init__.py.
+
+        Returns:
+            str: Normalized version string
         """
         version = deep_get(self.project_data, keys='project.version', default='')
         if version:
-            return version
+            return str(Version(str(version)))
 
         # try to get from __init__.py of the commit
         if self.folder:
@@ -118,7 +134,7 @@ class RepoStandardMetadata:
             else:
                 version = get_version_from_source(content.decode('utf-8'))
                 if version:
-                    return version
+                    return str(Version(str(version)))
 
         detail = f' and {self.folder}/__init__.py' if self.folder else ''
         raise ValueError(f'Empty version in pyproject.toml{detail} at commit {self.commit}')

@@ -38,10 +38,14 @@ Usage:
 
 import re
 
+from packaging.utils import canonicalize_name as normalize_name  # noqa: F401
+
+# The requirement file format rules are shared with the client on purpose:
+# the release side parses the same files the client installs from.
 from alasio.deploy.simple_pip.parse_req import Requirements, build_pins, parse_requirement
-# re-exported for the release modules that normalize a distribution name,
-# e.g. fetch_wheel and dep_gen
-from alasio.deploy.simple_pip.pip_list import normalize_name  # noqa: F401
+# Re-exported for the release modules that normalize a distribution name,
+# e.g. fetch_wheel and dep_gen. The release side uses packaging; the client
+# keeps its own normalize_name in alasio.deploy.simple_pip.pip_list.
 from alasio.ext.cache import cached_property
 
 

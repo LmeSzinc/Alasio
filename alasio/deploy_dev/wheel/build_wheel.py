@@ -332,9 +332,8 @@ class BuildWheel:
 
     @cached_property
     def file_targz(self):
-        # Distribution name for sdist usually uses original name (with hyphens)
-        name = str(deep_get(self.project_data, keys='project.name', default=''))
-        return self.root / 'dist' / f'{name}-{self.version}.tar.gz'
+        # PEP 625: the sdist filename uses the PEP 503 canonical name
+        return self.root / 'dist' / f'{self.repo_metadata.canonical_name}-{self.version}.tar.gz'
 
     def _build_targz(self):
         """
