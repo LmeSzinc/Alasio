@@ -22,12 +22,11 @@ content later, an existing file of wrong content only costs the fetch
 the probe assumed to save; a false full-pack choice on the other hand
 only costs bandwidth, never correctness).
 
-The blocks are checked from the largest one down: the stored bytes, the
-currency of the decision, are dominated by the large blocks, so the scan
-stops as soon as the decision is certain - the missing blocks are over
-the request budget, or the present bytes plus every unchecked byte stay
-below PRESENT_RATIO of the pack - without checking the many small
-records behind the large ones. PresenceResult carries the decision
+The blocks are checked from the largest one down, in waves on the thread
+pool (PROBE_CHUNK blocks per job, PROBE_WAVE jobs at once): the decision
+is evaluated when a wave is done, so the scan still stops before the many
+small records behind the large ones, at most one wave behind the point a
+serial scan would have stopped at. PresenceResult carries the decision
 (prefer_full_pack()) and the accounting at the point the scan stopped:
 complete is False when blocks were skipped, the byte counters are then
 lower bounds of the full accounting. The verdict stays exact either way:
@@ -39,7 +38,8 @@ passes the decoder, localized to the local namespace of the target (see
 JobBase.localize()), and the root its record paths are relative to. One
 os.stat per record path is the io of the estimate - thousands of stats
 on a large pack - so the caller runs LocalProbe.presence() in a worker
-thread, like every other local phase of a deploy job.
+thread, like every other local phase of a deploy job. The scan must not
+run on a worker of THREAD_POOL itself: its waves wait for that pool.
 """
 import os
 import stat
@@ -47,6 +47,7 @@ import stat
 from msgspec import Struct
 
 from alasio.ext.cache import cached_property
+from alasio.ext.concurrent.threadpool import THREAD_POOL
 from alasio.ext.path import PathStr
 
 # Share of the stored bytes of a pack a local tree must supply for the
@@ -63,6 +64,42 @@ PRESENT_RATIO = 1 / 5
 # full pack download, however few bytes the tree reuses. The accounting
 # is per block, a block shared by several records counts once.
 REQUEST_BUDGET = 100
+
+# Blocks checked by one job of the presence scan. The scan is io bound (one
+# os.stat per record path) and a pool dispatch costs ~15us per job, so one
+# job per block is pure dispatch overhead: the chunk amortizes it over the
+# stats of the blocks it carries.
+#
+# Measured on the Alas2026 checkout (7638 files, 7635 blocks, 108.9 MiB,
+# warm cache, pool_size=8):
+#
+#   chunk     full scan     early stop     extra blocks
+#   serial      467 ms         2.31 ms              0
+#   8           120 ms         2.28 ms             27
+#   16          123 ms         1.87 ms             27
+#   32          108 ms         3.35 ms            155
+#   64          112 ms         7.08 ms            411
+#   128         115 ms        13.64 ms            923
+#   256         103 ms        28.55 ms           1947
+#   512         108 ms        57.23 ms           3995
+#
+# The absolute times move with the machine and the file system cache, the
+# shape of the table is what the choice is based on.
+# The full scan (the tree supplies every block, the per-file way is chosen
+# and every block is checked anyway) is flat from 32 blocks on, the dispatch
+# is amortized there. The early stop (a tree that supplies too little, the
+# full pack is chosen) is where the chunk costs: every block of the wave is
+# checked even when the decision is certain inside it, and a large chunk
+# turns the 2ms shortcut into 13-57ms. 8 keeps the shortcut within one wave
+# (64 blocks, the extra stats of the table) while the full scan stays close
+# to its floor.
+PROBE_CHUNK = 8
+
+# Jobs sent to the thread pool at once, one per worker of the default pool.
+# The decision is evaluated between waves, so a wave is the granularity of
+# the early stop: at most PROBE_WAVE * PROBE_CHUNK blocks behind the point a
+# serial scan would have stopped at are checked.
+PROBE_WAVE = 8
 
 
 class StoredBlock(Struct):
@@ -158,7 +195,8 @@ class LocalProbe:
     blocks): the stored bytes, the currency of the decision, are
     dominated by the large blocks, so the scan stops as soon as the
     decision cannot change any more (see presence()) and the many small
-    records behind the large ones are never checked.
+    records behind the large ones are never checked. The scan runs in
+    waves on the thread pool (see PROBE_CHUNK and PROBE_WAVE).
     """
 
     def __init__(self, decoder):
@@ -202,8 +240,10 @@ class LocalProbe:
         for it; a block with at least one missing record needs at most
         one range request, whatever the number of referencing records.
 
-        The blocks are checked from the largest one down and the scan
-        stops as soon as the decision of the result is certain:
+        The blocks are checked from the largest one down, in waves on the
+        thread pool: PROBE_WAVE jobs of PROBE_CHUNK blocks are checked at
+        once and the decision is evaluated when the wave is done, so the
+        scan stops as soon as the decision of the result is certain:
 
         - the missing blocks are over REQUEST_BUDGET (one range request
           each, the rest of the scan cannot bring them back under it);
@@ -214,12 +254,15 @@ class LocalProbe:
         Both stops only skip the blocks behind the large ones the
         decision is made of; the returned accounting is flagged partial
         (complete is False) and its counters are lower bounds of the
-        full accounting. A decision that only becomes certain on the
-        last block skips nothing: the accounting is complete then.
+        full accounting. The blocks of the wave that made the decision
+        are checked anyway, at most PROBE_WAVE * PROBE_CHUNK of them (see
+        PROBE_CHUNK for the choice). A decision that only becomes certain
+        on the last block skips nothing: the accounting is complete then.
 
         The caller runs this in a worker thread: one os.stat per record
         path is the io of the estimate, thousands of stats on a large
-        pack.
+        pack. It must not run on a worker of THREAD_POOL: the waves wait
+        for that pool.
 
         Args:
             root (str): Root folder of the target, the record paths are
@@ -240,12 +283,26 @@ class LocalProbe:
         missing_blocks = 0
         remaining = total_bytes
         complete = True
-        for block in self.blocks:
-            remaining -= block.data_size
-            if _block_present(root, block.paths):
-                present_bytes += block.data_size
-            else:
-                missing_blocks += 1
+        blocks = self.blocks
+        index = 0
+        while index < len(blocks):
+            # one wave: PROBE_WAVE jobs of PROBE_CHUNK blocks, the blocks
+            # of a wave are checked in parallel and their results are
+            # merged here when the wave is done
+            jobs = []
+            wave_bytes = 0
+            for _ in range(PROBE_WAVE):
+                piece = blocks[index:index + PROBE_CHUNK]
+                if not piece:
+                    break
+                index += len(piece)
+                wave_bytes += sum(block.data_size for block in piece)
+                jobs.append(THREAD_POOL.start_thread_soon(_check_blocks, root, piece))
+            for job in jobs:
+                got_present, got_missing = job.get()
+                present_bytes += got_present
+                missing_blocks += got_missing
+            remaining -= wave_bytes
             if remaining <= 0:
                 # the last block was checked: nothing is left to skip, the
                 # accounting is complete whatever the bounds below say
@@ -301,6 +358,30 @@ def stored_blocks(decoder):
         else:
             block.paths.append(path)
     return [blocks[key] for key in sorted(blocks)]
+
+
+def _check_blocks(root, blocks):
+    """
+    Check a chunk of blocks, the task of presence() on the thread pool.
+
+    The task only stats the record paths of its blocks, no state is shared
+    with the other tasks: the caller merges the results of a wave.
+
+    Args:
+        root (PathStr): Root folder of the target
+        blocks (list[StoredBlock]): Blocks of the chunk
+
+    Returns:
+        tuple[int, int]: (stored bytes of the present blocks, missing blocks)
+    """
+    present_bytes = 0
+    missing_blocks = 0
+    for block in blocks:
+        if _block_present(root, block.paths):
+            present_bytes += block.data_size
+        else:
+            missing_blocks += 1
+    return present_bytes, missing_blocks
 
 
 def _block_present(root, paths):

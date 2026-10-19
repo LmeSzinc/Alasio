@@ -226,20 +226,19 @@ class TestPresence:
             present_bytes=PROBE_TOTAL, total_bytes=PROBE_TOTAL, missing_blocks=0)
 
     def test_empty_root(self, fs):
-        """An empty root supplies nothing: the scan stops before the
-        smallest block (without it the ratio stays below PRESENT_RATIO)
-        and the full pack is decided."""
+        """An empty root supplies nothing: the one wave of the small pack is
+        checked and the full pack is decided."""
         fs.create_dir(ROOT)
         result = LocalProbe(PROBE_DECODER).presence(ROOT)
         assert result == PresenceResult(
-            present_bytes=0, total_bytes=PROBE_TOTAL, missing_blocks=3, complete=False)
+            present_bytes=0, total_bytes=PROBE_TOTAL, missing_blocks=4, complete=True)
         assert result.prefer_full_pack() is True
 
     def test_missing_root(self, fs):
         """A root that does not exist is an empty tree."""
         result = LocalProbe(PROBE_DECODER).presence(ROOT)
         assert result == PresenceResult(
-            present_bytes=0, total_bytes=PROBE_TOTAL, missing_blocks=3, complete=False)
+            present_bytes=0, total_bytes=PROBE_TOTAL, missing_blocks=4, complete=True)
         assert result.prefer_full_pack() is True
 
     def test_shared_block_counted_once(self, fs):
@@ -332,10 +331,9 @@ class TestEarlyStop:
         assert sizes == sorted(sizes, reverse=True)
         assert probe.total_bytes == sum(sizes)
 
-    def test_empty_tree_skips_small_blocks(self, fs, monkeypatch):
-        """An empty tree stops the scan among the large blocks: the large
-        blocks alone carry over 4/5 of the stored bytes, the hundred small
-        records behind them are never checked."""
+    def test_empty_tree_stops_after_the_first_wave(self, fs, monkeypatch):
+        """An empty tree stops after the first wave of the scan: the hun-
+        dred small records behind the large blocks are never checked."""
         calls = []
         original = os.stat
 
@@ -344,14 +342,14 @@ class TestEarlyStop:
             return original(path, *args, **kwargs)
         monkeypatch.setattr(os, 'stat', _counting)
 
-        result = LocalProbe(SKEW_DECODER).presence(ROOT)
+        probe = LocalProbe(SKEW_DECODER)
+        result = probe.presence(ROOT)
         assert result.present_bytes == 0
         # every checked block was missing
         assert result.missing_blocks == len(calls)
-        # the scan stopped before reaching the small records, i.e. before
-        # checking every large block either
-        assert len(calls) <= len(SKEW_BIGS)
-        assert not any('small' in path for path in calls)
+        # one wave of the scan, the blocks behind it are skipped
+        assert len(calls) == local_probe.PROBE_WAVE * local_probe.PROBE_CHUNK
+        assert len(calls) < len(probe.blocks)
         assert result.complete is False
         assert result.prefer_full_pack() is True
 
@@ -376,6 +374,9 @@ class TestEarlyStop:
         the rest of the scan cannot bring them back."""
         write_tree(GUARD_DECODER, fs, exclude=GUARD_MISSING)
         monkeypatch.setattr(local_probe, 'REQUEST_BUDGET', 2)
+        # one block per wave, the early stop is evaluated after every block
+        monkeypatch.setattr(local_probe, 'PROBE_CHUNK', 1)
+        monkeypatch.setattr(local_probe, 'PROBE_WAVE', 1)
         result = LocalProbe(GUARD_DECODER).presence(ROOT)
         assert result.present_ratio > PRESENT_RATIO
         assert result.missing_blocks == len(GUARD_MISSING)
@@ -388,6 +389,9 @@ class TestEarlyStop:
         only difference."""
         write_tree(GUARD_DECODER, fs, exclude=GUARD_MISSING)
         monkeypatch.setattr(local_probe, 'REQUEST_BUDGET', len(GUARD_MISSING))
+        # one block per wave, the early stop is evaluated after every block
+        monkeypatch.setattr(local_probe, 'PROBE_CHUNK', 1)
+        monkeypatch.setattr(local_probe, 'PROBE_WAVE', 1)
         result = LocalProbe(GUARD_DECODER).presence(ROOT)
         assert result.missing_blocks == len(GUARD_MISSING)
         assert result.complete is True
