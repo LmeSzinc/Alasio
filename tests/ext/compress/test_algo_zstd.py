@@ -107,8 +107,12 @@ class TestZstdLevel:
 
     @pytest.mark.parametrize('level', [1, 3, 10, 22])
     def test_level_of_dict_compression_changes_the_output(self, level):
-        """The level has to reach the patch-from compression as well."""
-        source = b''.join(b'original line %d of the old file\n' % i for i in range(30000))
+        """The level has to reach the patch-from compression as well.
+
+        The source stays at a few thousand lines: level 22 already spends
+        seconds on a 1MB input, and the levels differ well before that.
+        """
+        source = b''.join(b'original line %d of the old file\n' % i for i in range(5000))
         data = source[:1000] + b'changed line\n' + source[2000:]
         patch = zstd_compress(data, source=source, level=level)
         assert zstd_decompress(patch, source=source) == data

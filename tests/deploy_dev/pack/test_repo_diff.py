@@ -209,7 +209,7 @@ class TestRepoDiffRename:
 
     def test_rename_modify(self):
         """A renamed file with changes becomes an RM record with a patch."""
-        lines = code_lines(4000)
+        lines = code_lines(1000)
         diff = make_diff(
             {'a.txt': b''.join(lines)},
             {'moved.txt': damage_lines(lines, 0.05, seed=3)},
