@@ -1,4 +1,5 @@
 import datetime as d
+import os
 import threading
 
 import pytest
@@ -7,6 +8,9 @@ from alasio.config.alasio.group_proxy import GroupProxy
 from alasio.config.base import AlasioConfigBase, config_access
 from alasio.config.const import DataInconsistent
 from alasio.config.entry.model import ConfigSetEvent
+from alasio.db.conn import SQLITE_POOL
+from alasio.ext import env
+from alasio.ext.env import ALASIO_ROOT
 from alasio.logger import logger
 
 
@@ -377,16 +381,27 @@ class TestConfigEdgeCases:
         with pytest.raises(TaskStop, match='Custom stop message'):
             AlasioConfigBase.task_stop('Custom stop message')
 
-    def test_empty_config_name_creates_file(self, example_mod):
+    def test_empty_config_name_creates_file(self, example_mod, monkeypatch):
         """Test config with empty name works as a base config"""
+        # an empty name maps to <PROJECT_ROOT>/config/.db, point the project
+        # root at temp/ so the database does not land in a real project root
+        root = ALASIO_ROOT.joinpath(f'temp/config_empty_name_{os.getpid()}')
+        monkeypatch.setattr(env, 'PROJECT_ROOT', root)
+
         class EmptyNameConfig(AlasioConfigBase):
             entry = example_mod.entry
             Scheduler: "scheduler.Scheduler"
 
-        cfg = EmptyNameConfig('', task='')
-        # Should not crash
-        assert cfg.config_name == ''
-        assert cfg.task == ''
+        try:
+            cfg = EmptyNameConfig('', task='')
+            # Should not crash
+            assert cfg.config_name == ''
+            assert cfg.task == ''
+        finally:
+            # release the pooled connection, then the temp folder can be
+            # removed on Windows
+            SQLITE_POOL.delete_file(root.joinpath('config/.db'))
+            root.folder_rmtree()
 
     def test_release_method(self, config):
         """Test release clears internal state"""

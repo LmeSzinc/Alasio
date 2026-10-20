@@ -39,8 +39,10 @@ def reset_token_table():
 @pytest.fixture(autouse=True)
 def auth_env(monkeypatch):
     """Configure a password so the login layer is enforced."""
-    monkeypatch.setattr(JWT_MANAGER, 'secret', SECRET)
-    monkeypatch.setattr(JWT_MANAGER, 'pwd', PASSWORD)
+    # setitem shadows the cached_property without evaluating it, setattr()
+    # would read the user deploy.yaml / gui.db to check the attribute exists
+    monkeypatch.setitem(JWT_MANAGER.__dict__, 'secret', SECRET)
+    monkeypatch.setitem(JWT_MANAGER.__dict__, 'pwd', PASSWORD)
     yield
     # restore the cached_property descriptors
     monkeypatch.undo()

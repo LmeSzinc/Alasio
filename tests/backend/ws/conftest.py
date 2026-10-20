@@ -33,9 +33,12 @@ def isolate_jwt_manager(monkeypatch):
     """
     from alasio.backend.auth.auth import JWT_MANAGER
 
-    # instance attributes shadow the cached_property descriptors
-    monkeypatch.setattr(JWT_MANAGER, 'pwd', '')
-    monkeypatch.setattr(JWT_MANAGER, 'secret', b'unit-test-secret')
+    # instance attributes shadow the cached_property descriptors, setitem
+    # writes the instance dict directly: setattr() would read the attribute
+    # to check it exists, which evaluates the descriptor and reads the user
+    # deploy.yaml / gui.db
+    monkeypatch.setitem(JWT_MANAGER.__dict__, 'pwd', '')
+    monkeypatch.setitem(JWT_MANAGER.__dict__, 'secret', b'unit-test-secret')
 
 
 @pytest.fixture(autouse=True)

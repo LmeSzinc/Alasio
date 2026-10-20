@@ -170,8 +170,11 @@ def reset_token_table():
 @pytest.fixture(autouse=True)
 def auth_env(monkeypatch):
     """Default: no password configured; tests override as needed."""
-    monkeypatch.setattr(JWT_MANAGER, 'secret', b'test-secret')
-    monkeypatch.setattr(JWT_MANAGER, 'pwd', '')
+    # setitem on the instance dict shadows the cached_property without
+    # evaluating it: setattr() reads the attribute to check it exists, which
+    # would open the user deploy.yaml and gui.db
+    monkeypatch.setitem(JWT_MANAGER.__dict__, 'secret', b'test-secret')
+    monkeypatch.setitem(JWT_MANAGER.__dict__, 'pwd', '')
     yield
     monkeypatch.undo()
 
@@ -195,7 +198,9 @@ def gate(monkeypatch):
 def set_password(monkeypatch, pwd='secret-password'):
     # the default must pass the strength rule, otherwise every test that
     # needs a usable password would silently fall into rule A
-    monkeypatch.setattr(JWT_MANAGER, 'pwd', pwd)
+    # the same as auth_env: never evaluate the cached_property, it reads the
+    # user deploy.yaml / gui.db
+    monkeypatch.setitem(JWT_MANAGER.__dict__, 'pwd', pwd)
 
 
 def valid_cookie_header():
