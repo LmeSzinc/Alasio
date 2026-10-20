@@ -1,76 +1,77 @@
 /**
  * Unit tests for the token announcement parsing and chained validation.
- *
- * Run with: npx tsx --test webapp/main/announcement.test.ts
  */
-import assert from "node:assert/strict";
-import { test } from "node:test";
+import { describe, expect, it } from "vitest";
 import { acceptAnnouncement, parseAnnouncement } from "./announcement";
 
 const T1 = "a".repeat(64);
 const T2 = "b".repeat(64);
 const T3 = "c".repeat(64);
 
-test("parseAnnouncement: accepts the initial begin announcement", () => {
-  assert.deepEqual(parseAnnouncement(`[Supervisor] token_set:begin:${T1}`), { old: "begin", next: T1 });
+describe("TestParseAnnouncement", () => {
+  it("accepts the initial begin announcement", () => {
+    expect(parseAnnouncement(`[Supervisor] token_set:begin:${T1}`)).toEqual({ old: "begin", next: T1 });
+  });
+
+  it("accepts a rotation announcement", () => {
+    expect(parseAnnouncement(`[Supervisor] token_set:${T1}:${T2}`)).toEqual({ old: T1, next: T2 });
+  });
+
+  it("rejects malformed lines", () => {
+    expect(parseAnnouncement("")).toBeNull();
+    expect(parseAnnouncement("[Supervisor] token_set:")).toBeNull();
+    expect(parseAnnouncement("[Supervisor] token_set:begin")).toBeNull();
+    expect(parseAnnouncement("[Supervisor] token_set:begin:")).toBeNull();
+    // wrong prefix
+    expect(parseAnnouncement(`[Backend] token_set:begin:${T1}`)).toBeNull();
+    // non-hex token
+    expect(parseAnnouncement(`[Supervisor] token_set:begin:xyz${T1.slice(3)}`)).toBeNull();
+    // trailing content
+    expect(parseAnnouncement(`[Supervisor] token_set:begin:${T1} extra`)).toBeNull();
+    // uppercase hex rejected (regex is lowercase only)
+    expect(parseAnnouncement(`[Supervisor] token_set:begin:${T1.toUpperCase()}`)).toBeNull();
+  });
 });
 
-test("parseAnnouncement: accepts a rotation announcement", () => {
-  assert.deepEqual(parseAnnouncement(`[Supervisor] token_set:${T1}:${T2}`), { old: T1, next: T2 });
-});
+describe("TestAcceptAnnouncement", () => {
+  it("accepts begin when current is null", () => {
+    expect(acceptAnnouncement(null, "begin", T1)).toBe(T1);
+  });
 
-test("parseAnnouncement: rejects malformed lines", () => {
-  assert.equal(parseAnnouncement(""), null);
-  assert.equal(parseAnnouncement("[Supervisor] token_set:"), null);
-  assert.equal(parseAnnouncement("[Supervisor] token_set:begin"), null);
-  assert.equal(parseAnnouncement("[Supervisor] token_set:begin:"), null);
-  // wrong prefix
-  assert.equal(parseAnnouncement(`[Backend] token_set:begin:${T1}`), null);
-  // non-hex token
-  assert.equal(parseAnnouncement(`[Supervisor] token_set:begin:xyz${T1.slice(3)}`), null);
-  // trailing content
-  assert.equal(parseAnnouncement(`[Supervisor] token_set:begin:${T1} extra`), null);
-  // uppercase hex rejected (regex is lowercase only)
-  assert.equal(parseAnnouncement(`[Supervisor] token_set:begin:${T1.toUpperCase()}`), null);
-});
+  it("ignores a forged begin after the chain started", () => {
+    // once authToken is non-null, begin:<fake> can never match
+    expect(acceptAnnouncement(T1, "begin", T2)).toBeNull();
+  });
 
-test("acceptAnnouncement: accepts begin when current is null", () => {
-  assert.equal(acceptAnnouncement(null, "begin", T1), T1);
-});
+  it("accepts a rotation when old matches current", () => {
+    expect(acceptAnnouncement(T1, T1, T2)).toBe(T2);
+  });
 
-test("acceptAnnouncement: ignores a forged begin after the chain started", () => {
-  // once authToken is non-null, begin:<fake> can never match
-  assert.equal(acceptAnnouncement(T1, "begin", T2), null);
-});
+  it("ignores a rotation when old mismatches", () => {
+    // forged / out-of-chain announcement: old != current
+    expect(acceptAnnouncement(T1, T2, T3)).toBeNull();
+    expect(acceptAnnouncement(T1, "begin", T3)).toBeNull();
+  });
 
-test("acceptAnnouncement: accepts a rotation when old matches current", () => {
-  assert.equal(acceptAnnouncement(T1, T1, T2), T2);
-});
+  it("rejects a forged announcement that cannot collide with the chain", () => {
+    // the attacker does not know the current token; a begin sentinel after
+    // the chain started and a random old token are both rejected
+    let current: string | null = null;
+    const step = (line: string) => {
+      const parsed = parseAnnouncement(line);
+      if (!parsed) return null;
+      const next = acceptAnnouncement(current, parsed.old, parsed.next);
+      if (next) current = next;
+      return next;
+    };
 
-test("acceptAnnouncement: ignores a rotation when old mismatches", () => {
-  // forged / out-of-chain announcement: old != current
-  assert.equal(acceptAnnouncement(T1, T2, T3), null);
-  assert.equal(acceptAnnouncement(T1, "begin", T3), null);
-});
-
-test("acceptAnnouncement: a forged announcement cannot collide with the chain", () => {
-  // the attacker does not know the current token; a begin sentinel after
-  // the chain started and a random old token are both rejected
-  let current: string | null = null;
-  const step = (line: string) => {
-    const parsed = parseAnnouncement(line);
-    if (!parsed) return null;
-    const next = acceptAnnouncement(current, parsed.old, parsed.next);
-    if (next) current = next;
-    return next;
-  };
-
-  // legitimate chain
-  assert.equal(step(`[Supervisor] token_set:begin:${T1}`), T1);
-  assert.equal(step(`[Supervisor] token_set:${T1}:${T2}`), T2);
-  // forged attempts after the chain started
-  assert.equal(step(`[Supervisor] token_set:begin:${T3}`), null);
-  assert.equal(step(`[Supervisor] token_set:${T1}:${T3}`), null);
-  // current unchanged
-  assert.equal(current, T2);
+    // legitimate chain
+    expect(step(`[Supervisor] token_set:begin:${T1}`)).toBe(T1);
+    expect(step(`[Supervisor] token_set:${T1}:${T2}`)).toBe(T2);
+    // forged attempts after the chain started
+    expect(step(`[Supervisor] token_set:begin:${T3}`)).toBeNull();
+    expect(step(`[Supervisor] token_set:${T1}:${T3}`)).toBeNull();
+    // current unchanged
+    expect(current).toBe(T2);
+  });
 });

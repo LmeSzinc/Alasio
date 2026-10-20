@@ -18,6 +18,15 @@
     "verbatimModuleSyntax": false,
     "types": ["node", "vite/client"]
   },
-  "include": ["main/**/*", "preload/**/*", "renderer/**/*", "shared/**/*", "*.ts", "vite.config.mts", "postcss.config.mts"],
+  "include": [
+    "main/**/*",
+    "preload/**/*",
+    "renderer/**/*",
+    "shared/**/*",
+    "*.ts",
+    "vite.config.mts",
+    "vitest.config.mts",
+    "postcss.config.mts"
+  ],
   "exclude": ["node_modules", "dist"]
 }

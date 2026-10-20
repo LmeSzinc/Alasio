@@ -1,10 +1,7 @@
 /**
  * Unit tests for LineSplitter.
- *
- * Run with: npx tsx --test webapp/main/line-splitter.test.ts
  */
-import assert from "node:assert/strict";
-import { test } from "node:test";
+import { describe, expect, it } from "vitest";
 import { LineSplitter } from "./line-splitter";
 
 const collect = (chunks: string[]): string[] => {
@@ -16,63 +13,65 @@ const collect = (chunks: string[]): string[] => {
   return lines;
 };
 
-test("LineSplitter: single complete line in one push (fast path)", () => {
-  assert.deepEqual(collect(["hello\n"]), ["hello"]);
-});
+describe("TestLineSplitter", () => {
+  it("splits a single complete line in one push (fast path)", () => {
+    expect(collect(["hello\n"])).toEqual(["hello"]);
+  });
 
-test("LineSplitter: consecutive complete lines (fast path per push)", () => {
-  assert.deepEqual(collect(["a\n", "b\n", "c\n"]), ["a", "b", "c"]);
-});
+  it("splits consecutive complete lines (fast path per push)", () => {
+    expect(collect(["a\n", "b\n", "c\n"])).toEqual(["a", "b", "c"]);
+  });
 
-test("LineSplitter: line split across pushes", () => {
-  assert.deepEqual(collect(["hel", "lo\n"]), ["hello"]);
-});
+  it("joins a line split across pushes", () => {
+    expect(collect(["hel", "lo\n"])).toEqual(["hello"]);
+  });
 
-test("LineSplitter: multiple lines in one push", () => {
-  assert.deepEqual(collect(["a\nb\nc\n"]), ["a", "b", "c"]);
-});
+  it("splits multiple lines in one push", () => {
+    expect(collect(["a\nb\nc\n"])).toEqual(["a", "b", "c"]);
+  });
 
-test("LineSplitter: multiple lines without trailing newline", () => {
-  assert.deepEqual(collect(["a\nb"]), ["a"]);
-  assert.deepEqual(collect(["a\nb", "\n"]), ["a", "b"]);
-});
+  it("splits multiple lines without a trailing newline", () => {
+    expect(collect(["a\nb"])).toEqual(["a"]);
+    expect(collect(["a\nb", "\n"])).toEqual(["a", "b"]);
+  });
 
-test("LineSplitter: partial line without newline stays buffered", () => {
-  assert.deepEqual(collect(["hello"]), []);
-});
+  it("buffers a partial line without newline", () => {
+    expect(collect(["hello"])).toEqual([]);
+  });
 
-test("LineSplitter: partial line completes on a later push", () => {
-  assert.deepEqual(collect(["hello", " world\n"]), ["hello world"]);
-});
+  it("completes a partial line on a later push", () => {
+    expect(collect(["hello", " world\n"])).toEqual(["hello world"]);
+  });
 
-test("LineSplitter: complete line then partial buffer", () => {
-  assert.deepEqual(collect(["a\nbc"]), ["a"]);
-  assert.deepEqual(collect(["a\nbc", "d\n"]), ["a", "bcd"]);
-});
+  it("handles a complete line followed by a partial buffer", () => {
+    expect(collect(["a\nbc"])).toEqual(["a"]);
+    expect(collect(["a\nbc", "d\n"])).toEqual(["a", "bcd"]);
+  });
 
-test("LineSplitter: empty push", () => {
-  assert.deepEqual(collect([""]), []);
-});
+  it("ignores an empty push", () => {
+    expect(collect([""])).toEqual([]);
+  });
 
-test("LineSplitter: empty line", () => {
-  assert.deepEqual(collect(["\n"]), [""]);
-  assert.deepEqual(collect(["\r\n"]), [""]);
-});
+  it("emits an empty line", () => {
+    expect(collect(["\n"])).toEqual([""]);
+    expect(collect(["\r\n"])).toEqual([""]);
+  });
 
-test("LineSplitter: CRLF line ending is stripped", () => {
-  // Windows pipes deliver CRLF; the trailing "\r" is part of the line
-  // ending, not the line content.
-  assert.deepEqual(collect(["a\r\n"]), ["a"]);
-  assert.deepEqual(collect(["a\r\n", "b\n"]), ["a", "b"]);
-});
+  it("strips a CRLF line ending", () => {
+    // Windows pipes deliver CRLF; the trailing "\r" is part of the line
+    // ending, not the line content.
+    expect(collect(["a\r\n"])).toEqual(["a"]);
+    expect(collect(["a\r\n", "b\n"])).toEqual(["a", "b"]);
+  });
 
-test("LineSplitter: CRLF split across pushes", () => {
-  assert.deepEqual(collect(["hel", "lo\r\n"]), ["hello"]);
-  assert.deepEqual(collect(["a\r", "b\n"]), ["a\rb"]);
-});
+  it("strips a CRLF split across pushes", () => {
+    expect(collect(["hel", "lo\r\n"])).toEqual(["hello"]);
+    expect(collect(["a\r", "b\n"])).toEqual(["a\rb"]);
+  });
 
-test("LineSplitter: carriage return inside the line is kept", () => {
-  // Only the line-ending "\r" of a CRLF line is stripped; a "\r"
-  // anywhere else in the line is raw content.
-  assert.deepEqual(collect(["a\rb\n"]), ["a\rb"]);
+  it("keeps a carriage return inside the line", () => {
+    // Only the line-ending "\r" of a CRLF line is stripped; a "\r"
+    // anywhere else in the line is raw content.
+    expect(collect(["a\rb\n"])).toEqual(["a\rb"]);
+  });
 });
