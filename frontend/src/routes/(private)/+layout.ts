@@ -1,5 +1,6 @@
 import { redirect } from "@sveltejs/kit";
 import { authApi } from "$lib/api/auth";
+import { errorText } from "$public/auth/translate";
 import type { LayoutLoad } from "./$types";
 
 export const load: LayoutLoad = async () => {
@@ -16,7 +17,7 @@ export const load: LayoutLoad = async () => {
     } else {
       // any captured error
       console.error(response.data);
-      return { success: false, errorMsg: response.data?.err };
+      return { success: false, errorMsg: response.data ? errorText(response.data) : undefined };
     }
   } catch (error: any) {
     // redirect
