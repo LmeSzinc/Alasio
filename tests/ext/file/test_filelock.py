@@ -1,17 +1,18 @@
 import gc
 import os
-import shutil
 import sqlite3
 import subprocess
 import sys
 import threading
 import time
+import uuid
 from pathlib import Path
 
 import pytest
 
 from alasio.ext.env import ALASIO_ROOT
 from alasio.ext.file.filelock import FilelockTimeout, SQLiteFileLock
+from alasio.ext.path.atomic import folder_rmtree
 
 CHILD_HOLD = (
     "import os, sys, time\n"
@@ -28,21 +29,26 @@ CHILD_HOLD = (
 )
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture
 def lock_dir():
     """
     Real filesystem directory for the SQLite lock tests.
 
     SQLite opens its database file in the C layer, so the in-memory fake
     filesystem cannot intercept it: the lock tests need a real directory.
-    The directory lives under the repo's temp/ folder and is removed after
-    the module finishes.
+
+    Every test gets its own directory under the repo's temp/ folder, named
+    with the process id and a random suffix. Concurrent pytest workers (and
+    directories left behind by an interrupted run) therefore never share a
+    lock file, while a test still sees a clean directory.
+
+    Returns:
+        PathStr: Path of the directory, removed when the test finishes
     """
-    path = ALASIO_ROOT.joinpath('temp/filelock')
-    shutil.rmtree(path, ignore_errors=True)
-    os.mkdir(path)
+    path = ALASIO_ROOT.joinpath(f'temp/filelock_{os.getpid()}_{uuid.uuid4().hex[:8]}')
+    os.makedirs(path)
     yield path
-    shutil.rmtree(path, ignore_errors=True)
+    folder_rmtree(path)
 
 
 class TestFilelockTimeout:
