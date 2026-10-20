@@ -2,7 +2,7 @@
   // !!![svelte-drop-dev-page]!!!
   import type { UPDATE_STATE, UpdateInfoLike, UpdateTopicLike } from "$lib/components/aside/types";
   import { type HistoryItem, type ModHistoryData, type ModOption } from "$lib/components/update/utils";
-  import ModManager from "../../mod/ModManager.svelte";
+  import ModManager from "../../updater/ModManager.svelte";
 
   // ModManager (the card list of the mod page) reads the ModList / ModHistory /
   // Update topics in production. Every scenario below overrides them with props,

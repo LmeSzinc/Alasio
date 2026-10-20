@@ -16,7 +16,7 @@ export const load: LayoutLoad = async () => {
     } else {
       // any captured error
       console.error(response.data);
-      return { success: false, errorMsg: response.data?.message };
+      return { success: false, errorMsg: response.data?.err };
     }
   } catch (error: any) {
     // redirect

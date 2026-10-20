@@ -37,8 +37,11 @@
   }
 
   // --- Dashboard types as a single card (simulating real config) ---
+  // CardData declares an index signature for the groups, so object literals
+  // with a typed `_info` are not assignable to it directly; the other debug
+  // pages cast for the same reason (see arginput / configdisplay).
   let dashboardCard = $state({
-    _info: { group: "DashboardDemo", arg: "_info", card: "card-Dashboard-Demo", name: "Dashboard Types" },
+    _info: { group: "DashboardDemo", arg: "_info", card: "card-Dashboard-Demo", name: "Dashboard Types" } as any,
     Amount: {
       _info: info("Amount", "Amount", "#eb8efe", "Gems"),
       Value: arg("Amount", "Value", "input-int", 8654),
@@ -82,11 +85,11 @@
       Eta: arg("PlannerDone", "Eta", "input", "00:00:00"),
       Time: timeArg("PlannerDone", 5 * 1000),
     },
-  });
+  } as CardData);
 
   // --- Non-dashboard card (normal args, for comparison) ---
   let normalCard = $state({
-    _info: { group: "NormalDemo", arg: "_info", card: "card-Normal-Demo", name: "Non-Dashboard (normal args)" },
+    _info: { group: "NormalDemo", arg: "_info", card: "card-Normal-Demo", name: "Non-Dashboard (normal args)" } as any,
     Settings: {
       _info: { group: "Settings", arg: "_info", name: "Settings", value: "" } as any,
       Name: arg("Settings", "Name", "input", "MyConfig"),
@@ -100,11 +103,11 @@
       Retries: arg("Output", "Retries", "input-int", 3, { ge: 1, le: 10 }),
       Notes: arg("Output", "Notes", "textarea", "Optional notes here"),
     },
-  });
+  } as CardData);
 
   // --- Mixed card (dashboard + non-dashboard groups side by side) ---
   let mixedCard = $state({
-    _info: { group: "MixedDemo", arg: "_info", card: "card-Mixed-Demo", name: "Mixed: Dashboard + Normal" },
+    _info: { group: "MixedDemo", arg: "_info", card: "card-Mixed-Demo", name: "Mixed: Dashboard + Normal" } as any,
     // Dashboard groups
     Gems: {
       _info: info("Gems", "Amount", "#eb8efe", "Gems"),
@@ -138,7 +141,7 @@
       MaxDepth: arg("Advanced", "MaxDepth", "input-int", 3, { ge: 0, le: 10 }),
       Debug: arg("Advanced", "Debug", "checkbox", false),
     },
-  });
+  } as CardData);
 
   const noopEdit = noop;
   const noopReset = noop;
