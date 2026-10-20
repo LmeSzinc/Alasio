@@ -56,15 +56,24 @@ export interface SvelteDropDevPageOptions {
  * (no node, no chunk, no placeholder) is emitted for them in the build
  * output.
  *
+ * The files are restored in `configResolved`, right after the route scan:
+ * sveltekit scans routes in its own `config` hook, and Vite runs every
+ * `config` hook before any `configResolved` hook. `svelte-kit sync`
+ * resolves the Vite config through the same path, but writes its type
+ * files after `load_config()` returns, so it re-scans the routes with
+ * every file back in place. `svelte-check` therefore keeps checking the
+ * dropped pages, while only the build output excludes them.
+ *
  * Interrupted build repair:
- * - Running `vite build` again continues the interrupted drop: files
- *   already dropped are kept, remaining marked files are dropped too.
- * - Starting `vite dev` restores every file left dropped by an
- *   interrupted build, so dev-only pages are accessible again.
+ * - The drop only lives inside config resolution, so an interrupted build
+ *   no longer leaves dropped files behind.
+ * - Starting `vite dev` still restores files left dropped by an older
+ *   interrupted run (or by a killed `svelte-kit sync`), so dev-only pages
+ *   are accessible again.
  *
  * The plugin must be placed before the sveltekit plugin in the `plugins`
- * array (and runs with `enforce: 'pre'`), so its `configResolved` hook
- * runs before sveltekit's, which performs the route scan.
+ * array (and runs with `enforce: 'pre'`), so its `config` hook runs
+ * before sveltekit's `config` hook, which performs the route scan.
  *
  * @param options Plugin options
  * @returns Vite plugin
@@ -109,18 +118,25 @@ export function svelteDropDevPage(options: SvelteDropDevPageOptions = {}): Plugi
       },
     },
 
-    configResolved(config) {
+    async configResolved(config) {
       command = config.command;
       routesRoot = path.resolve(config.root, routesDir);
+      if (command !== "build") return;
+      // Restore right after the build's route scan. sveltekit scans routes
+      // in its own `config` hook, which has already run at this point, so
+      // the build uses the route table without the dropped pages;
+      // `svelte-kit sync` re-scans after `load_config()` returns and sees
+      // every file again.
+      const restored = await restoreDroppedRoutes(routesRoot);
+      if (restored.length > 0) {
+        config.logger.info(`[svelte-drop-dev-page] restored ${restored.length} route file(s) after route scan`);
+      }
     },
 
     async closeBundle() {
-      // Vite build may run two passes (client + ssr); restore the dropped
-      // files on every pass. Restoring is idempotent: the config hook of
-      // the next pass re-drops the marked files, and the final pass ends
-      // with every file restored. A pure-SPA build (adapter-static
-      // fallback, build.ssr === false) runs a single pass only, so it
-      // must not be skipped either.
+      // Backstop: files are normally restored in `configResolved`, right
+      // after the route scan. Keep the restore here in case a build runs
+      // the hooks in a different order. Restoring is idempotent.
       if (command !== "build") return;
       const restored = await restoreDroppedRoutes(routesRoot);
       if (restored.length > 0) {
