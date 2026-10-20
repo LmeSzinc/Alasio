@@ -172,3 +172,82 @@ class TestRepoStandardMetadata:
         repo = make_repo({'pyproject.toml': b'[project]\nname = "demo-pkg"\n'})
         with pytest.raises(ValueError, match='Empty version'):
             _ = RepoStandardMetadata(repo, 'demo_pkg').version
+
+
+PYPROJECT_ENTRY_POINTS = b'''\
+[project]
+name = "demo-pkg"
+version = "1.0.0"
+
+[project.scripts]
+demo = "demo_pkg.cli:main"
+
+[project.gui-scripts]
+demo-gui = "demo_pkg.gui:main"
+
+[project.entry-points."demo.plugins"]
+plugin = "demo_pkg.plugin:Plugin"
+
+[project.entry-points."pytest11"]
+demo = "demo_pkg.pytest_plugin"
+'''
+
+ENTRY_POINT_FILES = {
+    'pyproject.toml': PYPROJECT_ENTRY_POINTS,
+    'demo_pkg/__init__.py': b'',
+}
+
+
+class TestEntryPoints:
+    """Tests for the entry point groups of a project."""
+
+    @pytest.fixture
+    def metadata(self, make_repo):
+        return RepoStandardMetadata(make_repo(ENTRY_POINT_FILES), 'demo_pkg')
+
+    def test_no_entry_points(self, make_repo):
+        """A project without an entry point declares no group."""
+        metadata = RepoStandardMetadata(make_repo(FILES), 'demo_pkg')
+        assert metadata.entry_points == {}
+
+    def test_groups(self, metadata):
+        """The shortcut tables and the entry point groups are merged."""
+        assert metadata.entry_points == {
+            'console_scripts': {'demo': 'demo_pkg.cli:main'},
+            'demo.plugins': {'plugin': 'demo_pkg.plugin:Plugin'},
+            'gui_scripts': {'demo-gui': 'demo_pkg.gui:main'},
+            'pytest11': {'demo': 'demo_pkg.pytest_plugin'},
+        }
+
+    def test_empty_group_dropped(self, make_repo):
+        """An empty group would be an empty section, it is dropped."""
+        repo = make_repo({
+            'pyproject.toml': (
+                b'[project]\n'
+                b'name = "demo-pkg"\n'
+                b'version = "1.0.0"\n'
+                b'\n[project.entry-points."demo.empty"]\n'
+            ),
+        })
+        assert RepoStandardMetadata(repo, 'demo_pkg').entry_points == {}
+
+    def test_shortcut_wins(self, make_repo):
+        """A name declared twice is taken from the shortcut table."""
+        repo = make_repo({
+            'pyproject.toml': (
+                b'[project]\n'
+                b'name = "demo-pkg"\n'
+                b'version = "1.0.0"\n'
+                b'\n[project.scripts]\n'
+                b'demo = "demo_pkg.cli:main"\n'
+                b'\n[project.entry-points.console_scripts]\n'
+                b'demo = "demo_pkg.other:main"\n'
+                b'extra = "demo_pkg.extra:main"\n'
+            ),
+        })
+        assert RepoStandardMetadata(repo, 'demo_pkg').entry_points == {
+            'console_scripts': {
+                'demo': 'demo_pkg.cli:main',
+                'extra': 'demo_pkg.extra:main',
+            },
+        }

@@ -4,6 +4,7 @@ import zipfile
 
 import pytest
 
+from alasio.deploy.simple_pip.whl_record import RecordManager, sha256_checksum
 from alasio.deploy_dev.wheel.build_wheel import BuildWheel
 from alasio.deploy_dev.wheel.parse_metadata import RepoStandardMetadata
 from alasio.ext.path.atomic import atomic_read_bytes
@@ -20,6 +21,58 @@ FILES = {
     'demo_pkg/core.py': b'a = 1\n',
     'demo_pkg/empty.py': b'',
 }
+
+PYPROJECT_ENTRY_POINTS = b'''\
+[project]
+name = "demo-pkg"
+version = "1.0.0"
+readme = "README.md"
+
+[project.scripts]
+demo = "demo_pkg.cli:main"
+
+[project.gui-scripts]
+demo-gui = "demo_pkg.gui:main"
+
+[project.entry-points."demo.plugins"]
+plugin = "demo_pkg.plugin:Plugin"
+'''
+
+ENTRY_POINTS_TXT = b'''\
+[console_scripts]
+demo = demo_pkg.cli:main
+
+[demo.plugins]
+plugin = demo_pkg.plugin:Plugin
+
+[gui_scripts]
+demo-gui = demo_pkg.gui:main
+'''
+
+
+def make_build_wheel(repo):
+    """
+    A BuildWheel whose repo and head are in memory.
+
+    Args:
+        repo (MockGitRepo): Repository of the build
+
+    Returns:
+        BuildWheel:
+    """
+    build = BuildWheel('/repo', 'demo_pkg')
+    # Replace the git repo and the head of the working tree, the properties
+    # of the build read them back through the instance cache
+    build.head = 'c1'
+    build.repo = repo
+    build.repo_metadata = RepoStandardMetadata(repo, 'demo_pkg', commit='c1')
+    # What RepoWithStatics.list_files gives, without the repo of a working tree
+    build.package_files = {
+        path: entry
+        for path, entry in repo.list_files('c1').items()
+        if path.startswith('demo_pkg/')
+    }
+    return build
 
 
 @pytest.fixture
@@ -48,19 +101,32 @@ def wheel(repo, fs):
     Returns:
         BuildWheel:
     """
-    build = BuildWheel('/repo', 'demo_pkg')
-    # Replace the git repo and the head of the working tree, the properties
-    # of the build read them back through the instance cache
-    build.head = 'c1'
-    build.repo = repo
-    build.repo_metadata = RepoStandardMetadata(repo, 'demo_pkg', commit='c1')
-    # What RepoWithStatics.list_files gives, without the repo of a working tree
-    build.package_files = {
-        path: entry
-        for path, entry in repo.list_files('c1').items()
-        if path.startswith('demo_pkg/')
-    }
-    return build
+    return make_build_wheel(repo)
+
+
+@pytest.fixture
+def repo_entry_points(make_repo):
+    """
+    The commit of a project that declares entry points.
+
+    Returns:
+        MockGitRepo:
+    """
+    return make_repo({**FILES, 'pyproject.toml': PYPROJECT_ENTRY_POINTS}, time=COMMIT_TIME)
+
+
+@pytest.fixture
+def wheel_entry_points(repo_entry_points, fs):
+    """
+    A BuildWheel of a project that declares entry points.
+
+    The fs fixture is requested here so every artifact is written to the
+    in-memory filesystem, never to the real disk.
+
+    Returns:
+        BuildWheel:
+    """
+    return make_build_wheel(repo_entry_points)
 
 
 class TestCommitTime:
@@ -147,6 +213,60 @@ class TestSdist:
         first = atomic_read_bytes(wheel._build_targz())
         second = atomic_read_bytes(wheel._build_targz())
         assert second == first
+
+
+class TestEntryPoints:
+    def test_wheel_member(self, wheel_entry_points):
+        """The dist-info declares the entry points, the RECORD lists them."""
+        with zipfile.ZipFile(wheel_entry_points._build_wheel()) as zf:
+            assert zf.namelist() == [
+                'demo_pkg/__init__.py',
+                'demo_pkg/core.py',
+                'demo_pkg/empty.py',
+                'demo_pkg-1.0.0.dist-info/METADATA',
+                'demo_pkg-1.0.0.dist-info/WHEEL',
+                'demo_pkg-1.0.0.dist-info/top_level.txt',
+                'demo_pkg-1.0.0.dist-info/entry_points.txt',
+                'demo_pkg-1.0.0.dist-info/RECORD',
+            ]
+            assert zf.read('demo_pkg-1.0.0.dist-info/entry_points.txt') == ENTRY_POINTS_TXT
+
+            record = RecordManager()
+            record.load_bytes(zf.read('demo_pkg-1.0.0.dist-info/RECORD'))
+            entry = record.entries['demo_pkg-1.0.0.dist-info/entry_points.txt']
+            assert entry.sha256 == f'sha256={sha256_checksum(ENTRY_POINTS_TXT)}'
+            assert entry.size == str(len(ENTRY_POINTS_TXT))
+
+    def test_sdist_egg_info(self, wheel_entry_points):
+        """The egg-info of the sdist declares the entry points."""
+        data = atomic_read_bytes(wheel_entry_points._build_targz())
+        with tarfile.open(fileobj=io.BytesIO(data), mode='r:gz') as tar:
+            assert tar.extractfile(
+                'demo-pkg-1.0.0/demo_pkg.egg-info/entry_points.txt'
+            ).read() == ENTRY_POINTS_TXT
+            # The file is a member of the sdist, so it is listed in SOURCES.txt
+            sources = tar.extractfile('demo-pkg-1.0.0/demo_pkg.egg-info/SOURCES.txt').read()
+        assert sources == b'''\
+PKG-INFO
+README.md
+demo_pkg.egg-info/PKG-INFO
+demo_pkg.egg-info/SOURCES.txt
+demo_pkg.egg-info/entry_points.txt
+demo_pkg.egg-info/requires.txt
+demo_pkg.egg-info/top_level.txt
+demo_pkg/__init__.py
+demo_pkg/core.py
+demo_pkg/empty.py
+pyproject.toml'''
+
+    def test_absent_without_entry_points(self, wheel):
+        """A project without an entry point has no entry_points.txt at all."""
+        with zipfile.ZipFile(wheel._build_wheel()) as zf:
+            assert not [name for name in zf.namelist() if name.endswith('entry_points.txt')]
+
+        data = atomic_read_bytes(wheel._build_targz())
+        with tarfile.open(fileobj=io.BytesIO(data), mode='r:gz') as tar:
+            assert not [name for name in tar.getnames() if name.endswith('entry_points.txt')]
 
 
 class TestBuild:

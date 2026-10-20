@@ -178,6 +178,34 @@ class RepoStandardMetadata:
         return metadata
 
     @cached_property
+    def entry_points(self):
+        """
+        Entry point groups of the project, PEP 621.
+
+        project.scripts and project.gui-scripts are shortcuts of the
+        console_scripts and gui_scripts groups. A name declared by both the
+        shortcut table and the group table is taken from the shortcut table,
+        an empty group is dropped so it does not produce an empty section.
+
+        Returns:
+            dict[str, dict[str, str]]: {group: {name: value}}
+        """
+        metadata = self.standard_metadata
+        entry_points = {
+            group: dict(entries)
+            for group, entries in metadata.entrypoints.items()
+            if entries
+        }
+        for group, entries in (
+            ('console_scripts', metadata.scripts),
+            ('gui_scripts', metadata.gui_scripts),
+        ):
+            if entries:
+                entry_points.setdefault(group, {}).update(entries)
+
+        return entry_points
+
+    @cached_property
     def license_files(self):
         """
         Contents of project.license-files resolved against the commit.

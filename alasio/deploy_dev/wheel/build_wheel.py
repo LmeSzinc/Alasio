@@ -176,6 +176,39 @@ class BuildWheel:
         ]).encode(encoding='utf-8')
 
     @cached_property
+    def data_entry_points(self):
+        """
+        /{metaname}-{version}.dist-info/entry_points.txt
+
+        The file declares the console scripts, the gui scripts and the other
+        entry point groups of the project, an installer generates the scripts
+        of the first two groups from this file.
+
+        None when the project declares no entry point: a file without a
+        section declares nothing and is not written at all.
+
+        Returns:
+            bytes | None:
+        """
+        entry_points = self.repo_metadata.entry_points
+        if not entry_points:
+            return None
+
+        # The format of setuptools: a section per group, a blank line between
+        # the sections. The groups and the names are sorted, so the same commit
+        # produces the same file and the diff of a version is readable.
+        lines = []
+        for group, entries in sorted(entry_points.items()):
+            if lines:
+                lines.append('')
+            lines.append(f'[{group}]')
+            for name, value in sorted(entries.items()):
+                lines.append(f'{name} = {value}')
+
+        # The file ends with a single newline, not with a blank line
+        return ('\n'.join(lines) + '\n').encode(encoding='utf-8')
+
+    @cached_property
     def data_record(self):
         """
         /{metaname}-{version}.dist-info/RECORD
@@ -191,6 +224,9 @@ class BuildWheel:
         record.add_content(f'{folder}/METADATA', self.data_metadata)
         record.add_content(f'{folder}/WHEEL', self.data_wheel)
         record.add_content(f'{folder}/top_level.txt', self.data_top_level_txt)
+        entry_points = self.data_entry_points
+        if entry_points is not None:
+            record.add_content(f'{folder}/entry_points.txt', entry_points)
         for path, content in self.repo_metadata.license_files.items():
             record.add_content(f'{folder}/licenses/{path}', content)
         record.add_content(f'{folder}/RECORD', None)
@@ -280,6 +316,10 @@ class BuildWheel:
         out[f'{folder}/top_level.txt'] = self.data_top_level_txt
         # requires.txt
         out[f'{folder}/requires.txt'] = self.data_requires_txt
+        # entry_points.txt
+        entry_points = self.data_entry_points
+        if entry_points is not None:
+            out[f'{folder}/entry_points.txt'] = entry_points
 
         # SOURCES.txt
         # Need to include all files in sdist + egg-info itself
@@ -317,6 +357,9 @@ class BuildWheel:
             zf.write_member(f'{dist_info}/METADATA', self.data_metadata)
             zf.write_member(f'{dist_info}/WHEEL', self.data_wheel)
             zf.write_member(f'{dist_info}/top_level.txt', self.data_top_level_txt)
+            entry_points = self.data_entry_points
+            if entry_points is not None:
+                zf.write_member(f'{dist_info}/entry_points.txt', entry_points)
             # License files, PEP 639
             for path, content in self.repo_metadata.license_files.items():
                 zf.write_member(f'{dist_info}/licenses/{path}', content)
