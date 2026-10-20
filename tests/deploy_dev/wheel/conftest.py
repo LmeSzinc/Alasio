@@ -1,6 +1,24 @@
 import pytest
 
 from alasio.git.mock.mock_repo import MockGitRepo
+from alasio.logger import logger
+
+
+@pytest.fixture(autouse=True)
+def capture_logs():
+    """
+    Capture the logs of every test of this folder in memory.
+
+    ``logger.mock_capture_writer()`` swaps the whole writer for a capturing
+    one, so no log line reaches the log file (log/{date}__main__.txt) or
+    stdout. A test that checks a message takes this fixture and reads the
+    capture.
+
+    Returns:
+        CaptureWriter: Logs of the test, see logger.mock_capture_writer()
+    """
+    with logger.mock_capture_writer() as capture:
+        yield capture
 
 
 @pytest.fixture
