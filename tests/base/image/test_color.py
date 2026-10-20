@@ -67,10 +67,10 @@ def rgb888_image():
     return create_rgb888()
 
 
-def color_blocks(image, size=125):
+def color_blocks(image, size=173):
     """
     Yield non-overlapping size x size blocks covering the whole image.
-    125x125 = 15625 pixels, which is below the 30000-pixel branch threshold.
+    173x173 = 29929 pixels, which is below the 30000-pixel branch threshold.
 
     Args:
         image (np.ndarray): Input image
@@ -219,7 +219,7 @@ class TestColorSimilarity2d:
         result = color_similarity_2d(rgb888_image, color)
         reference = self.reference(rgb888_image, color)
         assert np.array_equal(result, reference), f"color={color}"
-        # Small image path (< 30000 pixels): every 125x125 block together
+        # Small image path (< 30000 pixels): every 173x173 block together
         # covers the full color space
         for index, block in enumerate(color_blocks(rgb888_image)):
             result = color_similarity_2d(block, color)
@@ -260,7 +260,7 @@ class TestColorMask:
         reference = self.reference(rgb888_image, color, threshold)
         assert np.array_equal(result, reference), \
             f"color={color} threshold={threshold}"
-        # Small image path (< 30000 pixels): every 125x125 block together
+        # Small image path (< 30000 pixels): every 173x173 block together
         # covers the full color space
         for index, block in enumerate(color_blocks(rgb888_image)):
             result = color_mask(block, color, threshold)
@@ -304,7 +304,7 @@ class TestExtractLetters:
         reference = self.reference(rgb888_image, tuple(letter), threshold)
         assert np.array_equal(result, reference), \
             f"letter={letter} threshold={threshold}"
-        # Small image path (< 30000 pixels): every 125x125 block together
+        # Small image path (< 30000 pixels): every 173x173 block together
         # covers the full color space
         for index, block in enumerate(color_blocks(rgb888_image)):
             result = extract_letters(block, letter=letter, threshold=threshold)
