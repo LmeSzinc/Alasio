@@ -300,7 +300,17 @@ class TestPackServerRun:
             'AzurLaneAutoScript', 'AzurLaneAutoScript',
             'StarRailCopilot', 'StarRailCopilot', 'StarRailCopilot',
             'StarRailCopilot', 'StarRailCopilot']
-        assert capture.fd.any_contains('Ran 2 configs: 2 done, 0 failed')
+        assert capture.concat() == f"""\
+INFO | Write config {run_dir}/config/template.yaml
+INFO | Running 2 configs of "{run_dir}"
+===================== RUNNING CONFIG "LMESZINC_AZURLANEAUTOSCRIPT_MASTER.YAML" =====================
+INFO | RUNNING CONFIG "LMESZINC_AZURLANEAUTOSCRIPT_MASTER.YAML"
+INFO | Config "LmeSzinc_AzurLaneAutoScript_master.yaml" done
+====================== RUNNING CONFIG "LMESZINC_STARRAILCOPILOT_MASTER.YAML" =======================
+INFO | RUNNING CONFIG "LMESZINC_STARRAILCOPILOT_MASTER.YAML"
+INFO | Config "LmeSzinc_StarRailCopilot_master.yaml" done
+INFO | Ran 2 configs: 2 done, 0 failed
+"""
 
     def test_failed_config_does_not_stop_the_rest(self, fs, run_dir, monkeypatch):
         """A config that fails is skipped, the other configs still run, the run fails at the end."""
@@ -326,9 +336,38 @@ class TestPackServerRun:
             ('repo', 'Alasio'), ('dep', 'Alasio'), ('gen', 'Alasio'),
             ('gen-commit', 'Alasio'), ('dep-commit', 'Alasio'),
             ('repo', 'StarRailCopilot'), ('dep', 'StarRailCopilot')]
-        assert capture.fd.any_contains(f'Config "{FILE}" failed')
-        assert capture.fd.any_contains(f'Config "{OTHER}" failed')
-        assert capture.fd.any_contains('Ran 3 configs: 1 done, 2 failed')
+        assert capture.concat() == f"""\
+INFO | Write config {run_dir}/config/template.yaml
+INFO | Running 3 configs of "{run_dir}"
+=========================== RUNNING CONFIG "LMESZINC_ALASIO_MASTER.YAML" ===========================
+INFO | RUNNING CONFIG "LMESZINC_ALASIO_MASTER.YAML"
+INFO | Config "LmeSzinc_Alasio_master.yaml" done
+===================== RUNNING CONFIG "LMESZINC_AZURLANEAUTOSCRIPT_MASTER.YAML" =====================
+INFO | RUNNING CONFIG "LMESZINC_AZURLANEAUTOSCRIPT_MASTER.YAML"
+ERROR | Config "LmeSzinc_AzurLaneAutoScript_master.yaml" failed
++------------------------------- Traceback (most recent call last) --------------------------------+
+|   File "in run", line 170                                                                        |
+|                                                                                                  |
+|   File "in run_config", line 127                                                                 |
+|                                                                                                  |
+|   File "in run", line 127                                                                        |
++--------------------------------------------------------------------------------------------------+
+RuntimeError: fake failure of the repo "AzurLaneAutoScript"
+
+====================== RUNNING CONFIG "LMESZINC_STARRAILCOPILOT_MASTER.YAML" =======================
+INFO | RUNNING CONFIG "LMESZINC_STARRAILCOPILOT_MASTER.YAML"
+ERROR | Config "LmeSzinc_StarRailCopilot_master.yaml" failed
++------------------------------- Traceback (most recent call last) --------------------------------+
+|   File "in run", line 170                                                                        |
+|                                                                                                  |
+|   File "in run_config", line 133                                                                 |
+|                                                                                                  |
+|   File "in run", line 159                                                                        |
++--------------------------------------------------------------------------------------------------+
+RuntimeError: fake failure of the packs of "StarRailCopilot"
+
+INFO | Ran 3 configs: 1 done, 2 failed
+"""
 
     def test_no_config(self, fs, run_dir, monkeypatch):
         """A run directory without a config file writes the template and runs nothing."""
@@ -338,8 +377,10 @@ class TestPackServerRun:
         with logger.mock_capture_writer() as capture:
             main.PackServer().run()
         assert calls == []
-        assert capture.fd.any_contains('Write config')
-        assert capture.fd.any_contains('No config file')
+        assert capture.concat() == f"""\
+INFO | Write config {run_dir}/config/template.yaml
+WARNING | No config file in "{run_dir}/config", copy "template.yaml" to a config file and fill it
+"""
         # the operator has the template to copy
         assert join_path(run_dir, 'config', PackRepoConfig.TEMPLATE_FILE).isfile()
 
@@ -352,12 +393,25 @@ class TestPackServerRun:
         monkeypatch.setattr(main, 'DepGen', fake_dep_gen(calls))
         with logger.mock_capture_writer() as capture:
             main.PackServer().run()
-        assert capture.fd.any_contains('Write config')
+        assert capture.concat() == f"""\
+INFO | Write config {run_dir}/config/template.yaml
+INFO | Running 1 config of "{run_dir}"
+===================== RUNNING CONFIG "LMESZINC_AZURLANEAUTOSCRIPT_MASTER.YAML" =====================
+INFO | RUNNING CONFIG "LMESZINC_AZURLANEAUTOSCRIPT_MASTER.YAML"
+INFO | Config "LmeSzinc_AzurLaneAutoScript_master.yaml" done
+INFO | Ran 1 config: 1 done, 0 failed
+"""
         assert join_path(run_dir, 'config', PackRepoConfig.TEMPLATE_FILE).isfile()
         # the second run finds the template up to date
         with logger.mock_capture_writer() as capture:
             main.PackServer().run()
-        assert not capture.fd.any_contains('Write config')
+        assert capture.concat() == f"""\
+INFO | Running 1 config of "{run_dir}"
+===================== RUNNING CONFIG "LMESZINC_AZURLANEAUTOSCRIPT_MASTER.YAML" =====================
+INFO | RUNNING CONFIG "LMESZINC_AZURLANEAUTOSCRIPT_MASTER.YAML"
+INFO | Config "LmeSzinc_AzurLaneAutoScript_master.yaml" done
+INFO | Ran 1 config: 1 done, 0 failed
+"""
         assert [step for step, *_ in calls] == [
             'repo', 'dep', 'gen', 'gen-commit', 'dep-commit',
             'repo', 'dep', 'gen', 'gen-commit', 'dep-commit']

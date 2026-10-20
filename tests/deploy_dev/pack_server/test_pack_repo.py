@@ -122,6 +122,23 @@ def write_ref(root, ref, content):
         f.write(content)
 
 
+def run_repo(config=CONFIG):
+    """
+    Run PackRepo with its log captured in memory.
+
+    PackRepo logs every git command at INFO, a test that does not capture
+    would append the lines to log/{date}__main__.txt of the repository.
+
+    Args:
+        config (PackRepoModel): Config of the run, CONFIG by default
+
+    Returns:
+        GitRepo: The repo of the run
+    """
+    with logger.mock_capture_writer():
+        return PackRepo(config).run()
+
+
 def cmd_result(cmd, returncode, stdout=''):
     """
     The result of a fake git command, the way run_cmd returns it.
@@ -322,21 +339,24 @@ class TestGitCmdline:
         """A command of a repo runs "git -C root", without a timeout, run_cmd uses its default."""
         recorder = Recorder()
         monkeypatch.setattr(pack_repo, 'run_cmd', recorder)
-        GitCmdline().run('folder', 'status')
+        with logger.mock_capture_writer():
+            GitCmdline().run('folder', 'status')
         assert recorder.calls == [(['git', '-C', 'folder', 'status'], {'check': True})]
 
     def test_run_without_root(self, monkeypatch):
         """A command without a repo runs git directly, without a timeout, run_cmd uses its default."""
         recorder = Recorder()
         monkeypatch.setattr(pack_repo, 'run_cmd', recorder)
-        GitCmdline().run('', 'version')
+        with logger.mock_capture_writer():
+            GitCmdline().run('', 'version')
         assert recorder.calls == [(['git', 'version'], {'check': True})]
 
     def test_run_with_network_timeout(self, monkeypatch):
         """A command that calls the network passes its own timeout through to run_cmd."""
         recorder = Recorder()
         monkeypatch.setattr(pack_repo, 'run_cmd', recorder)
-        GitCmdline().run('folder', 'fetch', timeout=GIT_NETWORK_TIMEOUT)
+        with logger.mock_capture_writer():
+            GitCmdline().run('folder', 'fetch', timeout=GIT_NETWORK_TIMEOUT)
         assert recorder.calls == [
             (['git', '-C', 'folder', 'fetch'], {'timeout': GIT_NETWORK_TIMEOUT, 'check': True})]
 
@@ -344,7 +364,8 @@ class TestGitCmdline:
         """A clone is not checked out, the pack generation reads git objects only."""
         recorder = Recorder()
         monkeypatch.setattr(pack_repo, 'run_cmd', recorder)
-        GitCmdline().clone('remote', 'folder', 'master')
+        with logger.mock_capture_writer():
+            GitCmdline().clone('remote', 'folder', 'master')
         assert recorder.calls == [
             (['git', 'clone', '--no-checkout', '--origin', 'origin', '--branch', 'master', 'remote', 'folder'],
              {'timeout': GIT_NETWORK_TIMEOUT, 'check': True})]
@@ -353,7 +374,8 @@ class TestGitCmdline:
         """An existing remote "origin" is pointed to the url of the config."""
         recorder = Recorder()
         monkeypatch.setattr(pack_repo, 'run_cmd', recorder)
-        GitCmdline().set_remote('folder', 'url')
+        with logger.mock_capture_writer():
+            GitCmdline().set_remote('folder', 'url')
         assert recorder.calls == [
             (['git', '-C', 'folder', 'remote', 'set-url', 'origin', 'url'], {'check': False})]
 
@@ -366,7 +388,8 @@ class TestGitCmdline:
             return cmd_result(cmd, 1 if 'set-url' in cmd else 0)
 
         monkeypatch.setattr(pack_repo, 'run_cmd', run_cmd)
-        GitCmdline().set_remote('folder', 'url')
+        with logger.mock_capture_writer():
+            GitCmdline().set_remote('folder', 'url')
         assert calls == [
             ['git', '-C', 'folder', 'remote', 'set-url', 'origin', 'url'],
             ['git', '-C', 'folder', 'remote', 'add', 'origin', 'url'],
@@ -376,7 +399,8 @@ class TestGitCmdline:
         """Every branch and tag is fetched, a rewritten or deleted ref of the remote is followed."""
         recorder = Recorder()
         monkeypatch.setattr(pack_repo, 'run_cmd', recorder)
-        GitCmdline().fetch('folder')
+        with logger.mock_capture_writer():
+            GitCmdline().fetch('folder')
         assert recorder.calls == [
             (['git', '-C', 'folder', 'fetch', '--prune', 'origin',
               '+refs/heads/*:refs/remotes/origin/*', '+refs/tags/*:refs/tags/*'],
@@ -386,7 +410,8 @@ class TestGitCmdline:
         """A local ref is set to the ref it should point to."""
         recorder = Recorder()
         monkeypatch.setattr(pack_repo, 'run_cmd', recorder)
-        GitCmdline().update_ref('folder', 'refs/heads/master', 'refs/remotes/origin/master')
+        with logger.mock_capture_writer():
+            GitCmdline().update_ref('folder', 'refs/heads/master', 'refs/remotes/origin/master')
         assert recorder.calls == [
             (['git', '-C', 'folder', 'update-ref', 'refs/heads/master', 'refs/remotes/origin/master'],
              {'check': True})]
@@ -395,14 +420,16 @@ class TestGitCmdline:
         """The ref is looked up with rev-parse, a missing ref is not an error."""
         recorder = Recorder(returncode=0)
         monkeypatch.setattr(pack_repo, 'run_cmd', recorder)
-        assert GitCmdline().ref_exists('folder', 'refs/heads/master') is True
+        with logger.mock_capture_writer():
+            assert GitCmdline().ref_exists('folder', 'refs/heads/master') is True
         assert recorder.calls == [
             (['git', '-C', 'folder', 'rev-parse', '--verify', '--quiet', 'refs/heads/master'],
              {'check': False})]
 
         recorder = Recorder(returncode=1)
         monkeypatch.setattr(pack_repo, 'run_cmd', recorder)
-        assert GitCmdline().ref_exists('folder', 'refs/heads/dev') is False
+        with logger.mock_capture_writer():
+            assert GitCmdline().ref_exists('folder', 'refs/heads/dev') is False
 
 
 class TestConfigAndFolder:
@@ -435,7 +462,7 @@ class TestConfigAndFolder:
         # the gate for the run directory of this test
         monkeypatch.setattr(pack_repo, 'check_run_dir', check_run_dir.__wrapped__)
         with pytest.raises(RunDirError):
-            PackRepo(CONFIG).run()
+            run_repo()
         assert fake.commands == []
 
 
@@ -448,7 +475,12 @@ class TestClone:
         folder = join_path(run_dir, REPO_FOLDER, 'Author_Repo')
         with logger.mock_capture_writer() as capture:
             repo = PackRepo(CONFIG).run()
-        assert capture.fd.any_contains('Cloning repo')
+        assert capture.concat() == f"""\
+INFO | Cloning repo: remote="{REMOTE}", branch="master", folder="{folder}"
+INFO | Git command: git clone --no-checkout --origin origin --branch master {REMOTE} {folder}
+INFO | Git command: git -C {folder} rev-parse --verify --quiet refs/remotes/origin/master
+INFO | Git command: git -C {folder} update-ref refs/heads/master refs/remotes/origin/master
+"""
         assert fake.commands == [
             ['git', 'clone', '--no-checkout', '--origin', 'origin', '--branch', 'master', REMOTE, str(folder)],
             ['git', '-C', str(folder), 'rev-parse', '--verify', '--quiet', 'refs/remotes/origin/master'],
@@ -475,7 +507,7 @@ class TestClone:
             Repo=RepoConfig(Remote=REMOTE, Author='Author', Repo='Repo', Branch='master'),
             Lookback=LookbackConfig(LookbackBranch=['dev']),
         )
-        PackRepo(config).run()
+        run_repo(config)
         folder = join_path(run_dir, REPO_FOLDER, 'Author_Repo')
         assert read_ref(folder, 'refs/heads/master') == sha1_of('master')
         assert read_ref(folder, 'refs/heads/dev') == sha1_of('dev')
@@ -483,16 +515,16 @@ class TestClone:
     def test_second_run_fetches(self, fs, run_dir, monkeypatch):
         """The run after the clone fetches the cloned repo instead of cloning it again."""
         fake = patch_git(monkeypatch, fs)
-        PackRepo(CONFIG).run()
+        run_repo()
         fake.commands.clear()
-        PackRepo(CONFIG).run()
+        run_repo()
         assert all('clone' not in cmd for cmd in fake.commands)
 
     def test_clone_failed(self, fs, run_dir, monkeypatch):
         """A failed clone is raised to the caller, no clone is left behind."""
         fake = patch_git(monkeypatch, fs, fail=('clone',))
         with pytest.raises(CmdlineError):
-            PackRepo(CONFIG).run()
+            run_repo()
         assert len(fake.commands) == 1
         assert not join_path(run_dir, REPO_FOLDER, 'Author_Repo', '.git').exists()
 
@@ -500,7 +532,7 @@ class TestClone:
         """An empty folder is the leftover of an interrupted run, the clone fills it."""
         fake = patch_git(monkeypatch, fs)
         fs.create_dir(join_path(run_dir, REPO_FOLDER, 'Author_Repo'))
-        PackRepo(CONFIG).run()
+        run_repo()
         assert fake.commands[0][1] == 'clone'
         assert read_ref(join_path(run_dir, REPO_FOLDER, 'Author_Repo'), 'refs/heads/master') == sha1_of('master')
 
@@ -509,7 +541,7 @@ class TestClone:
         fake = patch_git(monkeypatch, fs)
         fs.create_file(join_path(run_dir, REPO_FOLDER, 'Author_Repo', 'readme.txt'), contents='keep me')
         with pytest.raises(ValueError, match='not a git repo'):
-            PackRepo(CONFIG).run()
+            run_repo()
         assert fake.commands == []
         # the file of the operator is kept
         assert join_path(run_dir, REPO_FOLDER, 'Author_Repo', 'readme.txt').exists()
@@ -519,7 +551,7 @@ class TestClone:
         fake = patch_git(monkeypatch, fs)
         fs.create_file(join_path(run_dir, REPO_FOLDER, 'Author_Repo'), contents='')
         with pytest.raises(ValueError, match='not a folder'):
-            PackRepo(CONFIG).run()
+            run_repo()
         assert fake.commands == []
 
 
@@ -532,7 +564,13 @@ class TestUpdate:
         folder = fake.make_clone(run_dir)
         with logger.mock_capture_writer() as capture:
             PackRepo(CONFIG).run()
-        assert capture.fd.any_contains('Updating repo')
+        assert capture.concat() == f"""\
+INFO | Updating repo: remote="{REMOTE}", folder="{folder}"
+INFO | Git command: git -C {folder} remote set-url origin {REMOTE}
+INFO | Git command: git -C {folder} fetch --prune origin +refs/heads/*:refs/remotes/origin/* +refs/tags/*:refs/tags/*
+INFO | Git command: git -C {folder} rev-parse --verify --quiet refs/remotes/origin/master
+INFO | Git command: git -C {folder} update-ref refs/heads/master refs/remotes/origin/master
+"""
         assert fake.commands == [
             ['git', '-C', str(folder), 'remote', 'set-url', 'origin', REMOTE],
             ['git', '-C', str(folder), 'fetch', '--prune', 'origin',
@@ -547,7 +585,7 @@ class TestUpdate:
         folder = fake.make_clone(run_dir)
         write_ref(folder, 'refs/heads/master', '0' * 40)
         fake.move_branch('master', 'a' * 40)
-        PackRepo(CONFIG).run()
+        run_repo()
         assert read_ref(folder, 'refs/heads/master') == 'a' * 40
 
     def test_update_with_lookback_branch(self, fs, run_dir, monkeypatch):
@@ -558,7 +596,7 @@ class TestUpdate:
             Repo=RepoConfig(Remote=REMOTE, Author='Author', Repo='Repo', Branch='master'),
             Lookback=LookbackConfig(LookbackBranch=['dev']),
         )
-        PackRepo(config).run()
+        run_repo(config)
         assert read_ref(folder, 'refs/heads/master') == sha1_of('master')
         assert read_ref(folder, 'refs/heads/dev') == sha1_of('dev')
 
@@ -567,7 +605,7 @@ class TestUpdate:
         fake = patch_git(monkeypatch, fs, branches=('dev',))
         folder = fake.make_clone(run_dir)
         with pytest.raises(ValueError, match='No such branch "master"'):
-            PackRepo(CONFIG).run()
+            run_repo()
         assert not ref_path(folder, 'refs/heads/master').exists()
 
     def test_update_missing_lookback_branch(self, fs, run_dir, monkeypatch):
@@ -580,7 +618,15 @@ class TestUpdate:
         )
         with logger.mock_capture_writer() as capture:
             PackRepo(config).run()
-        assert capture.fd.any_contains('No such lookback branch "dev"')
+        assert capture.concat() == f"""\
+INFO | Updating repo: remote="{REMOTE}", folder="{folder}"
+INFO | Git command: git -C {folder} remote set-url origin {REMOTE}
+INFO | Git command: git -C {folder} fetch --prune origin +refs/heads/*:refs/remotes/origin/* +refs/tags/*:refs/tags/*
+INFO | Git command: git -C {folder} rev-parse --verify --quiet refs/remotes/origin/master
+INFO | Git command: git -C {folder} update-ref refs/heads/master refs/remotes/origin/master
+INFO | Git command: git -C {folder} rev-parse --verify --quiet refs/remotes/origin/dev
+WARNING | No such lookback branch "dev" at remote, skipped, folder="{folder}"
+"""
         # the branch of the config is still set, the stale one is not created
         assert read_ref(folder, 'refs/heads/master') == sha1_of('master')
         assert not ref_path(folder, 'refs/heads/dev').exists()
@@ -589,7 +635,7 @@ class TestUpdate:
         """Only the fetch of an update calls the network, it carries GIT_NETWORK_TIMEOUT."""
         fake = patch_git(monkeypatch, fs)
         fake.make_clone(run_dir)
-        PackRepo(CONFIG).run()
+        run_repo()
         # the commands are the remote set-url, the fetch, the rev-parse of the
         # remote branch and the update-ref of the local branch
         assert fake.kwargs == [

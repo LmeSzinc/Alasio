@@ -274,4 +274,8 @@ class TestBuild:
         """build() succeeds and stamps the commit time."""
         with logger.mock_capture_writer() as capture:
             assert wheel.build() is True
-        assert capture.fd.any_contains('Building demo_pkg==1.0.0 commit=c1 time=1609459200')
+        assert capture.concat() == """\
+INFO | Building demo_pkg==1.0.0 commit=c1 time=1609459200
+INFO | Wheel built at: /repo/dist/demo_pkg-1.0.0-py3-none-any.whl
+INFO | Source distribution built at: /repo/dist/demo-pkg-1.0.0.tar.gz
+"""

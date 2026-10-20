@@ -264,7 +264,9 @@ class TestLookbackWheelFiles:
         with logger.mock_capture_writer() as capture:
             wheel = LookbackWheel(repo, _make_config(files=['requirements.txt', 'requirements-dev.txt']))
             assert wheel.latest_deps == {('httpx', '0.28.1'): 'c0'}
-        assert capture.fd.any_contains('no such dependency file "requirements-dev.txt"')
+        assert capture.concat() == """\
+WARNING | LookbackWheel: no such dependency file "requirements-dev.txt" in the lookback window, repo=
+"""
 
     def test_file_added_later_no_warning(self):
         """A file that only the latest commit carries is not warned about."""
@@ -274,7 +276,7 @@ class TestLookbackWheelFiles:
             wheel = LookbackWheel(repo, _make_config(files=['requirements.txt']))
             assert wheel.latest_deps == {('httpx', '0.28.1'): 'c1'}
             assert wheel.lookback_deps == {}
-        assert not capture.fd.any_contains('no such dependency file')
+        assert capture.concat() == ''
 
     def test_same_revision_parsed_once(self):
         """The same revision of a file is read once, the two sides share the parse."""

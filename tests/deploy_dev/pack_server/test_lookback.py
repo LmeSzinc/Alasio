@@ -266,7 +266,9 @@ class TestCommitChain:
         with logger.mock_capture_writer() as capture:
             lookback = PackRepoLookback(repo, _make_config())
             assert lookback.lookback_commit == []
-        assert capture.fd.any_contains('object gone does not exist')
+        assert capture.concat() == """\
+WARNING | PackRepoLookback: object gone does not exist, repo=
+"""
 
 
 class TestLookbackBranch:
@@ -317,7 +319,9 @@ class TestLookbackBranch:
         with logger.mock_capture_writer() as capture:
             lookback = PackRepoLookback(repo, config)
             assert lookback.lookback_commit == ['c1', 'c0']
-        assert capture.fd.any_contains('no such branch "dev" at repo')
+        assert capture.concat() == """\
+WARNING | PackRepoLookback: no such branch "dev" at repo 
+"""
 
     def test_lookback_branch_duplicated(self):
         """The branch to pack may be listed in LookbackBranch, its commits are not duplicated."""
@@ -417,7 +421,9 @@ class TestTagCommit:
         with logger.mock_capture_writer() as capture:
             lookback = PackRepoLookback(repo, _make_config(max_commit_count=1))
             assert lookback.lookback_commit == []
-        assert capture.fd.any_contains('tag "v1.0" does not point to a commit')
+        assert capture.concat() == """\
+WARNING | PackRepoLookback: tag "v1.0" does not point to a commit, repo=
+"""
 
     def test_tag_object_to_unknown_object(self):
         """A tag object that points to a missing object is skipped with warnings."""
@@ -428,8 +434,10 @@ class TestTagCommit:
         with logger.mock_capture_writer() as capture:
             lookback = PackRepoLookback(repo, _make_config(max_commit_count=1))
             assert lookback.lookback_commit == []
-        assert capture.fd.any_contains('object gone does not exist')
-        assert capture.fd.any_contains('tag "v1.0" does not point to a commit')
+        assert capture.concat() == """\
+WARNING | PackRepoLookback: object gone does not exist, repo=
+WARNING | PackRepoLookback: tag "v1.0" does not point to a commit, repo=
+"""
 
     def test_tag_to_unknown_object(self):
         """A tag that points to a missing object is skipped with a warning."""
@@ -439,7 +447,9 @@ class TestTagCommit:
         with logger.mock_capture_writer() as capture:
             lookback = PackRepoLookback(repo, _make_config(max_commit_count=1))
             assert lookback.lookback_commit == []
-        assert capture.fd.any_contains('tag "v1.0" points to an object that does not exist')
+        assert capture.concat() == """\
+WARNING | PackRepoLookback: tag "v1.0" points to an object that does not exist, repo=
+"""
 
 
 class TestTagChain:
@@ -456,7 +466,10 @@ class TestTagChain:
         with logger.mock_capture_writer() as capture:
             lookback = PackRepoLookback(repo, _make_config(max_commit_count=1))
             assert lookback.lookback_commit == []
-        assert capture.fd.any_contains('cyclic tag chain')
+        assert capture.concat() == """\
+WARNING | PackRepoLookback: cyclic tag chain at tag_b, repo=
+WARNING | PackRepoLookback: tag "v1.0" does not point to a commit, repo=
+"""
 
     def test_self_referencing_tag(self):
         """A tag object that points to itself is detected."""
@@ -467,7 +480,10 @@ class TestTagChain:
         with logger.mock_capture_writer() as capture:
             lookback = PackRepoLookback(repo, _make_config(max_commit_count=1))
             assert lookback.lookback_commit == []
-        assert capture.fd.any_contains('cyclic tag chain')
+        assert capture.concat() == """\
+WARNING | PackRepoLookback: cyclic tag chain at tag_a, repo=
+WARNING | PackRepoLookback: tag "v1.0" does not point to a commit, repo=
+"""
 
     @staticmethod
     def _register_tag_chain(repo, count, now):
@@ -509,7 +525,10 @@ class TestTagChain:
         with logger.mock_capture_writer() as capture:
             lookback = PackRepoLookback(repo, _make_config(max_commit_count=1))
             assert lookback.lookback_commit == []
-        assert capture.fd.any_contains('tag chain is too long')
+        assert capture.concat() == """\
+WARNING | PackRepoLookback: tag chain is too long at tag_0, repo=
+WARNING | PackRepoLookback: tag "v1.0" does not point to a commit, repo=
+"""
 
 
 class TestParentRule:
@@ -594,7 +613,9 @@ class TestAdditionalCommit:
         with logger.mock_capture_writer() as capture:
             lookback = PackRepoLookback(repo, config)
             assert lookback.lookback_commit == ['c0']
-        assert capture.fd.any_contains('object gone does not exist')
+        assert capture.concat() == """\
+WARNING | PackRepoLookback: object gone does not exist, repo=
+"""
 
     def test_default_config(self):
         """The default config of the model works, there is no additional commit."""

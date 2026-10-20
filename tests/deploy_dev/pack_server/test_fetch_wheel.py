@@ -389,13 +389,13 @@ class TestWheelFetcher:
         # only the wheel file is requested, the index data comes from the cache
         assert mirror.requests == ['http://mirror/packages/httpx-0.28.1-py3-none-any.whl']
 
-    @pytest.mark.parametrize('content', [
+    @pytest.mark.parametrize('content, warning', [
         # not json at all
-        b'not json',
+        (b'not json', 'JSON is malformed: invalid character (byte 4)'),
         # a json document that is not the index data of a distribution
-        b'{"name": "httpx"}',
+        (b'{"name": "httpx"}', 'Expected `array`, got `object`'),
     ])
-    def test_index_data_broken(self, content, fs, make_fetcher, mirror, root):
+    def test_index_data_broken(self, content, warning, fs, make_fetcher, mirror, root):
         """An index_data.json that holds no index data is warned about and read again."""
         mirror.register('httpx', '0.28.1')
         file = index_data_file(root, 'httpx', '0.28.1')
@@ -404,7 +404,11 @@ class TestWheelFetcher:
             result = make_fetcher('httpx', '0.28.1').fetch()
         # the broken file is reported, the page is read again and the cache
         # is written again, the fetch itself is not blocked
-        assert capture.fd.any_contains(f'Invalid index data, read the index page again: "{file}"')
+        assert capture.concat() == f"""\
+WARNING | Invalid index data, read the index page again: "{file}", {warning}
+INFO | Index data cached: "http://mirror/httpx/" -> "{file}"
+INFO | Download wheel: "http://mirror/packages/httpx-0.28.1-py3-none-any.whl" -> "{wheel_file(root, 'httpx', '0.28.1', 'httpx-0.28.1-py3-none-any.whl')}"
+"""
         assert result.name == 'httpx-0.28.1-py3-none-any.whl'
         assert mirror.requests == [
             'http://mirror/httpx/',

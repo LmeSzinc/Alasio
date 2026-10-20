@@ -445,8 +445,15 @@ class TestRun:
         assert list(join_path(run_dir, PACK_ROOT).iter_foldernames()) == ['c3']
         # every update pack is logged with its position in the lookback window,
         # the lookback commits are the newest first
-        assert capture.fd.any_contains('[1/2] Packing update pack from c2')
-        assert capture.fd.any_contains('[2/2] Packing update pack from c1')
+        assert capture.concat() == f"""\
+INFO | Generating packs of "Author_Repo_master": 3 versions, latest=c3
+INFO | Writing full pack: "{run_dir}/pack/Author_Repo_master/packrepo/c3/full.pack"
+INFO | [1/2] Packing update pack from c2
+INFO | Writing update pack: c2 -> c3, "{run_dir}/pack/Author_Repo_master/packrepo/c3/update_c2.pack"
+INFO | [2/2] Packing update pack from c1
+INFO | Writing update pack: c1 -> c3, "{run_dir}/pack/Author_Repo_master/packrepo/c3/update_c1.pack"
+INFO | Packs of "Author_Repo_master" generated, latest=c3
+"""
 
     def test_update_pack_records(self, fs, run_dir):
         """The update pack records the changes from the old version to the latest one."""
@@ -556,7 +563,21 @@ class TestRun:
         monkeypatch.setattr(pack_gen, 'atomic_rmtree', fail)
         with logger.mock_capture_writer() as capture:
             generate(repo)
-        assert capture.fd.any_contains('Failed to remove stale pack folder')
+        assert capture.concat() == f"""\
+INFO | Generating packs of "Author_Repo_master": 4 versions, latest=c4
+INFO | Writing full pack: "{run_dir}/pack/Author_Repo_master/packrepo/c4/full.pack"
+INFO | [1/3] Packing update pack from c3
+INFO | Writing update pack: c3 -> c4, "{run_dir}/pack/Author_Repo_master/packrepo/c4/update_c3.pack"
+INFO | [2/3] Packing update pack from c2
+INFO | Writing update pack: c2 -> c4, "{run_dir}/pack/Author_Repo_master/packrepo/c4/update_c2.pack"
+INFO | [3/3] Packing update pack from c1
+INFO | Writing update pack: c1 -> c4, "{run_dir}/pack/Author_Repo_master/packrepo/c4/update_c1.pack"
+INFO | Packs of "Author_Repo_master" generated, latest=c4
+INFO | Writing latest info: version=c4, "{run_dir}/pack/Author_Repo_master/packrepo/latest.pack"
+INFO | Removing stale pack folder: "{run_dir}/pack/Author_Repo_master/packrepo/c3"
+WARNING | Failed to remove stale pack folder "{run_dir}/pack/Author_Repo_master/packrepo/c3": folder is held: {run_dir}/pack/Author_Repo_master/packrepo/c3
+INFO | Packs of "Author_Repo_master" committed, latest=c4
+"""
         # the new version is published, the stale folder is left to the next run
         assert join_path(run_dir, PACK_ROOT, 'c4', 'full.pack').isfile()
         assert join_path(run_dir, PACK_ROOT, 'c3').isdir()
@@ -683,7 +704,15 @@ class TestExistingPacks:
         with logger.mock_capture_writer() as capture:
             PackRepoGen(repo, CONFIG).run()
 
-        assert capture.fd.any_contains('Failed to read the existing pack')
+        assert capture.concat() == f"""\
+INFO | Generating packs of "Author_Repo_master": 3 versions, latest=c3
+INFO | Full pack exists, skipped: "{run_dir}/pack/Author_Repo_master/packrepo/c3/full.pack"
+INFO | [1/2] Update pack exists, skipped: "{run_dir}/pack/Author_Repo_master/packrepo/c3/update_c2.pack"
+WARNING | Failed to read the existing pack, writing it again: Failed to read the pack: not a pack file: b'NOPE', "{run_dir}/pack/Author_Repo_master/packrepo/c3/update_c1.pack"
+INFO | [2/2] Packing update pack from c1
+INFO | Writing update pack: c1 -> c3, "{run_dir}/pack/Author_Repo_master/packrepo/c3/update_c1.pack"
+INFO | Packs of "Author_Repo_master" generated, latest=c3
+"""
         decoder = PackDecodeBase(file_read_bytes(file))
         decoder.validate()
         assert decoder.old_version == 'c1'
@@ -700,7 +729,15 @@ class TestExistingPacks:
         with logger.mock_capture_writer() as capture:
             PackRepoGen(repo, CONFIG).run()
 
-        assert capture.fd.any_contains('Existing pack is not the pack of this version')
+        assert capture.concat() == f"""\
+INFO | Generating packs of "Author_Repo_master": 3 versions, latest=c3
+INFO | Full pack exists, skipped: "{run_dir}/pack/Author_Repo_master/packrepo/c3/full.pack"
+INFO | [1/2] Update pack exists, skipped: "{run_dir}/pack/Author_Repo_master/packrepo/c3/update_c2.pack"
+WARNING | Existing pack is not the pack of this version, writing it again: "{run_dir}/pack/Author_Repo_master/packrepo/c3/update_c1.pack"
+INFO | [2/2] Packing update pack from c1
+INFO | Writing update pack: c1 -> c3, "{run_dir}/pack/Author_Repo_master/packrepo/c3/update_c1.pack"
+INFO | Packs of "Author_Repo_master" generated, latest=c3
+"""
         decoder = PackDecodeBase(file_read_bytes(file))
         decoder.validate()
         assert decoder.old_version == 'c1'
