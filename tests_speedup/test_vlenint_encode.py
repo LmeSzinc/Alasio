@@ -9,35 +9,23 @@ encoder:
 - ``decode_vlenint(encode_vlenint(data))`` returns ``data``
 - the encoded size must not be larger than the Python encoder
 
-The accelerator is optional: the tests skip when the shared library is
-missing and cannot be built, a machine without a C compiler still runs the
-rest of the test suite.
+The accelerator is required: the suite fails when ``alasio_speedup`` is not
+installed, when the shared library cannot be built or loaded, or when
+``check()`` rejects it. A skip would leave CI green while nothing was
+tested, see ``python -m alasio_speedup.build``.
 """
 import random
 
 import pytest
 
+# the accelerator under test is required: a missing module or a library
+# that cannot build or load fails the collection of this suite
+import alasio_speedup.bit2 as bit2
 from alasio.ext.algorithm.bit2coding.vlenint_decode import decode_vlenint
 from alasio.ext.algorithm.bit2coding.vlenint_encode_c import encode_vlenint
 from alasio.ext.algorithm.bit2coding.vlenint_encode_python import encode_vlenint as encode_vlenint_python
 
-bit2 = pytest.importorskip('alasio_speedup.bit2')
-
-# the error of the first build/load attempt, None while every test passes
-_encoder_error = None
-
-
-@pytest.fixture(autouse=True)
-def c_encoder_available():
-    """Skip the tests when the C encoder is not built and cannot be built."""
-    global _encoder_error
-    if _encoder_error is None:
-        try:
-            bit2.check()
-        except Exception as e:
-            _encoder_error = str(e)
-    if _encoder_error:
-        pytest.skip(f'C bit2coding encoder is not available: {_encoder_error}')
+bit2.check()
 
 
 def iter_cases():

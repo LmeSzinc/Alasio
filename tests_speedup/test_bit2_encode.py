@@ -12,9 +12,10 @@ result:
 - the encoded size must not be larger than the Python encoder
 - the pruned and the unpruned search must emit the same size
 
-The accelerator is optional: the tests skip when the shared library is
-missing and cannot be built, a machine without a C compiler still runs the
-rest of the test suite.
+The accelerator is required: the suite fails when ``alasio_speedup`` is not
+installed, when the shared library cannot be built or loaded, or when
+``check()`` rejects it. A skip would leave CI green while nothing was
+tested, see ``python -m alasio_speedup.build``.
 """
 import ctypes
 import inspect
@@ -22,6 +23,10 @@ import random
 
 import pytest
 
+# the accelerator under test, the C encoder of the bit2 format, the module
+# wraps the shared library built from bit2_encode.c. A missing module or a
+# library that cannot build or load fails the collection of this suite
+import alasio_speedup.bit2 as speedup
 from alasio.ext.algorithm.bit2coding.bit2coding_decode import decode_bit2
 from alasio.ext.algorithm.bit2coding.bit2coding_encode_c import encode_bit2
 from alasio.ext.algorithm.bit2coding.bit2coding_encode_python import encode_bit2_stream_iter
@@ -30,25 +35,7 @@ from tests.ext.algorithm.test_bit2coding_encode import TestRoundtrip as TestRoun
 from tests.ext.algorithm.test_bit2coding_ext8 import TestRoundtripExt8
 from tests.ext.algorithm.test_bit2coding_opcode import TestLargeData, TestRoundtrip as TestRoundtripOpcode
 
-# the accelerator under test, the C encoder of the bit2 format, the module
-# wraps the shared library built from bit2_encode.c
-speedup = pytest.importorskip('alasio_speedup.bit2')
-
-# the error of the first build/load attempt, None while every test passes
-_encoder_error = None
-
-
-@pytest.fixture(autouse=True)
-def c_encoder_available():
-    """Skip the tests when the C encoder is not built and cannot be built."""
-    global _encoder_error
-    if _encoder_error is None:
-        try:
-            speedup.check()
-        except Exception as e:
-            _encoder_error = str(e)
-    if _encoder_error:
-        pytest.skip(f'C bit2coding encoder is not available: {_encoder_error}')
+speedup.check()
 
 
 def encode_stream(values, ext8=False, lossless_prune=True):

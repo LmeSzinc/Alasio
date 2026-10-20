@@ -22,23 +22,11 @@ import random
 
 import pytest
 
-bit2 = pytest.importorskip('alasio_speedup.bit2')
+# the accelerator under test is required: a missing module or a library
+# that cannot build or load fails the collection of this suite
+import alasio_speedup.bit2 as bit2
 
-# the first build/load attempt, None while every test passes
-_encoder_error = None
-
-
-@pytest.fixture(autouse=True)
-def c_encoder_available():
-    """Skip the tests when the C encoder is not built and cannot be built."""
-    global _encoder_error
-    if _encoder_error is None:
-        try:
-            bit2.check()
-        except Exception as e:
-            _encoder_error = str(e)
-    if _encoder_error:
-        pytest.skip(f'C bit2coding encoder is not available: {_encoder_error}')
+bit2.check()
 
 
 def iter_cases():

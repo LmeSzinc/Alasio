@@ -10,14 +10,18 @@ plus encode_prefix_comb() and encode_suffix_comb(), which stay the
 reference, and the decoder of the pack reads the result back to the paths
 of the input.
 
-The accelerator is optional: the tests skip when the shared library is
-missing and cannot be built, a machine without a C compiler still runs the
-rest of the test suite.
+The accelerator is required: the suite fails when ``alasio_speedup`` is not
+installed, when the shared library cannot be built or loaded, or when
+``check()`` rejects it. A skip would leave CI green while nothing was
+tested, see ``python -m alasio_speedup.build``.
 """
 import random
 
 import pytest
 
+# the accelerator under test is required: a missing module or a library
+# that cannot build or load fails the collection of this suite
+import alasio_speedup.pathcomb as pathcomb
 from alasio.deploy.pack.decode_base import PackDecodeBase
 from alasio.ext.algorithm.pathcomb.pathcomb_decode import decode_prefix_comb, decode_suffix_comb
 from alasio.ext.algorithm.pathcomb.pathcomb_encode_c import PARAMS
@@ -27,23 +31,7 @@ from alasio.ext.algorithm.pathcomb.pathcomb_encode_python import (
 )
 from alasio.ext.path.validate import validate_filepath
 
-pathcomb = pytest.importorskip('alasio_speedup.pathcomb')
-
-# the error of the first build/load attempt, None while every test passes
-_encoder_error = None
-
-
-@pytest.fixture(autouse=True)
-def c_encoder_available():
-    """Skip the tests when the C encoder is not built and cannot be built."""
-    global _encoder_error
-    if _encoder_error is None:
-        try:
-            pathcomb.check()
-        except Exception as e:
-            _encoder_error = str(e)
-    if _encoder_error:
-        pytest.skip(f'C pathcomb encoder is not available: {_encoder_error}')
+pathcomb.check()
 
 
 def encode_path_comb_python(paths):

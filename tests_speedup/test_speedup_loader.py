@@ -5,20 +5,22 @@ The loader must use the installed copy of ``alasio_speedup`` only: the
 directory of a checkout is the development source, not the accelerator of
 the deployed server, and a machine without the install must keep running
 on the pure Python encoder.
+
+The suite tests that loader, so it requires the installed accelerator: a
+missing package or a library that cannot be loaded fails these tests
+instead of skipping them. The fallback of a deployment without the
+accelerator is covered by the monkeypatched cases below.
 """
 import importlib
 import os
 import sys
 import types
 
-import pytest
-
+import alasio_speedup as speedup_module
 from alasio import speedup
 from alasio.ext.algorithm.bit2coding.bit2coding_decode import decode_bit2
 from alasio.ext.algorithm.bit2coding.bit2coding_encode_c import encode_bit2
 from alasio.ext.algorithm.bit2coding.bit2coding_encode_python import encode_bit2 as encode_bit2_python
-
-speedup_module = pytest.importorskip('alasio_speedup')
 
 
 def site_dir(*parts):
@@ -67,8 +69,7 @@ class TestSitePackagesDirs:
             path for path in sys.path
             if os.path.basename(path) in ('site-packages', 'dist-packages') and os.path.isdir(path)
         ]
-        if not in_path:
-            pytest.skip('sys.path holds no site-packages directory')
+        assert in_path, 'sys.path holds no site-packages directory'
         dirs = speedup.site_packages_dirs()
         for path in in_path:
             assert path in dirs
@@ -80,8 +81,7 @@ class TestFindInstalled:
     def test_found_path_is_a_package_of_a_site_packages(self):
         """A found path is a real package directory below a site-packages."""
         path = speedup.find_installed()
-        if path is None:
-            pytest.skip('alasio_speedup is not installed')
+        assert path is not None, 'alasio_speedup is not installed'
         assert os.path.basename(path) == speedup.SPEEDUP
         assert os.path.isfile(os.path.join(path, '__init__.py'))
         dirs = [os.path.normcase(os.path.abspath(d)) for d in speedup.site_packages_dirs()]
@@ -159,10 +159,17 @@ class TestAccelerators:
     def test_names_come_from_the_package(self):
         """The names are the ACCELERATORS of the installed package."""
         names = speedup.accelerator_names()
-        if names:
-            assert 'bit2' in names
-        else:
-            assert speedup.find_installed() is None or speedup.PACKAGE_ERROR
+        assert names, speedup.PACKAGE_ERROR or f'{speedup.SPEEDUP} is not installed or declares no accelerators'
+        assert 'bit2' in names, names
+
+    def test_every_accelerator_is_usable(self):
+        """The installed package loads and checks every accelerator it declares."""
+        names = speedup.accelerator_names()
+        assert names, speedup.PACKAGE_ERROR or f'{speedup.SPEEDUP} is not installed or declares no accelerators'
+        for name in names:
+            assert speedup.accelerator(name) is not None, speedup.ERRORS.get(
+                name, f'{name} accelerator is not usable'
+            )
 
     def test_accelerator_is_loaded_once(self, monkeypatch):
         """Two calls of accelerator() load the module once."""
@@ -254,6 +261,6 @@ class TestEncoderSwitch:
     def test_c_encoder_is_not_larger(self):
         """The Python encoder is the reference, the C one must not be larger."""
         data = [(i * 5 + i // 7) % 4 for i in range(500)]
-        if speedup.accelerator('bit2') is None:
-            pytest.skip('the bit2 accelerator of alasio_speedup is not installed')
+        assert speedup.accelerator('bit2') is not None, 'the bit2 accelerator is not usable'
+        assert encode_bit2 is not encode_bit2_python, 'the C encoder is not in use'
         assert len(encode_bit2(data)) <= len(encode_bit2_python(data))
