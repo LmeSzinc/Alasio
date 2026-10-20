@@ -278,6 +278,26 @@ class TestAddFolder:
         archive.write('/out.asar')
         assert file_read_bytes('/out.asar') == fixture.tiny_341()
 
+    def test_add_folder_prefix(self, fs):
+        """A prefix places the whole tree below another archive directory."""
+        root = build_source_tree(fs)
+        archive = AsarArchive()
+        assert archive.add_folder(root, prefix='dist') == 3
+        assert entry_paths(archive) == [
+            'dist', 'dist/hello.txt', 'dist/sub', 'dist/sub/bin.dat',
+        ]
+        archive.write('/out.asar')
+        with AsarArchive('/out.asar') as reader:
+            assert bytes(reader.read_file('dist/hello.txt')) == b'hello asar'
+            assert bytes(reader.read_file('dist/sub/bin.dat')) == b'PAYLOAD'
+
+    def test_add_folder_invalid_prefix(self, fs):
+        """A prefix is an archive path and is validated like one."""
+        root = build_source_tree(fs)
+        archive = AsarArchive()
+        with pytest.raises(AsarPathError):
+            archive.add_folder(root, prefix='../dist')
+
     def test_add_folder_keeps_empty_dirs(self, fs):
         """Empty directories are entries of the archive, nested ones as well."""
         root = build_source_tree(fs)

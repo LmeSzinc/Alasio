@@ -76,7 +76,9 @@ class RepoWithStatics(GitRepo):
         if (webapp_root / 'dist').isdir() and (webapp_root / 'package.json').isfile():
             count_webapp = 0
             with AsarArchive() as asar:
-                count_webapp += asar.add_folder(webapp_root / 'dist')
+                # package.json.main is dist/main/index.js, the archive must
+                # keep the dist/ prefix to match electron-builder's layout
+                count_webapp += asar.add_folder(webapp_root / 'dist', prefix='dist')
                 asar.add_file(webapp_root / 'package.json')
                 count_webapp += 1
                 asar.write(webapp_root / 'release/app.asar')

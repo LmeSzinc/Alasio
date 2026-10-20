@@ -617,7 +617,7 @@ class AsarArchive:
                 unpacked = True
         return unpacked
 
-    def add_folder(self, root, unpack=False):
+    def add_folder(self, root, unpack=False, prefix=''):
         """
         Add a directory tree to the archive.
 
@@ -637,20 +637,26 @@ class AsarArchive:
                 instead of inside it, for the entries that have to be real files
                 (native modules and the like). A directory that is unpacked
                 already keeps its flag
+            prefix (str): Relative archive path to place the tree below,
+                defaults to the archive root. For example, ``prefix='dist'``
+                stores ``main.js`` as ``dist/main.js``. The prefix must not
+                end with a separator
 
         Returns:
             int: Number of added entries
 
         Raises:
             AsarError: If the directory can not be listed
-            AsarPathError: If a path of the tree is not a valid archive path
+            AsarPathError: If a path of the tree or the prefix is not a valid
+                archive path
         """
+        prefix_keys = check_archive_path(prefix) if prefix else ()
         entries = crawl_tree(root)
         for arc_path, local_path, kind in entries:
             # The path is checked once here, the entry is put into the table with
             # the segments it gives: the tree of the directory is not validated
             # a second time by the file entries
-            keys = check_archive_path(arc_path)
+            keys = prefix_keys + check_archive_path(arc_path)
             if kind != KIND_DIR:
                 self._set_file(keys, LocalFileSource(local_path), unpack)
                 continue
