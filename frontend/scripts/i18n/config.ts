@@ -11,6 +11,12 @@ export interface I18nConfig {
   languages: string[];
   /** Current working directory */
   cwd: string;
+  /**
+   * Generation mode:
+   * - 'svelte': generated modules read `i18nState.l` from a svelte runes state
+   * - 'node': generated modules read `getLang()` from a plain ts state module
+   */
+  mode: "svelte" | "node";
 }
 
 export const i18nConfig: I18nConfig = {
@@ -21,6 +27,7 @@ export const i18nConfig: I18nConfig = {
   // Convention: Always use xx-YY format.
   // The first language is considered the default/fallback.
   languages: ["en-US", "zh-CN", "ja-JP", "zh-TW", "es-ES"],
+  mode: "svelte",
 };
 
 /** Helper to resolve absolute paths based on config */

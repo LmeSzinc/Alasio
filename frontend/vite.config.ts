@@ -4,6 +4,7 @@ import { sveltekit } from "@sveltejs/kit/vite";
 import tailwindcss from "@tailwindcss/vite";
 import { type Plugin, defineConfig } from "vite";
 import { cspInlineHashDev } from "./scripts/csp-inline-hash/vite.ts";
+import { i18nConfig } from "./scripts/i18n/config.ts";
 import { i18nPlugin } from "./scripts/i18n/vite.ts";
 import { svelteDropDevPage } from "./scripts/svelte-drop-dev-page/vite.ts";
 
@@ -101,7 +102,7 @@ export default defineConfig({
   // svelteDropDevPage renames dev route files for the build
   // svelteDropDevPage must be placed before sveltekit so it sees the raw svelte source
   plugins: [
-    i18nPlugin(),
+    i18nPlugin([i18nConfig]),
     svelteDropDevPage(),
     tailwindcss(),
     sveltekit(),

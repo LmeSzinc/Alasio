@@ -119,10 +119,13 @@ function svelteKitGeneratedHmrGuard(): Plugin {
 }
 
 export default defineConfig({
-  // i18nPlugin (renderer instance) is listed first so its config hook
-  // scans renderer sources before the sveltekit build starts
+  // i18nPlugin is listed first so its config hook scans sources before the
+  // sveltekit build starts. It owns every i18n config of the project:
+  // only this top-level config is resolved by `svelte-kit sync`, so the
+  // main process config must be generated here as well (the nested main
+  // build never runs during a sync).
   plugins: [
-    i18nPlugin(rendererI18nConfig),
+    i18nPlugin([rendererI18nConfig, mainI18nConfig]),
     // SvelteKit options are passed directly (supported since SvelteKit
     // 2.62.0) instead of a svelte.config.js file: webapp has no
     // "type": "module" (electron 22 needs a CJS main process), so an ESM
@@ -160,7 +163,7 @@ export default defineConfig({
           // The main process runs as plain node (no HMR): the node-mode
           // i18n plugin rescans main sources on every buildStart, so
           // tray translations stay in sync during watch builds.
-          plugins: [i18nPlugin(mainI18nConfig)],
+          plugins: [i18nPlugin([mainI18nConfig])],
           build: {
             // electron 22 bundles Node 16.17; do not follow vite 8's
             // default baseline-widely-available (2026-01) target
