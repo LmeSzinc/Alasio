@@ -17,7 +17,6 @@ from alasio.deploy.pack.job import DeployJob
 from alasio.deploy.pack.job_reset import ResetJob
 from alasio.deploy.pack.job_unpack import UnpackJob
 from alasio.ext import env
-from alasio.ext.env import ALASIO_ROOT
 from alasio.ext.file.filelock import FilelockTimeout
 from alasio.ext.path.atomic import file_read_bytes
 from alasio.logger import logger
@@ -35,7 +34,7 @@ def real_root():
     directory. It lives under the repo's temp/ folder and is removed
     after the test.
     """
-    path = ALASIO_ROOT.joinpath('temp/deploy_job_lock')
+    path = env.ALASIO_TEMP.joinpath('deploy_job_lock')
     shutil.rmtree(path, ignore_errors=True)
     os.makedirs(path)
     yield path

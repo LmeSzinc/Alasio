@@ -11,7 +11,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import pytest
 
 from alasio.db.conn import SQLITE_POOL, ConnectionPool, SqlitePool
-from alasio.ext.env import ALASIO_ROOT
+from alasio.ext import env
 from tests.db.conn.conftest import TEST_DATA_DIR
 
 # ============================================================================
@@ -414,7 +414,7 @@ class TestGlobalSingleton:
 
     def test_sqlite_pool_singleton_usable(self):
         """Test global singleton is usable"""
-        folder = ALASIO_ROOT.joinpath(f'temp/db_conn_{os.getpid()}')
+        folder = env.ALASIO_TEMP.joinpath(f'db_conn_{os.getpid()}')
         db_path = folder.joinpath('singleton_test.db')
 
         try:

@@ -10,7 +10,6 @@ from alasio.config.const import DataInconsistent
 from alasio.config.entry.model import ConfigSetEvent
 from alasio.db.conn import SQLITE_POOL
 from alasio.ext import env
-from alasio.ext.env import ALASIO_ROOT
 from alasio.logger import logger
 
 
@@ -385,7 +384,7 @@ class TestConfigEdgeCases:
         """Test config with empty name works as a base config"""
         # an empty name maps to <PROJECT_ROOT>/config/.db, point the project
         # root at temp/ so the database does not land in a real project root
-        root = ALASIO_ROOT.joinpath(f'temp/config_empty_name_{os.getpid()}')
+        root = env.ALASIO_TEMP.joinpath(f'config_empty_name_{os.getpid()}')
         monkeypatch.setattr(env, 'PROJECT_ROOT', root)
 
         class EmptyNameConfig(AlasioConfigBase):

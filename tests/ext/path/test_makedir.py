@@ -3,7 +3,7 @@ import shutil
 
 import pytest
 
-from alasio.ext.env import ALASIO_ROOT
+from alasio.ext import env
 from alasio.ext.path.calc import joinpath, normpath
 from alasio.ext.path.makedir import _convert_path, _get_parent_folder, _iter_parent_folder, batch_makedirs
 
@@ -11,15 +11,15 @@ from alasio.ext.path.makedir import _convert_path, _get_parent_folder, _iter_par
 @pytest.fixture(scope='module')
 def temp_dir():
     """
-    Create a temporary test folder under ALASIO_ROOT,
+    Create a temporary test folder under env.ALASIO_TEMP,
     removed after all tests in this module finish
 
     Yields:
         str: Absolute path of the temporary test folder
     """
-    folder = ALASIO_ROOT.joinpath('test_makedir_tmp')
+    folder = env.ALASIO_TEMP.joinpath('test_makedir_tmp')
     shutil.rmtree(folder, ignore_errors=True)
-    os.mkdir(folder)
+    os.makedirs(folder)
     yield folder
     shutil.rmtree(folder, ignore_errors=True)
 

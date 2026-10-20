@@ -9,7 +9,7 @@ import pytest
 
 from alasio.db.conn import SQLITE_POOL
 from alasio.db.table import AlasioTable
-from alasio.ext.env import ALASIO_ROOT
+from alasio.ext import env
 
 # ============================================================================
 # Test Models and Tables
@@ -48,7 +48,7 @@ def db_dir():
     The directory lives under the repo's temp/ folder and is removed after
     the module finishes.
     """
-    path = ALASIO_ROOT.joinpath('temp/db_pargma')
+    path = env.ALASIO_TEMP.joinpath('db_pargma')
     shutil.rmtree(path, ignore_errors=True)
     os.mkdir(path)
     yield path

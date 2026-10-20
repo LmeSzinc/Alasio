@@ -19,6 +19,8 @@ AIX = sys.platform.startswith("aix")
 # Global variable
 PROJECT_ROOT = PathStr.new('')
 ALASIO_ROOT = PathStr.new(__file__).uppath(3)
+# Disposable folder of the repository, tests put their temporary files here
+ALASIO_TEMP = ALASIO_ROOT.joinpath('temp')
 
 
 def set_project_root(root, up=0):

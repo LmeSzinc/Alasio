@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from alasio.ext.env import ALASIO_ROOT
+from alasio.ext import env
 from alasio.ext.file.filelock import FilelockTimeout, SQLiteFileLock
 from alasio.ext.path.atomic import folder_rmtree
 
@@ -45,7 +45,7 @@ def lock_dir():
     Returns:
         PathStr: Path of the directory, removed when the test finishes
     """
-    path = ALASIO_ROOT.joinpath(f'temp/filelock_{os.getpid()}_{uuid.uuid4().hex[:8]}')
+    path = env.ALASIO_TEMP.joinpath(f'filelock_{os.getpid()}_{uuid.uuid4().hex[:8]}')
     os.makedirs(path)
     yield path
     folder_rmtree(path)

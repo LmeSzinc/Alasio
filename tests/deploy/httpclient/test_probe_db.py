@@ -15,7 +15,7 @@ import pytest
 from alasio.db.conn import SQLITE_POOL
 from alasio.deploy.httpclient.probe_db import RECORD_TTL, MirrorRecord, MirrorRecordTable, load_result, save_result
 from alasio.deploy.httpclient.probe_mirrors import Mirrors
-from alasio.ext.env import ALASIO_ROOT
+from alasio.ext import env
 from alasio.logger import logger
 from tests.deploy_dev.pack.conftest import BrokenMirrorTable, FakeMirrorTable
 
@@ -178,7 +178,7 @@ def mirror_db_dir():
     filesystem cannot intercept it: the MirrorRecordTable tests need a
     real directory (the same reason as the table tests of tests/db).
     """
-    path = ALASIO_ROOT.joinpath('temp/mirror_record_table')
+    path = env.ALASIO_TEMP.joinpath('mirror_record_table')
     shutil.rmtree(path, ignore_errors=True)
     os.makedirs(path.joinpath('config'))
     yield path

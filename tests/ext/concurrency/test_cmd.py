@@ -5,8 +5,8 @@ from unittest.mock import patch
 
 import pytest
 
+from alasio.ext import env
 from alasio.ext.concurrent.cmd import CmdlineError, CmdlineResultBytes, CmdlineResultStr, run_cmd
-from alasio.ext.env import ALASIO_ROOT
 
 PYTHON = sys.executable
 
@@ -19,7 +19,7 @@ def cmd_dir():
     The directory lives under the repo's temp/ folder and is removed after
     the module finishes.
     """
-    path = ALASIO_ROOT.joinpath('temp/concurrency_cmd')
+    path = env.ALASIO_TEMP.joinpath('concurrency_cmd')
     shutil.rmtree(path, ignore_errors=True)
     os.mkdir(path)
     yield path

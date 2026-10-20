@@ -29,7 +29,7 @@ def prefs_root():
     Yields:
         PathStr: Project root of the test
     """
-    root = env.ALASIO_ROOT.joinpath('temp').joinpath(f'supervisor_prefs_{os.getpid()}_{uuid.uuid4().hex}')
+    root = env.ALASIO_TEMP.joinpath(f'supervisor_prefs_{os.getpid()}_{uuid.uuid4().hex}')
     config_dir = root.joinpath('config')
     config_dir.makedirs()
     shutil.copyfile(DEPLOY_TEMPLATE, config_dir.joinpath('deploy.yaml'))
