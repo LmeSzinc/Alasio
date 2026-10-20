@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING
 
 from alasio.backend.worker.bridge import BackendBridge
 from alasio.backend.worker.event import ConfigEvent
-from alasio.base.image.imfile import image_encode
 from alasio.device.config import DeviceConfig
 from alasio.ext.cache import cached_property_threadsafe
 from alasio.logger import logger
@@ -163,6 +162,9 @@ class DeviceBase:
         Yields:
             tuple[str, bytes]: (filename, image_bytes)
         """
+        # local import to avoid importing numpy/opencv globally
+        from alasio.base.image.imfile import image_encode
+
         for data in self.screenshot_deque:
             imtime = datetime.strftime(data['time'], '%Y-%m-%d_%H-%M-%S-%f')
             image = image_encode(data['image'], ext='webp')

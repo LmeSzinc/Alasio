@@ -7,6 +7,8 @@ asks for by the annotations of its parameters. The end to end usage of the pytes
 plugin is covered by ExampleMod/tests, this file tests the pieces.
 """
 import os
+import subprocess
+import sys
 
 import pytest
 
@@ -20,6 +22,28 @@ from alasio.testing.screenshot import (
 )
 from alasio.testing.screenshot_device import ScreenshotDevice, ScreenshotNotProvided
 from ExampleMod.module.config.config import Config
+
+
+class TestImport:
+    def test_import_does_not_load_image_stack(self):
+        """Loading the pytest plugin must not import numpy/opencv."""
+        code = (
+            "import sys\n"
+            "import alasio.testing.screenshot\n"
+            "assert 'numpy' not in sys.modules, 'numpy imported at plugin load'\n"
+            "assert 'cv2' not in sys.modules, 'cv2 imported at plugin load'\n"
+            "assert 'alasio.base.image.imfile' not in sys.modules, 'imfile imported at plugin load'\n"
+        )
+        process_env = os.environ.copy()
+        process_env['PYTHONPATH'] = str(env.ALASIO_ROOT) + os.pathsep + process_env.get('PYTHONPATH', '')
+        result = subprocess.run(
+            [sys.executable, '-c', code],
+            cwd=str(env.ALASIO_ROOT),
+            env=process_env,
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, result.stderr
 
 
 class StubModule:

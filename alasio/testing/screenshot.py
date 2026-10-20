@@ -62,7 +62,6 @@ from typing import get_type_hints
 import pytest
 from msgspecerror import get_class_annotation
 
-from alasio.base.image.imfile import image_load
 from alasio.config.base import AlasioConfigBase
 from alasio.ext.path import PathStr
 from alasio.testing.screenshot_device import ScreenshotDevice, ScreenshotTestError
@@ -277,6 +276,9 @@ def load_screenshot(item):
             screenshot does not exist
     """
     file = screenshot_of(item)
+    # local import to avoid importing numpy/opencv when the pytest plugin loads
+    from alasio.base.image.imfile import image_load
+
     try:
         return file, image_load(file)
     except FileNotFoundError:
