@@ -151,7 +151,9 @@ class FakeFilesystem:
             dirpath (str): Normalized directory path
 
         Returns:
-            str: Key prefix, "/" for the POSIX root
+            str: Key prefix, "/" for the POSIX root. The root is its own
+                prefix match, so callers must skip the directory itself:
+                a directory is not its own child.
         """
         return '/' if dirpath == '/' else f'{dirpath}/'
 
@@ -166,7 +168,8 @@ class FakeFilesystem:
         prefix = self._child_prefix(dirpath)
         return (
             any(key.startswith(prefix) for key in self._files)
-            or any(key.startswith(prefix) for key in self._dirs)
+            # the root is its own prefix match, a directory is not its own child
+            or any(key.startswith(prefix) and key != dirpath for key in self._dirs)
             or any(key.startswith(prefix) for key in self._symlinks)
         )
 
@@ -483,6 +486,8 @@ class FakeFilesystem:
             del self._symlinks[path]
             return
         if path in self._dirs:
+            if path == self.root_dir.path:
+                raise OSError(errno.EBUSY, 'Cannot remove the root directory', path)
             if self._has_children(path):
                 raise OSError(errno.ENOTEMPTY, 'Directory not empty', path)
             del self._dirs[path]
@@ -980,6 +985,8 @@ class FakeFilesystem:
             raise NotADirectoryError(errno.ENOTDIR, 'Not a directory', path)
         if path not in self._dirs:
             raise FileNotFoundError(errno.ENOENT, 'No such file or directory', path)
+        if path == self.root_dir.path:
+            raise OSError(errno.EBUSY, 'Cannot remove the root directory', path)
         if self._has_children(path):
             raise OSError(errno.ENOTEMPTY, 'Directory not empty', path)
         del self._dirs[path]
@@ -1126,17 +1133,17 @@ class FakeFilesystem:
         prefix = self._child_prefix(path)
         entries = []
         for key in self._files:
-            if key.startswith(prefix):
+            if key.startswith(prefix) and key != path:
                 name = key[len(prefix):]
                 if '/' not in name:
                     entries.append(FakeDirEntry(name, key, False, self._files[key].stat()))
         for key in self._dirs:
-            if key.startswith(prefix):
+            if key.startswith(prefix) and key != path:
                 name = key[len(prefix):]
                 if '/' not in name:
                     entries.append(FakeDirEntry(name, key, True, self._dirs[key].stat()))
         for key, link in self._symlinks.items():
-            if key.startswith(prefix):
+            if key.startswith(prefix) and key != path:
                 name = key[len(prefix):]
                 if '/' not in name:
                     follow_stat = None
@@ -1175,17 +1182,17 @@ class FakeFilesystem:
         prefix = self._child_prefix(path)
         names = []
         for key in self._files:
-            if key.startswith(prefix):
+            if key.startswith(prefix) and key != path:
                 name = key[len(prefix):]
                 if '/' not in name:
                     names.append(name)
         for key in self._dirs:
-            if key.startswith(prefix):
+            if key.startswith(prefix) and key != path:
                 name = key[len(prefix):]
                 if '/' not in name:
                     names.append(name)
         for key in self._symlinks:
-            if key.startswith(prefix):
+            if key.startswith(prefix) and key != path:
                 name = key[len(prefix):]
                 if '/' not in name:
                     names.append(name)

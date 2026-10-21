@@ -755,6 +755,62 @@ class TestOsDir:
             os.scandir(join(fs, 'a.txt'))
 
 
+class TestRootScan:
+    """Scanning the root, the root is its own prefix match but not its own child.
+
+    A POSIX root is created explicitly with FakeFilesystem(cwd='/'), so the
+    cases below run on every platform. On Windows a default root is a drive
+    ("D:"), the root self reference only exists for "/".
+    """
+
+    def test_listdir_root(self):
+        """os.listdir() of the root should not yield an empty name."""
+        fs = FakeFilesystem(cwd='/')
+        fs.create_file('/a.txt')
+        fs.create_dir('/dir')
+        assert fs.listdir('/') == ['a.txt', 'dir']
+
+    def test_scandir_root(self):
+        """os.scandir() of the root should not yield the root itself."""
+        fs = FakeFilesystem(cwd='/')
+        fs.create_file('/a.txt')
+        fs.create_dir('/dir')
+        entries = list(fs.scandir('/'))
+        assert sorted(entry.name for entry in entries) == ['a.txt', 'dir']
+        assert sorted(entry.path for entry in entries) == ['/a.txt', '/dir']
+
+    def test_walk_root(self):
+        """os.walk() of the root should walk the tree once and terminate."""
+        with FakeFilesystem(cwd='/') as fs:
+            fs.create_file('/proj/a.txt')
+            fs.create_file('/proj/sub/b.txt')
+            walked = [
+                (root.replace('\\', '/'), dirs, files)
+                for root, dirs, files in os.walk('/')
+            ]
+        assert walked == [
+            ('/', ['proj'], []),
+            ('/proj', ['sub'], ['a.txt']),
+            ('/proj/sub', [], ['b.txt']),
+        ]
+
+    def test_remove_root(self):
+        """remove() of the root should raise EBUSY, the root is never removed."""
+        fs = FakeFilesystem(cwd='/')
+        with pytest.raises(OSError) as exc_info:
+            fs.remove('/')
+        assert exc_info.value.errno == errno.EBUSY
+        assert fs.isdir('/')
+
+    def test_rmdir_root(self):
+        """os.rmdir() of an empty root should raise EBUSY, not ENOTEMPTY."""
+        with FakeFilesystem(cwd='/') as fs:
+            with pytest.raises(OSError) as exc_info:
+                os.rmdir('/')
+        assert exc_info.value.errno == errno.EBUSY
+        assert fs.isdir('/')
+
+
 class TestOsFd:
     """The mocked low level fd functions os.open / write / close."""
 

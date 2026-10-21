@@ -91,7 +91,8 @@ Not supported (documented limitations):
 - symlinks in the middle of a path (a symlinked directory) are only
   resolved by realpath(), the other functions resolve the link at the
   path itself
-- os.walk(), os.access() and other rarely used os functions
+- os.walk() goes through the mocked os.scandir() and works; os.access()
+  and other rarely used os functions are not mocked
 - tarfile writes through its own open(), it is not mocked
   (zipfile goes through io.open and works)
 - do not combine the fixture with pytest tmp_path / tmpdir, the fake
