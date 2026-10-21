@@ -102,8 +102,7 @@ if (!gotTheLock) {
       setupSharedStateIPC();
       setupWindowIPC();
 
-      const iconPath = path.join(__dirname, "../resources/icon.png");
-      createTray(iconPath, appState.displayLang);
+      createTray(appState.displayLang);
       return;
     }
 
@@ -147,8 +146,7 @@ if (!gotTheLock) {
     });
 
     // Create tray
-    const iconPath = path.join(__dirname, "../resources/icon.png");
-    createTray(iconPath, appState.displayLang);
+    createTray(appState.displayLang);
 
     // Start backend if not first time setup
     if (!appState.isFirstTimeSetup) {

@@ -14,13 +14,13 @@ files:
   # Declared in "dependencies" only to satisfy electron-builder's node
   # module collection, this exclusion keeps the asar identical to a
   # dependency-free build.
-  - '!node_modules{,/**/*}'
+  - "!node_modules{,/**/*}"
 electronLanguages:
   - en-US
 win:
   target:
     - dir
-  icon: resources/icon.png
+  icon: resources/icon.ico
 mac:
   target:
     - dmg

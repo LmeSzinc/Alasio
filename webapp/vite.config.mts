@@ -164,6 +164,11 @@ export default defineConfig({
           // i18n plugin rescans main sources on every buildStart, so
           // tray translations stay in sync during watch builds.
           plugins: [i18nPlugin([mainI18nConfig])],
+          // Only the tray assets are copied next to the compiled main
+          // bundle. The packaging icons in resources/ are read by
+          // electron-builder from the source tree; keeping the 512px PNG
+          // out of dist/main saves ~600KB inside app.asar.
+          publicDir: resolve(__dirname, "resources/tray"),
           build: {
             // electron 22 bundles Node 16.17; do not follow vite 8's
             // default baseline-widely-available (2026-01) target
