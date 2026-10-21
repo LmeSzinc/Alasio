@@ -1,4 +1,12 @@
-from alasio.device.search.windows_reg import extract_uninstall_path
+import pytest
+
+from alasio.ext.env import WINDOWS
+
+# windows_reg.py imports winreg at module level, which does not exist on posix
+if WINDOWS:
+    from alasio.device.search.windows_reg import extract_uninstall_path
+
+pytestmark = pytest.mark.skipif(not WINDOWS, reason='The Windows registry is not available on this platform')
 
 
 class TestExtractUninstallPath:

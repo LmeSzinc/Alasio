@@ -1,4 +1,5 @@
 import os
+import winreg
 
 from alasio.device.search.base import *
 from alasio.device.search.windows_reg import *
@@ -29,9 +30,6 @@ def iter_instances(emu: EmuStr):
                     )
     elif emutype == EmuType.BlueStacks5:
         # Get UserDefinedDir, where BlueStacks stores data
-        # Local import, winreg is only available on Windows
-        import winreg
-
         folder = None
         try:
             with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\BlueStacks_nxt") as reg:
