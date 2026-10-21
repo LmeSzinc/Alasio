@@ -11,6 +11,7 @@ import os as os_module
 from hashlib import sha1
 
 import pytest
+import trio
 from starlette.exceptions import HTTPException
 
 from alasio.backend.dev.assets import ImageStaticFiles
@@ -87,7 +88,12 @@ async def run_response(resp, scope):
     messages = []
 
     async def receive():
-        return {'type': 'http.request', 'body': b'', 'more_body': False}
+        # A real server blocks here until the client disconnects: the request
+        # body is complete, the only message left is http.disconnect. Returning
+        # http.request again hands starlette's FileResponse a disconnect
+        # listener that never blocks (its loop has no checkpoint), so the loop
+        # spins without yielding, the file is never streamed and the test hangs.
+        await trio.sleep_forever()
 
     async def send(message):
         messages.append(message)
