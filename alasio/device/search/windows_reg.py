@@ -1,6 +1,5 @@
 import codecs
 import re
-import winreg
 from dataclasses import dataclass
 
 from alasio.device.search.base import EmuStr
@@ -15,8 +14,10 @@ class RegValue:
 
 def list_reg(reg) -> "list[RegValue]":
     """
-    List all reg values in a reg key
+    List all reg values in a reg key, Windows only
     """
+    import winreg
+
     rows = []
     index = 0
     try:
@@ -31,8 +32,10 @@ def list_reg(reg) -> "list[RegValue]":
 
 def list_key(reg) -> "list[str]":
     """
-    List all keys in a reg key
+    List all keys in a reg key, Windows only
     """
+    import winreg
+
     rows = []
     index = 0
     try:
@@ -97,6 +100,8 @@ def iter_user_assist():
     Yields:
         EmuStr: Path to emulator executables, may contains duplicate values
     """
+    import winreg
+
     path = r'Software\Microsoft\Windows\CurrentVersion\Explorer\UserAssist'
     # {XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX}\xxx.exe
     regex_hash = re.compile(r'{.*}')
@@ -138,6 +143,8 @@ def iter_mui_cache():
     Yields:
         EmuStr: Path to emulator executable, may contains duplicate values
     """
+    import winreg
+
     path = r'Software\Classes\Local Settings\Software\Microsoft\Windows\Shell\MuiCache'
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, path) as reg:
@@ -167,6 +174,8 @@ def get_install_dir_from_reg(path, key):
     Returns:
         str: Installation dir or ''
     """
+    import winreg
+
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, path) as reg:
             root = winreg.QueryValueEx(reg, key)[0]
@@ -208,6 +217,8 @@ def iter_uninstall_registry():
     Yields:
         EmuStr: Path to uninstall exe file
     """
+    import winreg
+
     known_uninstall_registry_path = [
         r'SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall',
         r'Software\Microsoft\Windows\CurrentVersion\Uninstall'

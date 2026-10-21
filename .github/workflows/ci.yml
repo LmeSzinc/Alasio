@@ -166,16 +166,20 @@ jobs:
           print('alasio_speedup OK')
           PY
 
+      # A collection error would abort the session and hide every module after it,
+      # the matrix is meant to surface all platform issues in a single run
       - name: Speedup tests
         run: |
           mkdir -p test-results
           uv run --no-project --python .venv python -m pytest tests_speedup -q \
+            --continue-on-collection-errors \
             --junitxml="test-results/speedup-${{ matrix.os }}-${{ matrix.python }}.xml"
 
       - name: Alasio tests
         run: |
           mkdir -p test-results
           uv run --no-project --python .venv python -m pytest tests -q \
+            --continue-on-collection-errors \
             --junitxml="test-results/alasio-${{ matrix.os }}-${{ matrix.python }}.xml"
 
       - name: Upload test results
