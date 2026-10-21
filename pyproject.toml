@@ -29,7 +29,8 @@ dependencies = [
     # 0.23.0 is the last version that support python3.8
     "zstandard>=0.23.0",
     # 6.x releases continue to support Python 3.8
-    "PyYAML>=6.0",
+    # 6.0.3 is the version with a cp38 macOS arm64 wheel in py38deps
+    "PyYAML>=6.0.3",
     # httpx is no longer maintained, httpx2 is the pydantic fork of httpx
     # python 3.8 support comes from the py38deps backport wheels
     "httpx2>=2",
