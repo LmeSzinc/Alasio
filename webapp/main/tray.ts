@@ -14,10 +14,19 @@ export function setMainWindow(window: BrowserWindow) {
  * Tray icon file, chosen per platform.
  *
  * Windows takes the multi-size ICO so the shell picks a frame matching
- * the current DPI scale; macOS and Linux cannot read ICO and use the PNG.
+ * the current DPI scale. macOS and Linux take a PNG pair: the plain file
+ * is the 1x image and nativeImage loads the sibling @2x file for
+ * high-DPI screens. macOS uses 18/36 (menu bar points), Linux uses 32/64
+ * (panel pixels).
  */
 function trayIconFile() {
-  return process.platform === "win32" ? "icon.ico" : "icon.png";
+  if (process.platform === "win32") {
+    return "icon.ico";
+  }
+  if (process.platform === "darwin") {
+    return "icon-mac.png";
+  }
+  return "icon.png";
 }
 
 /**
@@ -25,22 +34,16 @@ function trayIconFile() {
  *
  * vite copies resources/tray/ into the main build output (publicDir in
  * vite.config.mts), so the same path works in development and inside
- * app.asar. An empty image means the asset is missing from the build;
- * the tray would then render as a blank slot, so report it instead of
- * failing silently.
+ * app.asar. nativeImage.createFromPath picks up the sibling @2x file
+ * (icon-mac@2x.png / icon@2x.png) automatically. An empty image means
+ * the asset is missing from the build; the tray would then render as a
+ * blank slot, so report it instead of failing silently.
  */
 function loadTrayIcon() {
   const file = path.join(__dirname, trayIconFile());
   const image = nativeImage.createFromPath(file);
   if (image.isEmpty()) {
     console.error(`[tray] Failed to load icon: ${file}`);
-    return image;
-  }
-  // macOS menu bar icons are sized in points: the packaging source is
-  // 512px and would cover the whole menu bar. Windows keeps the ICO (the
-  // shell handles DPI) and Linux tray hosts scale the PNG themselves.
-  if (process.platform === "darwin") {
-    return image.resize({ width: 16, height: 16 });
   }
   return image;
 }
