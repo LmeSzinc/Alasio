@@ -13,7 +13,7 @@ alasio 的可选 C 加速模块，独立分发。目前提供 bit2coding 的编�
 - `pathcomb.py`：pack index 文件名编码器的 ctypes 绑定与公开 API（`pathcomb.c` 的对外入口）
 - `pathcomb.c`：C 编码器（前缀复用 + 剩余路径 + 后缀复用的搜索与合并编码，一次遍历出三段）
 - `_library.py`：通用件——按需构建、ctypes 加载、校验库声明的接口版本（所有加速模块共用）
-- `build.py`：编译包内的每个 `.c` 为同名动态库（与源码同目录，增量判断时间戳）
+- `build.py`：编译包内的每个 `.c` 为动态库（与源码同目录，增量判断时间戳）；Windows 叫 `<stem>.dll`，POSIX 叫 `lib<stem>.so` / `lib<stem>.dylib`——`<stem>.so` 会被 Python 当成扩展模块、抢在 `<stem>.py` 前面导入
 - `__init__.py`：`ACCELERATORS` 加速模块清单与新增指南
 
 ## API

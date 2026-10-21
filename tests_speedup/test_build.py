@@ -80,6 +80,30 @@ class TestToolchain:
         assert build.toolchain(cc) == expected
 
 
+class TestLibraryFor:
+    """Where the built library of a source lands."""
+
+    def test_windows_keeps_the_plain_name(self, monkeypatch):
+        """A DLL cannot be imported, so the name stays the plain stem."""
+        monkeypatch.setattr(sys, 'platform', 'win32')
+        assert build.library_for('pkg/pathcomb.c') == 'pkg/pathcomb.dll'
+
+    def test_posix_prefixes_the_name(self, monkeypatch):
+        """A .so named like the module is imported before the module itself."""
+        monkeypatch.setattr(sys, 'platform', 'linux')
+        assert build.library_for('pkg/pathcomb.c') == 'pkg/libpathcomb.so'
+
+    def test_macos_prefixes_the_name(self, monkeypatch):
+        """Darwin uses its own suffix and the same prefix."""
+        monkeypatch.setattr(sys, 'platform', 'darwin')
+        assert build.library_for('pkg/pathcomb.c') == 'pkg/libpathcomb.dylib'
+
+    def test_relative_source(self, monkeypatch):
+        """A source without a directory keeps a bare relative name."""
+        monkeypatch.setattr(sys, 'platform', 'linux')
+        assert build.library_for('pathcomb.c') == 'libpathcomb.so'
+
+
 class TestCompilerFlags:
     """The flags of the two toolchains."""
 

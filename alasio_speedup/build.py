@@ -85,7 +85,16 @@ def library_for(source):
     Returns:
         str: Path of the shared library built from it
     """
-    return source[:-2] + library_suffix()
+    stem = source[:-2]
+    suffix = library_suffix()
+    if sys.platform == 'win32':
+        return stem + suffix
+    # outside windows python imports ``pathcomb.so`` as an extension module
+    # before it ever looks at ``pathcomb.py``, so the library of a module
+    # carries the unix ``lib`` prefix: ``libpathcomb.so`` shadows no module
+    # and is still what ctypes loads
+    directory, sep, name = stem.replace('\\', '/').rpartition('/')
+    return f'{directory}{sep}lib{name}{suffix}'
 
 
 def is_file(path):
