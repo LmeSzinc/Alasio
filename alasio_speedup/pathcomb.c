@@ -246,7 +246,7 @@ static int pathcomb_mark_first(PathComb *comb)
     return 0;
 }
 
-/* ── UTF-8, the paths are character sequences, the lengths are too ────── */
+/* -- UTF-8, the paths are character sequences, the lengths are too ------ */
 
 /*
  * The byte length of the character starting at data, clamped to the
@@ -465,7 +465,7 @@ static void pathcomb_key(
     }
 }
 
-/* ── the trie of the path tails ───────────────────────────────────────── */
+/* -- the trie of the path tails ----------------------------------------- */
 
 /*
  * The rank of one byte among the children of a node: the bytes below it in
@@ -595,7 +595,7 @@ static int32_t pathcomb_traverse(PathComb *comb, const char *path, uint32_t len,
     return (int32_t)node;
 }
 
-/* ── the suffix buckets of the level 3 search ─────────────────────────── */
+/* -- the suffix buckets of the level 3 search --------------------------- */
 
 /*
  * The bucket of one suffix, created when it is missing: the suffixes are
@@ -654,7 +654,7 @@ static uint32_t pathcomb_suffix_score(
     return pathcomb_lcs(path, path_len, bucket.ptr, bucket.len, 0, 0, &bytes);
 }
 
-/* ── the combined encoding, mirror of pathlen_coding.py ──────────────── */
+/* -- the combined encoding, mirror of pathlen_coding.py ---------------- */
 
 /*
  * prefix reuse and remaining path length into one int, the three ranges
@@ -849,7 +849,7 @@ static void pathcomb_lookup(
     *out_bytes = 0;
 }
 
-/* ── the entry points ────────────────────────────────────────────────── */
+/* -- the entry points -------------------------------------------------- */
 
 PATHCOMB_EXPORT int64_t abi_version(void);
 
@@ -1068,7 +1068,7 @@ PATHCOMB_EXPORT int64_t pathcomb_encode_paths(
         return PATHCOMB_ERR_ARGUMENT;
     }
 
-    /* ── the layout pass: the trie, the groups, the member blocks ──────
+    /* -- the layout pass: the trie, the groups, the member blocks ------
        The keys and the group of a path depend on the paths alone, so the
        layout of every group is known before the search runs: the members
        of a group end up in one block, in insertion order, which is the
@@ -1160,7 +1160,7 @@ PATHCOMB_EXPORT int64_t pathcomb_encode_paths(
         return error;
     }
 
-    /* ── the search pass ──────────────────────────────────────────────
+    /* -- the search pass ----------------------------------------------
        For every path: the search reads the entries of the paths before it,
        then the path is added, which refreshes the index of its entry when
        it is already there, exactly like the reference. */
