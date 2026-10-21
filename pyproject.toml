@@ -33,6 +33,8 @@ dependencies = [
     # httpx is no longer maintained, httpx2 is the pydantic fork of httpx
     # python 3.8 support comes from the py38deps backport wheels
     "httpx2>=2",
+    # alasio/spider parses and builds urls with yarl
+    "yarl>=1.9",
     # just to ensure not too old
     "psutil>=5.9",
     # alasio/log
@@ -84,6 +86,12 @@ test = [
     "pytest>=8.3.4",
     # 0.8.0 is the latest version, pytest-trio is unchanged since 2022
     "pytest-trio>=0.8.0",
+    # The tests drive the app through starlette.testclient, which speaks the
+    # project http client (httpx2) from starlette 1.2 on. Older starlette
+    # versions import httpx, whose exceptions are not httpx2 errors and break
+    # the code under test. The runtime floor stays 0.44, a library that only
+    # mounts the app never imports the test client.
+    "starlette>=1.2.0",
     # just to ensure not too old
     "ruff>=0.16.0",
     # alasio/codegen/ruff/ruff_format.py requires isort>=5.2.0

@@ -7,6 +7,30 @@ import zstandard as zstd
 SMALL_INPUT_SIZE = 64 * 1024
 
 
+def _zstd_version():
+    """
+    Version of the zstandard module
+
+    Returns:
+        tuple[int, int]: Major and minor version, (99, 0) when the version
+            string is not the expected layout
+    """
+    try:
+        major, minor = zstd.__version__.split('.')[:2]
+        return int(major), int(minor)
+    except (AttributeError, ValueError):
+        return 99, 0
+
+
+# zstandard 0.24.0 made the single call decompress() honor the frame format of
+# the decompressor (python-zstandard 7312fae, "frameparams: support defining
+# frame format for get_frame_parameters()"). Before it the frame content size
+# was probed with ZSTD_getFrameContentSize(), which always reads the default
+# frame format, so a magic-less frame failed with
+# "error determining content size from frame header".
+MAGICLESS_DECOMPRESS_SUPPORTED = _zstd_version() >= (0, 24)
+
+
 def _zstd_window_log(level, data, source):
     """
     Window log for a compression, at least what the level asks for
@@ -112,16 +136,25 @@ def zstd_decompress(data, source=None):
     else:
         dict_data = zstd.ZstdCompressionDict(source)
 
-    # Auto-detect format: if data starts with zstd magic header, use default format,
-    # otherwise treat as magicless (FORMAT_ZSTD1_MAGICLESS).
     if data[:len(zstd.FRAME_HEADER)] == zstd.FRAME_HEADER:
-        fmt = zstd.FORMAT_ZSTD1
-    else:
-        fmt = zstd.FORMAT_ZSTD1_MAGICLESS
+        decompressor = zstd.ZstdDecompressor(dict_data=dict_data)
+        return decompressor.decompress(data)
 
-    decompressor = zstd.ZstdDecompressor(
-        dict_data=dict_data,
-        format=fmt,
-    )
-    out = decompressor.decompress(data)
-    return out
+    if MAGICLESS_DECOMPRESS_SUPPORTED:
+        decompressor = zstd.ZstdDecompressor(
+            dict_data=dict_data,
+            format=zstd.FORMAT_ZSTD1_MAGICLESS,
+        )
+        return decompressor.decompress(data)
+
+    # An older zstandard cannot decode a magic-less frame in a single call, so
+    # the magic header is fed in front of the data and the default format is
+    # decoded. The two are handed to the decompression object one after the
+    # other, concatenating them would copy the whole compressed input.
+    obj = zstd.ZstdDecompressor(dict_data=dict_data).decompressobj()
+    parts = [obj.decompress(zstd.FRAME_HEADER), obj.decompress(data), obj.flush()]
+    if not obj.eof:
+        # a frame that ends early decodes to what it has, the truncated input
+        # has to be an error like it is on the single call of a new zstandard
+        raise zstd.ZstdError('zstd decompressor error: incomplete frame')
+    return b''.join(parts)
