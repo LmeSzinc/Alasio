@@ -218,9 +218,12 @@ jobs:
           # python 3.8 takes starlette and httpx2 from the backport index
           # (1.6.0 and 2.12.0), so the declared floors 1.2.0 and 2.0.0 are only
           # reachable on 3.10, the first interpreter with a pypi wheel of the
-          # starlette floor. One leg is enough: those two are pure python, and
-          # every other package resolves the same version as on 3.8.
+          # starlette floor.
+          - os: windows-2022
+            python: "3.10"
           - os: ubuntu-22.04
+            python: "3.10"
+          - os: macos-15
             python: "3.10"
     steps:
       - uses: actions/checkout@v5
