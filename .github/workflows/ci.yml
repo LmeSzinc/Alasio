@@ -147,22 +147,27 @@ jobs:
 
       # alasio.speedup never loads the library of the checkout, only the
       # installed copy: pip does not ship the *.dll / *.so (package-data holds
-      # the sources only), so the prebuilt library is copied in afterwards
+      # the sources only), so the prebuilt library is copied in afterwards.
+      # The copy has to land inside the installed package, the loader looks for
+      # the library next to the C source it belongs to.
       - name: Install the prebuilt libraries into site-packages
         shell: bash
         run: |
-          site=$(uv run --no-project --python .venv python -c 'import sysconfig; print(sysconfig.get_paths()["purelib"].replace("\\", "/"))')
+          package=$(uv run --no-project --python .venv python -c 'import sysconfig, os; print(os.path.join(sysconfig.get_paths()["purelib"], "alasio_speedup").replace("\\", "/"))')
+          test -f "$package/__init__.py"
           shopt -s nullglob
           libs=(alasio_speedup/*.dll alasio_speedup/*.so alasio_speedup/*.dylib)
           test "${#libs[@]}" -gt 0
-          cp -v "${libs[@]}" "$site/"
+          cp -v "${libs[@]}" "$package/"
 
+      # the installed copy is the one tests and the backend load, the checkout
+      # copy next to it is a different package and says nothing about the tests
       - name: Verify the accelerator libraries
         run: |
           uv run --no-project --python .venv python - <<'PY'
-          from alasio_speedup import bit2, pathcomb
-          assert bit2.check(), 'bit2 accelerator is not usable'
-          assert pathcomb.check(), 'pathcomb accelerator is not usable'
+          from alasio.speedup import ERRORS, accelerator
+          for name in ('bit2', 'pathcomb'):
+              assert accelerator(name) is not None, f'{name}: {ERRORS.get(name)}'
           print('alasio_speedup OK')
           PY
 
