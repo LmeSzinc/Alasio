@@ -115,7 +115,10 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          fetch-depth: 1
+          # tests/git reads historical commit objects, a shallow clone makes
+          # those 12 tests fail with a missing sha1. The repository is small
+          # (a few MB packed), the full history costs nothing to fetch.
+          fetch-depth: 0
 
       - uses: actions/download-artifact@v8.0.2
         with:
@@ -175,26 +178,18 @@ jobs:
       # the matrix is meant to surface all platform issues in a single run
       - name: Speedup tests
         run: |
-          mkdir -p test-results
           uv run --no-project --python .venv python -m pytest tests_speedup -q \
-            --continue-on-collection-errors \
-            --junitxml="test-results/speedup-${{ matrix.os }}-${{ matrix.python }}.xml"
+            --continue-on-collection-errors
 
+      # faulthandler_timeout dumps the stack of every thread when a single test
+      # hangs, the last progress line only says which file the run reached:
+      # without it a hang leaves no evidence behind.
       - name: Alasio tests
+        timeout-minutes: 20
         run: |
-          mkdir -p test-results
           uv run --no-project --python .venv python -m pytest tests -q \
             --continue-on-collection-errors \
-            --junitxml="test-results/alasio-${{ matrix.os }}-${{ matrix.python }}.xml"
-
-      - name: Upload test results
-        if: always()
-        uses: actions/upload-artifact@v7.0.2
-        with:
-          name: test-results-${{ matrix.os }}-${{ matrix.python }}
-          path: test-results/
-          if-no-files-found: ignore
-          retention-days: 7
+            -o faulthandler_timeout=180
 
   frontend:
     name: frontend
