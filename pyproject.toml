@@ -35,8 +35,8 @@ dependencies = [
     "httpx2>=2",
     # alasio/spider parses and builds urls with yarl
     "yarl>=1.9",
-    # just to ensure not too old
-    "psutil>=5.9",
+    # 5.9.3 is the first version with arm64 macOS wheels
+    "psutil>=5.9.3",
     # alasio/log
     # rich version is limited because we patched rich.trackback to enable exceptiongroup tracebacks on py<3.11
     # 14.1.0 is the minimum version to have exceptiongroup support
