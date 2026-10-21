@@ -46,15 +46,18 @@ dependencies = [
 
 [project.optional-dependencies]
 image = [
-    # just to ensure not too old
-    "numpy>=1.16",
+    # 1.21.6 is the last patch of the first numpy line with cp38 arm64 macOS
+    # wheels, the code does not use an api of a newer numpy
+    "numpy>=1.21.6",
     # use headless version by default, so alasio still works on server without GUI
     # in fact, all 4 opencv-python versions are supported
     # - opencv-python
     # - opencv-python-headless
     # - opencv-contrib-python
     # - opencv-contrib-python-headless
-    "opencv-python-headless>=4.5",
+    # 4.5.4.60 is the patch release of the first opencv line with cp38 arm64
+    # macOS wheels (4.5.3.56)
+    "opencv-python-headless>=4.5.4.60",
 ]
 backend = [
     # 0.17.3 is the last version that support python3.8

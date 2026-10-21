@@ -191,6 +191,107 @@ jobs:
             --continue-on-collection-errors \
             -o faulthandler_timeout=180
 
+  # The floors in pyproject.toml are declarations until something runs against
+  # them. This job installs every direct dependency at the lowest version the
+  # requirements allow and runs the same suite, so a floor that is too low (or
+  # a floor bumped for a feature the code does not use) shows up here instead of
+  # in a user's environment. python 3.8 is the interpreter under test because
+  # the low version floors are about it: everything that dropped 3.8 has to come
+  # from the backport index. One job per operating system, so the floors are
+  # checked against the wheels each platform actually has.
+  minimum:
+    name: minimum / py${{ matrix.python }} / ${{ matrix.os }}
+    needs: speedup
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        # the artifact is speedup-<os>, the same list as the speedup job
+        include:
+          - os: windows-2022
+            python: "3.8"
+          - os: ubuntu-22.04
+            python: "3.8"
+          - os: macos-15
+            python: "3.8"
+          # python 3.8 takes starlette and httpx2 from the backport index
+          # (1.6.0 and 2.12.0), so the declared floors 1.2.0 and 2.0.0 are only
+          # reachable on 3.10, the first interpreter with a pypi wheel of the
+          # starlette floor. One leg is enough: those two are pure python, and
+          # every other package resolves the same version as on 3.8.
+          - os: ubuntu-22.04
+            python: "3.10"
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # tests/git reads historical commit objects, a shallow clone makes
+          # those 12 tests fail with a missing sha1
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v8.0.2
+        with:
+          name: speedup-${{ matrix.os }}
+          path: alasio_speedup
+
+      - uses: astral-sh/setup-uv@v10.3.0
+        with:
+          version: "0.13.2"
+          python-version: ${{ matrix.python }}
+          enable-cache: true
+          cache-dependency-glob: |
+            pyproject.toml
+            alasio_speedup/pyproject.toml
+
+      - name: Create venv
+        run: uv venv --python "${{ matrix.python }}" .venv
+
+      # --resolution lowest-direct takes the lowest version of every declared
+      # dependency. A full --resolution lowest is not usable: it resolves the
+      # transitive requirements at their lowest too, which pulls pre-release era
+      # sdists (sortedcontainers 0.5.0 for trio) that do not build at all. The
+      # backport index supplies what dropped python 3.8, their floors included.
+      - name: Install dependencies at their lowest version
+        run: |
+          uv pip install --python .venv \
+            --resolution lowest-direct \
+            --index-url https://pypi.org/simple \
+            --extra-index-url "$PY38DEPS_INDEX" \
+            --index-strategy unsafe-best-match \
+            -e ".[all]" \
+            ./alasio_speedup
+
+      - name: Install the prebuilt libraries into site-packages
+        shell: bash
+        run: |
+          package=$(uv run --no-project --python .venv python -c 'import sysconfig, os; print(os.path.join(sysconfig.get_paths()["purelib"], "alasio_speedup").replace("\\", "/"))')
+          test -f "$package/__init__.py"
+          shopt -s nullglob
+          libs=(alasio_speedup/*.dll alasio_speedup/*.so alasio_speedup/*.dylib)
+          test "${#libs[@]}" -gt 0
+          cp -v "${libs[@]}" "$package/"
+
+      - name: Verify the accelerator libraries
+        run: |
+          uv run --no-project --python .venv python - <<'PY'
+          from alasio.speedup import ERRORS, accelerator
+          for name in ('bit2', 'pathcomb'):
+              assert accelerator(name) is not None, f'{name}: {ERRORS.get(name)}'
+          print('alasio_speedup OK')
+          PY
+
+      - name: Alasio tests
+        timeout-minutes: 20
+        run: |
+          uv run --no-project --python .venv python -m pytest tests -q \
+            --continue-on-collection-errors \
+            -o faulthandler_timeout=180
+
+      # the log of the run records which versions "minimum" meant for this commit
+      - name: Resolved versions
+        if: always()
+        run: uv pip list --python .venv
+
   frontend:
     name: frontend
     runs-on: ubuntu-22.04
@@ -270,7 +371,7 @@ jobs:
 
   wheel:
     name: wheel
-    needs: [python-tests, frontend, webapp]
+    needs: [python-tests, minimum, frontend, webapp]
     runs-on: ubuntu-22.04
     timeout-minutes: 30
     steps:
