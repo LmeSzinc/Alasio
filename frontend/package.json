@@ -1,17 +1,17 @@
 {
   "name": "alasio-frontend",
   "private": true,
-  "version": "0.0.1",
+  "version": "2.0.0",
   "type": "module",
   "engines": {
     "node": "^20.19.0 || >=22.12.0"
   },
   "scripts": {
     "dev": "vite dev",
-    "build": "vite build && tsx scripts/csp-inline-hash/fix.ts",
+    "build": "node scripts/sync-version.mjs && vite build && tsx scripts/csp-inline-hash/fix.ts",
     "preview": "vite preview",
     "prepare": "svelte-kit sync || echo ''",
-    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+    "check": "node scripts/sync-version.mjs --check && svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
     "format": "prettier --write .",
     "lint": "prettier --check .",
