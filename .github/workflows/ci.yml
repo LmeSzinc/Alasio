@@ -1,9 +1,13 @@
 name: CI
 
-# Only the speedup job for now: it compiles the C accelerators of
-# alasio_speedup on the three platforms and uploads them as speedup-<os>.
-# The python-tests / frontend / webapp / wheel jobs come after this matrix is
-# green, see doc/2026-10-20_github-ci-matrix.md.
+# speedup (3 jobs) ---> python-tests (3 OS x 7 Python = 21 jobs) ----+
+#                                                                    +---> wheel
+# frontend (1) ------------------------------------------------------+
+# webapp   (1) ------------------------------------------------------+
+#
+# The accelerator libraries are compiled once per platform by the speedup job
+# and handed to the python-tests matrix as speedup-<os>, so the 21 test jobs
+# need no compiler.
 
 on:
   push:
@@ -26,6 +30,8 @@ defaults:
 
 env:
   PYTHONUTF8: "1"
+  PY38DEPS_INDEX: https://py38deps.github.io/py38deps/simple/
+  UV_INDEX_STRATEGY: unsafe-best-match
 
 jobs:
   speedup:
@@ -35,9 +41,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # the artifact is speedup-<os>: the python-tests matrix of the next
-        # stage downloads it with the same matrix.os value, so the two os
-        # lists have to stay identical
+        # the artifact is speedup-<os>: python-tests downloads it with the same
+        # matrix.os value, so the two os lists have to stay identical
         os:
           - windows-2022
           - ubuntu-22.04
@@ -86,3 +91,241 @@ jobs:
             alasio_speedup/*.dylib
           if-no-files-found: error
           retention-days: 7
+
+  python-tests:
+    name: py${{ matrix.python }} / ${{ matrix.os }}
+    needs: speedup
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - windows-2022
+          - ubuntu-22.04
+          - macos-15
+        python:
+          - "3.8"
+          - "3.9"
+          - "3.10"
+          - "3.11"
+          - "3.12"
+          - "3.13"
+          - "3.14"
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+
+      - uses: actions/download-artifact@v8.0.2
+        with:
+          name: speedup-${{ matrix.os }}
+          path: alasio_speedup
+
+      - uses: astral-sh/setup-uv@v10.3.0
+        with:
+          version: "0.13.2"
+          python-version: ${{ matrix.python }}
+          enable-cache: true
+          cache-dependency-glob: |
+            pyproject.toml
+            alasio_speedup/pyproject.toml
+
+      - name: Create venv
+        run: uv venv --python "${{ matrix.python }}" .venv
+
+      # py38deps is the backport index of the low python versions, the two
+      # indexes are merged so a package comes from wherever it exists
+      - name: Install dependencies
+        run: |
+          uv pip install --python .venv \
+            --index-url https://pypi.org/simple \
+            --extra-index-url "$PY38DEPS_INDEX" \
+            --index-strategy unsafe-best-match \
+            -e ".[all]" \
+            ./alasio_speedup
+
+      # alasio.speedup never loads the library of the checkout, only the
+      # installed copy: pip does not ship the *.dll / *.so (package-data holds
+      # the sources only), so the prebuilt library is copied in afterwards
+      - name: Install the prebuilt libraries into site-packages
+        shell: bash
+        run: |
+          site=$(uv run --no-project --python .venv python -c 'import sysconfig; print(sysconfig.get_paths()["purelib"].replace("\\", "/"))')
+          shopt -s nullglob
+          libs=(alasio_speedup/*.dll alasio_speedup/*.so alasio_speedup/*.dylib)
+          test "${#libs[@]}" -gt 0
+          cp -v "${libs[@]}" "$site/"
+
+      - name: Verify the accelerator libraries
+        run: |
+          uv run --no-project --python .venv python - <<'PY'
+          from alasio_speedup import bit2, pathcomb
+          assert bit2.check(), 'bit2 accelerator is not usable'
+          assert pathcomb.check(), 'pathcomb accelerator is not usable'
+          print('alasio_speedup OK')
+          PY
+
+      - name: Speedup tests
+        run: |
+          mkdir -p test-results
+          uv run --no-project --python .venv python -m pytest tests_speedup -q \
+            --junitxml="test-results/speedup-${{ matrix.os }}-${{ matrix.python }}.xml"
+
+      - name: Alasio tests
+        run: |
+          mkdir -p test-results
+          uv run --no-project --python .venv python -m pytest tests -q \
+            --junitxml="test-results/alasio-${{ matrix.os }}-${{ matrix.python }}.xml"
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: test-results-${{ matrix.os }}-${{ matrix.python }}
+          path: test-results/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  frontend:
+    name: frontend
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v6.1.0
+        with:
+          version: "10.33.2"
+
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      # the prepare script runs svelte-kit sync, which builds src/i18ngen
+      - run: pnpm install --frozen-lockfile
+        working-directory: frontend
+
+      - run: pnpm test
+        working-directory: frontend
+
+      - run: pnpm run check
+        working-directory: frontend
+
+      - run: pnpm run build
+        working-directory: frontend
+
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: frontend-build
+          path: frontend/build
+          if-no-files-found: error
+          retention-days: 7
+
+  webapp:
+    name: webapp
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    env:
+      # the ci builds the app.asar with vite and pack-asar, it never runs
+      # electron or electron-builder, the 100MB binary is not needed
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v6.1.0
+        with:
+          version: "10.33.2"
+
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: webapp/pnpm-lock.yaml
+
+      - run: pnpm install --frozen-lockfile
+        working-directory: webapp
+
+      - run: pnpm test
+        working-directory: webapp
+
+      - run: pnpm run check
+        working-directory: webapp
+
+      - run: pnpm run build
+        working-directory: webapp
+
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: webapp-dist
+          path: webapp/dist
+          if-no-files-found: error
+          retention-days: 7
+
+  wheel:
+    name: wheel
+    needs: [python-tests, frontend, webapp]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      # the wheel builder reads the commit objects of .git, not the worktree
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+
+      - uses: astral-sh/setup-uv@v10.3.0
+        with:
+          version: "0.13.2"
+          python-version: "3.14"
+          enable-cache: true
+          cache-dependency-glob: |
+            pyproject.toml
+            alasio_speedup/pyproject.toml
+
+      - name: Create venv
+        run: uv venv --python 3.14 .venv
+
+      - name: Install pack dependencies
+        run: |
+          uv pip install --python .venv \
+            --index-url https://pypi.org/simple \
+            --extra-index-url "$PY38DEPS_INDEX" \
+            --index-strategy unsafe-best-match \
+            -e ".[pack]"
+
+      - uses: actions/download-artifact@v8.0.2
+        with:
+          name: frontend-build
+          path: frontend/build
+
+      - uses: actions/download-artifact@v8.0.2
+        with:
+          name: webapp-dist
+          path: webapp/dist
+
+      # --require-static fails when frontend/build or webapp/dist is missing,
+      # the builder itself only warns and would produce a wheel without them
+      - name: Build wheel
+        run: |
+          uv run --no-project --python .venv python -m alasio.deploy_dev.wheel build \
+            --root . --folder alasio --require-static
+
+      # verifies RECORD / METADATA / WHEEL, the frontend manifest and files,
+      # the app.asar layout and package.json.main, and the sdist structure
+      - name: Verify wheel
+        run: uv run --no-project --python .venv python -m alasio.deploy_dev.wheel verify dist
+
+      - name: Checksums
+        run: sha256sum dist/*.whl dist/*.tar.gz > dist/SHA256SUMS
+
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: alasio-dist
+          path: |
+            dist/*.whl
+            dist/*.tar.gz
+            dist/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 30
