@@ -1,0 +1,88 @@
+name: CI
+
+# Only the speedup job for now: it compiles the C accelerators of
+# alasio_speedup on the three platforms and uploads them as speedup-<os>.
+# The python-tests / frontend / webapp / wheel jobs come after this matrix is
+# green, see doc/2026-10-20_github-ci-matrix.md.
+
+on:
+  push:
+    branches: [master]
+    paths-ignore:
+      - 'doc/**'
+      - 'ai-doc/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  PYTHONUTF8: "1"
+
+jobs:
+  speedup:
+    name: speedup / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        # the artifact is speedup-<os>: the python-tests matrix of the next
+        # stage downloads it with the same matrix.os value, so the two os
+        # lists have to stay identical
+        os:
+          - windows-2022
+          - ubuntu-22.04
+          - macos-15
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+
+      # cl.exe is not on PATH in the default shell of the runner, vcvars puts
+      # it there and exports the INCLUDE / LIB of the windows sdk with it
+      - name: MSVC environment
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - uses: astral-sh/setup-uv@v10.3.0
+        with:
+          version: "0.13.2"
+          python-version: "3.8"
+
+      # the build needs a python and a C compiler, nothing else: alasio is
+      # not installed here, build.py imports the standard library only
+      - name: Build the accelerator libraries
+        run: uv run --no-project --python 3.8 python -m alasio_speedup.build
+
+      # check() loads the library, verifies the abi version it declares and
+      # encodes a tiny input: a compile that produced an unusable library
+      # fails here in seconds instead of at the first pack on the server
+      - name: Verify the libraries load
+        run: |
+          uv run --no-project --python 3.8 python - <<'PY'
+          from alasio_speedup import bit2, pathcomb
+          assert bit2.check(), 'bit2 accelerator is not usable'
+          assert pathcomb.check(), 'pathcomb accelerator is not usable'
+          print('alasio_speedup OK')
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: speedup-${{ matrix.os }}
+          path: |
+            alasio_speedup/*.dll
+            alasio_speedup/*.so
+            alasio_speedup/*.dylib
+          if-no-files-found: error
+          retention-days: 7
