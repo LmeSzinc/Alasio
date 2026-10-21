@@ -22,8 +22,11 @@ import importlib.util
 from alasio.ext import env
 from tests.backend.import_testing import HeavyImportTest
 
-# gui.py sits at the project root
-GUI_PATH = env.ALASIO_ROOT.joinpath('gui.py')
+# gui.py sits at the project root. A plain str, not the PathStr joinpath()
+# returns: importlib passes the path to compile(), a str subclass ends up in
+# co_filename and marshal refuses to write a code object with one into the pyc
+# cache (ValueError: unmarshallable object)
+GUI_PATH = str(env.ALASIO_ROOT.joinpath('gui.py'))
 
 # Blacklists per process: modules a process must never import at startup.
 #
