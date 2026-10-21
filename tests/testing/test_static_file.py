@@ -17,7 +17,10 @@ CONTENT = b'0123456789'
 
 def make_client(server):
     """An httpx2.AsyncClient that talks to the app of the server in-process."""
-    return httpx2.AsyncClient(transport=httpx2.ASGITransport(app=server))
+    # a base url of its own: the cookie handling of httpx2 builds a urllib
+    # request from the url of every response, and urllib rejects a relative one
+    return httpx2.AsyncClient(
+        transport=httpx2.ASGITransport(app=server), base_url='http://testserver')
 
 
 class TestParseRange:
@@ -122,7 +125,8 @@ class TestAnswers:
         """The app is mountable: the file is looked up below the prefix."""
         server = MockStaticFile({'latest.pack': CONTENT})
         app = Starlette(routes=[Mount('/pack/demo', app=server)])
-        async with httpx2.AsyncClient(transport=httpx2.ASGITransport(app=app)) as client:
+        async with httpx2.AsyncClient(
+                transport=httpx2.ASGITransport(app=app), base_url='http://testserver') as client:
             response = await client.get('/pack/demo/latest.pack')
         assert response.status_code == 200
         assert response.content == CONTENT
