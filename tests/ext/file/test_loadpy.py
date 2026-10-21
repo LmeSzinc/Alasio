@@ -1,7 +1,12 @@
+import os
+import shutil
+import uuid
+
 import _io
 import pytest
 
 from alasio.ext.file.loadpy import LOADPY_CACHE, loadpy
+from alasio.ext.path import PathStr
 from alasio.testing.filesystem import fs  # noqa: F401
 
 
@@ -17,6 +22,33 @@ def test_loadpy_valid(fs):
     assert module.a == 1
     assert module.func() == 2
     assert module.__name__ == 'valid'
+
+
+def test_loadpy_str_subclass():
+    """
+    A path that is a str subclass loads and its bytecode cache is written
+
+    importlib hands the path to compile(), where a str subclass lands in
+    co_filename, and marshal refuses to write a code object carrying one into
+    the pyc cache. The fake filesystem cannot reproduce it: the loader stats
+    the source with the real os.stat and skips the cache when the stat fails,
+    so this test uses a real folder under temp/.
+    """
+    folder = PathStr.new('temp').joinpath(f'test_loadpy_{os.getpid()}_{uuid.uuid4().hex}')
+    folder.makedirs()
+    try:
+        file = folder.joinpath('mod.py')
+        with open(file, 'w', encoding='utf-8') as f:
+            f.write('a = 1\n')
+
+        module = loadpy(PathStr.new(file))
+
+        assert module.a == 1
+        assert module.__name__ == 'mod'
+        # the pyc was written, so the code object was marshalable
+        assert folder.joinpath('__pycache__').isdir()
+    finally:
+        shutil.rmtree(folder, ignore_errors=True)
 
 
 def test_loadpy_invalid_extension(fs):
