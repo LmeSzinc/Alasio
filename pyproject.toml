@@ -64,9 +64,11 @@ backend = [
     "hypercorn>=0.17.3",
     # 0.27.0 is the last version that support python3.8
     "trio>=0.27.0",
-    # 0.44.0 is the last version that support python3.8, the py38deps backport provides 1.8.0
-    # the backend and tests support both
-    "starlette>=0.44.0",
+    # 1.2.0 is the first version whose TestClient speaks httpx2, the http client
+    # of the project: the older ones import httpx, whose exceptions are not
+    # httpx2 errors and break the code under test. 1.2.0 itself requires
+    # python>=3.10, the py38deps backport provides 1.6~1.8 for python 3.8/3.9.
+    "starlette>=1.2.0",
     # 2.9.0 is the last version that support python3.8
     "PyJWT>=2.9.0",
 ]
@@ -89,12 +91,6 @@ test = [
     "pytest>=8.3.4",
     # 0.8.0 is the latest version, pytest-trio is unchanged since 2022
     "pytest-trio>=0.8.0",
-    # The tests drive the app through starlette.testclient, which speaks the
-    # project http client (httpx2) from starlette 1.2 on. Older starlette
-    # versions import httpx, whose exceptions are not httpx2 errors and break
-    # the code under test. The runtime floor stays 0.44, a library that only
-    # mounts the app never imports the test client.
-    "starlette>=1.2.0",
     # just to ensure not too old
     "ruff>=0.16.0",
     # alasio/codegen/ruff/ruff_format.py requires isort>=5.2.0
