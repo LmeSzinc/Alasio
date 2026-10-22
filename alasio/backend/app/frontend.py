@@ -54,6 +54,7 @@ from alasio.ext import env
 from alasio.ext.cache.resource import ResourceCacheTTL
 from alasio.ext.path import PathStr
 from alasio.ext.path.atomic import atomic_read_bytes
+from alasio.ext.path.calc import get_suffix
 from alasio.logger import logger
 
 # The frontend files and their manifest, as recorded in the wheel, relative to
@@ -65,6 +66,17 @@ MANIFEST_FILE = f'{DEPLOY_DATA}/frontend-manifest.pack'
 
 # The SPA entry of the frontend build, the page served for every route
 INDEX_HTML = 'index.html'
+
+# Content types that mimetypes does not answer the same way on every host:
+# ".js" is application/javascript up to python 3.11 and text/javascript from
+# python 3.12 on (RFC 9239), and on Windows mimetypes reads the registry, whose
+# Content Type of the extension is whatever the installed software wrote. The
+# type of these files is fixed so that a browser gets the same header, and a
+# module script the type it is required to have, on every host
+MEDIA_TYPES = {
+    '.js': 'text/javascript',
+    '.mjs': 'text/javascript',
+}
 
 # frame-ancestors can only be set through a response header (the meta tag
 # ignores it): it allows the electron host (app://bundle, production) and the
@@ -372,7 +384,11 @@ class FrontendSite:
                 f'expected {record.size} bytes with sha1 {record.sha1.hex()}'
             )
 
-        media_type = guess_type(path)[0] or 'application/octet-stream'
+        # the map covers the extensions mimetypes answers differently on
+        # another host, see MEDIA_TYPES
+        media_type = MEDIA_TYPES.get(get_suffix(path))
+        if media_type is None:
+            media_type = guess_type(path)[0] or 'application/octet-stream'
         # only a page carries a CSP meta, non-html files need no policy
         csp = _html_csp(content) if media_type == 'text/html' else ''
         compressed = gzip.compress(content, compresslevel=9)

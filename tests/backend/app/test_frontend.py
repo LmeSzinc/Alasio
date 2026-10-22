@@ -498,7 +498,8 @@ class TestIdentityBody:
         assert isinstance(body, FrontendBody)
         assert body.encoding == ''
         assert body.body == SCRIPT
-        assert body.media_type == 'application/javascript'
+        # RFC 9239: the type of a ".js" file does not depend on the host
+        assert body.media_type == 'text/javascript'
 
     @pytest.mark.trio
     async def test_page_keeps_its_csp(self, site):
