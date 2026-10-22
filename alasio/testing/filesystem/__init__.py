@@ -34,6 +34,12 @@ served by the fake filesystem, nothing touches the real disk. Python
 imports inside a test keep working because the import machinery reads
 sources with io.open_code(), which is not patched.
 
+The filesystem of a test starts blank: it holds the root only, the root
+of the drive of the working directory on Windows and "/" on POSIX. The
+directories of the working directory are not created, so a path of a
+test never collides with the workspace of the runner it runs on
+("D:/a/Alasio/Alasio" would collide with the "/a" of a test).
+
 Mocked functions:
 
 - builtins.open() and io.open(), text and binary modes

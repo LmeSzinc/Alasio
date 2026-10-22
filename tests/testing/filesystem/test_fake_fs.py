@@ -808,6 +808,12 @@ class TestRootScan:
             ('/proj/sub', [], ['b.txt']),
         ]
 
+    def test_default_cwd_is_the_root(self):
+        """A fresh filesystem holds the root only, not the working directory."""
+        fs = FakeFilesystem()
+        assert fs.getcwd() == fs.root_dir.path
+        assert fs.listdir(fs.root_dir.path) == []
+
     def test_chdir_under_root(self):
         """A cwd below the root works, an absolute path keeps the root."""
         with FakeFilesystem(cwd='/') as fs:
@@ -899,6 +905,15 @@ class TestOsFd:
             os.close(fd)
         with pytest.raises(OSError):
             os.write(fd, b'x')
+
+    def test_os_close_of_a_process_fd(self, fs):
+        """A descriptor the fake filesystem did not hand out is closed for real."""
+        read_fd, write_fd = os.pipe()
+        os.close(read_fd)
+        os.close(write_fd)
+        # os.get_inheritable is not mocked, it asks the real descriptor table
+        with pytest.raises(OSError):
+            os.get_inheritable(write_fd)
 
     def test_os_fsync(self, fs):
         """os.fsync() should be a no-op for a valid fd."""

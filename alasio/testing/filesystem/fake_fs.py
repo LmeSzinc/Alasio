@@ -25,6 +25,14 @@ try:
 except AttributeError:
     O_ACCMODE = 3
 
+# File descriptors of the fake filesystem start above the descriptors of the
+# process: a descriptor the filesystem did not hand out belongs to the
+# process, os.close() closes it for real (POSIX subprocess.Popen() closes its
+# pipes with os.close), and a fake number is never mistaken for a real one
+FD_BASE = 1000
+# The real os.close, the fake filesystem patches it
+_platform_close = os.close
+
 
 class FakeFilesystem:
     """
@@ -68,13 +76,20 @@ class FakeFilesystem:
     def __init__(self, cwd=None):
         """
         Args:
-            cwd (str, optional): Initial working directory.
-                Defaults to None, use the real current directory.
+            cwd (str, optional): Initial working directory. Defaults to
+                None, use the root of the drive of the real working
+                directory: a fresh filesystem holds the root only, the
+                directories of the working directory are not created
         """
         # the state lock, taken by every public operation
         self._lock = RLock()
         if cwd is None:
+            # A blank filesystem keeps the drive of the real working directory
+            # so absolute paths land on the drive the platform expects, but not
+            # the directories of it: the workspace of a CI runner is
+            # "D:/a/Alasio/Alasio", its "a" collides with the "/a" of a test
             cwd = os.getcwd()
+            cwd = cwd[:2] if IS_WINDOWS and cwd[1:2] == ':' else '/'
         self._cwd = _normpath(cwd, cwd)
         # the drive root on Windows, "/" on POSIX and for a cwd that has no
         # drive (a POSIX style cwd of the fake filesystem)
@@ -93,7 +108,7 @@ class FakeFilesystem:
         self._symlinks: "dict[str, FakeSymlink]" = {}
         # fd -> FakeFileObject
         self._fds: "dict[int, FakeFileObject]" = {}
-        self._next_fd = 3
+        self._next_fd = FD_BASE
         # saved originals of activate() without monkeypatch
         self._saved = []
         # create the cwd chain, so os.getcwd() exists in the fake fs
@@ -1244,16 +1259,24 @@ class FakeFilesystem:
         """
         Mock of os.close().
 
+        A descriptor the fake filesystem did not hand out belongs to the
+        process, e.g. a pipe of subprocess.Popen() on POSIX, it is closed for
+        real.
+
         Args:
-            fd (int): Fake file descriptor
+            fd (int): Fake file descriptor, or a descriptor of the process
 
         Raises:
             OSError: If the fd is not open
         """
         fobj = self._fds.get(fd)
-        if fobj is None:
+        if fobj is not None:
+            fobj.close()
+            return
+        if isinstance(fd, int) and fd >= FD_BASE:
+            # A descriptor of the fake filesystem that is already closed
             raise OSError(errno.EBADF, 'Bad file descriptor')
-        fobj.close()
+        _platform_close(fd)
 
     @synchronized
     def os_fsync(self, fd):
