@@ -627,10 +627,17 @@ class TestDeepSetNoReplace:
         assert str(e.value) == expected
 
     def test_deep_set_no_replace_unhashable_key_message(self):
-        # A non-hashable key cannot be a dict key, the python message is kept
+        # A non-hashable key cannot be a dict key, the python message is kept.
+        # Python 3.12 names the key in it as well ("cannot use 'list' as a dict
+        # key (unhashable type: 'list')"), so the expected message comes from
+        # this interpreter instead of pinning one of the two wordings
+        key = [['x'], 'y']
+        d = {}
+        with pytest.raises(TypeError) as plain:
+            d[key] = 2
         with pytest.raises(TypeError) as e:
-            deep_set_no_replace({'a': 1}, [['x'], 'y'], 2)
-        assert str(e.value) == "unhashable type: 'list'"
+            deep_set_no_replace({'a': 1}, key, 2)
+        assert str(e.value) == str(plain.value)
 
     def test_deep_set_no_replace_non_iterable_keys_message(self):
         # `keys` is not iterable, the python message is kept
