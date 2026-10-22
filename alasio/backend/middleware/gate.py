@@ -1,5 +1,6 @@
 import http.cookies
 import ipaddress
+import re
 
 import jwt
 from starlette import status
@@ -18,6 +19,16 @@ _REDIRECT_SCHEMES = {'http': 'https', 'ws': 'wss'}
 # HSTS value injected into https responses. One year, no
 # includeSubDomains (subdomains may host non-https services).
 _HSTS_VALUE = b'max-age=31536000'
+
+# A host header the redirect may use: a reg-name or a bracketed ipv6 address,
+# with an optional port. The value becomes the Location of the response, so it
+# must not carry a path, a userinfo or a unicode host (a browser would
+# punycode the last one), see the reg-name of RFC 3986
+_HOST_RE = re.compile(r'^(\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9._-]+)(:[0-9]{1,5})?$')
+
+# Default port of a scheme, the port of a server address on it is left out of
+# the authority, like the url of the scope leaves it out
+_DEFAULT_PORTS = {'http': 80, 'ws': 80, 'https': 443, 'wss': 443}
 
 # LAN source whitelist (rule B). Explicit network objects instead of the
 # ipaddress `is_private` / `is_ula` convenience flags: their exact
@@ -64,6 +75,74 @@ def _is_lan_source(host):
         if ip in net:
             return True
     return False
+
+
+def _server_netloc(scope):
+    """
+    The authority of the redirect target built from the server address.
+
+    Args:
+        scope (Scope):
+
+    Returns:
+        str | None: "host", "host:port" or "[ipv6]:port", None when the scope
+            carries no server address
+    """
+    server = scope.get('server')
+    if not server:
+        return None
+    host, port = server
+    if ':' in host and not host.startswith('['):
+        # a bare ipv6 address, an url authority needs the brackets, starlette
+        # only brackets it since 1.7.0
+        host = f'[{host}]'
+    if port == _DEFAULT_PORTS.get(scope['scheme'], 80):
+        return host
+    return f'{host}:{port}'
+
+
+def _host_header_netloc(host):
+    """
+    The authority of a host header, None when the value is not an authority.
+
+    Args:
+        host (str): The decoded value of the host header
+
+    Returns:
+        str | None: "host[:port]" or "[ipv6][:port]", None when the value
+            carries anything else: a path, a userinfo, a query, a unicode host
+            or a port out of range
+    """
+    match = _HOST_RE.match(host)
+    if not match:
+        return None
+    port = match.group(2)
+    if port and int(port[1:]) > 65535:
+        return None
+    return host
+
+
+def _request_netloc(scope):
+    """
+    The authority of the redirect target: the host header when it is an
+    authority, the server address otherwise.
+
+    A host header that is not an authority is not reflected into the Location
+    of the redirect: it is dropped, like starlette 1.0.1+ drops it (0.44.0
+    would reflect the raw value).
+
+    Args:
+        scope (Scope):
+
+    Returns:
+        str | None: The authority, None when neither the host header nor the
+            server address gives one
+    """
+    for key, value in scope.get('headers') or ():
+        if key == b'host':
+            # the first host header decides
+            return _host_header_netloc(value.decode('latin-1')) or _server_netloc(scope)
+    return _server_netloc(scope)
 
 
 class DeploymentGateMiddleware:
@@ -222,32 +301,31 @@ class DeploymentGateMiddleware:
         Build the https/wss url that mirrors the current plaintext
         request, keeping the host header (with port), path and query.
 
-        starlette builds the url from the scope: a host header that
-        passes its host syntax check is kept as is, a missing or
-        malformed one is dropped and the server address is used
-        instead (1.0.1+). 0.44.0 keeps the raw header value, which
-        makes such a request unbuildable (see Returns).
+        The authority is decided here: the host header when it is a valid
+        host, the server address otherwise, and a bare ipv6 address of the
+        server is bracketed. starlette only brackets it since 1.7.0, and
+        0.44.0 keeps the raw host header, so the url is built from a scope
+        carrying the authority above: the path and the query are still the
+        ones of the request, escaped like starlette escapes them.
 
         Args:
             scope (Scope):
 
         Returns:
-            str | None: The redirect target, or None when no usable
-                target can be built: a url without a hostname (no host
-                header and no server address, or a server address that
-                yields none, e.g. a bare ipv6 address) or a url
-                starlette cannot parse
+            str | None: The redirect target, or None when there is nothing to
+                redirect to: neither a usable host header nor a server address
         """
-        try:
-            url = URL(scope=scope)
-            # the guard covers the host header starlette dropped and the
-            # host it never had: without a hostname the url is relative
-            # or carries an unusable authority (a bare ipv6 address)
-            if not url.hostname:
-                return None
-            return str(url.replace(scheme=_REDIRECT_SCHEMES[url.scheme]))
-        except (KeyError, ValueError):
+        netloc = _request_netloc(scope)
+        if not netloc:
             return None
+        url = URL(scope={
+            'type': scope['type'],
+            'scheme': scope['scheme'],
+            'path': scope.get('path', '/'),
+            'query_string': scope.get('query_string', b''),
+            'headers': [(b'host', netloc.encode('latin-1'))],
+        })
+        return str(url.replace(scheme=_REDIRECT_SCHEMES[url.scheme]))
 
     async def _redirect_plaintext(self, scope, receive, send):
         """
