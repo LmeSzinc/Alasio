@@ -114,6 +114,19 @@ def mod_entry(mod_name, config_name, child_conn, project_root='', mod_root='', p
 
 
 def _async_raise(tid):
+    """
+    Inject a KeyboardInterrupt into a thread, the exception of the "killing" command
+
+    The exception is only delivered when the thread reaches python bytecode again,
+    a thread blocked in a native call keeps running until that call returns.
+
+    Args:
+        tid (int): Thread id to interrupt, e.g. the thread that runs the scheduler
+
+    Returns:
+        bool: True if the exception was injected, False if the thread is gone or
+            the injection was rolled back
+    """
     if tid <= 0:
         logger.error(f'[BackendBridge] Failed to send KeyboardInterrupt, tid invalid: {tid}')
         return False
@@ -123,16 +136,17 @@ def _async_raise(tid):
     err = ctypes.py_object(KeyboardInterrupt)
     res = ctypes.pythonapi.PyThreadState_SetAsyncExc(thread_id, err)
 
-    if res < 1:
+    if res == 1:
+        return True
+    if res == 0:
+        # the thread is not there any more, nothing was injected
         logger.error(f'[BackendBridge] Failed to send KeyboardInterrupt, tid invalid: {tid}')
-        return True
-    elif res == 1:
-        return True
-    else:
-        logger.error(f'[BackendBridge] Failed to send KeyboardInterrupt to thread {tid}')
-        # Failed to send KeyboardInterrupt, reset it
-        ctypes.pythonapi.PyThreadState_SetAsyncExc(thread_id, 0)
         return False
+    # more than one thread state was modified, which a thread id should not do:
+    # the exception is pending on a thread this call did not aim at, take it back
+    logger.error(f'[BackendBridge] Failed to send KeyboardInterrupt to thread {tid}')
+    ctypes.pythonapi.PyThreadState_SetAsyncExc(thread_id, 0)
+    return False
 
 
 class BackendBridge(metaclass=Singleton):

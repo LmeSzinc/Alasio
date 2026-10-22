@@ -3,22 +3,26 @@ Real process tests: a worker must not survive the process that started it
 
 The child process plays the backend role (it owns the WorkerManager), the worker
 runs a sleeping mod and never checks anything. Killing that backend process
-without any cleanup must take the worker down right away, by one of two means:
+without any cleanup must take the worker down right away: a worker that is still
+there after a few seconds is waiting for its sleep to finish, i.e. it became an
+orphan that keeps the device busy with nobody watching it.
 
-- a worker sleeping in short chunks follows the injected KeyboardInterrupt
-- a worker blocked in one long sleep never sees that exception (it is only
-  delivered when the blocking call returns), it has to be terminated directly
-
-In both cases a worker that is still there after a few seconds is waiting for its
-sleep to finish, i.e. it became an orphan that keeps the device busy with nobody
-watching it.
+The two means the bridge has for that - an injected KeyboardInterrupt, and the
+termination of the process when the exception does not unwind the scheduler in
+time - are asserted in test_bridge_backend_lost.py, in process and without any
+timing. Which one stopped a worker of this test can not be told from the outside:
+the exception is delivered between the sleep chunks of the mod and the child
+process then needs its own time to exit, i.e. the window of the injected stop is
+as wide as the hard exit deadline on a slow machine. These tests therefore assert
+the outcome only, for a worker that a chunked sleep makes interruptible and for
+one that a single long sleep makes uninterruptible.
 """
 import multiprocessing
 import time
 
 import psutil
+import pytest
 
-from alasio.backend.worker.bridge import BACKEND_LOST_KILL_WAIT_TIMEOUT
 from alasio.backend.worker.manager import WorkerManager
 from alasio.logger import logger
 
@@ -142,23 +146,13 @@ def run_backend_death(mod):
 
 
 class TestWorkerFollowsBackendDeath:
-    """杀掉启动 worker 的进程后，worker 必须马上消失"""
+    """杀掉启动 worker 的进程后，worker 必须退出结束，不能变成孤儿"""
 
-    def test_chunked_sleep_worker_is_stopped_by_injection(self):
-        """连续 0.1s 小 sleep 的 worker：注入的 KeyboardInterrupt 就够，不用硬杀"""
-        elapsed = run_backend_death('WorkerTestSleep')
-
-        assert elapsed < BACKEND_LOST_KILL_WAIT_TIMEOUT * 0.5, (
-            f'worker stopped after {elapsed:.2f}s, which is the hard exit deadline '
-            f'({BACKEND_LOST_KILL_WAIT_TIMEOUT}s): the injected KeyboardInterrupt did not stop it'
-        )
-
-    def test_long_sleep_worker_is_terminated(self):
-        """一次长 sleep 的 worker：注入的异常到不了，必须靠硬杀"""
-        elapsed = run_backend_death('WorkerTestSleepLong')
-
-        assert elapsed >= BACKEND_LOST_KILL_WAIT_TIMEOUT * 0.5, (
-            f'worker stopped after {elapsed:.2f}s, before the hard exit deadline '
-            f'({BACKEND_LOST_KILL_WAIT_TIMEOUT}s): a worker blocked in one long sleep should not '
-            f'see the injected KeyboardInterrupt'
-        )
+    @pytest.mark.parametrize('mod', ['WorkerTestSleep', 'WorkerTestSleepLong'])
+    def test_worker_does_not_survive_its_backend(self, mod):
+        """
+        短 sleep 的 worker 会被注入的 KeyboardInterrupt 打断，一次长 sleep 的只能硬杀；
+        两者都必须在 WORKER_STOP_DEADLINE 内消失（“靠哪种方式”由 test_bridge_backend_lost.py 断言）
+        """
+        # run_backend_death() fails when the worker is still there at the deadline
+        run_backend_death(mod)

@@ -12,7 +12,7 @@ worker 必须自己停下来，而不是变成无人管理的孤儿进程继续�
 """
 import time
 from multiprocessing import Pipe
-from threading import Lock
+from threading import Event, Lock, Thread, get_ident
 
 import pytest
 
@@ -113,6 +113,78 @@ def bridge_env(injected, exited):
                 pass
 
     BackendBridge.singleton_clear()
+
+
+class TestAsyncRaise:
+    """The injection itself, with the real PyThreadState_SetAsyncExc rather than a stub"""
+
+    @staticmethod
+    def start_sleeping_thread(caught, chunk):
+        """
+        Start a thread that sleeps in chunks and records the injected exception
+
+        Args:
+            caught (list): List the thread appends its thread id to when it
+                catches the KeyboardInterrupt of the injection
+            chunk (float): Seconds of one sleep
+
+        Returns:
+            Thread: The started thread, already inside its first sleep
+        """
+        started = Event()
+
+        def target():
+            started.set()
+            try:
+                while True:
+                    time.sleep(chunk)
+            except KeyboardInterrupt:
+                caught.append(get_ident())
+
+        thread = Thread(target=target, daemon=True, name='TestSleepingThread')
+        thread.start()
+        assert started.wait(1.0), 'the thread did not enter its sleep'
+        return thread
+
+    def test_interrupts_a_thread_sleeping_in_short_chunks(self):
+        """按 0.1s 小块 sleep 的线程：下一块结束时就会收到 KeyboardInterrupt"""
+        caught = []
+        thread = self.start_sleeping_thread(caught, 0.01)
+
+        assert bridge_module._async_raise(thread.ident) is True
+
+        thread.join(2.0)
+        assert not thread.is_alive()
+        assert caught == [thread.ident]
+
+    def test_does_not_interrupt_a_thread_blocked_in_one_sleep(self):
+        """一次长 sleep 期间异常送不到，sleep 返回后才抛出来"""
+        caught = []
+        thread = self.start_sleeping_thread(caught, 0.5)
+
+        assert bridge_module._async_raise(thread.ident) is True
+
+        time.sleep(0.1)
+        assert thread.is_alive()
+        assert caught == [], 'the exception is delivered in the middle of a blocking call'
+
+        thread.join(2.0)
+        assert caught == [thread.ident]
+
+    def test_refuses_a_thread_id_of_zero(self):
+        """tid 0 会打断一个任意的线程，直接拒绝"""
+        with logger.mock_capture_writer() as capture:
+            assert bridge_module._async_raise(0) is False
+
+        assert capture.fd.any_contains('tid invalid')
+
+    def test_refuses_a_thread_that_is_gone(self):
+        """线程已经不存在时报告失败，不当成注入成功"""
+        # no thread of this process has that id, PyThreadState_SetAsyncExc() finds nothing
+        with logger.mock_capture_writer() as capture:
+            assert bridge_module._async_raise(999999999) is False
+
+        assert capture.fd.any_contains('tid invalid')
 
 
 class TestPipeBreak:
