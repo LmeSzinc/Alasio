@@ -21,6 +21,7 @@ from alasio.codegen.asar.pack import (
 )
 from alasio.codegen.asar.source import MemorySource
 from alasio.ext.path.atomic import file_read_bytes
+from alasio.ext.path.calc import joinpath
 from alasio.testing.filesystem import fs  # noqa: F401
 from tests.codegen.asar import fixture
 
@@ -35,7 +36,7 @@ def build_source_tree(fs):
     Returns:
         str: Root path of the tree
     """
-    root = f'{fs.root_dir.path}/src'
+    root = joinpath(fs.root_dir.path, 'src')
     fs.create_dir(root)
     fs.create_dir(f'{root}/sub')
     fs.create_file(f'{root}/hello.txt', contents=b'hello asar')

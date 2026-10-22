@@ -41,7 +41,7 @@ from alasio.deploy.simple_pip.whl_record import RecordEntry, RecordManager
 from alasio.ext.cache import cached_property
 from alasio.ext.concurrent.threadpool import THREAD_POOL
 from alasio.ext.path import PathStr
-from alasio.ext.path.calc import to_posix
+from alasio.ext.path.calc import subpath_to, to_posix
 from alasio.logger import logger
 
 # Categories of the .data directory of a wheel, PEP 427 maps the files of a
@@ -231,11 +231,19 @@ class DistInfo:
             list[PathStr]: Paths of the directories
         """
         site_packages = self.site_packages
-        inside_prefix = f'{self.prefix}/'
+        prefix = self.prefix
         out = set()
         for path in self.record_paths.values():
             folder = path.uppath()
-            while folder != site_packages and folder.startswith(inside_prefix):
+            # The prefix is a directory of the environment, the root "/" of a
+            # POSIX environment included: subpath_to() checks the boundary at
+            # a separator, a plain f'{prefix}/' would build "//" for the root
+            # and then no directory would be inside of it
+            while (
+                folder != site_packages
+                and folder != prefix
+                and subpath_to(folder, prefix) is not None
+            ):
                 out.add(folder)
                 folder = folder.uppath()
         # The longest path is the deepest directory, it has to be removed first

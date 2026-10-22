@@ -11,6 +11,7 @@ from alasio.codegen.asar import crawl
 from alasio.codegen.asar.crawl import crawl_tree, list_dir
 from alasio.codegen.asar.errors import AsarError, AsarUnsupportedError
 from alasio.codegen.asar.model import KIND_DIR, KIND_FILE
+from alasio.ext.path.calc import joinpath
 from alasio.testing.filesystem import fs  # noqa: F401
 
 
@@ -24,7 +25,7 @@ def build_tree(fs):
     Returns:
         str: Root path of the tree
     """
-    root = f'{fs.root_dir.path}/root'
+    root = joinpath(fs.root_dir.path, 'root')
     fs.create_dir(root)
     fs.create_dir(f'{root}/dir/sub')
     fs.create_dir(f'{root}/empty_dir')
@@ -60,14 +61,14 @@ class TestListDir:
         """Listing a missing directory is an error, the OSError is its cause."""
         build_tree(fs)
         with pytest.raises(AsarError) as e:
-            list_dir(f'{fs.root_dir.path}/nope')
+            list_dir(joinpath(fs.root_dir.path, 'nope'))
         assert str(e.value).startswith('Unable to list directory')
         assert isinstance(e.value.__cause__, FileNotFoundError)
 
     def test_list_dir_missing_ok(self, fs):
         """A directory that is not there is empty when the caller allows it."""
         build_tree(fs)
-        assert list_dir(f'{fs.root_dir.path}/nope', missing_ok=True) == []
+        assert list_dir(joinpath(fs.root_dir.path, 'nope'), missing_ok=True) == []
 
 
 class TestCrawlTree:
@@ -131,7 +132,7 @@ class TestCrawlTree:
         """A source directory that is not there fails the walk."""
         build_tree(fs)
         with pytest.raises(AsarError) as e:
-            crawl_tree(f'{fs.root_dir.path}/nope')
+            crawl_tree(joinpath(fs.root_dir.path, 'nope'))
         assert str(e.value).startswith('Unable to list directory')
 
     def test_crawl_tree_directory_that_can_not_be_read(self, fs, monkeypatch):

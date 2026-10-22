@@ -20,8 +20,20 @@ import zipfile
 import pytest
 
 from alasio.deploy.simple_pip.pip_install import DistInfo
+from alasio.ext.path.calc import joinpath
 from alasio.ext.path.iter import iter_files, iter_folders
 from alasio.logger.writer import LogWriter
+from alasio.testing.filesystem.base import IS_WINDOWS
+
+# Layout of the fake python environment: a Windows environment keeps
+# site-packages in Lib/, a POSIX one in lib/pythonX.Y/, and the scripts of
+# the two go to Scripts/ and bin/ respectively. The expected paths of the
+# tests are derived from these, a Windows layout on a POSIX runner used to
+# derive the root "/" of the environment.
+ENV_ROOT_REL = '/env'
+SITE_BRANCH_REL = 'Lib/site-packages' if IS_WINDOWS else 'lib/python3.8/site-packages'
+SITE_PACKAGES_REL = f'{ENV_ROOT_REL}/{SITE_BRANCH_REL}'
+SCRIPTS_DIR = 'Scripts' if IS_WINDOWS else 'bin'
 
 
 def sha256_record(content):
@@ -155,6 +167,10 @@ def abs_path(fake, path):
     The fake filesystem resolves a path without drive against the drive of
     the working directory on Windows, e.g. "/env/x" gives "E:/env/x".
 
+    Also the path of a file of the environment: the root is joined with the
+    relative path, a plain f-string would build "//env/x" out of the root
+    "/" of POSIX.
+
     Args:
         fake (FakeFilesystem): Active fake filesystem
         path (str): Path like "/env/Lib/site-packages"
@@ -162,8 +178,7 @@ def abs_path(fake, path):
     Returns:
         str: Absolute posix path, with the drive of the fake filesystem on Windows
     """
-    root = fake.root_dir.path.rstrip('/')
-    return f'{root}/{path.lstrip("/")}'
+    return joinpath(fake.root_dir.path, path.lstrip('/'))
 
 
 def site_packages(fake):
@@ -176,7 +191,37 @@ def site_packages(fake):
     Returns:
         str: Absolute posix path of site-packages
     """
-    return abs_path(fake, '/env/Lib/site-packages')
+    return abs_path(fake, SITE_PACKAGES_REL)
+
+
+def site_branch():
+    """
+    The directories between the environment root and site-packages.
+
+    Returns:
+        list[str]: Relative directories, "Lib/site-packages" gives
+            ["Lib", "Lib/site-packages"]
+    """
+    segments = SITE_BRANCH_REL.split('/')
+    return ['/'.join(segments[:index]) for index in range(1, len(segments) + 1)]
+
+
+def outside(path):
+    """
+    RECORD path of a file installed outside of site-packages.
+
+    The paths of a RECORD are relative to site-packages (PEP 376), a file
+    installed to the scripts directory is recorded with one "../" per
+    directory between site-packages and the root of the environment.
+
+    Args:
+        path (str): Path relative to the root of the environment
+
+    Returns:
+        str: RECORD path relative to site-packages
+    """
+    depth = SITE_BRANCH_REL.count('/') + 1
+    return f'{"../" * depth}{path}'
 
 
 def list_files(root):

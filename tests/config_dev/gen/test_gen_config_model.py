@@ -15,6 +15,7 @@ from alasio.config_dev.gen.gen_config import ConfigGenerator
 from alasio.config_dev.parse import parse_groups
 from alasio.config_dev.parse.base import DefinitionError
 from alasio.ext.path import PathStr
+from alasio.ext.path.calc import joinpath
 from alasio.testing.filesystem import fs  # noqa: F401
 
 YAML_MAIN = """\
@@ -63,9 +64,9 @@ def make_parser(fs, nav, yaml):
     Returns:
         ConfigGenerator:
     """
-    root = fs.root_dir.path.rstrip('/\\')
+    root = fs.root_dir.path
     entry = ModEntryInfo(name='test', root=root, path_config='module/config')
-    file = f'{root}/module/config/{nav}/{nav}.args.yaml'
+    file = joinpath(root, f'module/config/{nav}/{nav}.args.yaml')
     fs.create_file(file, contents=yaml)
     return ConfigGenerator(entry, PathStr.new(file))
 

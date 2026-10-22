@@ -6,8 +6,12 @@ from alasio.deploy.simple_pip.pip_install import DistInfo
 from alasio.logger import logger
 from alasio.testing.filesystem import fs  # noqa: F401
 from tests.deploy.simple_pip.conftest import (
-    abs_path, create_dist, list_files, list_folders, sha256_record, site_packages
+    SCRIPTS_DIR, SITE_PACKAGES_REL, abs_path, create_dist, list_files, list_folders, outside, sha256_record,
+    site_branch, site_packages
 )
+
+# RECORD path of the script installed outside of site-packages
+TOOL = outside(f'{SCRIPTS_DIR}/demo-tool')
 
 
 class TestTopLevelList:
@@ -59,9 +63,9 @@ class TestResolvePath:
         assert dist.resolve_path('demo/__init__.py') == f'{site}/demo/__init__.py'
 
     def test_resolve_path_outside_site_packages(self, fs):
-        """A file installed outside of site-packages is recorded with "../.."."""
-        dist = create_dist(fs, {'demo/__init__.py': b'', '../../Scripts/demo-tool': b''})
-        assert dist.resolve_path('../../Scripts/demo-tool') == abs_path(fs, '/env/Scripts/demo-tool')
+        """A file installed outside of site-packages is recorded with a relative path."""
+        dist = create_dist(fs, {'demo/__init__.py': b'', TOOL: b''})
+        assert dist.resolve_path(TOOL) == abs_path(fs, f'/env/{SCRIPTS_DIR}/demo-tool')
 
     def test_resolve_path_windows_record(self, fs):
         """A RECORD written on Windows holds backslashes."""
@@ -122,7 +126,7 @@ class TestFolderToDelete:
     def test_folder_outside_site_packages(self, fs):
         """The directories holding the files installed outside of site-packages are listed."""
         site = site_packages(fs)
-        dist = create_dist(fs, {'demo/__init__.py': b'', '../../share/demo/data.txt': b''})
+        dist = create_dist(fs, {'demo/__init__.py': b'', outside('share/demo/data.txt'): b''})
         assert sorted(str(folder) for folder in dist.folder_to_delete) == sorted([
             f'{site}/demo', f'{site}/demo-1.0.dist-info',
             abs_path(fs, '/env/share/demo'), abs_path(fs, '/env/share'),
@@ -131,9 +135,9 @@ class TestFolderToDelete:
     def test_folder_never_site_packages_or_prefix(self, fs):
         """site-packages and the root of the environment are never listed."""
         site = site_packages(fs)
-        dist = create_dist(fs, {'demo/__init__.py': b'', '../../Scripts/demo-tool': b''})
+        dist = create_dist(fs, {'demo/__init__.py': b'', TOOL: b''})
         folders = [str(folder) for folder in dist.folder_to_delete]
-        assert abs_path(fs, '/env/Scripts') in folders
+        assert abs_path(fs, f'/env/{SCRIPTS_DIR}') in folders
         assert site not in folders
         assert abs_path(fs, '/env') not in folders
 
@@ -143,23 +147,22 @@ class TestFolderToDelete:
         The listing does not scan the disk, the directory is simply not
         removed by uninstall() when it is not empty.
         """
-        dist = create_dist(fs, {'demo/__init__.py': b'', '../../Scripts/demo-tool': b''})
-        fs.create_file(abs_path(fs, '/env/Scripts/other-tool'), contents=b'')
-        assert abs_path(fs, '/env/Scripts') in [str(folder) for folder in dist.folder_to_delete]
+        dist = create_dist(fs, {'demo/__init__.py': b'', TOOL: b''})
+        fs.create_file(abs_path(fs, f'/env/{SCRIPTS_DIR}/other-tool'), contents=b'')
+        assert abs_path(fs, f'/env/{SCRIPTS_DIR}') in [str(folder) for folder in dist.folder_to_delete]
 
 
 class TestPrefix:
     def test_prefix_derived(self, fs):
         """Without a prefix of the caller, it is derived from the layout of site-packages."""
-        site_rel = '/env/Lib/site-packages' if os.name == 'nt' else '/env/lib/python3.8/site-packages'
-        site = abs_path(fs, site_rel)
+        site = abs_path(fs, SITE_PACKAGES_REL)
         dist = create_dist(fs, {'demo/__init__.py': b''}, site=site)
         assert dist.prefix == abs_path(fs, '/env')
 
     def test_prefix_given(self, fs):
         """The prefix of the caller bounds the directories to remove."""
         site = site_packages(fs)
-        create_dist(fs, {'demo/__init__.py': b'', '../../Scripts/demo-tool': b''})
+        create_dist(fs, {'demo/__init__.py': b'', TOOL: b''})
         dist = DistInfo(f'{site}/demo-1.0.dist-info', prefix=site)
         assert dist.prefix == site
         # The directories outside of the prefix are not listed
@@ -184,7 +187,7 @@ class TestRecordOrder:
         'demo/aaa/b.py': b'b = 2\n',
         'demo/bbbname.py': b'bname = 3\n',
         'demo/aaa-z.py': b'z = 4\n',
-        '../../Scripts/demo-tool': b'#!python\n',
+        TOOL: b'#!python\n',
     }
 
     @pytest.mark.parametrize("order", [
@@ -203,8 +206,8 @@ class TestRecordOrder:
             for path in order
         ]
         rows += [
-            ('../../Scripts/demo-tool', sha256_record(self.FILES['../../Scripts/demo-tool']),
-             str(len(self.FILES['../../Scripts/demo-tool']))),
+            (TOOL, sha256_record(self.FILES[TOOL]),
+             str(len(self.FILES[TOOL]))),
             ('demo-1.0.dist-info/METADATA', sha256_record(b''), '0'),
             ('demo-1.0.dist-info/RECORD', '', ''),
         ]
@@ -213,7 +216,7 @@ class TestRecordOrder:
         # shared directory of the tool is not empty after the removal
         assert dist.uninstall() == (7, 4)
         assert list_files(abs_path(fs, '/env')) == []
-        assert list_folders(abs_path(fs, '/env')) == ['Lib', 'Lib/site-packages']
+        assert list_folders(abs_path(fs, '/env')) == site_branch()
 
 
 class TestUninstall:
@@ -223,14 +226,14 @@ class TestUninstall:
         dist = create_dist(fs, {
             'demo/__init__.py': b'a = 1\n',
             'demo/sub/core.py': b'b = 2\n',
-            '../../Scripts/demo-tool': b'#!python\n',
-            '../../share/demo/data.txt': b'demo data\n',
+            TOOL: b'#!python\n',
+            outside('share/demo/data.txt'): b'demo data\n',
         })
         assert dist.uninstall() == (6, 6)
         assert list_files(abs_path(fs, '/env')) == []
         assert list_folders(site) == []
         # site-packages and the directories above it are kept
-        assert list_folders(abs_path(fs, '/env')) == ['Lib', 'Lib/site-packages']
+        assert list_folders(abs_path(fs, '/env')) == site_branch()
 
     def test_uninstall_keeps_other_distribution(self, fs):
         """The files of an other distribution sharing a directory are kept."""

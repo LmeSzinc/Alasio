@@ -5,6 +5,7 @@ from alasio.config_dev.gen.gen_task_entry import GenTaskEntry
 from alasio.config_dev.parse.base import DefinitionError
 from alasio.ext.concurrent.threadpool import Job
 from alasio.ext.path.atomic import atomic_read_text
+from alasio.ext.path.calc import joinpath
 from alasio.logger import logger
 from alasio.testing.filesystem import fs  # noqa: F401
 
@@ -20,7 +21,7 @@ def make_gen(fs, folders=None):
     Returns:
         GenTaskEntry:
     """
-    root = fs.root_dir.path.rstrip('/\\')
+    root = fs.root_dir.path
     entry = ModEntryInfo(
         name='test',
         root=root,
@@ -40,8 +41,7 @@ def write_code(fs, path, code):
         path (str): Absolute path
         code (str): Python code text
     """
-    root = fs.root_dir.path.rstrip('/\\')
-    fs.create_file(f'{root}/{path}', contents=code)
+    fs.create_file(joinpath(fs.root_dir.path, path), contents=code)
 
 
 CODE_REWARD = """

@@ -41,6 +41,12 @@ from alasio.git.mock.mock_repo import MockGitRepo
 from alasio.testing.static_file import MockStaticFile
 
 COMMIT = 'c1'
+# The app folder of a test is a directory of the fake root, never the root
+# itself: the expected log texts of the deploy tests are built from
+# env.PROJECT_ROOT with f-strings, and the root "/" of POSIX would turn every
+# "{root}/.pack" into "//.pack". A project is a directory of the filesystem
+# anyway.
+APP_FOLDER = 'app'
 
 
 class MemoryLock:
@@ -97,6 +103,10 @@ class MemoryLock:
 def app_folder(fs, monkeypatch):
     """Set PROJECT_ROOT to a fresh folder in the fake filesystem.
 
+    The folder is a directory of the fake root (APP_FOLDER), not the root
+    itself, so the paths built from env.PROJECT_ROOT in the expected log
+    texts are the ones the job logs on every platform.
+
     The fs fixture is imported explicitly in the test modules, see
     the usage notes in alasio/testing/filesystem/__init__.py. The lock
     of DeployJob is swapped for an in-memory lock: the SQLite file lock
@@ -104,7 +114,8 @@ def app_folder(fs, monkeypatch):
     cannot serve, see test_deploy_lock.py for the real lock on a real
     directory.
     """
-    monkeypatch.setattr(env, 'PROJECT_ROOT', PathStr.new(fs.root_dir.path))
+    monkeypatch.setattr(env, 'PROJECT_ROOT', PathStr.new(fs.root_dir.path).joinpath(APP_FOLDER))
+    fs.create_dir(env.PROJECT_ROOT)
     monkeypatch.setattr(job_module, 'SQLiteFileLock', MemoryLock)
 
 

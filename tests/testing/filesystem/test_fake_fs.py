@@ -472,6 +472,20 @@ class TestSymlink:
         os.symlink('a.txt', join(fs, 'link'))
         assert os.path.realpath(join(fs, 'link')) == join(fs, 'a.txt')
 
+    def test_realpath_relative_dotdot_target(self, fs):
+        """A relative target may climb out of the directory of the link."""
+        fs.create_dir(join(fs, 'dir'))
+        fs.create_file(join(fs, 'a.txt'), contents='data')
+        os.symlink('../a.txt', join(fs, 'dir', 'link'))
+        assert os.path.realpath(join(fs, 'dir', 'link')) == join(fs, 'a.txt')
+
+    @pytest.mark.skipif(not FS_IS_WINDOWS, reason='backslash is a separator on Windows only')
+    def test_realpath_windows_target(self, fs):
+        """The backslashes of a target written on Windows are separators."""
+        fs.create_file(join(fs, 'sub', 'a.txt'), contents='data')
+        os.symlink('sub\\a.txt', join(fs, 'link'))
+        assert os.path.realpath(join(fs, 'link')) == join(fs, 'sub', 'a.txt')
+
     def test_realpath_dotdot(self, fs):
         """'..' should collapse on the resolved prefix, after the link."""
         fs.create_dir(join(fs, 'folder'))
@@ -793,6 +807,15 @@ class TestRootScan:
             ('/proj', ['sub'], ['a.txt']),
             ('/proj/sub', [], ['b.txt']),
         ]
+
+    def test_chdir_under_root(self):
+        """A cwd below the root works, an absolute path keeps the root."""
+        with FakeFilesystem(cwd='/') as fs:
+            fs.makedirs('/cwd')
+            os.chdir('/cwd')
+            fs.create_file('a.txt', contents='x')
+            assert os.path.exists('/cwd/a.txt')
+            assert os.path.exists('..')
 
     def test_remove_root(self):
         """remove() of the root should raise EBUSY, the root is never removed."""

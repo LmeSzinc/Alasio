@@ -16,7 +16,8 @@ from alasio.ext.path.calc import to_posix
 from alasio.logger import logger
 from alasio.testing.filesystem import fs  # noqa: F401
 from tests.deploy.simple_pip.conftest import (  # noqa: F401
-    abs_path, build_wheel, create_dist, list_files, list_folders, pyc_compile, sha256_record, site_packages
+    SCRIPTS_DIR, abs_path, build_wheel, create_dist, list_files, list_folders, outside, pyc_compile, sha256_record,
+    site_branch, site_packages
 )
 
 
@@ -491,8 +492,8 @@ demo-1.0.dist-info/top_level.txt,sha256=65wmuu5H8Z5Jk6d7ypNtD_CeNVqC09t5vxVOv_Go
             'demo-1.0.data/scripts/demo.conf': b'answer = 42\n',
         }, executable=['demo-1.0.data/scripts/demo-tool'])
         SimplePip(site).install(wheel)
-        assert os.stat(abs_path(fs, '/env/Scripts/demo-tool')).st_mode & 0o111 == 0o111
-        assert os.stat(abs_path(fs, '/env/Scripts/demo.conf')).st_mode & 0o111 == 0
+        assert os.stat(abs_path(fs, f'/env/{SCRIPTS_DIR}/demo-tool')).st_mode & 0o111 == 0o111
+        assert os.stat(abs_path(fs, f'/env/{SCRIPTS_DIR}/demo.conf')).st_mode & 0o111 == 0
 
     @pytest.mark.parametrize("layout, site_rel, category, member, target_rel, record_rel", [
         # Windows layout: <prefix>/Lib/site-packages
@@ -540,7 +541,7 @@ demo-1.0.dist-info/top_level.txt,sha256=65wmuu5H8Z5Jk6d7ypNtD_CeNVqC09t5vxVOv_Go
             purelib=site,
             # A platform directory that the layout of site-packages can not tell
             platlib=abs_path(fs, '/env/lib64/site-packages'),
-            scripts=abs_path(fs, '/env/Scripts'),
+            scripts=abs_path(fs, f'/env/{SCRIPTS_DIR}'),
             data=abs_path(fs, '/env'),
             include=abs_path(fs, '/env/include/python3.8'),
         )
@@ -553,7 +554,7 @@ demo-1.0.dist-info/top_level.txt,sha256=65wmuu5H8Z5Jk6d7ypNtD_CeNVqC09t5vxVOv_Go
         })
         SimplePip(site, scheme=scheme).install(wheel)
         assert os.path.isfile(abs_path(fs, '/env/lib64/site-packages/demo/plat.py'))
-        assert os.path.isfile(abs_path(fs, '/env/Scripts/demo-tool'))
+        assert os.path.isfile(abs_path(fs, f'/env/{SCRIPTS_DIR}/demo-tool'))
         assert os.path.isfile(abs_path(fs, '/env/share/demo/data.txt'))
         assert os.path.isfile(abs_path(fs, '/env/include/python3.8/demo/demo.h'))
         assert sorted(path for path, _, _ in read_record(site)) == sorted([
@@ -564,11 +565,11 @@ demo-1.0.dist-info/top_level.txt,sha256=65wmuu5H8Z5Jk6d7ypNtD_CeNVqC09t5vxVOv_Go
             'demo-1.0.dist-info/top_level.txt',
             'demo/pure.py',
             pyc_path('demo/pure.py'),
-            '../../lib64/site-packages/demo/plat.py',
-            pyc_path('../../lib64/site-packages/demo/plat.py'),
-            '../../Scripts/demo-tool',
-            '../../include/python3.8/demo/demo.h',
-            '../../share/demo/data.txt',
+            outside('lib64/site-packages/demo/plat.py'),
+            pyc_path(outside('lib64/site-packages/demo/plat.py')),
+            outside(f'{SCRIPTS_DIR}/demo-tool'),
+            outside('include/python3.8/demo/demo.h'),
+            outside('share/demo/data.txt'),
         ])
 
     def test_install_data_unknown_category(self, fs, pyc_compile):
@@ -684,7 +685,7 @@ demo-1.0.dist-info/top_level.txt,sha256=65wmuu5H8Z5Jk6d7ypNtD_CeNVqC09t5vxVOv_Go
         assert pip.uninstall('demo') is True
         # The files are removed, the directories emptied under the prefix as well
         assert list_files(abs_path(fs, '/env')) == []
-        assert list_folders(abs_path(fs, '/env')) == ['Lib', 'Lib/site-packages']
+        assert list_folders(abs_path(fs, '/env')) == site_branch()
 
     def test_uninstall_prefix_bounds_folders(self, fs, pyc_compile):
         """A prefix narrower than the environment keeps the directories outside of it."""
@@ -697,8 +698,8 @@ demo-1.0.dist-info/top_level.txt,sha256=65wmuu5H8Z5Jk6d7ypNtD_CeNVqC09t5vxVOv_Go
         pip = SimplePip(site, prefix=site)
         assert pip.uninstall('demo') is True
         assert list_files(abs_path(fs, '/env')) == []
-        # <env>/Scripts is outside of the prefix, it is kept
-        assert list_folders(abs_path(fs, '/env')) == ['Lib', 'Lib/site-packages', 'Scripts']
+        # The scripts directory is outside of the prefix, it is kept
+        assert list_folders(abs_path(fs, '/env')) == sorted(site_branch() + [SCRIPTS_DIR])
 
 
 class TestPipConformance:
@@ -732,10 +733,10 @@ class TestPipConformance:
             for path in recorded
         }
         assert resolved == installed
-        assert sorted(recorded - set(list_files(site))) == [
-            '../../Scripts/demo-tool',
-            '../../share/demo/data.txt',
-        ]
+        assert sorted(recorded - set(list_files(site))) == sorted([
+            outside(f'{SCRIPTS_DIR}/demo-tool'),
+            outside('share/demo/data.txt'),
+        ])
 
     def test_record_paths_are_relative(self, fs, pyc_compile):
         """PEP 376 requires the paths of a RECORD to be relative to site-packages."""

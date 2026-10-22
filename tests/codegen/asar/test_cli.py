@@ -9,6 +9,7 @@ import pytest
 
 from alasio.codegen.asar.__main__ import main
 from alasio.ext.path.atomic import file_read_bytes
+from alasio.ext.path.calc import joinpath
 from alasio.testing.filesystem import fs  # noqa: F401
 from tests.codegen.asar import fixture
 
@@ -23,7 +24,7 @@ def build_source_tree(fs):
     Returns:
         str: Root path of the tree
     """
-    root = f'{fs.root_dir.path}/src'
+    root = joinpath(fs.root_dir.path, 'src')
     fs.create_dir(root)
     fs.create_dir(f'{root}/dist')
     fs.create_file(f'{root}/package.json', contents=b'{"name":"alasio"}')

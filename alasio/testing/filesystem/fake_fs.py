@@ -12,7 +12,9 @@ from threading import RLock
 
 import _io
 
-from .base import IS_WINDOWS, FakeDir, FakeFile, FakeSymlink, _normpath, synchronized
+from alasio.ext.path.calc import joinpath
+
+from .base import IS_WINDOWS, FakeDir, FakeFile, FakeSymlink, _normpath, _parent_path, _split_abspath, synchronized
 from .entry import FakeDirEntry, FakeScandirIterator
 from .file_object import FakeFileObject
 
@@ -74,8 +76,9 @@ class FakeFilesystem:
         if cwd is None:
             cwd = os.getcwd()
         self._cwd = _normpath(cwd, cwd)
-        # the drive root on Windows, "/" on POSIX
-        root = self._cwd[:2] if IS_WINDOWS else '/'
+        # the drive root on Windows, "/" on POSIX and for a cwd that has no
+        # drive (a POSIX style cwd of the fake filesystem)
+        root = self._cwd[:2] if IS_WINDOWS and self._cwd[1:2] == ':' else '/'
         self._ino = 0
         now = time.time()
         self.root_dir = FakeDir(
@@ -173,20 +176,6 @@ class FakeFilesystem:
             or any(key.startswith(prefix) for key in self._symlinks)
         )
 
-    @staticmethod
-    def _parent_dir(path):
-        """
-        Get the parent of a normalized absolute path.
-
-        Args:
-            path (str): Normalized absolute path
-
-        Returns:
-            str: Parent path, "/" for a direct child of the POSIX root
-        """
-        parent = path.rpartition('/')[0]
-        return parent or '/'
-
     def _missing_parents(self, path):
         """
         Walk up the parent chain of a path and collect the missing directories.
@@ -199,7 +188,7 @@ class FakeFilesystem:
                 deepest to the shallowest, and the first parent path that
                 is a file or a symlink (None when the chain has no such path)
         """
-        parent = self._parent_dir(path)
+        parent = _parent_path(path)
         missing = []
         conflict = None
         while parent not in self._dirs:
@@ -828,26 +817,8 @@ class FakeFilesystem:
             OSError: If a symlink loop is detected (errno.ELOOP)
         """
         path = str(path)
-        if IS_WINDOWS:
-            path = path.replace('\\', '/')
-        drive = ''
-        if IS_WINDOWS and len(path) > 1 and path[1] == ':':
-            # explicit drive letter, e.g. "C:/a" or "C:a"
-            drive, path = path[:2], path[2:]
-        if drive:
-            if path.startswith('/'):
-                bits = [f'{drive}/'] + path.split('/')[1:]
-            else:
-                # drive-relative path "C:foo", resolve on the drive root
-                bits = [f'{drive}/'] + path.split('/')
-        elif path.startswith('/'):
-            bits = ['/'] + path.split('/')[1:]
-        else:
-            # relative path, resolve against the fake cwd
-            bits = self._cwd.split('/') + path.split('/')
-        if not bits[0]:
-            bits = ['/'] + bits
-        return self._join_realpath(bits[0], bits[1:])
+        root, bits = _split_abspath(path, self._cwd)
+        return self._join_realpath(root, bits)
 
     def _join_realpath(self, resolved, bits):
         """
@@ -871,12 +842,12 @@ class FakeFilesystem:
                 i += 1
                 continue
             if bit == '..':
-                # collapse on the resolved prefix, like the real os
-                parent = resolved.rpartition('/')[0]
-                resolved = parent if parent else resolved
+                # collapse on the resolved prefix, like the real os, the root
+                # is the parent of its own children
+                resolved = _parent_path(resolved)
                 i += 1
                 continue
-            candidate = self._normpath(f'{resolved}/{bit}')
+            candidate = joinpath(resolved, bit)
             link = self._symlinks.get(candidate)
             if link is None:
                 resolved = candidate
@@ -886,15 +857,14 @@ class FakeFilesystem:
                 raise OSError(errno.ELOOP, 'Too many levels of symbolic links', candidate)
             seen.add(candidate)
             target = link.target
+            if IS_WINDOWS:
+                target = target.replace('\\', '/')
             if os.path.isabs(target):
-                if IS_WINDOWS and len(target) > 1 and target[1] == ':':
-                    resolved = f'{target[:2]}/'
-                    tbits = target[2:].split('/')
-                else:
-                    resolved = '/'
-                    tbits = target.split('/')[1:]
+                # an absolute target replaces the resolved prefix, its own
+                # root decides where it lands, no cwd is involved
+                resolved, tbits = _split_abspath(target, '')
             else:
-                # relative target, components are joined to the resolved prefix
+                # a relative target continues below the resolved prefix
                 tbits = target.split('/')
             bits = tbits + bits[i + 1:]
             i = 0

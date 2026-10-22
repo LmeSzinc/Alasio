@@ -10,7 +10,14 @@ from functools import wraps
 
 import msgspec
 
+from alasio.ext.path.calc import joinpath
+
 IS_WINDOWS = os.name == 'nt'
+# The collapsing of "." and ".." is the one of the running platform. The fake
+# filesystem patches os / os.path, but normpath is not one of the patched
+# functions (see FakeFilesystem._iter_patches) and the filesystem itself must
+# not follow a patch of it: the name is bound before any patch can be made.
+_platform_normpath = os.path.normpath
 
 
 def synchronized(method):
@@ -37,23 +44,25 @@ def synchronized(method):
     return wrapper
 
 
-def _normpath(path, cwd):
+def _split_abspath(path, cwd):
     """
-    Normalize a path to an absolute path with "/" separators.
+    Split a path into its root and the components below it.
 
-    Windows drive letters ("C:") are kept as the drive root, absolute
-    paths without a drive letter get the drive of cwd, relative paths
-    are resolved against cwd. The segment collapsing ("." and "..")
-    is delegated to os.path.normpath(), which handles all edge cases
-    of the platform, only the resolution and the separator style are
-    done here.
+    Relative paths are resolved against cwd and the separators are normalized
+    to "/". The "." and ".." components are kept: the caller decides how to
+    collapse them, a symbolic link has to be resolved before the ".." that
+    follows it.
 
     Args:
-        path (str): Path to normalize
-        cwd (str): Normalized absolute current working directory
+        path (str): Path to split
+        cwd (str): Normalized absolute current working directory, only used
+            to resolve a relative path and to pick the drive of an absolute
+            path that has none. An empty cwd keeps such a path on the POSIX
+            root
 
     Returns:
-        str: Normalized absolute path
+        tuple[str, list[str]]: Root, "/" or the drive root "C:", and the
+            non-empty path components below it
     """
     path = str(path)
     if IS_WINDOWS:
@@ -72,23 +81,58 @@ def _normpath(path, cwd):
             if IS_WINDOWS and len(path) > 1 and path[1] == ':':
                 # the joined path starts with the cwd drive
                 drive, path = path[:2], path[2:]
-    elif IS_WINDOWS and not drive:
+    elif IS_WINDOWS and not drive and cwd[1:2] == ':':
         # absolute path without a drive letter, e.g. "/data.txt",
-        # use the drive of cwd like the real os
+        # use the drive of cwd like the real os. A cwd without a drive
+        # (the POSIX root of a fake filesystem) keeps the path as it is
         drive = cwd[:2]
-    if drive:
-        # "C:" is the drive root, "C:/a" is a path on the drive
-        path = drive if path == '/' else f'{drive}/{path}'
+    root = drive or '/'
+    return root, [bit for bit in path.split('/') if bit]
+
+
+def _parent_path(path):
+    """
+    Parent of a normalized absolute path, a root is its own parent.
+
+    Args:
+        path (str): Normalized absolute path, e.g. "/a/a.txt"
+
+    Returns:
+        str: Parent path, "/" for a child of the POSIX root and "C:" for a
+            child of the drive root
+    """
+    parent = path.rpartition('/')[0]
+    if parent:
+        return parent
+    return '/' if path.startswith('/') else path
+
+
+def _normpath(path, cwd):
+    """
+    Normalize a path to an absolute path with "/" separators.
+
+    Windows drive letters ("C:") are kept as the drive root, absolute
+    paths without a drive letter get the drive of cwd, relative paths
+    are resolved against cwd. The segment collapsing ("." and "..")
+    is delegated to os.path.normpath(), which handles all edge cases
+    of the platform, only the resolution and the separator style are
+    done here.
+
+    Args:
+        path (str): Path to normalize
+        cwd (str): Normalized absolute current working directory
+
+    Returns:
+        str: Normalized absolute path
+    """
+    root, bits = _split_abspath(path, cwd)
     # collapse ".", ".." and duplicate separators
-    path = os.path.normpath(path)
+    path = _platform_normpath(joinpath(root, '/'.join(bits)))
     if IS_WINDOWS:
         path = path.replace('\\', '/')
-        if drive and path == f'{drive}/':
-            # normpath() returns "C:/" for the drive root
-            path = drive
-    elif path.startswith('//'):
-        # normpath() keeps a leading "//" on POSIX, the root is "/"
-        path = path[1:]
+        if path != '/' and path.endswith('/'):
+            # normpath() returns "C:/" for the drive root, "C:" is the root
+            path = path[:-1]
     return path
 
 
