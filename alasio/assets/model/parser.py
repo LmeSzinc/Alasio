@@ -192,12 +192,11 @@ class AssetParser:
 
     def extract_value_from_node(self, node: ast.AST):
         """Extract Python value from AST node"""
+        # ast.Num, ast.Str and the other deprecated aliases of a literal are
+        # not checked: they are subclassed by ast.Constant since python 3.8
+        # and were removed in python 3.14, a literal node is always Constant
         if isinstance(node, ast.Constant):
             return node.value
-        elif isinstance(node, ast.Num):
-            return node.n
-        elif isinstance(node, ast.Str):
-            return node.s
         elif isinstance(node, ast.Tuple):
             return tuple(self.extract_value_from_node(e) for e in node.elts)
         elif isinstance(node, ast.List):
