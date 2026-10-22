@@ -9,8 +9,10 @@ from alasio.ext.timez import to_local_aware, to_local_naive
 @pytest.fixture
 def mock_local_tz(monkeypatch):
     """
-    Mocks the _get_local_tz helper function to return a fixed timezone.
-    This is the definitive, robust way to handle this testing challenge.
+    Mock get_local_tz() to a fixed timezone.
+
+    The conversions read the local timezone from get_local_tz() only, so the
+    tests control it whatever the timezone of the host is.
     """
     fixed_tz = datetime.timezone(datetime.timedelta(hours=8), name="CST")
 
@@ -150,3 +152,35 @@ class TestTimeConverter:
             to_local_naive("22-11-2023 10:30:00")
         with pytest.raises(ValueError):
             to_local_aware("not a time string")
+
+
+class TestLocalTimezoneSource:
+    """The local timezone comes from get_local_tz(), not from the host."""
+
+    @staticmethod
+    def _patch_local_tz(monkeypatch, hours):
+        fixed_tz = datetime.timezone(datetime.timedelta(hours=hours), name='FIXED')
+        monkeypatch.setattr(time_converter, 'get_local_tz', lambda: fixed_tz)
+        return fixed_tz
+
+    def test_to_local_aware_follows_the_local_tz(self, monkeypatch):
+        """An aware input is converted to the timezone of get_local_tz()."""
+        self._patch_local_tz(monkeypatch, -5)
+        result = to_local_aware(datetime.datetime(2023, 1, 1, 0, 0, tzinfo=datetime.timezone.utc))
+        assert result == datetime.datetime(2022, 12, 31, 19, 0, tzinfo=datetime.timezone(datetime.timedelta(hours=-5)))
+        assert result.utcoffset() == datetime.timedelta(hours=-5)
+
+    def test_to_local_naive_follows_the_local_tz(self, monkeypatch):
+        """An aware input is converted to the timezone of get_local_tz()."""
+        self._patch_local_tz(monkeypatch, -5)
+        result = to_local_naive(datetime.datetime(2023, 1, 1, 0, 0, tzinfo=datetime.timezone.utc))
+        assert result == datetime.datetime(2022, 12, 31, 19, 0)
+
+    def test_a_naive_input_is_local_time_already(self, monkeypatch):
+        """A naive input is kept, the local timezone is only attached to it."""
+        self._patch_local_tz(monkeypatch, -5)
+        naive = datetime.datetime(2023, 1, 1, 12, 0)
+        assert to_local_naive(naive) == naive
+        aware = to_local_aware(naive)
+        assert aware.replace(tzinfo=None) == naive
+        assert aware.utcoffset() == datetime.timedelta(hours=-5)

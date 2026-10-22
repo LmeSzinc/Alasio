@@ -4,10 +4,59 @@ from typing import Union
 
 def get_local_tz() -> datetime.tzinfo:
     """
-    Isolates the call to datetime.now() so it can be easily patched during tests.
-    Returns the current system's local timezone info object.
+    The local timezone of the system.
+
+    The call is isolated here so that the tests can patch it, to_local_naive()
+    and to_local_aware() read the local timezone from this function only. The
+    tzinfo is the fixed offset the system has now, the DST rules of a zone are
+    not part of it.
+
+    Returns:
+        datetime.tzinfo: The local timezone
     """
     return datetime.datetime.now().astimezone().tzinfo
+
+
+def _parse_isoformat(text):
+    """
+    datetime.fromisoformat() with the 'Z' suffix of UTC.
+
+    The suffix is not supported by fromisoformat before Python 3.11.
+
+    Args:
+        text (str): An ISO 8601 formatted string
+
+    Returns:
+        datetime.datetime:
+
+    Raises:
+        ValueError: If the string is not a valid ISO 8601 format
+    """
+    if text.endswith('Z') or text.endswith('z'):
+        text = text[:-1] + '+00:00'
+    return datetime.datetime.fromisoformat(text)
+
+
+def _to_datetime(time_input):
+    """
+    Convert a time input into a datetime object, as it is given.
+
+    Args:
+        time_input (str | datetime.datetime): ISO 8601 text, or a datetime
+            object, aware or naive
+
+    Returns:
+        datetime.datetime: The datetime of the input, aware or naive as given
+
+    Raises:
+        TypeError: If the input is not a str or datetime.datetime object
+        ValueError: If the string is not a valid ISO 8601 format
+    """
+    if isinstance(time_input, str):
+        return _parse_isoformat(time_input)
+    if isinstance(time_input, datetime.datetime):
+        return time_input
+    raise TypeError('Input must be a str or datetime.datetime object')
 
 
 def fromisoformat(text) -> datetime.datetime:
@@ -30,8 +79,7 @@ def fromisoformat(text) -> datetime.datetime:
         TypeError:
     """
     if isinstance(text, str):
-        if text.endswith('Z') or text.endswith('z'):
-            text = text[:-1] + '+00:00'
+        return _parse_isoformat(text)
     return datetime.datetime.fromisoformat(text)
 
 
@@ -59,27 +107,15 @@ def to_local_naive(time_input: "Union[str, datetime.datetime]") -> datetime.date
         ValueError: If the string is not a valid ISO 8601 format.
     """
     # 1. Unify the input into a datetime object
-    if isinstance(time_input, str):
-        # The 'Z' suffix is not supported in fromisoformat before Python 3.11.
-        if time_input.endswith('Z') or time_input.endswith('z'):
-            time_input = time_input[:-1] + '+00:00'
-        dt_obj = datetime.datetime.fromisoformat(time_input)
-
-    elif isinstance(time_input, datetime.datetime):
-        dt_obj = time_input
-    else:
-        raise TypeError('Input must be a str or datetime.datetime object')
+    dt_obj = _to_datetime(time_input)
 
     # 2. Process based on whether the datetime object is naive or aware
-    if dt_obj.tzinfo:
-        # Input is an aware object -> convert it to the system's local timezone.
-        # Calling astimezone() with no argument converts to the local timezone.
-        local_dt = dt_obj.astimezone(None)
-        # Remove timezone info to make it naive
-        return local_dt.replace(tzinfo=None)
-    else:
+    if not dt_obj.tzinfo:
         # Input is a naive object -> assume it's already in local time and return it
         return dt_obj
+    # Input is an aware object -> convert it to the local timezone,
+    # get_local_tz() is the patchable source of it
+    return dt_obj.astimezone(get_local_tz()).replace(tzinfo=None)
 
 
 def to_local_aware(time_input: "Union[str, datetime.datetime]") -> datetime.datetime:
@@ -105,18 +141,10 @@ def to_local_aware(time_input: "Union[str, datetime.datetime]") -> datetime.date
         ValueError: If the string is not a valid ISO 8601 format.
     """
     # 1. Unify the input into a datetime object
-    if isinstance(time_input, str):
-        # The 'Z' suffix is not supported in fromisoformat before Python 3.11.
-        if time_input.endswith('Z') or time_input.endswith('z'):
-            time_input = time_input[:-1] + '+00:00'
-        dt_obj = datetime.datetime.fromisoformat(time_input)
-    elif isinstance(time_input, datetime.datetime):
-        dt_obj = time_input
-    else:
-        raise TypeError('Input must be a str or datetime.datetime object')
+    dt_obj = _to_datetime(time_input)
 
-    # Get the local timezone object
-    local_tz = datetime.datetime.now().astimezone().tzinfo
+    # get_local_tz() is the patchable source of the local timezone
+    local_tz = get_local_tz()
 
     # 2. Process based on whether the datetime object is naive or aware
     if dt_obj.tzinfo:

@@ -54,7 +54,7 @@ INFO | Replacing files to "{mod_root}"
 INFO | Update done
 INFO | [Update] Applied the update of "WorkerTestScheduler"
 INFO | [Restart] Resume credential announced to the supervisor
-INFO | [Restart] Resume file written: {backend.resume_file} (owner=restart, 1 configs, 0 actions, updated_all_at=1791828000)
+INFO | [Restart] Resume file written: {backend.resume_file} (owner=restart, 1 configs, 0 actions, updated_all_at={at(2, 0):.0f})
 INFO | [Restart] Handover of the "update" flow (update): 1 configs to resume
 INFO | [Restart] Flow "update" finished
 """)
