@@ -321,6 +321,12 @@ class TestExtractWhiteLetters:
         """
         Unoptimized reference algorithm, copied from the comments in color.py
 
+        The 0.5 scaling uses cv2.convertScaleAbs() like the implementation, not
+        cv2.multiply(): that is the rounding step of the function, and the two
+        ops round differently on some HALs (macOS arm64 with opencv 4.5.4
+        truncates convertScaleAbs() where multiply() rounds), which would
+        compare the choice of primitive rather than the optimization.
+
         Args:
             image (np.ndarray): 2D BGR image
             threshold (int):
@@ -331,8 +337,8 @@ class TestExtractWhiteLetters:
         r, g, b = cv2.split(cv2.subtract((255, 255, 255, 0), image))
         minimum = cv2.min(cv2.min(r, g), b)
         maximum = cv2.max(cv2.max(r, g), b)
-        maximum = cv2.multiply(maximum, 0.5)
-        minimum = cv2.multiply(minimum, 0.5)
+        maximum = cv2.convertScaleAbs(maximum, alpha=0.5)
+        minimum = cv2.convertScaleAbs(minimum, alpha=0.5)
         return cv2.multiply(cv2.add(maximum, cv2.subtract(maximum, minimum)), 255.0 / threshold)
 
     @pytest.mark.parametrize("threshold", [64, 128, 255])
