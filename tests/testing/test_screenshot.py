@@ -150,24 +150,28 @@ class TestProjectRootManager:
         """
         manager = ProjectRootManager()
         monkeypatch.setattr(screenshot_module, 'PROJECT_ROOT_MANAGER', manager)
-        stats = []
-        original = os.stat
+        # A step of the walk is one existence check of a folder. os.stat is not
+        # counted as well: on Windows python 3.12+ os.path.isfile() takes the
+        # nt._path_isfile() fast path and never calls the python level os.stat,
+        # which made the walk read as a walk of no folder
+        calls = []
+        original = os.path.isfile
 
-        def counting_stat(*args, **kwargs):
-            stats.append(args[0] if args else None)
-            return original(*args, **kwargs)
+        def counting_isfile(path):
+            calls.append(path)
+            return original(path)
 
-        monkeypatch.setattr(os, 'stat', counting_stat)
+        monkeypatch.setattr(os.path, 'isfile', counting_isfile)
 
         manager.get_project_root(TEST_FILE)
-        walk = len(stats)
+        walk = len(calls)
         # Other test files of the same mod, in the same and in other folders
         manager.get_project_root(EXAMPLE_MOD.joinpath('tests/map/test_other.py'))
         manager.get_project_root(EXAMPLE_MOD.joinpath('tests/island/handler/test_order.py'))
         manager.get_project_root(EXAMPLE_MOD.joinpath('tests/test_entry.py'))
 
         assert walk > 0
-        assert len(stats) == walk
+        assert len(calls) == walk
 
     def test_known_root_prefers_the_longest_match(self):
         """A mod nested in another mod resolves to the inner one, without IO."""
