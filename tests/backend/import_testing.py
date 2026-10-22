@@ -87,14 +87,20 @@ class ImportViolation:
 class ForbiddenImportDetector:
     """Detect if forbidden libraries are imported"""
 
-    def __init__(self, forbidden_libraries: Set[str]):
+    def __init__(self, forbidden_libraries: Set[str], allowed_importers: Optional[Dict[str, Set[str]]] = None):
         """
         Initialize the detector
 
         Args:
             forbidden_libraries: Set of forbidden library names
+            allowed_importers: Modules that may import a forbidden library,
+                keyed by library name, e.g. ``{'asyncio': {'starlette'}}``
+                accepts asyncio when starlette imports it. A name matches the
+                module and its submodules. Defaults to None, no importer is
+                allowed
         """
         self.forbidden_libraries = forbidden_libraries
+        self.allowed_importers = allowed_importers or {}
         self.modules_before = set()
 
     def record_baseline(self):
@@ -120,11 +126,28 @@ class ForbiddenImportDetector:
 
             if forbidden_modules:
                 import_path = tracker.get_import_path(forbidden)
-                violations.append(
-                    ImportViolation(forbidden, forbidden_modules, import_path)
-                )
+                violation = ImportViolation(forbidden, forbidden_modules, import_path)
+                if self._is_allowed(violation):
+                    continue
+                violations.append(violation)
 
         return violations
+
+    def _is_allowed(self, violation: ImportViolation) -> bool:
+        """
+        Check whether the importer of the violation is allowed to import it.
+
+        Args:
+            violation (ImportViolation): The violation to check
+
+        Returns:
+            bool: True when the direct importer is one of the allowed modules
+        """
+        allowed = self.allowed_importers.get(violation.library)
+        if not allowed:
+            return False
+        importer = violation.direct_importer
+        return any(importer == name or importer.startswith(name + '.') for name in allowed)
 
     @staticmethod
     def _find_forbidden_modules(library_name: str, modules: Set[str]) -> List[str]:
@@ -178,9 +201,9 @@ class ImportDiagnosticsReporter:
             "=" * 80,
         ]
         if test_name:
-            header.append(f"❌ [{test_name}] Detected the following heavy libraries imported at application startup:")
+            header.append(f"[X] [{test_name}] Detected the following heavy libraries imported at application startup:")
         else:
-            header.append("❌ Detected the following heavy libraries imported at application startup:")
+            header.append("[X] Detected the following heavy libraries imported at application startup:")
         header.append("=" * 80)
         return header
 
@@ -197,7 +220,7 @@ class ImportDiagnosticsReporter:
         """
         lines = [
             "",
-            f"📦 Library: {violation.library}",
+            f"Library: {violation.library}",
             f"   Number of imported modules: {len(violation.modules)}",
         ]
 
@@ -225,7 +248,7 @@ class ImportDiagnosticsReporter:
         lines = ["   Import chain:"]
         for i, module in enumerate(import_chain):
             indent = "      " + "  " * i
-            arrow = "└─> " if i > 0 else ""
+            arrow = "-> " if i > 0 else ""
             lines.append(f"{indent}{arrow}{module}")
         return lines
 
@@ -242,8 +265,8 @@ class ImportDiagnosticsReporter:
         """
         return [
             "",
-            f"   🎯 Direct importer: {violation.direct_importer}",
-            f"   ⚠️  Suggestion: Change {violation.library} to lazy import in {violation.direct_importer}",
+            f"   Direct importer: {violation.direct_importer}",
+            f"   Suggestion: Change {violation.library} to lazy import in {violation.direct_importer}",
         ]
 
     @staticmethod
@@ -251,8 +274,8 @@ class ImportDiagnosticsReporter:
         """Format general fix suggestions"""
         return [
             "=" * 80,
-            "💡 How to fix:",
-            "   1. Find the module file marked with 🎯 above",
+            "How to fix:",
+            "   1. Find the module file of the direct importer above",
             "   2. Search for 'import xxx' or 'from xxx import' statements in that file",
             "   3. Move the import statement from the top of the file to inside functions (lazy import)",
             "   4. If the dependency must be loaded at startup, consider removing it from the detection list",
@@ -294,7 +317,8 @@ class ImportDiagnosticsReporter:
 def _subprocess_import_test_worker(
         conn: "PipeConnection",
         func: Callable,
-        forbidden_libraries: Set[str]
+        forbidden_libraries: Set[str],
+        allowed_importers: Optional[Dict[str, Set[str]]] = None,
 ):
     """
     Subprocess worker function: Execute import test in isolated environment
@@ -303,10 +327,12 @@ def _subprocess_import_test_worker(
         conn: Pipe connection for communication
         func: Import function to test
         forbidden_libraries: Set of forbidden libraries
+        allowed_importers: Modules that may import a forbidden library, see
+            ForbiddenImportDetector
     """
     try:
         # Create detector
-        detector = ForbiddenImportDetector(forbidden_libraries)
+        detector = ForbiddenImportDetector(forbidden_libraries, allowed_importers)
         detector.record_baseline()
 
         # Use import tracker
@@ -337,7 +363,8 @@ def run_import_test_isolated(
         import_func: Callable,
         forbidden_libraries: Set[str],
         test_name: str = "",
-        timeout: int = 30
+        timeout: int = 30,
+        allowed_importers: Optional[Dict[str, Set[str]]] = None,
 ) -> Optional[List[ImportViolation]]:
     """
     Run import test in isolated subprocess (core function)
@@ -350,6 +377,8 @@ def run_import_test_isolated(
         forbidden_libraries: Set of forbidden library names
         test_name: Test name for error reporting
         timeout: Subprocess timeout in seconds, default 30 seconds
+        allowed_importers: Modules that may import a forbidden library, see
+            ForbiddenImportDetector
 
     Returns:
         Returns list of violations if any, otherwise None
@@ -380,7 +409,7 @@ def run_import_test_isolated(
     # Create subprocess
     process = ctx.Process(
         target=_subprocess_import_test_worker,
-        args=(child_conn, import_func, forbidden_libraries)
+        args=(child_conn, import_func, forbidden_libraries, allowed_importers)
     )
 
     # Start subprocess
@@ -432,7 +461,8 @@ def run_import_test_isolated(
 
 
 class HeavyImportTest:
-    def __init__(self, forbidden_libraries: Set[str], test_name: str = "", timeout: int = 30):
+    def __init__(self, forbidden_libraries: Set[str], test_name: str = "", timeout: int = 30,
+                 allowed_importers: Optional[Dict[str, Set[str]]] = None):
         """
         Initialize test instance
 
@@ -440,10 +470,13 @@ class HeavyImportTest:
             forbidden_libraries: Set of forbidden library names
             test_name: Test name to display in reports
             timeout: Subprocess timeout in seconds, default 30 seconds
+            allowed_importers: Modules that may import a forbidden library,
+                keyed by library name, see ForbiddenImportDetector
         """
         self.forbidden_libraries = forbidden_libraries
         self.test_name = test_name
         self.timeout = timeout
+        self.allowed_importers = allowed_importers
         self.reporter = ImportDiagnosticsReporter()
 
     def run_test(self, import_callback: Callable):
@@ -475,7 +508,8 @@ class HeavyImportTest:
             import_callback,
             self.forbidden_libraries,
             self.test_name,
-            self.timeout
+            self.timeout,
+            self.allowed_importers,
         )
 
         # If violations exist, generate report and fail test
