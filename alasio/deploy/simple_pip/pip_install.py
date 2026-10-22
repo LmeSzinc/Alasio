@@ -33,9 +33,9 @@ import py_compile
 import stat
 import sys
 import zipfile
-from importlib.util import cache_from_source
 
 from alasio.backport import removeprefix, removesuffix
+from alasio.deploy.simple_pip.pyc import pyc_path
 from alasio.deploy.simple_pip.python_probe import PythonProbe, Scheme, prefix_of
 from alasio.deploy.simple_pip.whl_record import RecordEntry, RecordManager
 from alasio.ext.cache import cached_property
@@ -674,8 +674,9 @@ class SimplePip:
         """
         py_file = str(self.site_packages / path)
         try:
-            # Compile to .pyc
-            pyc_file = cache_from_source(py_file)
+            # The in-tree name of the installation, see pyc_path() for why it is
+            # not importlib.util.cache_from_source()
+            pyc_file = pyc_path(py_file)
             py_compile.compile(py_file, cfile=pyc_file, dfile=path)
         except Exception as e:
             # Some .py files might not be compilable (e.g. templates, incomplete scripts)

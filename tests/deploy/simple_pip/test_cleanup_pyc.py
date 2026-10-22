@@ -1,34 +1,18 @@
 import os
 import sys
-from importlib.util import cache_from_source
 from stat import S_IWRITE
 
 import pytest
 
 from alasio.deploy.simple_pip import cleanup_pyc
 from alasio.deploy.simple_pip.cleanup_pyc import CleanupPyc
+from alasio.deploy.simple_pip.pyc import pyc_path
 from alasio.ext.path.atomic import IS_WINDOWS
-from alasio.ext.path.calc import to_posix
 from alasio.logger import logger
 from alasio.testing.filesystem import fs  # noqa: F401
 
 # Root of the tests, a site-packages look-alike
 SITE = '/env/Lib/site-packages'
-
-
-def pyc_path(source, optimization=None):
-    """
-    Path of the pyc file python compiles for a source file.
-
-    Args:
-        source (str): Path of the .py file, relative to SITE
-        optimization (str): Optimization level of the manual optimization
-            names, e.g. "1" gives "core.cpython-38.opt-1.pyc". Defaults to None.
-
-    Returns:
-        str: Relative posix path of the .pyc file
-    """
-    return to_posix(cache_from_source(source, optimization=optimization))
 
 
 def create_source(fake, path):

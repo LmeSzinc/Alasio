@@ -4,11 +4,11 @@ import re
 import sys
 import sysconfig
 import zipfile
-from importlib.util import cache_from_source
 
 import pytest
 
 from alasio.deploy.simple_pip.pip_install import DistInfo, SimplePip
+from alasio.deploy.simple_pip.pyc import pyc_path
 from alasio.deploy.simple_pip.python_probe import Scheme, probe_python
 from alasio.ext.concurrent.cmd import CmdlineError, CmdlineResultStr
 from alasio.ext.path import PathStr
@@ -19,19 +19,6 @@ from tests.deploy.simple_pip.conftest import (  # noqa: F401
     SCRIPTS_DIR, abs_path, build_wheel, create_dist, list_files, list_folders, outside, pyc_compile, sha256_record,
     site_branch, site_packages
 )
-
-
-def pyc_path(path):
-    """
-    Path of the .pyc file python generates for a source file.
-
-    Args:
-        path (str): Path of the .py file, relative to site-packages
-
-    Returns:
-        str: Relative posix path of the .pyc file
-    """
-    return to_posix(cache_from_source(path))
 
 
 def read_record(site, name='demo-1.0.dist-info'):
@@ -372,6 +359,25 @@ class TestInstall:
         ]
         with open(f'{site}/demo-1.0.dist-info/INSTALLER', 'rb') as f:
             assert f.read() == b'pip\n'
+
+    def test_install_with_a_pycache_prefix(self, fs, pyc_compile, monkeypatch):
+        """The bytecode is compiled in the installation, sys.pycache_prefix moves the pycs of python only."""
+        monkeypatch.setattr(sys, 'pycache_prefix', '/pycache')
+        site = site_packages(fs)
+        wheel = build_wheel('/w/demo-1.0-py3-none-any.whl', {'demo/__init__.py': b'a = 1\n'})
+        SimplePip(site).install(wheel)
+        pyc = pyc_path('demo/__init__.py')
+        assert pyc in list_files(site)
+        # A row of a RECORD is relative to site-packages, no row may escape it
+        assert [path for path, _, _ in read_record(site)] == [
+            'demo/__init__.py',
+            pyc,
+            'demo-1.0.dist-info/INSTALLER',
+            'demo-1.0.dist-info/METADATA',
+            'demo-1.0.dist-info/RECORD',
+            'demo-1.0.dist-info/WHEEL',
+            'demo-1.0.dist-info/top_level.txt',
+        ]
 
     def test_install_record(self, fs, pyc_compile):
         """The RECORD lists the files, the checksum of the content and the size of the file."""

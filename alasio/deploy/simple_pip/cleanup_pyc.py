@@ -3,15 +3,10 @@ from stat import S_IWRITE
 
 from alasio.backport import removesuffix
 from alasio.deploy.simple_pip.cleanup_folder import CleanupFolder
+from alasio.deploy.simple_pip.pyc import PYC_SUFFIX, PYCACHE
 from alasio.ext.path.atomic import IS_WINDOWS, folder_rmtree_empty
 from alasio.ext.path.calc import joinpath, normpath
 from alasio.logger import logger
-
-# Folder holding the bytecode compiled from the sources of the folder
-# above it, PEP 3147
-PYCACHE = '__pycache__'
-# Suffix of the bytecode files
-PYC_SUFFIX = '.pyc'
 
 
 class CleanupPyc:
