@@ -599,7 +599,15 @@ class TestErrors:
         with pytest.raises(AsarFormatError) as e:
             with AsarArchive('/broken.asar'):
                 pass
-        assert str(e.value) == 'Header is nested too deeply, over 256 segments'
+        # The check that catches it depends on the decoder: msgspec raises
+        # RecursionError in the middle of the decode up to python 3.13, the
+        # decode of python 3.14 returns the whole tree and the walk of the
+        # entries reports the path that is too deep
+        deep_path = '/'.join(['files'] * 256)
+        assert str(e.value) in (
+            'Header is nested too deeply, over 256 segments',
+            f'Path "{deep_path}" is deeper than 256 segments',
+        )
 
     def test_missing_file(self, fs):
         """An archive that does not exist reports the file system error."""
