@@ -132,6 +132,50 @@ def test_a():
             errors=[],
         )
 
+    def test_class_method_decorator_anchors_at_the_first_decorator(self):
+        source = '''\
+from alasio.testing.screenshot import image
+
+class TestFoo:
+    @slow
+    @image(
+        "a.webp"
+    )
+    def test_one(self):
+        pass
+'''
+        assert parse_test_source(source) == ParsedUnittest(
+            source=source,
+            images=[
+                UnittestImage(
+                    class_name='TestFoo', func_name='test_one', start_line=4, end_line=9,
+                    image='a.webp', error='',
+                ),
+            ],
+            errors=[],
+        )
+
+    def test_multiple_images_still_anchor_at_the_first_decorator(self):
+        source = '''\
+from alasio.testing.screenshot import image
+
+@slow
+@image("a.webp")
+@image("b.webp")
+def test_a():
+    pass
+'''
+        assert parse_test_source(source) == ParsedUnittest(
+            source=source,
+            images=[
+                UnittestImage(
+                    class_name='', func_name='test_a', start_line=3, end_line=7, image='a.webp',
+                    error='line 4: multiple @image decorators, using the first one',
+                ),
+            ],
+            errors=[],
+        )
+
 
 class TestImageDecorator:
     def test_plain_import(self):
