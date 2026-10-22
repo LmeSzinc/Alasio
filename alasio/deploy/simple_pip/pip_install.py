@@ -41,7 +41,7 @@ from alasio.deploy.simple_pip.whl_record import RecordEntry, RecordManager
 from alasio.ext.cache import cached_property
 from alasio.ext.concurrent.threadpool import THREAD_POOL
 from alasio.ext.path import PathStr
-from alasio.ext.path.calc import subpath_to, to_posix
+from alasio.ext.path.calc import is_abspath, subpath_to, to_posix
 from alasio.logger import logger
 
 # Categories of the .data directory of a wheel, PEP 427 maps the files of a
@@ -299,6 +299,26 @@ class DistInfo:
         return files, folders
 
 
+def is_absolute_env_path(path):
+    """
+    Check that a path of a python environment is absolute.
+
+    The paths of this module are posix style: an environment of Windows keeps
+    its drive (``E:/envs/alasio/Lib/site-packages``), an environment of another
+    platform starts at the posix root (``/envs/alasio/lib/python3.8``).
+    os.path.isabs() is not used because a posix path without a drive is not
+    absolute for it on Windows: up to python 3.12 it is accepted as a drive
+    relative path, from python 3.13 on it is rejected.
+
+    Args:
+        path (str): Path to check
+
+    Returns:
+        bool: True if the path is absolute
+    """
+    return path.startswith('/') or is_abspath(path)
+
+
 class SimplePip:
     """
     A minimal pip, install and uninstall wheels in a python environment.
@@ -330,10 +350,13 @@ class SimplePip:
         """
         Args:
             site_packages (str | PathStr): Path of the site-packages directory,
-                a native path is accepted, it is normalized to the posix style
+                a native path is accepted, it is normalized to the posix style,
+                a posix path without a drive is a path of the current drive on
+                Windows
             prefix (str | PathStr): Root of the python environment. Defaults to
                 None, derived from the layout of site-packages (see prefix_of),
-                from_python() passes the sys.prefix of the interpreter it probed
+                from_python() passes the sys.prefix of the interpreter it probed,
+                the posix style of site_packages applies to it as well
             scheme (Scheme): Install scheme of the environment. Defaults to
                 None, derived from the layout of site-packages (see
                 Scheme.from_layout), from_python() passes the scheme of the
@@ -343,7 +366,7 @@ class SimplePip:
             ValueError: If site_packages or prefix is not an absolute path
         """
         site_packages = PathStr.new(site_packages)
-        if not os.path.isabs(site_packages):
+        if not is_absolute_env_path(site_packages):
             raise ValueError(f'site-packages is not an absolute path: "{site_packages}"')
         self.site_packages = site_packages
 
@@ -351,7 +374,7 @@ class SimplePip:
             self.prefix = prefix_of(site_packages)
         else:
             prefix = PathStr.new(prefix)
-            if not os.path.isabs(prefix):
+            if not is_absolute_env_path(prefix):
                 raise ValueError(f'prefix is not an absolute path: "{prefix}"')
             self.prefix = prefix
 
