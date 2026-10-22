@@ -56,8 +56,8 @@ class MemoryLock:
     The job lock is a SQLite file lock, SQLite opens its file in the C
     layer where the in-memory fake filesystem cannot intercept it (the
     real lock is covered by test_deploy_lock.py on a real directory).
-    The interface used by DeployJob is implemented, re-entrant by
-    counter like SQLiteFileLock.
+    The interface used by DeployJob is implemented, not reentrant like
+    SQLiteFileLock: a second acquire() of the holding thread raises.
     """
 
     def __init__(self, lock_file, timeout=-1):
@@ -69,7 +69,7 @@ class MemoryLock:
         """
         self.lock_file = str(lock_file)
         self.timeout = timeout
-        self._count = 0
+        self._held = False
 
     @property
     def is_locked(self):
@@ -77,17 +77,27 @@ class MemoryLock:
         Returns:
             bool: True if the lock is held
         """
-        return self._count > 0
+        return self._held
 
-    def acquire(self, timeout=None):
+    def acquire(self, timeout=None, owner=None):
         """
         Args:
             timeout (float, optional): Ignored, the lock is in memory.
+            owner (int, optional): Ignored, kept for the SQLiteFileLock
+                interface
 
         Returns:
             MemoryLock: self
+
+        Raises:
+            RuntimeError: If this thread already holds the lock
         """
-        self._count += 1
+        if self._held:
+            raise RuntimeError(
+                f'The lock "{self.lock_file}" is already held by this thread, '
+                f'a reentrant acquire would wait for itself'
+            )
+        self._held = True
         return self
 
     def release(self, force=False):
@@ -95,8 +105,7 @@ class MemoryLock:
         Args:
             force (bool): Ignored, kept for the SQLiteFileLock interface
         """
-        if self._count:
-            self._count -= 1
+        self._held = False
 
 
 @pytest.fixture

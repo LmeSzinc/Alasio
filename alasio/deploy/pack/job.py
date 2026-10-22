@@ -1,3 +1,5 @@
+import functools
+import threading
 from contextlib import asynccontextmanager, contextmanager
 
 import trio
@@ -84,10 +86,11 @@ class DeployJob(DeployTarget):
 
     Both entry points take the exclusive lock of the target ledger for the
     whole flow, see alocked(): two updaters of the same target never
-    interleave, the second one waits (or fails at once with
-    locked(timeout=0)). The server of the instance is handed to the job of
-    the flow, the downloads of the job (the index pack, the failed records)
-    use it.
+    interleave, a second one in another thread or process waits (or fails at
+    once with locked(timeout=0)), a second one in the same thread is a
+    reentrancy error (RuntimeError, the lock is not reentrant). The server of
+    the instance is handed to the job of the flow, the downloads of the job
+    (the index pack, the failed records) use it.
     """
 
     def __init__(self, root=None, name='', server=None):
@@ -118,20 +121,21 @@ class DeployJob(DeployTarget):
         Hold the exclusive lock of the target ledger for a block.
 
         The lock is a SQLite file lock on the lock file of the ledger
-        folder ({ledger}/lock): exclusive across processes and threads,
-        released by the operating system when the process exits, so a
-        crashed updater never leaves a stale lock. The lock file itself
-        is never deleted, deleting it would break the exclusion. The
-        acquire is re-entrant for this instance: a block nested in one
-        the instance already holds (update() and unpack() hold the lock
-        for their whole flow) counts up instead of deadlocking.
+        folder ({ledger}/lock): one lock per file in the process,
+        exclusive across processes and threads, released by the
+        operating system when the process exits, so a crashed updater
+        never leaves a stale lock. The lock file itself is never
+        deleted, deleting it would break the exclusion. The lock is not
+        reentrant: update() and unpack() take it for their whole flow,
+        a locked() block may not call them, the nested acquire raises
+        RuntimeError instead of waiting for itself.
 
         The caller does not need the lock for update() and unpack(); it
-        is taken explicitly to put several calls of one instance into
-        one critical section that another updater cannot interleave:
+        is taken explicitly by a user of a job class, which takes no
+        lock of its own (see RebuildJob):
 
             with deploy.locked(timeout=0):
-                await deploy.update()
+                await RebuildJob(server, root=root, name=name).run()
 
         Args:
             timeout (float, optional): Seconds to wait for the lock,
@@ -144,6 +148,8 @@ class DeployJob(DeployTarget):
         Raises:
             FilelockTimeout: If the lock is held elsewhere and the wait
                 is over, timeout=0 fails at once
+            RuntimeError: If the calling thread already holds the lock
+                of the target, a reentrancy that would wait for itself
         """
         self.lock.acquire(timeout=timeout)
         try:
@@ -158,12 +164,15 @@ class DeployJob(DeployTarget):
         block, the async form of locked() used by update() and
         unpack().
 
-        The acquire blocks inside the sqlite layer while the lock is
-        held elsewhere (a wait bounded by the timeout), so it runs in
-        a worker thread and never stalls the event loop; the release
-        is a quick rollback and close of the sqlite connection and
-        stays inline, so it still runs when the block is unwound by a
-        cancellation.
+        The lock is not reentrant and its owner is a thread, so the
+        owner is the event loop thread, the thread that releases in the
+        finally below. The wait itself runs in a worker thread inside
+        the SQLite busy handler, a blocking acquire would stall the
+        event loop; the worker only waits on behalf of the loop thread,
+        so a nested acquire of the loop is the same reentrancy error as
+        locked(). Two tasks of one loop are one thread for the lock, the
+        second task raises RuntimeError instead of interleaving: a lock
+        that serializes the tasks has to be a trio.Lock around this one.
 
         Args:
             timeout (float, optional): Seconds to wait for the lock,
@@ -176,8 +185,19 @@ class DeployJob(DeployTarget):
         Raises:
             FilelockTimeout: If the lock is held elsewhere and the wait
                 is over, timeout=0 fails at once
+            RuntimeError: If the calling thread already holds the lock
+                of the target, a reentrancy that would wait for itself
         """
-        await trio.to_thread.run_sync(self.lock.acquire, timeout)
+        if timeout is None:
+            timeout = self.lock.timeout
+        # The owner is the event loop thread, the thread that releases in the
+        # finally below; the wait itself runs in a worker thread inside the
+        # SQLite busy handler, a blocking acquire would stall the loop. A
+        # cancellation is ignored while the worker waits (it is delivered at
+        # the next checkpoint, inside the block), so the finally always sees
+        # the lock the acquire may have taken
+        owner = threading.get_ident()
+        await trio.to_thread.run_sync(functools.partial(self.lock.acquire, timeout, owner=owner))
         try:
             yield self.lock
         finally:
