@@ -16,8 +16,8 @@ from alasio.ext.path.calc import to_posix
 from alasio.logger import logger
 from alasio.testing.filesystem import fs  # noqa: F401
 from tests.deploy.simple_pip.conftest import (  # noqa: F401
-    SCRIPTS_DIR, abs_path, build_wheel, create_dist, list_files, list_folders, outside, pyc_compile, sha256_record,
-    site_branch, site_packages
+    SCRIPTS_DIR, SITE_BRANCH_REL, abs_path, build_wheel, create_dist, list_files, list_folders, outside, pyc_compile,
+    sha256_record, site_branch, site_packages
 )
 
 
@@ -144,10 +144,10 @@ class TestFromPython:
 
     def test_from_python_prefix_missing(self, monkeypatch):
         """An output without a prefix and a scheme falls back to the derived ones."""
-        self.patch_probe(monkeypatch, 'xxxsitepackage {"site_packages": ["/env/Lib/site-packages"]}\n')
+        self.patch_probe(monkeypatch, f'xxxsitepackage {{"site_packages": ["/env/{SITE_BRANCH_REL}"]}}\n')
         pip = SimplePip.from_python('python.exe')
-        assert pip.prefix == ('/env' if os.name == 'nt' else '')
-        assert pip.scheme.scripts == ('/env/Scripts' if os.name == 'nt' else '/bin')
+        assert pip.prefix == '/env'
+        assert pip.scheme.scripts == f'/env/{SCRIPTS_DIR}'
 
     def test_from_python_scheme_without_site_packages(self, monkeypatch):
         """The listing holds no site-packages directory, the purelib of the scheme is used."""
