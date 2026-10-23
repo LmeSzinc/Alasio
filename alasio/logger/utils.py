@@ -196,6 +196,9 @@ def replace_unicode_table(output):
         str:
     """
     mapping = {
+        # rich.traceback draws its panel with box.ROUNDED, which only becomes SQUARE
+        # on a legacy Windows console, other platforms keep the rounded corners
+        "╭": "+", "╮": "+", "╰": "+", "╯": "+",
         "┌": "+", "┐": "+", "└": "+", "┘": "+",
         "├": "+", "┤": "+", "┬": "+", "┴": "+",
         "┼": "+", "─": "-", "│": "|", "═": "=",

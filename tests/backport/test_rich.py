@@ -114,3 +114,28 @@ class TestPatchRichTracebackLinks:
 
             # Since we check for '  File "', it pretty much confirms the patch is working
             # if rich_formatter is producing it.
+
+
+class TestPlainTraceback:
+    def test_plain_traceback_is_ascii_on_a_non_legacy_host(self, monkeypatch):
+        """
+        The plain traceback goes to log files, so it must be ascii on every host.
+
+        rich draws its panel with box.ROUNDED and only substitutes SQUARE on a legacy
+        Windows console, so a POSIX host used to leave rounded corners in the logs.
+        """
+        # emulate a POSIX host (or a VT capable Windows console)
+        monkeypatch.setattr('rich.console.detect_legacy_windows', lambda: False)
+
+        try:
+            raise ValueError('test error')
+        except ValueError:
+            rich_trace, plain_trace = rich_formatter(sys.exc_info())
+
+        # the setup took effect, otherwise the assertion below would be vacuous
+        assert '\u256d' in rich_trace
+        # no box drawing character is left in the plain text
+        assert not any(0x2500 <= ord(char) <= 0x257F for char in plain_trace)
+        lines = plain_trace.splitlines()
+        assert lines[0].startswith('+---')
+        assert lines[0].endswith('---+')

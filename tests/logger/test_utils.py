@@ -1,6 +1,6 @@
 from exceptiongroup import ExceptionGroup
 
-from alasio.logger.utils import event_args_format, event_format, join_event_dict, stringify_event
+from alasio.logger.utils import event_args_format, event_format, join_event_dict, replace_unicode_table, stringify_event
 
 
 class TestStringifyEvent:
@@ -146,3 +146,26 @@ class TestJoinEventDict:
 
     def test_join_event_dict_complex_types(self):
         assert join_event_dict("Log", {"data": [1, 2], "val": None}) == "Log, data=[1, 2], val=None"
+
+
+class TestReplaceUnicodeTable:
+    def test_rounded_borders(self):
+        # rich.traceback draws its panel with box.ROUNDED on hosts that are not a
+        # legacy Windows console
+        assert replace_unicode_table('╭───╮\n│ a │\n╰───╯') == '+---+\n| a |\n+---+'
+
+    def test_square_borders(self):
+        assert replace_unicode_table('┌───┐\n│ a │\n└───┘') == '+---+\n| a |\n+---+'
+
+    def test_double_borders(self):
+        assert replace_unicode_table('╔═══╗\n║ a ║\n╚═══╝') == '+===+\n| a |\n+===+'
+
+    def test_tee_and_cross(self):
+        assert replace_unicode_table('├─┬─┤\n┼─┴─┼') == '+-+-+\n+-+-+'
+
+    def test_ellipsis(self):
+        assert replace_unicode_table('a…b') == 'a~b'
+
+    def test_ascii_text_is_unchanged(self):
+        text = 'INFO | nothing to replace: +-|='
+        assert replace_unicode_table(text) == text
