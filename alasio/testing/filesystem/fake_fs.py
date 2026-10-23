@@ -27,11 +27,13 @@ except AttributeError:
 
 # File descriptors of the fake filesystem start above the descriptors of the
 # process: a descriptor the filesystem did not hand out belongs to the
-# process, os.close() closes it for real (POSIX subprocess.Popen() closes its
-# pipes with os.close), and a fake number is never mistaken for a real one
+# process, os.close() closes it and os.write() writes it for real (POSIX
+# subprocess.Popen() uses both for its pipes), and a fake number is never
+# mistaken for a real one
 FD_BASE = 1000
-# The real os.close, the fake filesystem patches it
+# The real os.close / os.write, the fake filesystem patches them
 _platform_close = os.close
+_platform_write = os.write
 
 
 class FakeFilesystem:
@@ -1239,8 +1241,12 @@ class FakeFilesystem:
         """
         Mock of os.write().
 
+        A descriptor the fake filesystem did not hand out belongs to the
+        process, e.g. the stdin pipe of subprocess.Popen() on POSIX, it is
+        written for real.
+
         Args:
-            fd (int): Fake file descriptor
+            fd (int): Fake file descriptor, or a descriptor of the process
             data (bytes): Data to write
 
         Returns:
@@ -1250,9 +1256,12 @@ class FakeFilesystem:
             OSError: If the fd is not open
         """
         fobj = self._fds.get(fd)
-        if fobj is None:
+        if fobj is not None:
+            return fobj.write(data)
+        if isinstance(fd, int) and fd >= FD_BASE:
+            # A descriptor of the fake filesystem that is already closed
             raise OSError(errno.EBADF, 'Bad file descriptor')
-        return fobj.write(data)
+        return _platform_write(fd, data)
 
     @synchronized
     def os_close(self, fd):
