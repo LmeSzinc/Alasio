@@ -78,6 +78,22 @@ class TestGetLiteral:
         assert result == expected
         assert isinstance(result, tuple)
 
+    def test_classvar_literal_on_a_class_attribute(self):
+        """
+        get_literal with a class attribute annotated ClassVar[Literal] should return its values.
+
+        This is the shape a config model uses for a class level option: the annotation is
+        read back from the class instead of being built by the test.
+        """
+        from typing import ClassVar, Literal
+
+        class Config:
+            mode: ClassVar[Literal['normal', 'hard']] = 'normal'
+
+        result = get_literal(Config.__annotations__['mode'])
+        assert result == ('normal', 'hard')
+        assert isinstance(result, tuple)
+
     @pytest.mark.parametrize("values, expected", [
         ((42,), (42,)),
         ((0,), (0,)),
@@ -105,20 +121,32 @@ class TestGetLiteral:
         assert isinstance(result, tuple)
 
     def test_annotated_classvar_nesting(self):
-        """get_literal with Annotated[ClassVar[Literal]] should unwrap multiple layers."""
+        """
+        get_literal with nested ClassVar and Annotated should unwrap multiple layers.
+
+        ClassVar wraps Annotated instead of being its annotated type: typing.Annotated
+        rejects ClassVar and Final until typing._type_check() gained allow_special_forms
+        (CPython 3.9.6, shipped inside Xcode, and 3.10.0 raise
+        "typing.ClassVar[...] is not valid as type argument"). get_literal() unwraps the
+        layers in a loop, so the nesting order does not change the code path.
+        """
         from typing import ClassVar
 
         from typing_extensions import Annotated, Literal
-        result = get_literal(Annotated[ClassVar[Literal['deep']], 'meta'])
+        result = get_literal(ClassVar[Annotated[Literal['deep'], 'meta']])
         assert result == ('deep',)
         assert isinstance(result, tuple)
 
     def test_annotated_final_nesting(self):
-        """get_literal with Annotated[Final[Literal]] should unwrap multiple layers."""
+        """
+        get_literal with nested Final and Annotated should unwrap multiple layers.
+
+        Final wraps Annotated for the same reason as the ClassVar case above.
+        """
         from typing import Final
 
         from typing_extensions import Annotated, Literal
-        result = get_literal(Annotated[Final[Literal[99]], 'meta', 'extra'])
+        result = get_literal(Final[Annotated[Literal[99], 'meta', 'extra']])
         assert result == (99,)
         assert isinstance(result, tuple)
 
