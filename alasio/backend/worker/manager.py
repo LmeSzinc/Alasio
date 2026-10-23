@@ -1,4 +1,5 @@
 import multiprocessing
+import socket
 import threading
 import time
 from multiprocessing.connection import Connection
@@ -146,6 +147,25 @@ class WorkerState(msgspec.Struct):
         conn = self.conn
         if not conn:
             return
+        if isinstance(conn, Connection):
+            # On POSIX the pipe of a duplex Pipe() is a socketpair and the recv thread
+            # reads it with a blocking os.read(): closing the fd does not wake a read
+            # blocked in another thread, only data, EOF or shutdown() do. Without the
+            # shutdown the thread survives until the worker process closes its end
+            # (a worker that is gone already does not, e.g. a failed spawn), so the
+            # thread would leak past close() / force-kill.
+            try:
+                sock = socket.socket(fileno=conn.fileno())
+            except (OSError, ValueError):
+                pass
+            else:
+                try:
+                    sock.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    # not a socket (a pipe built with os.pipe), close() still applies
+                    pass
+                finally:
+                    sock.detach()
         try:
             conn.close()
         except Exception:

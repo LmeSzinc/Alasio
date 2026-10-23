@@ -463,6 +463,44 @@ class TestResourceManagement:
         # Verify thread gone
         assert_recv_thread_gone([config])
 
+    def test_conn_close_unblocks_the_recv_thread(self):
+        """
+        Closing the pipe of a worker must wake its recv thread
+
+        The manager closes the pipe of an entry while its recv thread is blocked in
+        recv_bytes() (a failed spawn, a worker killed before its disconnect was
+        handled): on POSIX closing the fd does not interrupt a read blocked in another
+        thread, so conn_close() shuts the socket down first. Windows wakes the reader on
+        close alone, the thread must end on both.
+        """
+        import socket
+        from multiprocessing.connection import Connection
+
+        state = WorkerState(mod='WorkerTestScheduler', config='cfg_conn_close', state='idle')
+        left, right = socket.socketpair()
+        state.conn = Connection(left.detach())
+        peer = Connection(right.detach())
+        result = []
+
+        def read():
+            try:
+                result.append(state.conn.recv_bytes())
+            except (EOFError, OSError):
+                result.append(None)
+
+        try:
+            thread = threading.Thread(target=read, daemon=True)
+            thread.start()
+            # let the reader block in recv_bytes()
+            time.sleep(0.1)
+
+            state.conn_close()
+            thread.join(timeout=1)
+
+            assert not thread.is_alive(), 'conn_close() did not wake the recv thread'
+        finally:
+            peer.close()
+
     def test_repeated_start_stop_no_leak(self, manager):
         """测试重复启停不泄漏"""
         config = 'test_cycle'
