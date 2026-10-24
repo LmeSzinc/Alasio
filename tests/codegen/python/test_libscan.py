@@ -1,7 +1,9 @@
 import importlib.util
 
+import alasio.codegen.python.libscan as libscan
 from alasio.codegen.python.libscan import EnvLibraryScanner, ModuleType
 from alasio.ext import env
+from alasio.testing.filesystem import fs  # noqa: F401
 
 # Alasio repo root, used as the scanner's classification root.
 PROJECT_ROOT = env.ALASIO_ROOT
@@ -90,3 +92,26 @@ class TestEnvLibraryScanner:
         # if it is found during scanning and is within the project root
         if 'alasio' in meta:
             assert meta['alasio'] == ModuleType.LOCAL_PROJECT
+
+
+class TestClassifySingleModule:
+    """Classification of one module name, without a full scan."""
+
+    def test_stdlib_by_name(self, fs, monkeypatch):
+        """A stdlib module is classified by name, not by the path of the interpreter.
+
+        The path of a module of a symlinked interpreter does not share the
+        prefix of sysconfig, and a fake filesystem does not resolve the
+        symlinks of the real disk: with paths alone the module would fall back
+        to the project root.
+        """
+        monkeypatch.setattr(libscan, 'STDLIB_MODULE_NAMES', frozenset({'typing'}))
+        scanner = EnvLibraryScanner('/classify-stdlib-by-name')
+        # the paths of sysconfig can not tell the stdlib of this interpreter
+        scanner.stdlib_paths = {'/not/the/stdlib'}
+        assert scanner._classify_single_module('typing') is ModuleType.STANDARD_LIBRARY
+
+    def test_third_party_by_path(self, fs):
+        """A module of site-packages is classified third-party."""
+        scanner = EnvLibraryScanner('/classify-third-party')
+        assert scanner._classify_single_module('msgspec') is ModuleType.THIRD_PARTY

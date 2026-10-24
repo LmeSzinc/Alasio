@@ -17,6 +17,15 @@ class ModuleType(StrEnum):
     UNKNOWN = "unknown"
 
 
+# Top level names of the standard library, sys.stdlib_module_names since
+# python 3.10. A name is classified by it before the physical path: the module
+# path of a symlinked interpreter (uv installs python under a symlink) does not
+# always share the prefix of sysconfig, and a fake filesystem does not resolve
+# the symlinks of the real disk, so the path comparison would miss the stdlib
+# and fall back to the project root.
+STDLIB_MODULE_NAMES = frozenset(getattr(sys, 'stdlib_module_names', ()))
+
+
 # ==========================================
 # 2. Environment Library Scanner and Classifier
 # ==========================================
@@ -129,6 +138,11 @@ class EnvLibraryScanner(metaclass=SingletonNamed):
         if name in sys.builtin_module_names:
             return ModuleType.STANDARD_LIBRARY
 
+        # 2. Standard library modules are classified by name, the paths of the
+        # interpreter can not tell them reliably, see STDLIB_MODULE_NAMES
+        if name in STDLIB_MODULE_NAMES:
+            return ModuleType.STANDARD_LIBRARY
+
         import importlib.util
         try:
             spec = importlib.util.find_spec(name)
@@ -137,7 +151,7 @@ class EnvLibraryScanner(metaclass=SingletonNamed):
         except Exception:
             return ModuleType.UNKNOWN
 
-        # 2. Extract actual physical path
+        # 3. Extract actual physical path
         if spec.origin is None:
             if spec.submodule_search_locations:
                 origin_path = os.path.realpath(list(spec.submodule_search_locations)[0])
@@ -148,7 +162,7 @@ class EnvLibraryScanner(metaclass=SingletonNamed):
                 return ModuleType.STANDARD_LIBRARY
             origin_path = os.path.realpath(spec.origin)
 
-        # 3. Classify by path range
+        # 4. Classify by path range
         # Prioritize third-party check to avoid misclassification when the project has an embedded virtual environment
         if self._is_subpath(origin_path, self.site_paths):
             return ModuleType.THIRD_PARTY
