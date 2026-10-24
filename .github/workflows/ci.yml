@@ -377,6 +377,10 @@ jobs:
     needs: [python-tests, minimum, frontend, webapp]
     runs-on: ubuntu-22.04
     timeout-minutes: 30
+    # the last step tags the version it built, the tag is the only way a
+    # version reaches pypi, so this job is the one allowed to write to the repo
+    permissions:
+      contents: write
     steps:
       # the wheel builder reads the commit objects of .git, not the worktree
       - uses: actions/checkout@v5
@@ -425,15 +429,53 @@ jobs:
       - name: Verify wheel
         run: uv run --no-project --python .venv python -m alasio.deploy_dev.wheel verify dist
 
+      # The sdist is built and verified above but never published anywhere: it
+      # carries the alasio package tree only, so a wheel built from it would
+      # ship without the frontend and webapp the release wheel embeds. Only the
+      # exact artifact the matrix tested is distributed.
       - name: Checksums
-        run: sha256sum dist/*.whl dist/*.tar.gz > dist/SHA256SUMS
+        run: sha256sum dist/*.whl > dist/SHA256SUMS
 
       - uses: actions/upload-artifact@v7.0.2
         with:
           name: alasio-dist
           path: |
             dist/*.whl
-            dist/*.tar.gz
             dist/SHA256SUMS
           if-no-files-found: error
           retention-days: 30
+
+      # The tag is the release switch, and it is created here only: the last
+      # job of a run in which every gate above passed and the artifacts exist.
+      # An old tag on another commit means the version was not bumped, which is
+      # the normal state of a fix commit and releases nothing. The release
+      # workflow never creates a tag, it only publishes the one found here.
+      - name: Tag the built version
+        if: github.ref == 'refs/heads/master'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          wheels=(dist/*.whl)
+          if [ "${#wheels[@]}" -ne 1 ]; then
+            echo "::error::expected exactly one wheel, found ${#wheels[@]}"
+            exit 1
+          fi
+          version=$(basename "${wheels[0]}")
+          version=${version#alasio-}
+          version=${version%-py3-none-any.whl}
+          tag="v$version"
+          sha=$(git rev-parse HEAD)
+
+          # a missing ref makes the api answer 404, gh exits 1 and prints nothing
+          existing=$(gh api "repos/{owner}/{repo}/git/ref/tags/$tag" --jq .object.sha 2>/dev/null || true)
+          if [ -z "$existing" ]; then
+            gh api -X POST "repos/{owner}/{repo}/git/refs" \
+              -f ref="refs/tags/$tag" -f sha="$sha" > /dev/null
+            echo "Tagged $tag at $sha"
+          elif [ "$existing" = "$sha" ]; then
+            echo "$tag already points to $sha"
+          else
+            echo "::notice::$tag already points to $existing, the version was not bumped, nothing is released"
+          fi
