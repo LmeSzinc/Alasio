@@ -935,6 +935,24 @@ class TestOsFd:
             os.write(FD_BASE, b'x')
         assert exc_info.value.errno == errno.EBADF
 
+    def test_open_of_a_process_fd(self, fs):
+        """A descriptor of the process is wrapped by the real open()."""
+        read_fd, write_fd = os.pipe()
+        try:
+            with open(write_fd, 'wb', closefd=False) as f:
+                f.write(b'data')
+            with open(read_fd, 'rb', closefd=False) as f:
+                assert f.read(4) == b'data'
+        finally:
+            os.close(read_fd)
+            os.close(write_fd)
+
+    def test_open_of_an_unhandled_fake_fd(self, fs):
+        """A number the filesystem never handed out can not be wrapped."""
+        with pytest.raises(OSError) as exc_info:
+            open(FD_BASE, 'rb')
+        assert exc_info.value.errno == errno.EBADF
+
     def test_os_fsync(self, fs):
         """os.fsync() should be a no-op for a valid fd."""
         fd = os.open(join(fs, 'a.bin'), os.O_CREAT | os.O_WRONLY)
@@ -958,12 +976,8 @@ class TestOsFd:
 class TestSubprocess:
     """A real subprocess keeps working while the fake filesystem is active."""
 
-    @pytest.mark.skipif(
-        FS_IS_WINDOWS,
-        reason='subprocess opens its pipes with io.open(fd) on Windows, the fake open() serves paths'
-    )
     def test_subprocess_with_input(self, fs):
-        """The stdin pipe of subprocess.Popen() is written through the real os.write."""
+        """The pipes of subprocess.Popen() go through the real open() and os.write()."""
         result = subprocess.run(
             [sys.executable, '-c', 'import sys; sys.stdout.write(sys.stdin.read())'],
             input=b'hello',

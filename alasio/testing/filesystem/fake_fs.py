@@ -27,11 +27,12 @@ except AttributeError:
 
 # File descriptors of the fake filesystem start above the descriptors of the
 # process: a descriptor the filesystem did not hand out belongs to the
-# process, os.close() closes it and os.write() writes it for real (POSIX
-# subprocess.Popen() uses both for its pipes), and a fake number is never
-# mistaken for a real one
+# process, open(), os.close() and os.write() serve it for real (POSIX
+# subprocess.Popen() wraps, writes and closes its pipes with all three), and
+# a fake number is never mistaken for a real one
 FD_BASE = 1000
-# The real os.close / os.write, the fake filesystem patches them
+# The real open / os.close / os.write, the fake filesystem patches them
+_platform_open = builtins.open
 _platform_close = os.close
 _platform_write = os.write
 
@@ -540,8 +541,11 @@ class FakeFilesystem:
         """
         Mock of the builtin open().
 
+        A descriptor the fake filesystem did not hand out belongs to the
+        process, e.g. a pipe of subprocess.Popen(), it is wrapped for real.
+
         Args:
-            file (str): Path of the file
+            file (str | int): Path of the file, or a descriptor of the process
             mode (str): Open mode, any of r / w / a / x with optional
                 b / t / +. Defaults to 'r'.
             buffering (int): Accepted for compatibility, ignored.
@@ -563,7 +567,14 @@ class FakeFilesystem:
             IsADirectoryError: If the path is a directory
             NotADirectoryError: (POSIX) If a parent path is a file
             ValueError: If the mode is invalid
+            OSError: If the descriptor of the process is not open
         """
+        if isinstance(file, int):
+            # A descriptor of the fake filesystem can not be wrapped, only the
+            # descriptors of the process are served
+            if file >= FD_BASE:
+                raise OSError(errno.EBADF, 'Bad file descriptor')
+            return _platform_open(file, mode, buffering, encoding, errors, newline, closefd, opener)
         file = self._normpath(file)
         file = self._follow_links(file)
         mode = str(mode)

@@ -1,6 +1,3 @@
-import builtins
-import io
-
 import pytest
 import ruff
 
@@ -8,10 +5,8 @@ from alasio.codegen.ruff.ruff_format import RuffFormatter, is_valid_module, is_v
 from alasio.testing.filesystem import fs  # noqa: F401
 
 # The in-memory fake filesystem mocks os.path.isfile (breaking the ruff
-# binary lookup) and io.open() with an int fd (breaking subprocess pipes),
-# so the real open and the real ruff binary path are captured at import
-# time, before any fs fixture activates.
-_REAL_OPEN = builtins.open
+# binary lookup), so the real ruff binary path is captured at import time,
+# before any fs fixture activates.
 RUFF_BIN = ruff.find_ruff_bin()
 
 
@@ -20,13 +15,9 @@ def formatter(fs, monkeypatch):
     """
     Build a RuffFormatter working on the in-memory fake filesystem.
 
-    The formatter cwd is a fresh directory of the fake fs. Two bridges are
-    needed because the fake fs cannot serve subprocesses:
-
-    - ruff binary lookup goes through os.path.isfile (mocked by the fake
-      fs), so find_ruff_bin() is patched to the real binary path;
-    - subprocess opens its pipes with io.open(int fd), so open() routes
-      int fds to the real open and keeps str paths on the fake fs.
+    The formatter cwd is a fresh directory of the fake fs. The ruff binary
+    lookup goes through os.path.isfile (mocked by the fake fs), so
+    find_ruff_bin() is patched to the real binary path.
     """
     from alasio.codegen.ruff import ruff_format
 
@@ -35,21 +26,7 @@ def formatter(fs, monkeypatch):
     # fresh project directory in the fake fs as the formatter cwd
     fs.create_dir('/project')
     fs.chdir('/project')
-    formatter = RuffFormatter()
-
-    # subprocess opens pipes with io.open(int fd): route int fds to the real
-    # open, keep str paths on the fake fs
-    fake_open = fs.open
-
-    def smart_open(file, *args, **kwargs):
-        if isinstance(file, int):
-            return _REAL_OPEN(file, *args, **kwargs)
-        return fake_open(file, *args, **kwargs)
-
-    monkeypatch.setattr(builtins, 'open', smart_open)
-    monkeypatch.setattr(io, 'open', smart_open)
-
-    yield formatter
+    yield RuffFormatter()
 
 
 def _read(fs, file='test.py'):
