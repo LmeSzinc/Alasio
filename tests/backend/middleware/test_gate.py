@@ -172,7 +172,8 @@ def auth_env(monkeypatch):
     # setitem on the instance dict shadows the cached_property without
     # evaluating it: setattr() reads the attribute to check it exists, which
     # would open the user deploy.yaml and gui.db
-    monkeypatch.setitem(JWT_MANAGER.__dict__, 'secret', b'test-secret')
+    # 32 bytes or more: pyjwt warns below the RFC 7518 Section 3.2 minimum for HS256
+    monkeypatch.setitem(JWT_MANAGER.__dict__, 'secret', b'test-secret' * 4)
     monkeypatch.setitem(JWT_MANAGER.__dict__, 'pwd', '')
     yield
     monkeypatch.undo()

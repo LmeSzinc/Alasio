@@ -38,7 +38,8 @@ def isolate_jwt_manager(monkeypatch):
     # to check it exists, which evaluates the descriptor and reads the user
     # deploy.yaml / gui.db
     monkeypatch.setitem(JWT_MANAGER.__dict__, 'pwd', '')
-    monkeypatch.setitem(JWT_MANAGER.__dict__, 'secret', b'unit-test-secret')
+    # 32 bytes or more: pyjwt warns below the RFC 7518 Section 3.2 minimum for HS256
+    monkeypatch.setitem(JWT_MANAGER.__dict__, 'secret', b'unit-test-secret' * 2)
 
 
 @pytest.fixture(autouse=True)

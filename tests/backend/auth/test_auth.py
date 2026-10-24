@@ -6,7 +6,9 @@ import pytest
 
 from alasio.backend.auth.auth import JwtManager
 
-SECRET = b'test-secret'
+# An HS256 key is at least 32 bytes, RFC 7518 Section 3.2: pyjwt warns about a
+# shorter key with InsecureKeyLengthWarning
+SECRET = b'test-secret' * 4
 PASSWORD = 'test-password'
 # the JWT subject is never the plaintext password (red line)
 SUB = 'v1:' + hashlib.sha256(PASSWORD.encode()).hexdigest()
