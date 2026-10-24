@@ -468,8 +468,12 @@ jobs:
           tag="v$version"
           sha=$(git rev-parse HEAD)
 
-          # a missing ref makes the api answer 404, gh exits 1 and prints nothing
-          existing=$(gh api "repos/{owner}/{repo}/git/ref/tags/$tag" --jq .object.sha 2>/dev/null || true)
+          # git answers without an api call: a tag on this very commit means a
+          # rerun, a tag on any other commit means the version was not bumped,
+          # and no tag at all means this run is the release. The second pattern
+          # asks for the peeled ref of an annotated tag, so the last sha is the
+          # tagged commit either way.
+          existing=$(git ls-remote origin "refs/tags/$tag" "refs/tags/$tag^{}" | cut -f1 | tail -n1)
           if [ -z "$existing" ]; then
             gh api -X POST "repos/{owner}/{repo}/git/refs" \
               -f ref="refs/tags/$tag" -f sha="$sha" > /dev/null

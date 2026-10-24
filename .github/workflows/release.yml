@@ -118,20 +118,21 @@ jobs:
           # commit is the release signal. No tag at all means the version was
           # not bumped while this commit was built, a tag on another commit
           # means an older run already released this version: both are the
-          # normal state of a fix commit and publish nothing.
-          tag_sha=$(gh api "repos/{owner}/{repo}/git/ref/tags/$tag" --jq .object.sha 2>/dev/null || true)
+          # normal state of a fix commit and publish nothing. ls-remote asks the
+          # remote, so it does not depend on what the shallow clone holds, and
+          # the peeled pattern makes the last sha the tagged commit even for an
+          # annotated tag.
+          tag_sha=$(git ls-remote origin "refs/tags/$tag" "refs/tags/$tag^{}" | cut -f1 | tail -n1)
           if [ -z "$tag_sha" ]; then
             echo "publish=false" >> "$GITHUB_OUTPUT"
             echo "::notice::No tag $tag, the version was not bumped, nothing to publish"
-            exit 0
-          fi
-          if [ "$tag_sha" != "$HEAD_SHA" ]; then
+          elif [ "$tag_sha" != "$HEAD_SHA" ]; then
             echo "publish=false" >> "$GITHUB_OUTPUT"
             echo "::notice::$tag points to $tag_sha, this run built $HEAD_SHA, nothing to publish"
-            exit 0
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+            echo "Releasing $version from $HEAD_SHA"
           fi
-          echo "publish=true" >> "$GITHUB_OUTPUT"
-          echo "Releasing $version from $HEAD_SHA"
 
       # The release is opened as a draft so the artifacts are attached before
       # the irreversible step. A failure after this point leaves a draft only
