@@ -6,7 +6,7 @@ from typing import Dict, List, Literal
 
 from msgspec import Struct, field
 
-from ..path.calc import joinpath, normpath
+from alasio.ext.path.calc import joinpath, normpath
 
 __all__ = [
     'PathWatcher',
@@ -114,9 +114,7 @@ class WatchEvent(Struct, frozen=True, omit_defaults=True):
         """
         if path is None:
             path = record.path
-        return cls(
-            event, path, record.type, record.mtime_ns, record.size
-        )
+        return cls(event, path, record.type, record.mtime_ns, record.size)
 
 
 class _Watch(Struct, omit_defaults=True):
@@ -290,10 +288,11 @@ def _change_events(old, new):
         yield WatchEvent.from_record('D', old)
         yield WatchEvent.from_record('A', new)
         return
-    if (new.type == 'F' and new.mtime_ns
-            and (old.mtime_ns, old.size, old.ino) != (
-                new.mtime_ns, new.size, new.ino)):
-        yield WatchEvent.from_record('M', new)
+    if new.type != 'F' or not new.mtime_ns:
+        return
+    if old.mtime_ns == new.mtime_ns and old.size == new.size and old.ino == new.ino:
+        return
+    yield WatchEvent.from_record('M', new)
 
 
 def _preserve(old, new, path, keep_root=False):
@@ -388,19 +387,12 @@ class PathWatcher:
         remaining = list(self._watches.values())
         self._records = {
             path: record for path, record in self._records.items()
-            if not _covers(watch, path)
-            or any(
-                _covers(other, path)
-                for other in remaining
-            )
+            if not _covers(watch, path) or any(_covers(other, path) for other in remaining)
         }
 
-    def update(self, force=False):
+    def update(self):
         """
         Scan every subscription and diff against the previous records.
-
-        Args:
-            force (bool): Kept for API compatibility. Scans always run.
 
         Returns:
             list[WatchEvent]: Added / modified / deleted paths,
@@ -416,17 +408,13 @@ class PathWatcher:
             # already handled by an earlier subscription.
             watches = sorted(
                 self._watches.values(),
-                key=lambda watch: (
-                    not watch.recursive, -len(watch.path)
-                ),
+                key=lambda w: (not w.recursive, -len(w.path)),
             )
             for watch in watches:
                 events.extend(self._update_watch(old, new, watch))
             for path, record in old.items():
                 if path not in new:
-                    events.append(
-                        WatchEvent.from_record('D', record)
-                    )
+                    events.append(WatchEvent.from_record('D', record))
 
             result = []
             consumed = set()
@@ -434,9 +422,7 @@ class PathWatcher:
             for event in events:
                 key = (event.event, event.path, event.type)
                 previous = events_map.get(key)
-                if (previous is None
-                        or (event.mtime_ns, event.size)
-                        > (previous.mtime_ns, previous.size)):
+                if previous is None or (event.mtime_ns, event.size) > (previous.mtime_ns, previous.size):
                     events_map[key] = event
             for event in events_map.values():
                 mark_time_ns = self._marked.get(event.path)
@@ -477,6 +463,44 @@ class PathWatcher:
         with self._lock:
             self._marked[filepath] = time.time_ns()
 
+    @staticmethod
+    def _update_children(old, new, watch, scan, first, stack):
+        """
+        Apply one successfully listed directory to the new records.
+
+        Args:
+            old (dict): Previous path -> WatchRecord map
+            new (dict): Current path -> WatchRecord map
+            watch (_Watch): Subscription being scanned
+            scan (_DirScan): Successful directory listing
+            first (bool): True during the subscription baseline
+            stack (list[str]): Pending child directories
+
+        Yields:
+            WatchEvent: Changes among the directory children
+        """
+        for child in scan.records:
+            if child.path in new:
+                # Another subscription already handled this path
+                # and, if it is a directory, its subtree.
+                continue
+            if watch.recursive and child.type == 'F':
+                record = _lstat(child.path)
+                if record is _MISSING:
+                    continue
+                if record is None:
+                    _preserve(old, new, child.path)
+                    continue
+                child = record
+            old_record = old.get(child.path)
+            if not first:
+                yield from _change_events(old_record, child)
+            new[child.path] = child
+            if watch.recursive and child.type == 'D':
+                stack.append(child.path)
+        for path in scan.failed:
+            _preserve(old, new, path)
+
     def _update_watch(self, old, new, watch):
         """
         Scan one subscription and update the new record map.
@@ -505,8 +529,6 @@ class PathWatcher:
         if old_root is not None and old_root.type != 'D':
             record = _stat(root)
             if record is _MISSING:
-                if first and old_root is None:
-                    yield WatchEvent('D', root, '', 0, 0)
                 if first:
                     watch.initialized = True
                 return
@@ -525,37 +547,65 @@ class PathWatcher:
                 yield from _change_events(old_root, record)
             new[root] = record
 
-        # The root is a directory, or its current type is not known yet.
-        stack = [root]
+        # Root step: resolve root-level errors before traversing any
+        # child directory. Child errors no longer need to compare with
+        # the subscription root.
+        stack = []
         root_state = None
+        scan = _list_dir(root)
+        if scan.status == _SCAN_INCOMPLETE:
+            # Do not retry in the same update. The next update is
+            # the retry point, after the caller has waited.
+            _preserve(old, new, root, keep_root=True)
+            return
+        if scan.status == _SCAN_MISSING:
+            new.pop(root, None)
+            root_state = 'missing'
+        elif scan.status == _SCAN_NOT_DIRECTORY:
+            record = _stat(root)
+            if record is _MISSING:
+                new.pop(root, None)
+                root_state = 'missing'
+            elif record is None or record.type == 'D':
+                _preserve(old, new, root, keep_root=True)
+                return
+            else:
+                old_record = old.get(root)
+                existing = new.get(root)
+                if existing is None or existing.type == 'D':
+                    if not first:
+                        yield from _change_events(old_record, record)
+                new[root] = record
+                root_state = 'record'
+        else:
+            if root not in new:
+                old_record = old.get(root)
+                if old_record is not None and old_record.type == 'D':
+                    record = old_record
+                else:
+                    record = WatchRecord(root, 'D')
+                if not first:
+                    yield from _change_events(old_record, record)
+                new[root] = record
+            root_state = 'record'
+            yield from self._update_children(old, new, watch, scan, first, stack)
+
         while stack:
             dir_path = stack.pop()
             scan = _list_dir(dir_path)
             if scan.status == _SCAN_INCOMPLETE:
-                # Do not retry in the same update. The next update is
-                # the retry point, after the caller has waited.
                 _preserve(old, new, dir_path, keep_root=True)
-                if dir_path == root:
-                    return
                 continue
             if scan.status == _SCAN_MISSING:
                 new.pop(dir_path, None)
-                if dir_path == root:
-                    root_state = 'missing'
-                    break
                 continue
             if scan.status == _SCAN_NOT_DIRECTORY:
                 record = _stat(dir_path)
                 if record is _MISSING:
                     new.pop(dir_path, None)
-                    if dir_path == root:
-                        root_state = 'missing'
-                        break
                     continue
                 if record is None or record.type == 'D':
                     _preserve(old, new, dir_path, keep_root=True)
-                    if dir_path == root:
-                        return
                     continue
                 old_record = old.get(dir_path)
                 existing = new.get(dir_path)
@@ -563,43 +613,8 @@ class PathWatcher:
                     if not first:
                         yield from _change_events(old_record, record)
                 new[dir_path] = record
-                if dir_path == root:
-                    root_state = 'record'
                 continue
-
-            if dir_path not in new:
-                old_record = old.get(dir_path)
-                if old_record is not None and old_record.type == 'D':
-                    record = old_record
-                else:
-                    record = WatchRecord(dir_path, 'D')
-                if not first:
-                    yield from _change_events(old_record, record)
-                new[dir_path] = record
-            if dir_path == root:
-                root_state = 'record'
-
-            for child in scan.records:
-                if child.path in new:
-                    # Another subscription already handled this path
-                    # and, if it is a directory, its subtree.
-                    continue
-                if watch.recursive and child.type == 'F':
-                    record = _lstat(child.path)
-                    if record is _MISSING:
-                        continue
-                    if record is None:
-                        _preserve(old, new, child.path)
-                        continue
-                    child = record
-                old_record = old.get(child.path)
-                if not first:
-                    yield from _change_events(old_record, child)
-                new[child.path] = child
-                if watch.recursive and child.type == 'D':
-                    stack.append(child.path)
-            for path in scan.failed:
-                _preserve(old, new, path)
+            yield from self._update_children(old, new, watch, scan, first, stack)
 
         if first:
             record = new.get(root)
