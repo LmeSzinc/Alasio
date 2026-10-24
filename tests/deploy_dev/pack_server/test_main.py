@@ -56,6 +56,28 @@ def join_path(root, *parts):
     return path
 
 
+def log_events(log):
+    """
+    The event lines of a log, without the traceback panels.
+
+    The body of a rich traceback panel (the source context and the locals of a
+    frame) is rendered from the live frames and the line cache of the process:
+    whether it shows up depends on the rich version and on what the process has
+    cached, not on the pack server. A failure is asserted through its log line
+    and the exception reported by PackRunError.
+
+    Args:
+        log (str): Captured log text
+
+    Returns:
+        list[str]: INFO / ERROR / WARNING lines and the hr separators, in order
+    """
+    return [
+        line for line in log.splitlines()
+        if line.startswith(('INFO | ', 'ERROR | ', 'WARNING | ', '='))
+    ]
+
+
 def config_content(repo='AzurLaneAutoScript'):
     """
     The content of a valid config file of a repo.
@@ -336,38 +358,26 @@ INFO | Ran 2 configs: 2 done, 0 failed
             ('repo', 'Alasio'), ('dep', 'Alasio'), ('gen', 'Alasio'),
             ('gen-commit', 'Alasio'), ('dep-commit', 'Alasio'),
             ('repo', 'StarRailCopilot'), ('dep', 'StarRailCopilot')]
-        assert capture.concat() == f"""\
-INFO | Write config {run_dir}/config/template.yaml
-INFO | Running 3 configs of "{run_dir}"
-=========================== RUNNING CONFIG "LMESZINC_ALASIO_MASTER.YAML" ===========================
-INFO | RUNNING CONFIG "LMESZINC_ALASIO_MASTER.YAML"
-INFO | Config "LmeSzinc_Alasio_master.yaml" done
-===================== RUNNING CONFIG "LMESZINC_AZURLANEAUTOSCRIPT_MASTER.YAML" =====================
-INFO | RUNNING CONFIG "LMESZINC_AZURLANEAUTOSCRIPT_MASTER.YAML"
-ERROR | Config "LmeSzinc_AzurLaneAutoScript_master.yaml" failed
-+------------------------------- Traceback (most recent call last) --------------------------------+
-|   File "in run", line 170                                                                        |
-|                                                                                                  |
-|   File "in run_config", line 127                                                                 |
-|                                                                                                  |
-|   File "in run", line 127                                                                        |
-+--------------------------------------------------------------------------------------------------+
-RuntimeError: fake failure of the repo "AzurLaneAutoScript"
-
-====================== RUNNING CONFIG "LMESZINC_STARRAILCOPILOT_MASTER.YAML" =======================
-INFO | RUNNING CONFIG "LMESZINC_STARRAILCOPILOT_MASTER.YAML"
-ERROR | Config "LmeSzinc_StarRailCopilot_master.yaml" failed
-+------------------------------- Traceback (most recent call last) --------------------------------+
-|   File "in run", line 170                                                                        |
-|                                                                                                  |
-|   File "in run_config", line 133                                                                 |
-|                                                                                                  |
-|   File "in run", line 159                                                                        |
-+--------------------------------------------------------------------------------------------------+
-RuntimeError: fake failure of the packs of "StarRailCopilot"
-
-INFO | Ran 3 configs: 1 done, 2 failed
-"""
+        log = capture.concat()
+        # both failures are logged with a traceback of the failing config
+        assert log.count('Traceback (most recent call last)') == 2
+        assert 'RuntimeError: fake failure of the repo "AzurLaneAutoScript"' in log
+        assert 'RuntimeError: fake failure of the packs of "StarRailCopilot"' in log
+        # the failures do not stop the last config, the run fails at the end
+        assert log_events(log) == [
+            f'INFO | Write config {run_dir}/config/template.yaml',
+            f'INFO | Running 3 configs of "{run_dir}"',
+            '=========================== RUNNING CONFIG "LMESZINC_ALASIO_MASTER.YAML" ===========================',
+            'INFO | RUNNING CONFIG "LMESZINC_ALASIO_MASTER.YAML"',
+            'INFO | Config "LmeSzinc_Alasio_master.yaml" done',
+            '===================== RUNNING CONFIG "LMESZINC_AZURLANEAUTOSCRIPT_MASTER.YAML" =====================',
+            'INFO | RUNNING CONFIG "LMESZINC_AZURLANEAUTOSCRIPT_MASTER.YAML"',
+            'ERROR | Config "LmeSzinc_AzurLaneAutoScript_master.yaml" failed',
+            '====================== RUNNING CONFIG "LMESZINC_STARRAILCOPILOT_MASTER.YAML" =======================',
+            'INFO | RUNNING CONFIG "LMESZINC_STARRAILCOPILOT_MASTER.YAML"',
+            'ERROR | Config "LmeSzinc_StarRailCopilot_master.yaml" failed',
+            'INFO | Ran 3 configs: 1 done, 2 failed',
+        ]
 
     def test_no_config(self, fs, run_dir, monkeypatch):
         """A run directory without a config file writes the template and runs nothing."""
