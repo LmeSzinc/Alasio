@@ -22,7 +22,10 @@ class AssetsExtractorSRC(AssetsExtractor):
                 for image in asset:
                     image.populate_search()
                     # add './' to keep existing format
-                    image.path = './' + image.path
+                    # populate() may be called again on the same assets, the path
+                    # of the base image is already prefixed and kept as it is
+                    if not image.path.startswith('./'):
+                        image.path = './' + image.path
                 asset.populate_attr_from_first_frame()
 
     def gen_module(self, gen: "CodeGen", module: "AssetModule"):

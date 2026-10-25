@@ -40,6 +40,20 @@ class TestPopulate:
         assert first.search == (0, 0, 35, 20)
         assert second.search == (0, 0, 34, 20)
 
+    def test_populate_is_idempotent(self, fs, small_resolution):
+        """populate() may be called again, the './' prefix is not added twice"""
+        project = project_root(fs)
+        write_png(fs, project.joinpath('assets/share/a/X.png'), area=(5, 4, 15, 12))
+        extractor = AssetsExtractorSRC(project)
+        asset = extractor.assets.dict_module['a'].dict_assets['X']
+        extractor.assets.load({'a'})
+        extractor.populate()
+        extractor.populate()
+
+        frame = asset.dict_lang_frame['share'][0]
+        assert frame.path == './assets/share/a/X.png'
+        assert frame.search == (0, 0, 35, 20)
+
     def test_copy_attributes_from_first_frame(self, fs, small_resolution):
         project = project_root(fs)
         write_png(fs, project.joinpath('assets/share/a/X.png'), area=(5, 4, 15, 12))
