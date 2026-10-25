@@ -558,11 +558,11 @@ class TestFileRoot:
         assert scans == []
 
 
-class TestSubscribeFile:
+class TestFileRootFirstObservation:
     def test_file_root_skips_first_scandir(self, fs, monkeypatch):
         fs.create_file('/watch/file.txt', contents='a')
         watcher = PathWatcher()
-        watcher.subscribe_file('/watch/file.txt')
+        watcher.subscribe('/watch/file.txt')
 
         real_scandir = os.scandir
         scans = []
@@ -577,11 +577,11 @@ class TestSubscribeFile:
         ]
         assert scans == []
 
-    def test_directory_falls_back_to_scan(self, fs):
+    def test_directory_root_is_scanned(self, fs):
         fs.create_file('/watch/sub/a.txt')
         fs.create_file('/watch/sub/deep/b.txt')
         watcher = PathWatcher()
-        watcher.subscribe_file('/watch/sub')
+        watcher.subscribe('/watch/sub')
         assert event_shape(watcher.update()) == [
             ('A', '/watch/sub', 'D'),
         ]
@@ -590,16 +590,16 @@ class TestSubscribeFile:
         assert ('/watch/sub/deep/b.txt', 'F') not in records
         assert watcher.update() == []
 
-    def test_directory_falls_back_recursive(self, fs):
+    def test_directory_root_is_scanned_recursively(self, fs):
         fs.create_file('/watch/sub/deep/a.txt')
         watcher = PathWatcher()
-        watcher.subscribe_file('/watch/sub', recursive=True)
+        watcher.subscribe('/watch/sub', recursive=True)
         watcher.update()
         assert ('/watch/sub/deep/a.txt', 'F') in record_shape(watcher.list())
 
     def test_missing_root_then_file(self, fs, monkeypatch):
         watcher = PathWatcher()
-        watcher.subscribe_file('/watch/file.txt')
+        watcher.subscribe('/watch/file.txt')
 
         real_scandir = os.scandir
         scans = []
@@ -620,10 +620,10 @@ class TestSubscribeFile:
         ]
         assert scans == []
 
-    def test_modify_after_file_hint(self, fs):
+    def test_modify_after_file_root(self, fs):
         fs.create_file('/watch/file.txt', contents='a')
         watcher = PathWatcher()
-        watcher.subscribe_file('/watch/file.txt')
+        watcher.subscribe('/watch/file.txt')
         watcher.update()
 
         with open('/watch/file.txt', 'w') as file:
@@ -633,13 +633,28 @@ class TestSubscribeFile:
             ('M', '/watch/file.txt', 'F'),
         ]
 
-    def test_existing_watch_is_not_reset(self, fs):
+    def test_symlink_root_is_not_followed(self, fs, monkeypatch):
+        fs.create_file('/watch/target.txt')
+        fs.create_symlink('/watch/link.txt', '/watch/target.txt')
+        watcher = PathWatcher()
+        watcher.subscribe('/watch/link.txt')
+
+        def fail(*args, **kwargs):
+            raise AssertionError('a symlink root must not be scanned')
+
+        monkeypatch.setattr(os, 'scandir', fail)
+        assert event_shape(watcher.update()) == [
+            ('A', '/watch/link.txt', 'S'),
+        ]
+        assert record_shape(watcher.list()) == [('/watch/link.txt', 'S')]
+
+    def test_repeated_subscribe_is_not_reset(self, fs):
         fs.create_file('/watch/file.txt', contents='a')
         watcher = PathWatcher()
         watcher.subscribe('/watch/file.txt')
         watcher.update()
 
-        watcher.subscribe_file('/watch/file.txt')
+        watcher.subscribe('/watch/file.txt')
         assert watcher.update() == []
         assert ('/watch/file.txt', 'F') in record_shape(watcher.list())
 
@@ -667,6 +682,83 @@ class TestRootTypeChange:
             ('D', '/watch/root', 'D'),
             ('A', '/watch/root', 'F'),
             ('D', '/watch/root/child.txt', 'F'),
+        ]
+
+
+class TestSymlinkRoot:
+    def test_file_symlink_is_the_link_only(self, fs):
+        fs.create_file('/outside/target.txt', contents='a')
+        fs.create_symlink('/watch/link.txt', '/outside/target.txt')
+        watcher = PathWatcher()
+        watcher.subscribe('/watch/link.txt')
+        assert event_shape(watcher.update()) == [('A', '/watch/link.txt', 'S')]
+        assert record_shape(watcher.list()) == [('/watch/link.txt', 'S')]
+
+        # Changing the target does not change the link entry.
+        with open('/outside/target.txt', 'w') as file:
+            file.write('b')
+        fs.utime('/outside/target.txt', ns=(0, 1000000000))
+        assert watcher.update() == []
+
+        # Retargeting replaces the link entry itself.
+        fs.remove('/watch/link.txt')
+        fs.create_symlink('/watch/link.txt', '/outside/other.txt')
+        assert event_shape(watcher.update()) == [('M', '/watch/link.txt', 'S')]
+
+        fs.remove('/watch/link.txt')
+        assert event_shape(watcher.update()) == [('D', '/watch/link.txt', 'S')]
+
+    def test_dangling_symlink_is_a_link(self, fs):
+        fs.create_symlink('/watch/link.txt', '/outside/missing.txt')
+        watcher = PathWatcher()
+        watcher.subscribe('/watch/link.txt')
+        assert event_shape(watcher.update()) == [('A', '/watch/link.txt', 'S')]
+        assert record_shape(watcher.list()) == [('/watch/link.txt', 'S')]
+
+    def test_directory_symlink_is_not_traversed(self, fs, monkeypatch):
+        fs.create_file('/outside/target/inside.txt')
+        fs.create_symlink('/watch/link', '/outside/target')
+        watcher = PathWatcher()
+        watcher.subscribe('/watch/link', recursive=True)
+
+        def fail(*args, **kwargs):
+            raise AssertionError('a symlink root must not be scanned')
+
+        monkeypatch.setattr(os, 'scandir', fail)
+        assert event_shape(watcher.update()) == [('A', '/watch/link', 'S')]
+        assert record_shape(watcher.list()) == [('/watch/link', 'S')]
+
+    def test_directory_root_replaced_by_symlink(self, fs):
+        fs.create_file('/watch/root/a.txt')
+        fs.create_file('/outside/target/b.txt')
+        watcher = PathWatcher()
+        watcher.subscribe('/watch/root', recursive=True)
+        watcher.update()
+
+        fs.rmtree('/watch/root')
+        fs.create_symlink('/watch/root', '/outside/target')
+        assert event_shape(watcher.update()) == [
+            ('D', '/watch/root', 'D'),
+            ('A', '/watch/root', 'S'),
+            ('D', '/watch/root/a.txt', 'F'),
+        ]
+        assert record_shape(watcher.list()) == [('/watch/root', 'S')]
+
+        # The target stays outside of the watched tree.
+        fs.create_file('/outside/target/c.txt')
+        assert watcher.update() == []
+
+    def test_symlink_root_replaced_by_file(self, fs):
+        fs.create_symlink('/watch/root', '/outside/target')
+        watcher = PathWatcher()
+        watcher.subscribe('/watch/root')
+        assert event_shape(watcher.update()) == [('A', '/watch/root', 'S')]
+
+        fs.remove('/watch/root')
+        fs.create_file('/watch/root', contents='a')
+        assert event_shape(watcher.update()) == [
+            ('D', '/watch/root', 'S'),
+            ('A', '/watch/root', 'F'),
         ]
 
 
@@ -968,17 +1060,17 @@ class TestFailureRecovery:
         watcher.subscribe('/watch/file.txt')
         watcher.update()
 
-        real_stat = os.stat
+        real_lstat = os.lstat
 
-        def fail_stat(path):
+        def fail_lstat(path):
             if path == '/watch/file.txt':
                 raise PermissionError('denied')
-            return real_stat(path)
+            return real_lstat(path)
 
-        monkeypatch.setattr(os, 'stat', fail_stat)
+        monkeypatch.setattr(os, 'lstat', fail_lstat)
         assert watcher.update() == []
 
-        monkeypatch.setattr(os, 'stat', real_stat)
+        monkeypatch.setattr(os, 'lstat', real_lstat)
         assert watcher.update() == []
         assert record_shape(watcher.list()) == [
             ('/watch/file.txt', 'F'),

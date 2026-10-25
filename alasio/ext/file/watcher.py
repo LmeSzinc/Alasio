@@ -42,8 +42,7 @@ class WatchRecord(Struct, frozen=True, omit_defaults=True):
     Attributes:
         path (str): Absolute path, normalized to '/' separators
         type (str): 'F' file, 'D' directory, 'S' symlink
-        mtime_ns (int): Modification time in nanoseconds; 0 for
-            directory and symlink entries
+        mtime_ns (int): Modification time in nanoseconds
         size (int): File size in bytes, 0 for directories and symlinks
         ino (int): Filesystem inode number, 0 when unavailable
     """
@@ -121,9 +120,6 @@ class WatchEvent(Struct, frozen=True, omit_defaults=True):
 class _Watch(Struct, omit_defaults=True):
     path: str
     recursive: bool
-    # True when the caller expects a file: stat the root before listing
-    # it, so a file root does not pay for a failed directory scan.
-    stat_first: bool = False
     # False until the first update that observed this subscription. The
     # first observation becomes the baseline and only reports the root.
     initialized: bool = False
@@ -206,9 +202,9 @@ def _covers(watch, path):
     return '/' not in rest
 
 
-def _stat(path):
+def _lstat(path):
     """
-    Stat a path, following symlinks.
+    Stat a path without following symlinks.
 
     Args:
         path (str): Absolute path
@@ -218,7 +214,7 @@ def _stat(path):
             unreadable path
     """
     try:
-        return WatchRecord.from_stat(path, os.stat(path))
+        return WatchRecord.from_stat(path, os.lstat(path))
     except (FileNotFoundError, NotADirectoryError):
         return _MISSING
     except OSError:
@@ -297,7 +293,7 @@ def _change_events(old, new):
         yield WatchEvent.from_record('D', old)
         yield WatchEvent.from_record('A', new)
         return
-    if new.type != 'F' or not new.mtime_ns:
+    if new.type == 'D' or not new.mtime_ns:
         return
     if old.mtime_ns == new.mtime_ns and old.size == new.size and old.ino == new.ino:
         return
@@ -356,54 +352,27 @@ class PathWatcher:
         Track a file or directory. Sync, memory only, no filesystem IO.
 
         File entries are compared by modification time, size and inode,
-        so a modified file is reported in both modes. Directory and
-        symlink entries are compared by type only.
+        so a modified file is reported in both modes. A symlink is an
+        entry of its own and is never followed. Directory entries are
+        compared by type only. The first observation uses lstat, so a
+        file or symlink root does not pay for a directory scan.
 
         Args:
             filepath (str): Absolute path to track
             recursive (bool): Watch the whole subtree of a directory.
                 Ignored for file paths.
         """
-        self._subscribe(filepath, recursive, stat_first=False)
-
-    def subscribe_file(self, filepath, recursive=False):
-        """
-        Track a path the caller expects to be a file.
-
-        The first observation stats the path before listing it, so a
-        file subscription does not pay for a failed directory scan.
-        When the path is actually a directory, it is still watched
-        exactly like subscribe(filepath, recursive=...).
-
-        Args:
-            filepath (str): Absolute path to track
-            recursive (bool): Watch the whole subtree when the path
-                turns out to be a directory. Ignored for files.
-        """
-        self._subscribe(filepath, recursive, stat_first=True)
-
-    def _subscribe(self, filepath, recursive, stat_first):
-        """
-        Add or update one subscription.
-
-        Args:
-            filepath (str): Absolute path to track
-            recursive (bool): Watch the whole subtree of a directory
-            stat_first (bool): Stat the root before listing it, so a
-                file root does not need a directory scan
-        """
         filepath = _normalize_path(filepath)
         recursive = bool(recursive)
         with self._lock:
             watch = self._watches.get(filepath)
             if watch is not None and watch.recursive == recursive:
-                watch.stat_first = watch.stat_first or stat_first
                 return
             if watch is not None:
                 self._watches.pop(filepath)
                 self._release(watch)
             # A new subscription starts a new baseline.
-            self._watches[filepath] = _Watch(filepath, recursive, stat_first=stat_first)
+            self._watches[filepath] = _Watch(filepath, recursive)
 
     def unsubscribe(self, filepath):
         """
@@ -623,39 +592,36 @@ class PathWatcher:
                 watch.initialized = True
             return
 
-        if watch.stat_first and old_root is None:
-            # The caller expects a file, stat the root before trying to
-            # list it. A directory still falls through to a normal scan.
-            record = _stat(root)
-            if record is _MISSING:
-                if first:
+        # Resolve the root without following symlinks. A symlink is a
+        # single record of its own, even when it points to a directory.
+        record = _lstat(root)
+        if record is _MISSING:
+            if first:
+                if old_root is None:
                     yield WatchEvent('D', root, '', 0, 0)
-                    watch.initialized = True
-                return
-            if record is None:
-                return
-            if record.type != 'D':
-                new[root] = record
                 watch.initialized = True
-                if first:
-                    yield WatchEvent.from_record('A', record)
-                return
+            else:
+                new.pop(root, None)
+            return
+        if record is None:
+            if old_root is not None:
+                _preserve(old, new, root)
+            return
+        if record.type != 'D':
+            new[root] = record
+            watch.initialized = True
+            if first:
+                yield WatchEvent.from_record('A', record)
+            return
 
-        if old_root is not None and old_root.type != 'D':
-            record = _stat(root)
-            if record is _MISSING:
-                if first:
-                    watch.initialized = True
-                return
-            if record is None:
-                new[root] = old_root
-                return
-            if record.type != 'D':
-                new[root] = record
-                watch.initialized = True
-                if first:
-                    yield WatchEvent.from_record('A', record)
-                return
+        # Directory root: keep the old directory payload when there is
+        # one, then scan the children. The root entry itself is already
+        # resolved, so a child scan never has to compare with it.
+        if old_root is None:
+            new[root] = WatchRecord(root, 'D')
+        elif old_root.type == 'D':
+            new[root] = old_root
+        else:
             new[root] = record
 
         # Root step: resolve root-level errors before traversing any
@@ -673,7 +639,7 @@ class PathWatcher:
             new.pop(root, None)
             root_state = 'missing'
         elif scan.status == _SCAN_NOT_DIRECTORY:
-            record = _stat(root)
+            record = _lstat(root)
             if record is _MISSING:
                 new.pop(root, None)
                 root_state = 'missing'
@@ -684,13 +650,6 @@ class PathWatcher:
                 new[root] = record
                 root_state = 'record'
         else:
-            if root not in new:
-                old_record = old.get(root)
-                if old_record is not None and old_record.type == 'D':
-                    record = old_record
-                else:
-                    record = WatchRecord(root, 'D')
-                new[root] = record
             root_state = 'record'
             self._update_children(old, new, watch, scan, stack)
 
@@ -704,7 +663,7 @@ class PathWatcher:
                 new.pop(dir_path, None)
                 continue
             if scan.status == _SCAN_NOT_DIRECTORY:
-                record = _stat(dir_path)
+                record = _lstat(dir_path)
                 if record is _MISSING:
                     new.pop(dir_path, None)
                     continue
