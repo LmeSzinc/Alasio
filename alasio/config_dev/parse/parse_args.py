@@ -155,13 +155,6 @@ def populate_input(dt: str, value):
     return dt, value
 
 
-def validate_literal_item(item: Any) -> None:
-    vtype = type(item)
-    if vtype in (bool, str, int, float, bytes, None):
-        return
-    raise DefinitionError(f'Value of "{item}" must be bool/str/int/float/bytes/None')
-
-
 def preprocess_arg(arg: dict) -> dict:
     """
     Additional pre-process before validating as ArgData
@@ -245,9 +238,6 @@ def preprocess_arg(arg: dict) -> dict:
                         raise DefinitionError(f'"option_dict" group name "{_group}" cannot be in "option"')
             except (AttributeError, TypeError) as e:
                 raise DefinitionError(f'"option_dict" must be a dict[str, list] if dt="secondary-select", {e}')
-            # options in literal datatype must be valid python literal items
-            for item in option:
-                validate_literal_item(item)
         else:
             raise DefinitionError('dt="secondary-select" must have "option" or "option_dict" defined')
     elif dt == 'filter-order':
@@ -271,9 +261,6 @@ def preprocess_arg(arg: dict) -> dict:
             if 'option' in arg:
                 option = arg['option']
                 validate_option(option, value)
-                # options in literal datatype must be valid python literal items
-                for item in option:
-                    validate_literal_item(item)
 
     vtype = type(value)
     # Timezone default to UTC

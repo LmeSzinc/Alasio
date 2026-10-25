@@ -162,4 +162,25 @@ option_dict:
   chapter1: [1-1, 1-2]
   chapter2: [{key: 1}, 2-2]
 """)
-        assert 'must be bool/str/int/float/bytes/None' in str(e.value)
+        assert 'must be None/bool/int/str' in str(e.value)
+
+    @pytest.mark.parametrize('option', ['1.5', '!!binary QQ=='], ids=['float', 'bytes'])
+    def test_non_literal_option_items(self, option):
+        """float and bytes option items are rejected after the groups are flattened."""
+        with pytest.raises(DefinitionError) as e:
+            parse_arg(f"""\
+dt: secondary-select
+value: disabled
+option_dict:
+  group: [{option}, disabled]
+""")
+        assert 'must be None/bool/int/str' in str(e.value)
+
+    def test_bool_options(self):
+        arg = parse_arg("""\
+dt: secondary-select
+value: disabled
+option_dict:
+  group: [disabled, true]
+""")
+        assert arg.option_dict == {'group': ['disabled', True]}

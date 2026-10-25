@@ -164,7 +164,31 @@ dt: filter-order
 value: Fleet-1
 option: [{key: 1}, Fleet-1]
 """)
-        assert 'must be bool/str/int/float/bytes/None' in str(e.value)
+        assert 'must be None/bool/int/str' in str(e.value)
+
+    @pytest.mark.parametrize('option', [
+        '2026-10-26',
+        '1.5',
+        '!!binary QQ==',
+    ], ids=['date', 'float', 'bytes'])
+    def test_non_literal_option_item(self, option):
+        """A hashable but non-literal item would generate an invalid Literal."""
+        with pytest.raises(DefinitionError) as e:
+            parse_arg(f"""\
+dt: filter-order
+value: []
+option: [{option}, Fleet-1]
+""")
+        assert 'must be None/bool/int/str' in str(e.value)
+
+    def test_bool_items(self):
+        """bool is a literal item supported by msgspec."""
+        arg = parse_arg("""\
+dt: filter-order
+value: [true, false]
+option: [true, false]
+""")
+        assert arg.value == (True, False)
 
     def test_duplicate_option(self):
         with pytest.raises(DefinitionError) as e:
@@ -211,4 +235,4 @@ dt: filter-order
 value: [{key: 1}]
 option: [Fleet-1]
 """)
-        assert 'must be bool/str/int/float/bytes/None' in str(e.value)
+        assert 'must be None/bool/int/str' in str(e.value)

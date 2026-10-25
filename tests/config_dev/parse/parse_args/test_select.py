@@ -32,6 +32,15 @@ option: [1, 2, 3]
         assert arg.value == 1
         assert arg.get_anno() == 't.Literal[1, 2, 3]'
 
+    def test_bool_options(self):
+        arg = parse_arg("""\
+dt: select
+value: false
+option: [true, false]
+""")
+        assert arg.value is False
+        assert arg.get_anno() == 't.Literal[True, False]'
+
     def test_literal_ref(self):
         """The module level literal variable replaces the inline literal."""
         arg = parse_arg("""\
@@ -124,7 +133,39 @@ option:
   - 2026-01-02T03:04:05Z
   - B
 """)
-        assert 'must be bool/str/int/float/bytes/None' in str(e.value)
+        assert 'must be None/bool/int/str' in str(e.value)
+
+    @pytest.mark.parametrize('option', ['1.5', '!!binary QQ=='], ids=['float', 'bytes'])
+    def test_non_literal_option_items(self, option):
+        """float and bytes are not supported by msgspec's Literal."""
+        with pytest.raises(DefinitionError) as e:
+            parse_arg(f"""\
+dt: select
+value: 1
+option: [{option}, 1]
+""")
+        assert 'must be None/bool/int/str' in str(e.value)
+
+    @pytest.mark.parametrize('value', ['1.5', '1.0', '!!binary QQ=='], ids=['float', 'float-int', 'bytes'])
+    def test_default_value_must_be_a_literal_item(self, value):
+        """float and bytes are not supported by msgspec's Literal."""
+        with pytest.raises(DefinitionError) as e:
+            parse_arg(f"""\
+dt: select
+value: {value}
+option: [1, 2]
+""")
+        assert 'must be None/bool/int/str' in str(e.value)
+
+    def test_bool_default_does_not_match_int_option(self):
+        """bool and int are different literal items, True is not the option 1."""
+        with pytest.raises(DefinitionError) as e:
+            parse_arg("""\
+dt: select
+value: true
+option: [1, 2]
+""")
+        assert 'Default value "True" is not in "option"' in str(e.value)
 
     def test_unhashable_option_item(self):
         """A dict item can not be an option, report it as a definition error."""
@@ -136,7 +177,7 @@ option:
   - {key: 1}
   - B
 """)
-        assert 'must be bool/str/int/float/bytes/None' in str(e.value)
+        assert 'must be None/bool/int/str' in str(e.value)
 
     def test_list_option_item(self):
         """A list item is unhashable as well."""
@@ -148,4 +189,4 @@ option:
   - [1, 2]
   - B
 """)
-        assert 'must be bool/str/int/float/bytes/None' in str(e.value)
+        assert 'must be None/bool/int/str' in str(e.value)
