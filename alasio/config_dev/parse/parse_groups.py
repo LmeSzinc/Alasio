@@ -1,9 +1,9 @@
-from datetime import datetime, timezone
 from typing import Dict, Optional, Tuple
 
 import msgspec
 from msgspec import UNSET, Struct
 
+from alasio.config.alasio.group_base import DEFAULT_TIME
 from alasio.config.entry.utils import validate_task_name
 from alasio.config_dev.format.validate_color import validate_dashboard_color
 from alasio.config_dev.parse.base import DefinitionError, ParseBase
@@ -123,8 +123,7 @@ class GroupData(Struct):
                 f'Dashboard group cannot have custom arg "Time"',
                 keys=[self.name, 'args', 'Time'], value=self.args['Time']
             )
-        self.args['Time'] = ArgData.from_arg_data(
-            datetime(2020, 1, 1, 0, 0, tzinfo=timezone.utc))
+        self.args['Time'] = ArgData.from_arg_data(DEFAULT_TIME)
         # validate dashboard="total"
         if self.dashboard == 'total':
             have = {'Value', 'Total'}
