@@ -17,7 +17,7 @@ __all__ = [
 ]
 
 # Record and event types
-_RootType = Literal['', 'F', 'D', 'S']
+_RootType = Literal['', 'F', 'D', 'S', 'O']
 _EventType = Literal['A', 'M', 'D']
 _MISSING = object()
 
@@ -43,9 +43,10 @@ class WatchRecord(Struct, frozen=True, omit_defaults=True):
 
     Attributes:
         path (str): Absolute path, normalized to '/' separators
-        type (str): 'F' file, 'D' directory, 'S' symlink
+        type (str): 'F' file, 'D' directory, 'S' symlink, 'O' other
         mtime_ns (int): Modification time in nanoseconds
-        size (int): File size in bytes, 0 for directories and symlinks
+        size (int): File size in bytes, 0 for directories, symlinks and
+            other entries
         ino (int): Filesystem inode number, 0 when unavailable
     """
     path: str
@@ -74,7 +75,8 @@ class WatchRecord(Struct, frozen=True, omit_defaults=True):
         elif stat.S_ISLNK(mode):
             path_type = 'S'
         else:
-            path_type = 'F'
+            # FIFO, socket, device and any other filesystem entry
+            path_type = 'O'
         mtime_ns = getattr(st, 'st_mtime_ns', None)
         if mtime_ns is None:
             mtime_ns = int(st.st_mtime * 1000000000)
@@ -90,10 +92,10 @@ class WatchEvent(Struct, frozen=True, omit_defaults=True):
     Attributes:
         event (str): 'A' added, 'M' modified, 'D' deleted
         path (str): Absolute path, normalized to '/' separators
-        type (str): 'F' file, 'D' directory, 'S' symlink,
+        type (str): 'F' file, 'D' directory, 'S' symlink, 'O' other,
             '' when the root is missing at baseline
         mtime_ns (int): Modification time in nanoseconds
-        size (int): File size in bytes
+        size (int): File size in bytes, 0 for non-file entries
     """
     event: _EventType
     path: str
@@ -228,10 +230,10 @@ def _list_dir(path):
     """
     Read one directory without caching.
 
-    Regular file and special entries are type-only; their DirEntry is
-    kept in `entries`, and the caller stats it after deciding whether
-    the path is already handled by another subscription. Directory and
-    symlink entries are type-only and have no entry.
+    Regular file entries are type-only; their DirEntry is kept in
+    `entries`, and the caller stats it after deciding whether the path
+    is already handled by another subscription. Directory, symlink and
+    other entries are type-only and have no entry.
 
     Args:
         path (str): Absolute directory path
@@ -255,11 +257,14 @@ def _list_dir(path):
                         record = WatchRecord(full, 'S')
                     elif entry.is_dir(follow_symlinks=False):
                         record = WatchRecord(full, 'D')
-                    else:
+                    elif entry.is_file(follow_symlinks=False):
                         # Type-only here, the caller stats the entry after
                         # checking whether another subscription handled it.
                         record = WatchRecord(full, 'F')
                         entries[full] = entry
+                    else:
+                        # FIFO, socket, device and any other entry
+                        record = WatchRecord(full, 'O')
                 except FileNotFoundError:
                     continue
                 except OSError as e:
@@ -357,10 +362,11 @@ class PathWatcher:
         Track a file or directory. Sync, memory only, no filesystem IO.
 
         File entries are compared by modification time, size and inode,
-        so a modified file is reported in both modes. A symlink is an
-        entry of its own and is never followed. Directory entries are
-        compared by type only. The first observation uses lstat, so a
-        file or symlink root does not pay for a directory scan.
+        so a modified file is reported in both modes. Directory entries
+        are compared by type only. A symlink or other special entry is a
+        single entry of its own; it is never followed or scanned. The
+        first observation uses lstat, so a file or symlink root does not
+        pay for a directory scan.
 
         Args:
             filepath (str): Absolute path to track
@@ -522,8 +528,9 @@ class PathWatcher:
         Call it after the operation completes and before the next
         update(). The next update() silences every event for the path
         when the path is missing, or when it is still a file whose mtime
-        is not newer than this mark. A path that is now a directory or
-        symlink is reported. Sync and memory only; no filesystem IO.
+        is not newer than this mark. A path that is now a directory,
+        symlink or other entry is reported. Sync and memory only; no
+        filesystem IO.
 
         Args:
             filepath (str): Absolute path that was written by us

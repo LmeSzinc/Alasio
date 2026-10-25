@@ -6,6 +6,7 @@ operations go through the in-memory filesystem fixture.
 """
 import inspect
 import os
+import stat
 import time
 from typing import Literal, get_type_hints
 
@@ -53,8 +54,8 @@ class TestContract:
         event_hints = get_type_hints(WatchEvent)
         record_hints = get_type_hints(WatchRecord)
         assert event_hints['event'] == Literal['A', 'M', 'D']
-        assert event_hints['type'] == Literal['', 'F', 'D', 'S']
-        assert record_hints['type'] == Literal['', 'F', 'D', 'S']
+        assert event_hints['type'] == Literal['', 'F', 'D', 'S', 'O']
+        assert record_hints['type'] == Literal['', 'F', 'D', 'S', 'O']
 
     def test_structs_are_frozen(self):
         record = WatchRecord('/a', 'F', 1, 2)
@@ -229,6 +230,87 @@ class TestDirectoryListing:
         scan = _list_dir('/watch/denied')
         assert scan.status == _SCAN_INCOMPLETE
         assert isinstance(scan.error, PermissionError)
+
+
+class TestSpecialEntry:
+    @pytest.mark.parametrize('mode', [
+        stat.S_IFIFO | 0o644,
+        stat.S_IFSOCK | 0o644,
+        stat.S_IFCHR | 0o644,
+        stat.S_IFBLK | 0o644,
+    ])
+    def test_from_stat_other_mode(self, mode):
+        st = os.stat_result((mode, 1, 0, 1, 0, 0, 0, 0, 0, 0))
+        record = WatchRecord.from_stat('/watch/special', st)
+        assert record.type == 'O'
+        assert record.size == 0
+
+    def test_list_dir_marks_special_entry(self, fs, monkeypatch):
+        fs.create_file('/watch/special')
+        fs.create_file('/watch/normal.txt')
+        real_is_file = FakeDirEntry.is_file
+
+        def is_file(self, follow_symlinks=True):
+            if self.name == 'special':
+                return False
+            return real_is_file(self, follow_symlinks=follow_symlinks)
+
+        monkeypatch.setattr(FakeDirEntry, 'is_file', is_file)
+        scan = _list_dir('/watch')
+        assert {(record.path, record.type) for record in scan.records} == {
+            ('/watch/special', 'O'),
+            ('/watch/normal.txt', 'F'),
+        }
+        assert list(scan.entries) == ['/watch/normal.txt']
+
+    def test_special_entry_is_not_a_file(self, fs, monkeypatch):
+        fs.create_file('/watch/special', contents='a')
+        real_is_file = FakeDirEntry.is_file
+
+        def is_file(self, follow_symlinks=True):
+            if self.name == 'special':
+                return False
+            return real_is_file(self, follow_symlinks=follow_symlinks)
+
+        monkeypatch.setattr(FakeDirEntry, 'is_file', is_file)
+        watcher = PathWatcher()
+        watcher.subscribe('/watch')
+        watcher.update()
+        assert record_shape(watcher.list()) == [
+            ('/watch', 'D'),
+            ('/watch/special', 'O'),
+        ]
+
+        # A special entry has no file signature to compare.
+        with open('/watch/special', 'w') as file:
+            file.write('changed')
+        assert watcher.update() == []
+
+        monkeypatch.setattr(FakeDirEntry, 'is_file', real_is_file)
+        assert event_shape(watcher.update()) == [
+            ('D', '/watch/special', 'O'),
+            ('A', '/watch/special', 'F'),
+        ]
+
+    def test_special_root_is_a_single_entry(self, fs, monkeypatch):
+        fs.create_file('/watch/special')
+        real_lstat = os.lstat
+        special = os.stat_result((stat.S_IFIFO | 0o644, 1, 0, 1, 0, 0, 0, 0, 0, 0))
+
+        def lstat(path):
+            if path == '/watch/special':
+                return special
+            return real_lstat(path)
+
+        monkeypatch.setattr(os, 'lstat', lstat)
+        watcher = PathWatcher()
+        watcher.subscribe('/watch/special')
+        assert event_shape(watcher.update()) == [
+            ('A', '/watch/special', 'O'),
+        ]
+        assert record_shape(watcher.list()) == [
+            ('/watch/special', 'O'),
+        ]
 
 
 class TestBaseline:
