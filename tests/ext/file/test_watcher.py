@@ -843,6 +843,38 @@ class TestOverlap:
 
 
 class TestFailureRecovery:
+    def test_ancestor_failure_does_not_rollback_fresher_records(
+            self, fs, monkeypatch):
+        fs.create_file('/watch/sub/a.txt', contents='a')
+        watcher = PathWatcher()
+        watcher.subscribe('/watch', recursive=True)
+        watcher.subscribe('/watch/sub', recursive=True)
+        watcher.update()
+
+        with open('/watch/sub/a.txt', 'w') as file:
+            file.write('bb')
+        fs.utime('/watch/sub/a.txt', ns=(0, 1000000000))
+
+        real_scandir = os.scandir
+
+        def selective_scandir(path):
+            if path == '/watch':
+                raise PermissionError('denied')
+            return real_scandir(path)
+
+        monkeypatch.setattr(os, 'scandir', selective_scandir)
+        assert event_shape(watcher.update()) == [
+            ('M', '/watch/sub/a.txt', 'F'),
+        ]
+        # The ancestor still cannot be read, but the fresh child record
+        # must not be rolled back and the event must not repeat.
+        assert watcher.update() == []
+        records = {record.path: record for record in watcher.list()}
+        assert records['/watch/sub/a.txt'].size == 2
+
+        monkeypatch.setattr(os, 'scandir', real_scandir)
+        assert watcher.update() == []
+
     def test_rescan_after_directory_failure(self, fs, monkeypatch):
         fs.create_dir('/watch')
         watcher = PathWatcher()

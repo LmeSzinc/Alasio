@@ -289,22 +289,22 @@ def _change_events(old, new):
     yield WatchEvent.from_record('M', new)
 
 
-def _preserve(old, new, path, keep_root=False):
+def _preserve(old, new, path):
     """
-    Copy the old records of one path from old to new.
+    Fill records missing from new with the old records of one path.
+
+    Existing new records are kept because they were read later and are
+    fresher than the preserved ones.
 
     Args:
         old (dict): Previous path -> WatchRecord map
         new (dict): Current path -> WatchRecord map
         path (str): Root of the subtree to preserve
-        keep_root (bool): True to keep a root already observed in new
     """
     prefix = path + '/' if path != '/' else '/'
     for key, record in old.items():
-        if key == path and keep_root and path in new:
-            continue
         if key == path or key.startswith(prefix):
-            new[key] = record
+            new.setdefault(key, record)
 
 
 def _event_sort_key(event):
@@ -617,7 +617,7 @@ class PathWatcher:
         if scan.status == _SCAN_INCOMPLETE:
             # Do not retry in the same update. The next update is
             # the retry point, after the caller has waited.
-            _preserve(old, new, root, keep_root=True)
+            _preserve(old, new, root)
             return
         if scan.status == _SCAN_MISSING:
             new.pop(root, None)
@@ -628,7 +628,7 @@ class PathWatcher:
                 new.pop(root, None)
                 root_state = 'missing'
             elif record is None or record.type == 'D':
-                _preserve(old, new, root, keep_root=True)
+                _preserve(old, new, root)
                 return
             else:
                 new[root] = record
@@ -648,7 +648,7 @@ class PathWatcher:
             dir_path = stack.pop()
             scan = _list_dir(dir_path)
             if scan.status == _SCAN_INCOMPLETE:
-                _preserve(old, new, dir_path, keep_root=True)
+                _preserve(old, new, dir_path)
                 continue
             if scan.status == _SCAN_MISSING:
                 new.pop(dir_path, None)
@@ -659,7 +659,7 @@ class PathWatcher:
                     new.pop(dir_path, None)
                     continue
                 if record is None or record.type == 'D':
-                    _preserve(old, new, dir_path, keep_root=True)
+                    _preserve(old, new, dir_path)
                     continue
                 new[dir_path] = record
                 continue
