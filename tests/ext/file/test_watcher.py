@@ -14,8 +14,8 @@ from msgspec import Struct
 
 import alasio.ext.file.watcher as watcher_module
 from alasio.ext.file.watcher import (
-    _SCAN_INCOMPLETE, _SCAN_MISSING, _SCAN_NOT_DIRECTORY, _SCAN_OK, PathWatcher, WatchEvent, WatchRecord, _list_dir,
-    _Watch
+    _SCAN_INCOMPLETE, _SCAN_MISSING, _SCAN_NOT_DIRECTORY, _SCAN_OK, PathWatcher, WatchEvent, WatchRecord, _covers,
+    _list_dir, _normalize_path, _preserve, _Watch
 )
 from alasio.testing.filesystem import fs  # noqa: F401
 from alasio.testing.filesystem.entry import FakeDirEntry
@@ -130,6 +130,57 @@ class TestContract:
         first = {record.path: record for record in watcher.list()}
         second = {record.path: record for record in watcher.list()}
         assert first['/watch/a.txt'] is second['/watch/a.txt']
+
+
+class TestDriveRoot:
+    def test_drive_root_covers_its_children(self):
+        assert _covers(_Watch('E:/', False), 'E:/a.txt')
+        assert not _covers(_Watch('E:/', False), 'E:/sub/a.txt')
+        assert _covers(_Watch('E:/', True), 'E:/sub/a.txt')
+
+    def test_preserve_keeps_the_drive_root_subtree(self):
+        old = {
+            'E:/a.txt': WatchRecord('E:/a.txt', 'F', 1, 2),
+            'E:/sub/b.txt': WatchRecord('E:/sub/b.txt', 'F', 3, 4),
+            'F:/other.txt': WatchRecord('F:/other.txt', 'F', 5, 6),
+        }
+        new = {}
+        _preserve(old, new, 'E:/')
+        assert new == {
+            'E:/a.txt': old['E:/a.txt'],
+            'E:/sub/b.txt': old['E:/sub/b.txt'],
+        }
+
+    @pytest.mark.skipif(os.name != 'nt', reason='Windows drive roots only')
+    def test_drive_root_stays_absolute(self):
+        assert _normalize_path('E:\\') == 'E:/'
+        assert _normalize_path('E:/') == 'E:/'
+
+    @pytest.mark.skipif(os.name != 'nt', reason='Windows drive roots only')
+    def test_watching_a_drive_root_reads_its_children(self, fs):
+        root = fs.root_dir.path
+        fs.create_file(f'{root}/a.txt')
+        watcher = PathWatcher()
+        watcher.subscribe(root + '\\')
+        assert event_shape(watcher.update()) == [('A', root + '/', 'D')]
+        fs.create_file(f'{root}/b.txt')
+        assert event_shape(watcher.update()) == [('A', f'{root}/b.txt', 'F')]
+
+
+class TestCovers:
+    def test_recursive_needs_a_separator_boundary(self):
+        watch = _Watch('/watch', True)
+        assert _covers(watch, '/watch')
+        assert _covers(watch, '/watch/a.txt')
+        assert _covers(watch, '/watch/sub/a.txt')
+        assert not _covers(watch, '/watcher/a.txt')
+
+    def test_non_recursive_covers_direct_children_only(self):
+        watch = _Watch('/watch', False)
+        assert _covers(watch, '/watch')
+        assert _covers(watch, '/watch/a.txt')
+        assert not _covers(watch, '/watch/sub/a.txt')
+        assert not _covers(watch, '/watcher/a.txt')
 
 
 class TestDirectoryListing:
@@ -620,6 +671,21 @@ class TestRootTypeChange:
 
 
 class TestOverlap:
+    def test_steady_state_does_not_check_coverage(self, fs, monkeypatch):
+        fs.create_file('/watch/a.txt')
+        fs.create_dir('/watch/sub')
+        watcher = PathWatcher()
+        watcher.subscribe('/watch', recursive=True)
+        watcher.subscribe('/watch/sub', recursive=True)
+        watcher.update()
+
+        def fail(*args, **kwargs):
+            raise AssertionError('steady state must not check coverage')
+
+        monkeypatch.setattr(watcher_module, '_covers', fail)
+        fs.create_file('/watch/sub/b.txt')
+        assert event_shape(watcher.update()) == [('A', '/watch/sub/b.txt', 'F')]
+
     def test_events_are_deduplicated(self, fs):
         fs.create_file('/watch/a/b/f.txt')
         fs.create_file('/watch/a/g.txt')

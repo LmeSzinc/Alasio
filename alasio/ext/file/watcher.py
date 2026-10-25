@@ -6,7 +6,7 @@ from typing import Dict, List, Literal
 
 from msgspec import Struct, field
 
-from alasio.ext.path.calc import joinpath, normpath
+from alasio.ext.path.calc import normpath, subpath_to
 
 __all__ = [
     'PathWatcher',
@@ -158,7 +158,8 @@ def _normalize_path(filepath):
         filepath (str): Absolute path to normalize
 
     Returns:
-        str: Path with '/' separators
+        str: Path with '/' separators. A drive root keeps its trailing
+            '/', so the result stays absolute.
 
     Raises:
         TypeError: When filepath is not a string
@@ -172,6 +173,19 @@ def _normalize_path(filepath):
     return normpath(filepath)
 
 
+def _subtree_prefix(path):
+    """
+    Get the prefix shared by every descendant of a path.
+
+    Args:
+        path (str): Normalized absolute directory path
+
+    Returns:
+        str: Path ending with '/', also for the POSIX root and drive roots
+    """
+    return path if path.endswith('/') else path + '/'
+
+
 def _covers(watch, path):
     """
     Check whether one subscription covers a path.
@@ -183,14 +197,13 @@ def _covers(watch, path):
     Returns:
         bool: True when watch observes path
     """
-    if path == watch.path:
-        return True
+    rest = subpath_to(path, watch.path)
+    if rest is None:
+        return False
     if watch.recursive:
-        return path.startswith(
-            '/' if watch.path == '/' else watch.path + '/'
-        )
-    parent, sep, _ = path.rpartition('/')
-    return bool(sep) and (parent or '/') == watch.path
+        return True
+    # A non-recursive root covers itself and its direct children only.
+    return '/' not in rest
 
 
 def _stat(path):
@@ -233,10 +246,11 @@ def _list_dir(path):
     failed = {}
     error = None
     status = _SCAN_OK
+    prefix = _subtree_prefix(path)
     try:
         with os.scandir(path) as scan:
             for entry in scan:
-                full = joinpath(path, entry.name)
+                full = prefix + entry.name
                 try:
                     if entry.is_symlink():
                         record = WatchRecord(full, 'S')
@@ -302,7 +316,7 @@ def _preserve(old, new, path):
         new (dict): Current path -> WatchRecord map
         path (str): Root of the subtree to preserve
     """
-    prefix = path + '/' if path != '/' else '/'
+    prefix = _subtree_prefix(path)
     for key, record in old.items():
         if key == path or key.startswith(prefix):
             new.setdefault(key, record)
@@ -453,8 +467,12 @@ class PathWatcher:
             # initialized before this update. Paths recorded only by a new
             # subscription are its baseline and stay silent.
             if initialized:
+                # In the steady state every subscription is initialized,
+                # so every record in new was produced by one of them and
+                # needs no coverage check.
+                check_coverage = len(initialized) < len(watches)
                 for path, record in new.items():
-                    if not any(_covers(watch, path) for watch in initialized):
+                    if check_coverage and not any(_covers(watch, path) for watch in initialized):
                         continue
                     old_record = old.get(path)
                     if old_record == record:
