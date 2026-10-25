@@ -1097,7 +1097,7 @@ class TestMarkModified:
         assert len(records) == 1
         assert records[0].size == len('changed')
 
-    def test_does_not_suppress_delete(self, fs):
+    def test_suppresses_delete(self, fs):
         fs.create_file('/watch/a.txt')
         watcher = PathWatcher()
         watcher.subscribe('/watch')
@@ -1105,9 +1105,116 @@ class TestMarkModified:
 
         fs.remove('/watch/a.txt')
         watcher.mark_modified('/watch/a.txt')
+        assert watcher.update() == []
+        assert ('/watch/a.txt', 'F') not in record_shape(watcher.list())
+
+    def test_type_change_after_mark_is_reported(self, fs):
+        fs.create_file('/watch/a.txt')
+        watcher = PathWatcher()
+        watcher.subscribe('/watch')
+        watcher.update()
+
+        watcher.mark_modified('/watch/a.txt')
+        fs.remove('/watch/a.txt')
+        fs.create_dir('/watch/a.txt')
         assert event_shape(watcher.update()) == [
             ('D', '/watch/a.txt', 'F'),
+            ('A', '/watch/a.txt', 'D'),
         ]
+
+    def test_mark_expires_after_one_scan(self, fs):
+        fs.create_file('/watch/a.txt')
+        watcher = PathWatcher()
+        watcher.subscribe('/watch')
+        watcher.update()
+
+        watcher.mark_modified('/watch/a.txt')
+        watcher.mark_modified('/not/watched.txt')
+        assert watcher.update() == []
+        assert watcher._marked == {}
+
+    def test_mark_only_silences_its_path(self, fs):
+        fs.create_file('/watch/a.txt', contents='a')
+        fs.create_file('/watch/b.txt', contents='b')
+        watcher = PathWatcher()
+        watcher.subscribe('/watch')
+        watcher.update()
+
+        with open('/watch/a.txt', 'w') as file:
+            file.write('aa')
+        with open('/watch/b.txt', 'w') as file:
+            file.write('bb')
+        fs.utime('/watch/a.txt', ns=(0, 1000000000))
+        fs.utime('/watch/b.txt', ns=(0, 1000000000))
+        watcher.mark_modified('/watch/a.txt')
+        assert event_shape(watcher.update()) == [
+            ('M', '/watch/b.txt', 'F'),
+        ]
+
+    def test_batch_generated_files_do_not_emit_events(self, fs):
+        fs.create_dir('/watch')
+        watcher = PathWatcher()
+        watcher.subscribe('/watch', recursive=True)
+        watcher.update()
+
+        paths = [f'/watch/{index}.txt' for index in range(20)]
+        for path in paths:
+            fs.create_file(path, contents='x')
+            watcher.mark_modified(path)
+        assert watcher.update() == []
+        assert watcher._marked == {}
+        assert watcher.update() == []
+        assert len(watcher.list()) == len(paths) + 1
+
+    def test_mark_during_scan_suppresses_event(self, fs, monkeypatch):
+        fs.create_dir('/watch')
+        watcher = PathWatcher()
+        watcher.subscribe('/watch')
+        watcher.update()
+
+        real_list_dir = watcher_module._list_dir
+        state = {'marked': False}
+
+        def hooking_list_dir(path):
+            if path == '/watch' and not state['marked']:
+                state['marked'] = True
+                fs.create_file('/watch/new.txt')
+                watcher.mark_modified('/watch/new.txt')
+            return real_list_dir(path)
+
+        monkeypatch.setattr(watcher_module, '_list_dir', hooking_list_dir)
+        assert watcher.update() == []
+        assert ('/watch/new.txt', 'F') in record_shape(watcher.list())
+        assert watcher._marked != {}
+
+        assert watcher.update() == []
+        assert watcher._marked == {}
+
+    def test_mark_during_scan_is_kept_for_next_scan(self, fs, monkeypatch):
+        fs.create_dir('/watch')
+        watcher = PathWatcher()
+        watcher.subscribe('/watch')
+        watcher.update()
+
+        real_list_dir = watcher_module._list_dir
+        state = {'marked': False}
+
+        def hooking_list_dir(path):
+            scan = real_list_dir(path)
+            if path == '/watch' and not state['marked']:
+                state['marked'] = True
+                fs.create_file('/watch/new.txt')
+                watcher.mark_modified('/watch/new.txt')
+            return scan
+
+        monkeypatch.setattr(watcher_module, '_list_dir', hooking_list_dir)
+        assert watcher.update() == []
+        assert ('/watch/new.txt', 'F') not in record_shape(watcher.list())
+        assert watcher._marked != {}
+
+        assert watcher.update() == []
+        assert ('/watch/new.txt', 'F') in record_shape(watcher.list())
+        assert watcher._marked == {}
 
 
 class TestList:

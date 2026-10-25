@@ -25,7 +25,8 @@ _EVENT_ORDER: Dict[_EventType, int] = {
     'M': 2,
 }
 
-# Timestamp rounding tolerance for suppressing our own writes without IO.
+# Filesystem timestamp rounding tolerance for marks. A mark is taken
+# after our write, so a slightly later mtime can still be ours.
 _MARK_GRACE_NS = 1000
 
 _SCAN_OK = 'ok'
@@ -333,6 +334,7 @@ class PathWatcher:
         self._watches: Dict[str, _Watch] = {}
         self._records: Dict[str, WatchRecord] = {}
         self._marked: Dict[str, int] = {}
+        self._marks_lock = Lock()
         self._lock = Lock()
 
     def subscribe(self, filepath, recursive=False):
@@ -400,7 +402,6 @@ class PathWatcher:
         filepath = _normalize_path(filepath)
         with self._lock:
             watch = self._watches.pop(filepath, None)
-            self._marked.pop(filepath, None)
             if watch is not None:
                 self._release(watch)
 
@@ -429,6 +430,8 @@ class PathWatcher:
             old = self._records
             new = {}
             events = []
+            with self._marks_lock:
+                start_marks = self._marked.copy()
             # Subscriptions that already had a baseline before this update.
             # A path covered by one of them still needs its diff even when a
             # new subscription recorded that path first.
@@ -461,26 +464,50 @@ class PathWatcher:
                 if path not in new:
                     events.append(WatchEvent.from_record('D', record))
 
-            result = []
-            consumed = set()
             events_map = {}
             for event in events:
                 key = (event.event, event.path, event.type)
                 previous = events_map.get(key)
                 if previous is None or (event.mtime_ns, event.size) > (previous.mtime_ns, previous.size):
                     events_map[key] = event
-            for event in events_map.values():
-                mark_time_ns = self._marked.get(event.path)
-                if mark_time_ns is not None:
-                    if event.event in ('A', 'M'):
-                        consumed.add(event.path)
-                        if event.mtime_ns <= mark_time_ns + _MARK_GRACE_NS:
-                            continue
-                    elif event.event == 'D':
-                        consumed.add(event.path)
-                result.append(event)
-            for path in consumed:
-                self._marked.pop(path, None)
+            with self._marks_lock:
+                end_marks = self._marked
+                self._marked = {}
+            if end_marks:
+                event_paths = {event.path for event in events_map.values()}
+                suppressed = set()
+                for path, mark in end_marks.items():
+                    record = new.get(path)
+                    if record is None:
+                        # A path deleted by us has no record to compare.
+                        silence = True
+                    elif record.type == 'F':
+                        silence = record.mtime_ns <= mark + _MARK_GRACE_NS
+                    else:
+                        # A type change is not ours to hide.
+                        silence = False
+                    if silence and path in event_paths:
+                        suppressed.add(path)
+                if suppressed:
+                    events_map = {
+                        key: event for key, event in events_map.items()
+                        if event.path not in suppressed
+                    }
+                # Equal snapshots mean no mark was created during the
+                # scan; every mark is a one-shot pre-scan mark.
+                if start_marks != end_marks:
+                    # A mark created while this update was scanning stays
+                    # for one more update: the scan may have passed the path
+                    # before the write became visible.
+                    kept = {
+                        path: mark for path, mark in end_marks.items()
+                        if start_marks.get(path) != mark
+                    }
+                    if kept:
+                        with self._marks_lock:
+                            for path, mark in kept.items():
+                                self._marked.setdefault(path, mark)
+            result = list(events_map.values())
             self._records = new
         return sorted(result, key=_event_sort_key)
 
@@ -498,14 +525,19 @@ class PathWatcher:
 
     def mark_modified(self, filepath):
         """
-        Mark a path written by us so changes not newer than the mark
-        are suppressed. Sync and memory only; no filesystem IO.
+        Mark a path written, created, or deleted by us.
+
+        Call it after the operation completes and before the next
+        update(). The next update() silences every event for the path
+        when the path is missing, or when it is still a file whose mtime
+        is not newer than this mark. A path that is now a directory or
+        symlink is reported. Sync and memory only; no filesystem IO.
 
         Args:
             filepath (str): Absolute path that was written by us
         """
         filepath = _normalize_path(filepath)
-        with self._lock:
+        with self._marks_lock:
             self._marked[filepath] = time.time_ns()
 
     @staticmethod
