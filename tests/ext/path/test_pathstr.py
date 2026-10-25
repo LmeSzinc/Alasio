@@ -39,6 +39,12 @@ class TestCwd:
         monkeypatch.setattr(os, 'getcwd', lambda: '/')
         assert PathStr.cwd() == '/'
 
+    def test_cwd_is_drive_root(self, monkeypatch):
+        """A Windows drive root cwd should stay "C:/" and absolute."""
+        monkeypatch.setattr(calc, 'WINDOWS_SEP', True)
+        monkeypatch.setattr(os, 'getcwd', lambda: 'C:\\')
+        assert PathStr.cwd() == 'C:/'
+
 
 class TestSubpath:
     """Tests for PathStr.subpath_to() and PathStr.subpath(), the calc wrappers."""

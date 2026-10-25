@@ -5,7 +5,11 @@ WINDOWS_SEP = os.sep == '\\'
 
 def normpath(path: str) -> str:
     """
-    Normalize whatever to seperator "/"
+    Normalize whatever to separator "/"
+
+    Roots keep their trailing separator so they stay absolute: "/" on
+    POSIX and "C:/" on Windows. A bare drive is treated as the drive
+    root, "C:" -> "C:/", because "C:" is drive-relative in the OS.
     """
     if WINDOWS_SEP:
         # In most cases just normpath('xxx.png') check '/' first to be faster
@@ -13,6 +17,8 @@ def normpath(path: str) -> str:
             normalized = path.rstrip('\\/').replace('\\', '/')
         else:
             normalized = path.rstrip('\\/')
+        if len(normalized) == 2 and normalized[1] == ':' and normalized[0].isalpha():
+            return normalized + '/'
     else:
         normalized = path.rstrip('/')
     # A bare root ("/" / "\\") is kept as "/" instead of becoming an empty
@@ -34,9 +40,9 @@ def joinpath(root: str, path: str) -> str:
     """
     if root:
         if path:
-            if root == '/':
-                # linux root, don't create '//path'
-                return f'/{path}'
+            if root[-1] == '/':
+                # Root already ends with a separator, don't create '//path'
+                return root + path
             else:
                 return f'{root}/{path}'
         else:
@@ -63,14 +69,16 @@ def joinnormpath(root: str, path: str) -> str:
             path = path.rstrip('\\/').replace('\\', '/')
         else:
             path = path.rstrip('\\/')
+        if len(path) == 2 and path[1] == ':' and path[0].isalpha():
+            path += '/'
     else:
         path = path.rstrip('/')
 
     if root:
         if path:
-            if root == '/':
-                # linux root, don't create '//path'
-                return f'/{path}'
+            if root[-1] == '/':
+                # Root already ends with a separator, don't create '//path'
+                return root + path
             else:
                 return f'{root}/{path}'
         else:
@@ -96,9 +104,9 @@ def uppath(root: str, up: int = 1) -> str:
             # Relative path can only up to empty string
             if not root:
                 return ''
-            # Absolute path can only up to "C:"
-            elif root.endswith(':'):
-                break
+            # Absolute path can only up to the drive root "C:/"
+            elif root[-1] == ':':
+                return root + '/'
         return root
     else:
         is_absolute = root.startswith('/')

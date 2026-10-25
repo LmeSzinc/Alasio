@@ -33,7 +33,7 @@ class CleanupFolder:
     the empty string and is never returned, so the removal can never
     escape the tree of the caller. An absolute path is accepted too, the
     walk of the parent folders stops at the filesystem root ("/") and at
-    the drive root ("C:"), e.g. "/env" and "C:/env" are the top level
+    the drive root ("C:/"), e.g. "/env" and "C:/env" are the top level
     folders returned. The roots themselves are never returned, even when
     they are registered as folders.
     """
@@ -105,7 +105,7 @@ class CleanupFolder:
         Returns:
             list[str]: Paths of the folders, the deepest first, so a
                 folder is removed before its parent folder. The root of
-                the caller (the empty string, "/" or "C:") is never
+                the caller (the empty string, "/" or "C:/") is never
                 listed, the caller removes the folders with os.rmdir(): a
                 folder that is not empty fails the removal and is kept
         """
@@ -125,11 +125,11 @@ class CleanupFolder:
         # collected by the walk of the folder itself. A root is not a
         # folder of the caller and is never a candidate, even when it is
         # registered: the empty string of a relative path, the filesystem
-        # root "/" and the drive root "C:" of an absolute path
+        # root "/" and the drive root "C:/" of an absolute path
         folders = {
             folder
             for folder in self._folders
-            if folder and folder != '/' and not folder.endswith(':')
+            if folder and not _is_root(folder)
         }
         for path in self._folders:
             for parent in _iter_parents(path):
@@ -144,6 +144,24 @@ class CleanupFolder:
         # The deepest first, a folder is removed before its parent folder,
         # the path breaks the ties for a deterministic order
         return sorted(folders - occupied, key=lambda path: (-path.count('/'), path))
+
+
+def _is_root(path):
+    """
+    Check whether a normalized path is the filesystem or a drive root.
+
+    Args:
+        path (str): Normalized path
+
+    Returns:
+        bool: True for "/" and for a drive root "C:/", "C:" is accepted
+            too for callers that have not normalized their paths yet
+    """
+    if path == '/':
+        return True
+    if len(path) == 2:
+        return path[1] == ':'
+    return len(path) == 3 and path[1] == ':' and path[2] == '/'
 
 
 def _iter_parents(path):
@@ -165,7 +183,7 @@ def _iter_parents(path):
     while folder:
         # the root of the filesystem and the root of a drive are not
         # folders of the tree of the caller
-        if folder == '/' or folder.endswith(':'):
+        if _is_root(folder):
             break
         yield folder
         folder = uppath(folder)

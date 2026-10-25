@@ -70,8 +70,9 @@ class TestIterParentFolder:
         assert list(_iter_parent_folder('file.txt')) == []
 
     def test_drive_root(self):
-        """Windows drive root should be yielded as the last folder."""
-        assert list(_iter_parent_folder('C:/folder/file.txt')) == ['C:/folder', 'C:']
+        """The Windows drive root already exists, it should not be yielded."""
+        assert list(_iter_parent_folder('C:/folder/file.txt')) == ['C:/folder']
+        assert list(_iter_parent_folder('C:/file.txt')) == []
 
     def test_absolute_path(self):
         """Absolute filepath should stop before the root."""

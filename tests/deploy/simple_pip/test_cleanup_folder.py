@@ -218,10 +218,11 @@ class TestRoot:
         cleaner.register_folder('/')
         assert cleaner.get_cleanup_folders() == []
 
-    def test_drive_root_registered_as_a_folder(self):
+    @pytest.mark.parametrize('root', ['C:', 'C:/'])
+    def test_drive_root_registered_as_a_folder(self, root):
         """The drive root is not a folder of the caller, it is never returned."""
         cleaner = CleanupFolder()
-        cleaner.register_folder('C:')
+        cleaner.register_folder(root)
         assert cleaner.get_cleanup_folders() == []
 
     def test_empty_string_paths(self):

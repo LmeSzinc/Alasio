@@ -28,7 +28,8 @@ def _iter_parent_folder(filepath):
     Iter parent folders of a normalized filepath, from deep to shallow.
     C:/folder/file
         - C:/folder
-        - C: (same as C:/)
+
+    The root folder always exists, it is not yielded.
 
     Args:
         filepath (str): Normalized filepath
@@ -38,6 +39,10 @@ def _iter_parent_folder(filepath):
     """
     folder, sep, _ = filepath.rpartition('/')
     while sep and folder:
+        # A drive root is "C:/", while "C:" is drive-relative in the OS.
+        # The root always exists, it is not a folder to create.
+        if len(folder) == 2 and folder[1] == ':' and folder[0].isalpha():
+            return
         yield folder
         folder, sep, _ = folder.rpartition('/')
 

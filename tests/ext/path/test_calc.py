@@ -57,9 +57,11 @@ class TestNormpathWhenWindows:
         ('a\\b//c', 'a/b//c'),
         ('C:\\Users\\x\\', 'C:/Users/x'),
         ('C:/Users/x/', 'C:/Users/x'),
-        # Only separators are removed, "C:" keeps its drive colon
-        ('C:\\', 'C:'),
-        ('C:', 'C:'),
+        # A drive root keeps its separator so it stays absolute,
+        # "C:" is drive-relative in the OS
+        ('C:\\', 'C:/'),
+        ('C:/', 'C:/'),
+        ('C:', 'C:/'),
         # A bare root keeps the root as "/" instead of becoming an empty string
         ('/', '/'),
         ('\\', '/'),
@@ -72,7 +74,7 @@ class TestNormpathWhenWindows:
         ('中文/图片\\', '中文/图片'),
     ])
     def test_normpath(self, path, expected):
-        """Whatever input should end as a "/" separated path without trailing separators."""
+        """Whatever input should end as a "/" separated path, roots keep their separator."""
         assert normpath(path) == expected
 
 
@@ -105,6 +107,9 @@ class TestNormpathWhenPosix:
         # No platform detection, a Windows path is not converted
         ('C:/x/', 'C:/x'),
         ('C:\\x\\', 'C:\\x\\'),
+        # A drive letter is an ordinary name on POSIX, only "/" is a root
+        ('C:/', 'C:'),
+        ('C:', 'C:'),
     ])
     def test_normpath(self, path, expected):
         """Only trailing "/" are removed, backslash is kept as is."""
@@ -123,9 +128,12 @@ class TestJoinpath:
         ('/a', 'b', '/a/b'),
         ('a/b', 'c/d', 'a/b/c/d'),
         ('C:', 'a', 'C:/a'),
+        ('C:/', 'a', 'C:/a'),
+        ('C:/', 'a/b', 'C:/a/b'),
         # Deviation: os.path.join('a', '') returns 'a/', joinpath returns 'a'
         ('a', '', 'a'),
-        # Linux root is special cased, no '//path'
+        ('C:/', '', 'C:/'),
+        # Roots are special cased, no '//path'
         ('/', 'a', '/a'),
         ('/', 'a/b', '/a/b'),
         ('/', '', '/'),
@@ -133,8 +141,8 @@ class TestJoinpath:
         # os.path.join('a', '/b') returns '/b', os.path.join('/', '/a') returns '/'
         ('a', '/b', 'a//b'),
         ('/', '/a', '//a'),
-        # Deviation: root must be normalized first, otherwise a double separator is produced
-        ('a/', 'b', 'a//b'),
+        # A trailing separator on the base does not produce a double separator
+        ('a/', 'b', 'a/b'),
     ])
     def test_joinpath(self, root, path, expected):
         """Result should be root and path joined by "/", root wins when path is empty."""
@@ -161,9 +169,14 @@ class TestJoinnormpathWhenWindows:
         ('a', 'b\\', 'a/b'),
         ('a', 'b\\c/', 'a/b/c'),
         ('a', 'b\\\\', 'a/b'),
-        # Linux root is special cased, no '//path' (same as joinpath)
+        # A drive root path is normalized like normpath()
+        ('', 'C:\\', 'C:/'),
+        ('', 'C:', 'C:/'),
+        # Roots are special cased, no '//path' (same as joinpath)
         ('/', 'a', '/a'),
         ('/', '', '/'),
+        ('C:/', 'b/', 'C:/b'),
+        ('C:/', '', 'C:/'),
         ('/a', 'b', '/a/b'),
         # Deviation: an absolute path is not recognized and not joined as a replacement
         ('/a', '/b', '/a//b'),
@@ -203,7 +216,7 @@ class TestJoinnormpathWhenPosix:
 
 
 class TestUppathWhenWindows:
-    """uppath() on the Windows branch, a drive root "C:" is the top."""
+    """uppath() on the Windows branch, the drive root "C:/" is the top."""
 
     @pytest.fixture(autouse=True)
     def windows_sep(self, monkeypatch):
@@ -222,12 +235,13 @@ class TestUppathWhenWindows:
         ('a/b/c/d', 2, 'a/b'),
         ('a/b/c', 5, ''),
         ('', 1, ''),
-        # Absolute path can only go up to the drive "C:"
+        # Absolute path can only go up to the drive root "C:/"
         ('C:/a/b', 1, 'C:/a'),
-        ('C:/a/b', 2, 'C:'),
-        ('C:/a/b', 9, 'C:'),
-        ('C:/a', 5, 'C:'),
-        # Deviation: "C:" itself goes up to the empty string
+        ('C:/a/b', 2, 'C:/'),
+        ('C:/a/b', 9, 'C:/'),
+        ('C:/a', 5, 'C:/'),
+        ('C:/', 1, 'C:/'),
+        # Deviation: an unnormalized "C:" is treated as a name
         ('C:', 1, ''),
         # Deviation: "/" is not absolute on this branch, it goes up to the empty string
         ('/', 1, ''),
@@ -355,7 +369,7 @@ class TestAbspathWhenWindows:
         assert abspath(path) == expected
 
     def test_abspath_cwd_drive_root(self, monkeypatch):
-        """A drive root cwd should be normalized to "C:" and joined as usual."""
+        """A drive root cwd should be normalized to "C:/" and joined as usual."""
         monkeypatch.setattr(os, 'getcwd', lambda: 'C:\\')
         assert abspath('a') == 'C:/a'
 
@@ -476,6 +490,9 @@ class TestSubpathTo:
         ('/a/b', '/', 'a/b'),
         ('a/b/c', 'a', 'b/c'),
         ('a/b', 'a', 'b'),
+        # A drive root keeps its trailing separator
+        ('C:/a/b', 'C:/', 'a/b'),
+        ('C:/a', 'C:/a', ''),
         # The empty path is the sub-path of an empty root
         ('', '', ''),
         # Not a sub-path, None is returned
@@ -487,6 +504,7 @@ class TestSubpathTo:
         # A plain string prefix is not a sub-path
         ('/a/bc', '/a/b', None),
         ('ab', 'a', None),
+        ('C:/b', 'C:/a', None),
         # Input should be normalized first, backslash is neither a separator
         # nor a boundary (same as the get_* functions)
         ('a\\b\\c', 'a', None),
@@ -559,6 +577,7 @@ class TestGetName:
         ('/a/b/', ''),
         # Deviation: pathlib treats a bare root as name '', so does this
         ('/', ''),
+        ('C:/', ''),
         ('', ''),
         # Deviation: backslash is not a separator here, even on Windows,
         # input should be normalized with normpath() first
@@ -692,6 +711,7 @@ class TestWithName:
         ('/abc/.git', 'xxx', '/abc/xxx'),
         ('def', 'xxx', 'xxx'),
         ('', 'xxx', 'xxx'),
+        ('C:/', 'xxx', 'C:/xxx'),
         ('a/b.c/d', 'xxx', 'a/b.c/xxx'),
         # Deviation: input is expected normalized, a trailing "/" makes the
         # new name a new component instead of replacing the old one
