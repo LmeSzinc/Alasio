@@ -17,6 +17,7 @@ from alasio.ext.file.watcher import (
     _SCAN_INCOMPLETE, _SCAN_MISSING, _SCAN_NOT_DIRECTORY, _SCAN_OK, PathWatcher, WatchEvent, WatchRecord, _covers,
     _list_dir, _normalize_path, _preserve, _Watch
 )
+from alasio.logger import logger
 from alasio.testing.filesystem import fs  # noqa: F401
 from alasio.testing.filesystem.entry import FakeDirEntry
 
@@ -1180,6 +1181,142 @@ class TestFailureRecovery:
 
         monkeypatch.setattr(FakeDirEntry, 'stat', real_stat)
         assert watcher.update() == []
+
+
+class TestErrorLogging:
+    def test_directory_scan_error(self, fs, monkeypatch):
+        fs.create_dir('/watch')
+        watcher = PathWatcher()
+        watcher.subscribe('/watch')
+        watcher.update()
+
+        def fail_scandir(path):
+            raise PermissionError('denied')
+
+        monkeypatch.setattr(os, 'scandir', fail_scandir)
+        with logger.mock_capture_writer() as capture:
+            assert watcher.update() == []
+        assert capture.concat() == (
+            'ERROR | PathWatcher: failed to scan directory /watch: '
+            'PermissionError: denied\n'
+        )
+
+    def test_child_directory_scan_error(self, fs, monkeypatch):
+        fs.create_file('/watch/sub/a.txt')
+        watcher = PathWatcher()
+        watcher.subscribe('/watch', recursive=True)
+        watcher.update()
+
+        real_scandir = os.scandir
+
+        def selective_scandir(path):
+            if path == '/watch/sub':
+                raise PermissionError('denied')
+            return real_scandir(path)
+
+        monkeypatch.setattr(os, 'scandir', selective_scandir)
+        with logger.mock_capture_writer() as capture:
+            assert watcher.update() == []
+        assert capture.concat() == (
+            'ERROR | PathWatcher: failed to scan directory /watch/sub: '
+            'PermissionError: denied\n'
+        )
+
+    def test_file_root_stat_error(self, fs, monkeypatch):
+        fs.create_file('/watch/file.txt')
+        watcher = PathWatcher()
+        watcher.subscribe('/watch/file.txt')
+        watcher.update()
+
+        real_lstat = os.lstat
+
+        def fail_lstat(path):
+            if path == '/watch/file.txt':
+                raise PermissionError('denied')
+            return real_lstat(path)
+
+        monkeypatch.setattr(os, 'lstat', fail_lstat)
+        with logger.mock_capture_writer() as capture:
+            assert watcher.update() == []
+        assert capture.concat() == (
+            'ERROR | PathWatcher: failed to stat path /watch/file.txt: '
+            'PermissionError: denied\n'
+        )
+
+    def test_error_without_message(self, fs, monkeypatch):
+        fs.create_file('/watch/file.txt')
+        watcher = PathWatcher()
+        watcher.subscribe('/watch/file.txt')
+        watcher.update()
+
+        real_lstat = os.lstat
+
+        def fail_lstat(path):
+            if path == '/watch/file.txt':
+                raise PermissionError()
+            return real_lstat(path)
+
+        monkeypatch.setattr(os, 'lstat', fail_lstat)
+        with logger.mock_capture_writer() as capture:
+            assert watcher.update() == []
+        assert capture.concat() == (
+            'ERROR | PathWatcher: failed to stat path /watch/file.txt: '
+            'PermissionError\n'
+        )
+
+    def test_entry_type_error(self, fs, monkeypatch):
+        fs.create_file('/watch/a.txt')
+        watcher = PathWatcher()
+        watcher.subscribe('/watch')
+        watcher.update()
+
+        real_is_dir = FakeDirEntry.is_dir
+
+        def fail_is_dir(self, follow_symlinks=True):
+            if self.name == 'a.txt':
+                raise PermissionError('denied')
+            return real_is_dir(self, follow_symlinks=follow_symlinks)
+
+        monkeypatch.setattr(FakeDirEntry, 'is_dir', fail_is_dir)
+        with logger.mock_capture_writer() as capture:
+            assert watcher.update() == []
+        assert capture.concat() == (
+            'ERROR | PathWatcher: failed to read directory entry /watch/a.txt: '
+            'PermissionError: denied\n'
+        )
+
+    def test_entry_stat_error(self, fs, monkeypatch):
+        fs.create_file('/watch/a.txt')
+        watcher = PathWatcher()
+        watcher.subscribe('/watch')
+        watcher.update()
+
+        real_stat = FakeDirEntry.stat
+
+        def fail_stat(self, follow_symlinks=True):
+            if self.name == 'a.txt':
+                raise PermissionError('denied')
+            return real_stat(self, follow_symlinks=follow_symlinks)
+
+        monkeypatch.setattr(FakeDirEntry, 'stat', fail_stat)
+        with logger.mock_capture_writer() as capture:
+            assert watcher.update() == []
+        assert capture.concat() == (
+            'ERROR | PathWatcher: failed to stat file /watch/a.txt: '
+            'PermissionError: denied\n'
+        )
+
+    def test_missing_and_file_roots_do_not_log(self, fs):
+        fs.create_file('/watch/file.txt')
+        watcher = PathWatcher()
+        watcher.subscribe('/missing')
+        watcher.subscribe('/watch/file.txt')
+        with logger.mock_capture_writer() as capture:
+            assert event_shape(watcher.update()) == [
+                ('D', '/missing', ''),
+                ('A', '/watch/file.txt', 'F'),
+            ]
+        assert capture.concat() == ''
 
 
 class TestMarkModified:

@@ -7,6 +7,8 @@ from typing import Dict, List, Literal
 from msgspec import Struct, field
 
 from alasio.ext.path.calc import normpath, subpath_to
+from alasio.logger import logger
+from alasio.logger.utils import stringify_event
 
 __all__ = [
     'PathWatcher',
@@ -217,7 +219,8 @@ def _lstat(path):
         return WatchRecord.from_stat(path, os.lstat(path))
     except (FileNotFoundError, NotADirectoryError):
         return _MISSING
-    except OSError:
+    except OSError as e:
+        logger.error(f'PathWatcher: failed to stat path {path}: {stringify_event(e)}')
         return None
 
 
@@ -263,6 +266,7 @@ def _list_dir(path):
                     failed[full] = e
                     if error is None:
                         error = e
+                    logger.error(f'PathWatcher: failed to read directory entry {full}: {stringify_event(e)}')
                     continue
                 records.append(record)
     except FileNotFoundError:
@@ -272,6 +276,7 @@ def _list_dir(path):
     except OSError as e:
         status = _SCAN_INCOMPLETE
         error = e
+        logger.error(f'PathWatcher: failed to scan directory {path}: {stringify_event(e)}')
     return _DirScan(status, records, failed, error, entries)
 
 
@@ -556,7 +561,8 @@ class PathWatcher:
                     child = WatchRecord.from_stat(child.path, st)
                 except FileNotFoundError:
                     continue
-                except OSError:
+                except OSError as e:
+                    logger.error(f'PathWatcher: failed to stat file {child.path}: {stringify_event(e)}')
                     _preserve(old, new, child.path)
                     continue
             new[child.path] = child
