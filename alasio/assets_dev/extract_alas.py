@@ -101,7 +101,9 @@ class AssetsExtractorALAS(AssetsExtractor):
                 False to remove it
         """
         # **DIFFERENCE** only remove assets.py in alas
-        if file.endswith('assets.py'):
+        # The module folder also holds hand written files, a file like
+        # `utils_assets.py` must be kept, only the generated `assets.py` is removed
+        if get_name(file) == 'assets.py':
             return False
         return True
 

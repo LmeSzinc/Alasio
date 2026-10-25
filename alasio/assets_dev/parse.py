@@ -330,7 +330,7 @@ class AssetModule:
         """
         with THREAD_POOL.wait_jobs() as pool:
             for image in self:
-                pool.start_thread_soon(image.load())
+                pool.start_thread_soon(image.load)
 
 
 class AssetAll:

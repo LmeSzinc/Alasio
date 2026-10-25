@@ -1,6 +1,7 @@
 import re
 
 from alasio.assets_dev.parse import AssetAll, AssetImage, AssetModule, AssetMultilang
+from alasio.backport import removeprefix
 from alasio.base.image.imfile import image_fixup
 from alasio.codegen.python import CodeGen
 from alasio.config.const import Const
@@ -268,10 +269,17 @@ class AssetsExtractor:
         cached_property.pop(self, 'assets')
 
     def file_to_module(self, file):
-        # /assets/combat/interact/xxx.png -> combat/interact
+        # /assets/share/combat/interact/xxx.png -> combat/interact
         path = uppath(file)
         path = subpath(path, self.root.joinpath(Const.ASSETS_PATH))
         path = path.replace('\\', '/')
+        # AssetImage.module is relative to the language folder, so is a module
+        # name, the language folder must be stripped to match
+        for lang in Const.ASSETS_LANG:
+            lang = f'{lang}/'
+            if path.startswith(lang):
+                path = removeprefix(path, lang)
+                break
         return path
 
     def generate_on_change(self, events: "list[PathEvent]", gitadd=None):
