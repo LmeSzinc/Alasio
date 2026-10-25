@@ -120,6 +120,9 @@ class WatchEvent(Struct, frozen=True, omit_defaults=True):
 class _Watch(Struct, omit_defaults=True):
     path: str
     recursive: bool
+    # True when the caller expects a file: stat the root before listing
+    # it, so a file root does not pay for a failed directory scan.
+    stat_first: bool = False
     # False until the first update that observed this subscription. The
     # first observation becomes the baseline and only reports the root.
     initialized: bool = False
@@ -345,17 +348,46 @@ class PathWatcher:
             recursive (bool): Watch the whole subtree of a directory.
                 Ignored for file paths.
         """
+        self._subscribe(filepath, recursive, stat_first=False)
+
+    def subscribe_file(self, filepath, recursive=False):
+        """
+        Track a path the caller expects to be a file.
+
+        The first observation stats the path before listing it, so a
+        file subscription does not pay for a failed directory scan.
+        When the path is actually a directory, it is still watched
+        exactly like subscribe(filepath, recursive=...).
+
+        Args:
+            filepath (str): Absolute path to track
+            recursive (bool): Watch the whole subtree when the path
+                turns out to be a directory. Ignored for files.
+        """
+        self._subscribe(filepath, recursive, stat_first=True)
+
+    def _subscribe(self, filepath, recursive, stat_first):
+        """
+        Add or update one subscription.
+
+        Args:
+            filepath (str): Absolute path to track
+            recursive (bool): Watch the whole subtree of a directory
+            stat_first (bool): Stat the root before listing it, so a
+                file root does not need a directory scan
+        """
         filepath = _normalize_path(filepath)
         recursive = bool(recursive)
         with self._lock:
             watch = self._watches.get(filepath)
             if watch is not None and watch.recursive == recursive:
+                watch.stat_first = watch.stat_first or stat_first
                 return
             if watch is not None:
                 self._watches.pop(filepath)
                 self._release(watch)
             # A new subscription starts a new baseline.
-            self._watches[filepath] = _Watch(filepath, recursive)
+            self._watches[filepath] = _Watch(filepath, recursive, stat_first=stat_first)
 
     def unsubscribe(self, filepath):
         """
@@ -525,6 +557,23 @@ class PathWatcher:
                 yield WatchEvent.from_record('A', current)
                 watch.initialized = True
             return
+
+        if watch.stat_first and old_root is None:
+            # The caller expects a file, stat the root before trying to
+            # list it. A directory still falls through to a normal scan.
+            record = _stat(root)
+            if record is _MISSING:
+                if first:
+                    yield WatchEvent('D', root, '', 0, 0)
+                    watch.initialized = True
+                return
+            if record is None:
+                return
+            if record.type != 'D':
+                new[root] = record
+                watch.initialized = True
+                yield WatchEvent.from_record('A', record)
+                return
 
         if old_root is not None and old_root.type != 'D':
             record = _stat(root)

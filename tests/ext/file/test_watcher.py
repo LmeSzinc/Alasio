@@ -507,6 +507,92 @@ class TestFileRoot:
         assert scans == []
 
 
+class TestSubscribeFile:
+    def test_file_root_skips_first_scandir(self, fs, monkeypatch):
+        fs.create_file('/watch/file.txt', contents='a')
+        watcher = PathWatcher()
+        watcher.subscribe_file('/watch/file.txt')
+
+        real_scandir = os.scandir
+        scans = []
+
+        def counting_scandir(path):
+            scans.append(path)
+            return real_scandir(path)
+
+        monkeypatch.setattr(os, 'scandir', counting_scandir)
+        assert event_shape(watcher.update()) == [
+            ('A', '/watch/file.txt', 'F'),
+        ]
+        assert scans == []
+
+    def test_directory_falls_back_to_scan(self, fs):
+        fs.create_file('/watch/sub/a.txt')
+        fs.create_file('/watch/sub/deep/b.txt')
+        watcher = PathWatcher()
+        watcher.subscribe_file('/watch/sub')
+        assert event_shape(watcher.update()) == [
+            ('A', '/watch/sub', 'D'),
+        ]
+        records = record_shape(watcher.list())
+        assert ('/watch/sub/a.txt', 'F') in records
+        assert ('/watch/sub/deep/b.txt', 'F') not in records
+        assert watcher.update() == []
+
+    def test_directory_falls_back_recursive(self, fs):
+        fs.create_file('/watch/sub/deep/a.txt')
+        watcher = PathWatcher()
+        watcher.subscribe_file('/watch/sub', recursive=True)
+        watcher.update()
+        assert ('/watch/sub/deep/a.txt', 'F') in record_shape(watcher.list())
+
+    def test_missing_root_then_file(self, fs, monkeypatch):
+        watcher = PathWatcher()
+        watcher.subscribe_file('/watch/file.txt')
+
+        real_scandir = os.scandir
+        scans = []
+
+        def counting_scandir(path):
+            scans.append(path)
+            return real_scandir(path)
+
+        monkeypatch.setattr(os, 'scandir', counting_scandir)
+        assert event_shape(watcher.update()) == [
+            ('D', '/watch/file.txt', ''),
+        ]
+        assert scans == []
+
+        fs.create_file('/watch/file.txt', contents='a')
+        assert event_shape(watcher.update()) == [
+            ('A', '/watch/file.txt', 'F'),
+        ]
+        assert scans == []
+
+    def test_modify_after_file_hint(self, fs):
+        fs.create_file('/watch/file.txt', contents='a')
+        watcher = PathWatcher()
+        watcher.subscribe_file('/watch/file.txt')
+        watcher.update()
+
+        with open('/watch/file.txt', 'w') as file:
+            file.write('b')
+        fs.utime('/watch/file.txt', ns=(0, 1000000000))
+        assert event_shape(watcher.update()) == [
+            ('M', '/watch/file.txt', 'F'),
+        ]
+
+    def test_existing_watch_is_not_reset(self, fs):
+        fs.create_file('/watch/file.txt', contents='a')
+        watcher = PathWatcher()
+        watcher.subscribe('/watch/file.txt')
+        watcher.update()
+
+        watcher.subscribe_file('/watch/file.txt')
+        assert watcher.update() == []
+        assert ('/watch/file.txt', 'F') in record_shape(watcher.list())
+
+
 class TestRootTypeChange:
     def test_file_directory_file(self, fs):
         fs.create_file('/watch/root', contents='a')
