@@ -18,6 +18,7 @@ from alasio.ext.file.watcher import (
     _Watch
 )
 from alasio.testing.filesystem import fs  # noqa: F401
+from alasio.testing.filesystem.entry import FakeDirEntry
 
 
 def event_shape(events):
@@ -132,8 +133,7 @@ class TestContract:
 
 
 class TestDirectoryListing:
-    def test_non_recursive_listing_does_not_stat_entries(
-            self, fs, monkeypatch):
+    def test_list_dir_is_type_only(self, fs, monkeypatch):
         fs.create_file('/watch/a/b/f.txt')
         fs.create_file('/watch/a/g.txt', contents='abc')
 
@@ -142,12 +142,16 @@ class TestDirectoryListing:
 
         monkeypatch.setattr(os, 'stat', fail)
         monkeypatch.setattr(os, 'lstat', fail)
+        monkeypatch.setattr(FakeDirEntry, 'stat', fail)
         scan = _list_dir('/watch/a')
         assert scan.status == _SCAN_OK
         assert {(record.path, record.type) for record in scan.records} == {
             ('/watch/a/b', 'D'),
             ('/watch/a/g.txt', 'F'),
         }
+        records = {record.path: record for record in scan.records}
+        assert records['/watch/a/g.txt'].mtime_ns == 0
+        assert list(scan.entries) == ['/watch/a/g.txt']
 
     def test_list_dir_statuses(self, fs, monkeypatch):
         fs.create_dir('/watch/empty')
@@ -263,6 +267,50 @@ class TestBaseline:
 
 
 class TestNonRecursive:
+    def test_direct_child_file_signature_is_stored(self, fs):
+        fs.create_file('/watch/a.txt', contents='abc')
+        fs.create_dir('/watch/sub')
+        watcher = PathWatcher()
+        watcher.subscribe('/watch')
+        watcher.update()
+
+        records = {record.path: record for record in watcher.list()}
+        assert records['/watch/a.txt'].type == 'F'
+        assert records['/watch/a.txt'].mtime_ns > 0
+        assert records['/watch/a.txt'].size == 3
+        assert records['/watch/sub'].mtime_ns == 0
+
+    def test_direct_child_modification_is_reported(self, fs):
+        fs.create_file('/watch/a.txt', contents='a')
+        watcher = PathWatcher()
+        watcher.subscribe('/watch')
+        watcher.update()
+
+        with open('/watch/a.txt', 'w') as file:
+            file.write('b')
+        fs.utime('/watch/a.txt', ns=(0, 1000000000))
+        assert event_shape(watcher.update()) == [
+            ('M', '/watch/a.txt', 'F'),
+        ]
+
+    def test_stats_only_file_children(self, fs, monkeypatch):
+        fs.create_file('/watch/a.txt')
+        fs.create_dir('/watch/sub')
+        fs.create_symlink('/watch/link', '/watch/a.txt')
+
+        watcher = PathWatcher()
+        watcher.subscribe('/watch')
+        real_stat = FakeDirEntry.stat
+        stats = []
+
+        def counting_stat(self, follow_symlinks=True):
+            stats.append(self.name)
+            return real_stat(self, follow_symlinks=follow_symlinks)
+
+        monkeypatch.setattr(FakeDirEntry, 'stat', counting_stat)
+        watcher.update()
+        assert stats == ['a.txt']
+
     def test_direct_children_only(self, fs):
         fs.create_file('/watch/a.txt', contents='a')
         fs.create_file('/watch/sub/b.txt', contents='b')
@@ -400,21 +448,21 @@ class TestRecursive:
             ('D', '/watch/sub/b.txt', 'F'),
         ]
 
-    def test_recursive_scan_lstats_only_files(self, fs, monkeypatch):
+    def test_recursive_scan_stats_only_files(self, fs, monkeypatch):
         fs.create_file('/watch/a/b/f.txt', contents='abc')
         fs.create_file('/watch/a/g.txt')
         watcher = PathWatcher()
         watcher.subscribe('/watch/a', recursive=True)
-        real_lstat = os.lstat
+        real_stat = FakeDirEntry.stat
         stats = []
 
-        def counting_lstat(path):
-            stats.append(path)
-            return real_lstat(path)
+        def counting_stat(self, follow_symlinks=True):
+            stats.append(self.name)
+            return real_stat(self, follow_symlinks=follow_symlinks)
 
-        monkeypatch.setattr(os, 'lstat', counting_lstat)
+        monkeypatch.setattr(FakeDirEntry, 'stat', counting_stat)
         watcher.update()
-        assert set(stats) == {'/watch/a/b/f.txt', '/watch/a/g.txt'}
+        assert set(stats) == {'f.txt', 'g.txt'}
 
 
 class TestFileRoot:
@@ -534,12 +582,22 @@ class TestOverlap:
             return real_scandir(path)
 
         monkeypatch.setattr(os, 'scandir', counting_scandir)
+        real_stat = FakeDirEntry.stat
+        stats = []
+
+        def counting_stat(self, follow_symlinks=True):
+            stats.append(self.name)
+            return real_stat(self, follow_symlinks=follow_symlinks)
+
+        monkeypatch.setattr(FakeDirEntry, 'stat', counting_stat)
         fs.utime('/watch/sub/a.txt', ns=(0, 1000000000))
         assert event_shape(watcher.update()) == [
             ('M', '/watch/sub/a.txt', 'F'),
         ]
         assert scans.count('/watch') == 1
         assert scans.count('/watch/sub') == 1
+        # The deeper subscription stat'ed the file, the ancestor skips it.
+        assert stats == ['a.txt']
 
     def test_recursive_parent_nonrecursive_child_scans_once(
             self, fs, monkeypatch):
@@ -564,7 +622,7 @@ class TestOverlap:
         assert scans.count('/watch') == 1
         assert scans.count('/watch/sub') == 1
 
-    def test_full_record_wins_over_type_only(self, fs):
+    def test_nested_watch_keeps_file_signature(self, fs):
         fs.create_file('/watch/sub/b.txt', contents='b')
         watcher = PathWatcher()
         watcher.subscribe('/watch', recursive=True)
@@ -727,14 +785,14 @@ class TestFailureRecovery:
         watcher.subscribe('/watch', recursive=True)
         watcher.update()
 
-        real_lstat = os.lstat
+        real_stat = FakeDirEntry.stat
 
-        def selective_lstat(path):
-            if path == '/watch/a.txt':
+        def selective_stat(self, follow_symlinks=True):
+            if self.name == 'a.txt':
                 raise PermissionError('denied')
-            return real_lstat(path)
+            return real_stat(self, follow_symlinks=follow_symlinks)
 
-        monkeypatch.setattr(os, 'lstat', selective_lstat)
+        monkeypatch.setattr(FakeDirEntry, 'stat', selective_stat)
         fs.create_file('/watch/c.txt', contents='c')
         assert event_shape(watcher.update()) == [
             ('A', '/watch/c.txt', 'F'),
@@ -743,7 +801,7 @@ class TestFailureRecovery:
         assert records['/watch/a.txt'].size == 1
         assert '/watch/c.txt' in records
 
-        monkeypatch.setattr(os, 'lstat', real_lstat)
+        monkeypatch.setattr(FakeDirEntry, 'stat', real_stat)
         assert watcher.update() == []
 
 

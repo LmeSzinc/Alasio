@@ -135,11 +135,15 @@ class _DirScan(Struct, frozen=True, omit_defaults=True):
         failed (dict): path -> error for children whose type could not
             be read; callers preserve their old records
         error (object): First error, None when every entry was read
+        entries (dict): path -> os.DirEntry for non-directory entries,
+            used to stat the file after the caller decides the path is
+            not already handled by another subscription
     """
     status: str
     records: List[WatchRecord] = field(default_factory=list)
     failed: Dict[str, object] = field(default_factory=dict)
     error: object = None
+    entries: Dict[str, object] = field(default_factory=dict)
 
 
 def _normalize_path(filepath):
@@ -204,28 +208,14 @@ def _stat(path):
         return None
 
 
-def _lstat(path):
-    """
-    Lstat a path without following symlinks.
-
-    Args:
-        path (str): Absolute path
-
-    Returns:
-        WatchRecord | object | None: Record, _MISSING, or None on an
-            unreadable path
-    """
-    try:
-        return WatchRecord.from_stat(path, os.lstat(path))
-    except (FileNotFoundError, NotADirectoryError):
-        return _MISSING
-    except OSError:
-        return None
-
-
 def _list_dir(path):
     """
     Read one directory without caching.
+
+    Regular file and special entries are type-only; their DirEntry is
+    kept in `entries`, and the caller stats it after deciding whether
+    the path is already handled by another subscription. Directory and
+    symlink entries are type-only and have no entry.
 
     Args:
         path (str): Absolute directory path
@@ -235,6 +225,7 @@ def _list_dir(path):
             level status such as missing or permission denied
     """
     records = []
+    entries = {}
     failed = {}
     error = None
     status = _SCAN_OK
@@ -244,14 +235,14 @@ def _list_dir(path):
                 full = joinpath(path, entry.name)
                 try:
                     if entry.is_symlink():
-                        path_type = 'S'
+                        record = WatchRecord(full, 'S')
                     elif entry.is_dir(follow_symlinks=False):
-                        path_type = 'D'
-                    elif entry.is_file(follow_symlinks=False):
-                        path_type = 'F'
+                        record = WatchRecord(full, 'D')
                     else:
-                        st = entry.stat(follow_symlinks=False)
-                        path_type = WatchRecord.from_stat(full, st).type
+                        # Type-only here, the caller stats the entry after
+                        # checking whether another subscription handled it.
+                        record = WatchRecord(full, 'F')
+                        entries[full] = entry
                 except FileNotFoundError:
                     continue
                 except OSError as e:
@@ -259,7 +250,7 @@ def _list_dir(path):
                     if error is None:
                         error = e
                     continue
-                records.append(WatchRecord(full, path_type))
+                records.append(record)
     except FileNotFoundError:
         status = _SCAN_MISSING
     except NotADirectoryError:
@@ -267,7 +258,7 @@ def _list_dir(path):
     except OSError as e:
         status = _SCAN_INCOMPLETE
         error = e
-    return _DirScan(status, records, failed, error)
+    return _DirScan(status, records, failed, error, entries)
 
 
 def _change_events(old, new):
@@ -345,6 +336,10 @@ class PathWatcher:
         """
         Track a file or directory. Sync, memory only, no filesystem IO.
 
+        File entries are compared by modification time, size and inode,
+        so a modified file is reported in both modes. Directory and
+        symlink entries are compared by type only.
+
         Args:
             filepath (str): Absolute path to track
             recursive (bool): Watch the whole subtree of a directory.
@@ -402,10 +397,11 @@ class PathWatcher:
             old = self._records
             new = {}
             events = []
-            # Recursive subscriptions first, then the deepest roots, so
-            # a file root contributes its full signature before an
-            # ancestor's type-only entry. The `new` check skips paths
-            # already handled by an earlier subscription.
+            # Recursive subscriptions first, then the deepest roots, so a
+            # recursive scan covers whole subtrees before shallower roots,
+            # and a deeper non-recursive root contributes its full file
+            # signature before an ancestor scans the same path. The `new`
+            # check skips paths already handled by an earlier subscription.
             watches = sorted(
                 self._watches.values(),
                 key=lambda w: (not w.recursive, -len(w.path)),
@@ -484,14 +480,18 @@ class PathWatcher:
                 # Another subscription already handled this path
                 # and, if it is a directory, its subtree.
                 continue
-            if watch.recursive and child.type == 'F':
-                record = _lstat(child.path)
-                if record is _MISSING:
+            if child.type == 'F' and child.path in scan.entries:
+                # The entry is not handled yet, stat it now so its
+                # mtime/size are available for the diff.
+                entry = scan.entries[child.path]
+                try:
+                    st = entry.stat(follow_symlinks=False)
+                    child = WatchRecord.from_stat(child.path, st)
+                except FileNotFoundError:
                     continue
-                if record is None:
+                except OSError:
                     _preserve(old, new, child.path)
                     continue
-                child = record
             old_record = old.get(child.path)
             if not first:
                 yield from _change_events(old_record, child)
