@@ -20,11 +20,15 @@ class TestIsAssetsFile:
             'X1.png',
             'X_1.png',
             'TEMPLATE_X.png',
+            # frame
             'X.2.png',
+            'X.2.gif',
+            # attribute
             'X.search.png',
             'X.2.search.png',
-            # only the part before the first dot is the asset name
-            'X.中文.png',
+            'X.area.color.png',
+            # language, case insensitive
+            'X.CN.png',
             '/project/assets/cn/combat/X.png',
         ],
     )
@@ -43,6 +47,13 @@ class TestIsAssetsFile:
             ('X Y.png', 'space is not allowed in a python variable name'),
             ('1X.png', 'a python variable can not start with a digit'),
             ('X!.png', 'only word characters are allowed'),
+            # unknown suffixes would make the file a duplicate base image of X
+            ('X.old.png', 'unknown suffix'),
+            ('X.bak.png', 'unknown suffix'),
+            ('X.中文.png', 'unknown suffix'),
+            ('X.2.unknown.png', 'unknown suffix'),
+            ('X.png.png', 'the extension can not be repeated'),
+            ('X..png', 'empty suffix'),
             ('Screenshot_20250520-212905.png', 'LDPlayer screenshot'),
             ('MuMu12-20250521-072111.png', 'MuMu 12 screenshot'),
             ('MuMu20190305233638.png', 'MuMu 6 screenshot'),
@@ -142,6 +153,18 @@ class TestAssets:
         write_png(fs, project.joinpath('assets/cn/a/X.png'))
         extractor = AssetsExtractor(project)
         assert extractor.assets is extractor.assets
+
+    def test_unknown_suffix(self, fs):
+        """A file with an unknown suffix is not loaded, it would replace the base image"""
+        project = project_root(fs)
+        folder = project.joinpath('assets/cn/a')
+        write_png(fs, folder.joinpath('X.png'), area=(5, 4, 15, 12))
+        write_png(fs, folder.joinpath('X.old.png'), area=(1, 1, 9, 9))
+
+        assets = AssetsExtractor(project).assets
+        assert assets.total == 1
+        frame = assets.dict_module['a'].dict_assets['X'].dict_lang_frame['cn'][0]
+        assert frame.path == 'assets/cn/a/X.png'
 
 
 class TestGenerate:

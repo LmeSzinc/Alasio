@@ -10,7 +10,7 @@ from alasio.ext.cache import cached_property
 from alasio.ext.file.watchdog import PathEvent, Watchdog
 from alasio.ext.path import PathStr
 from alasio.ext.path.atomic import atomic_remove
-from alasio.ext.path.calc import get_rootstem, get_suffix, subpath, uppath
+from alasio.ext.path.calc import get_multisuffix, get_rootstem, get_suffix, subpath, uppath
 from alasio.git.stage.gitadd import GitAdd
 from alasio.logger import logger
 
@@ -64,10 +64,24 @@ class AssetsExtractor:
             return False
 
         # check name format
-        if REGEX_ASSETS_NAME.match(name):
-            return True
-        else:
+        if not REGEX_ASSETS_NAME.match(name):
             return False
+
+        # check the suffixes after the asset name, a file is named like
+        # <asset>.<frame>.<lang>.<attr>.<ext>
+        # AssetImage ignores an unknown suffix, the file would be loaded as
+        # another frame image of the same asset, and could silently replace the
+        # image of the asset instead of being reported
+        for suffix in get_multisuffix(file).lower().split('.')[1:-1]:
+            if suffix in Const.ASSETS_ATTR:
+                continue
+            if suffix in Const.ASSETS_LANG:
+                continue
+            if suffix.isdigit():
+                continue
+            return False
+
+        return True
 
     def patch_const(self):
         pass

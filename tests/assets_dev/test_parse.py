@@ -35,7 +35,7 @@ class TestAssetImageParse:
             ('assets/share/a/X.CN.png', 'a', 'X', 'cn', 0, ''),
             # the last attribute wins
             ('assets/share/a/X.area.color.png', 'a', 'X', 'share', 0, 'color'),
-            # unknown suffix is ignored
+            # the parser ignores an unknown suffix, is_assets_file() rejects such a file
             ('assets/share/a/X.unknown.png', 'a', 'X', 'share', 0, ''),
             # nested module
             ('assets/share/combat/interact/X.png', 'combat/interact', 'X', 'share', 0, ''),
