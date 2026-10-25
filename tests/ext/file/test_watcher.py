@@ -652,6 +652,107 @@ class TestOverlap:
             ('A', '/watch/new/a.txt', 'F'),
         ]
 
+    def test_new_recursive_child_keeps_parent_modify(self, fs):
+        fs.create_file('/watch/sub/a.txt', contents='a')
+        watcher = PathWatcher()
+        watcher.subscribe('/watch', recursive=True)
+        watcher.update()
+
+        with open('/watch/sub/a.txt', 'w') as file:
+            file.write('b')
+        fs.utime('/watch/sub/a.txt', ns=(0, 1000000000))
+        watcher.subscribe('/watch/sub', recursive=True)
+        assert event_shape(watcher.update()) == [
+            ('A', '/watch/sub', 'D'),
+            ('M', '/watch/sub/a.txt', 'F'),
+        ]
+
+    def test_new_recursive_child_keeps_parent_add(self, fs):
+        fs.create_dir('/watch/sub')
+        watcher = PathWatcher()
+        watcher.subscribe('/watch', recursive=True)
+        watcher.update()
+
+        fs.create_file('/watch/sub/new.txt')
+        watcher.subscribe('/watch/sub', recursive=True)
+        assert event_shape(watcher.update()) == [
+            ('A', '/watch/sub', 'D'),
+            ('A', '/watch/sub/new.txt', 'F'),
+        ]
+
+    def test_new_recursive_child_baseline_has_no_extra_changes(self, fs):
+        fs.create_file('/watch/sub/a.txt', contents='a')
+        watcher = PathWatcher()
+        watcher.subscribe('/watch', recursive=True)
+        watcher.update()
+
+        watcher.subscribe('/watch/sub', recursive=True)
+        assert event_shape(watcher.update()) == [
+            ('A', '/watch/sub', 'D'),
+        ]
+
+    def test_new_recursive_child_keeps_initialized_file_root_change(self, fs):
+        fs.create_file('/watch/sub/a.txt', contents='a')
+        watcher = PathWatcher()
+        watcher.subscribe('/watch/sub/a.txt')
+        watcher.update()
+
+        with open('/watch/sub/a.txt', 'w') as file:
+            file.write('b')
+        fs.utime('/watch/sub/a.txt', ns=(0, 1000000000))
+        watcher.subscribe('/watch/sub', recursive=True)
+        assert ('M', '/watch/sub/a.txt', 'F') in event_shape(watcher.update())
+
+    def test_new_recursive_child_under_nonrecursive_parent(self, fs):
+        fs.create_file('/watch/sub/deep/a.txt')
+        watcher = PathWatcher()
+        watcher.subscribe('/watch')
+        watcher.update()
+
+        watcher.subscribe('/watch/sub', recursive=True)
+        watcher.update()
+        assert ('/watch/sub/deep/a.txt', 'F') in record_shape(watcher.list())
+
+    def test_new_file_root_keeps_nonrecursive_parent_change(self, fs):
+        fs.create_file('/watch/a.txt', contents='a')
+        watcher = PathWatcher()
+        watcher.subscribe('/watch')
+        watcher.update()
+
+        with open('/watch/a.txt', 'w') as file:
+            file.write('b')
+        fs.utime('/watch/a.txt', ns=(0, 1000000000))
+        watcher.subscribe('/watch/a.txt')
+        assert ('M', '/watch/a.txt', 'F') in event_shape(watcher.update())
+
+    def test_new_recursive_parent_keeps_existing_child_change(self, fs):
+        fs.create_file('/watch/sub/a.txt', contents='a')
+        watcher = PathWatcher()
+        watcher.subscribe('/watch/sub')
+        watcher.update()
+
+        with open('/watch/sub/a.txt', 'w') as file:
+            file.write('b')
+        fs.utime('/watch/sub/a.txt', ns=(0, 1000000000))
+        watcher.subscribe('/watch', recursive=True)
+        assert ('M', '/watch/sub/a.txt', 'F') in event_shape(watcher.update())
+
+    def test_new_recursive_child_keeps_parent_type_change(self, fs):
+        fs.create_file('/watch/sub/a', contents='a')
+        watcher = PathWatcher()
+        watcher.subscribe('/watch', recursive=True)
+        watcher.update()
+
+        fs.remove('/watch/sub/a')
+        fs.create_file('/watch/sub/a/b.txt')
+        watcher.subscribe('/watch/sub', recursive=True)
+        assert event_shape(watcher.update()) == [
+            ('A', '/watch/sub', 'D'),
+            ('D', '/watch/sub/a', 'F'),
+            ('A', '/watch/sub/a', 'D'),
+            ('A', '/watch/sub/a/b.txt', 'F'),
+        ]
+
     def test_nested_recursive_scans_each_directory_once(
             self, fs, monkeypatch):
         fs.create_file('/watch/sub/a.txt')
