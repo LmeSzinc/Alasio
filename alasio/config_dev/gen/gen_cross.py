@@ -4,7 +4,7 @@ from alasio.backport import removeprefix
 from alasio.config.entry.const import ModEntryInfo
 from alasio.config_dev.gen.gen_config import ConfigGenerator
 from alasio.config_dev.parse.base import DefinitionError
-from alasio.config_dev.parse.build_mro import build_mro
+from alasio.config_dev.parse.build_mro import MroError, build_mro
 from alasio.config_dev.parse.cache_alasio import CacheAlasio
 from alasio.config_dev.parse.parse_groups import GroupData, ParseGroups
 from alasio.config_dev.parse.parse_store import ParseStore
@@ -140,11 +140,27 @@ class CrossNavGenerator:
                 if parent not in self.groups_data:
                     raise DefinitionError(
                         f'Invalid group parent: "{parent}", no such group',
-                        file=group.parser.file, keys=[group.name, 'parent'], value=parent,
+                        file=group.parser.file if group.parser else '',
+                        keys=[group.name, 'parent'], value=parent,
                     )
             hierarchy[group.name] = group.parent
 
-        dict_mro = build_mro(hierarchy)
+        try:
+            dict_mro = build_mro(hierarchy)
+        except MroError as e:
+            group = self.groups_data.get(e.cls, None)
+            if group is not None:
+                file = group.parser.file if group.parser else ''
+                keys = [group.name, 'parent']
+                value = group.parent
+            else:
+                file = ''
+                keys = []
+                value = e.cls
+            raise DefinitionError(
+                f'Invalid group inheritance: {e}',
+                file=file, keys=keys, value=value
+            ) from e
         return dict_mro
 
     def build_group_mro(self):

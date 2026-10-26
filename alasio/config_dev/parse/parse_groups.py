@@ -65,16 +65,30 @@ class GroupData(Struct, forbid_unknown_fields=True):
         data['name'] = group
         # convert parent to tuple
         parent = data.get('parent', None)
-        if parent:
-            if isinstance(parent, (list, tuple)):
-                parent = tuple(parent)
-            elif isinstance(parent, str):
-                parent = (parent,)
-            else:
-                raise DefinitionError(f'Invalid group parent, expected str or list[str], got {parent}',
-                                      keys=[group, 'parent'], value=parent)
-        else:
+        if parent is None:
             parent = ()
+        elif isinstance(parent, (list, tuple)):
+            parent = tuple(parent)
+        elif isinstance(parent, str):
+            parent = (parent,) if parent else ()
+        else:
+            raise DefinitionError(f'Invalid group parent, expected str or list[str], got {parent}',
+                                  keys=[group, 'parent'], value=parent)
+        # validate parent names
+        seen = set()
+        for parent_name in parent:
+            if not validate_task_name(parent_name):
+                raise DefinitionError(
+                    f'Group parent format invalid: "{parent_name}"',
+                    keys=[group, 'parent'], value=parent_name)
+            if parent_name == group:
+                raise DefinitionError(f'Group parent cannot include group itself',
+                                      keys=[group, 'parent'], value=parent)
+            if parent_name in seen:
+                raise DefinitionError(
+                    f'Duplicate group parent: "{parent_name}"',
+                    keys=[group, 'parent'], value=parent)
+            seen.add(parent_name)
         data['parent'] = parent
         # internal property, ignore input
         data.pop('mro', None)
@@ -86,10 +100,6 @@ class GroupData(Struct, forbid_unknown_fields=True):
         except msgspec.ValidationError as e:
             e = DefinitionError(e, keys=[group], value=data)
             raise e
-        # validate
-        if obj.name in obj.parent:
-            raise DefinitionError(f'Group parent cannot include group itself',
-                                  keys=[group, 'parent'], value=obj.parent)
         # validate dashboard color
         try:
             validate_dashboard_color(obj.dashboard_color)

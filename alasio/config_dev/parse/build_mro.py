@@ -1,3 +1,16 @@
+class MroError(TypeError):
+    """
+    Error of MRO building.
+
+    Attributes:
+        cls (str): Class that triggered the error, empty if unknown
+    """
+
+    def __init__(self, msg, cls=''):
+        super().__init__(msg)
+        self.cls = cls
+
+
 def _merge_c3(lists_to_merge: "list[list[str]]", context_cls: str) -> "tuple[str, ...]":
     """
     C3 算法的合并核心逻辑。
@@ -34,9 +47,10 @@ def _merge_c3(lists_to_merge: "list[list[str]]", context_cls: str) -> "tuple[str
             # 这里的失败通常指“顺序冲突”（Inconsistent hierarchy）
             # 比如 A(B, C) 和 B(C, A) 同时存在
             remaining = [list(p) for p in active_lists]
-            raise TypeError(
+            raise MroError(
                 f"Cannot create a consistent MRO for class '{context_cls}'. "
-                f"Remaining merge lists: {remaining}"
+                f"Remaining merge lists: {remaining}",
+                cls=context_cls,
             )
 
 
@@ -58,7 +72,10 @@ def _resolve_mro(
         # 提取环的路径：从第一次出现 cls 的地方到当前
         path = list(stack_dict.keys())
         cycle_path = path[path.index(cls):] + [cls]
-        raise TypeError(f"Cycle detected in inheritance hierarchy: {' -> '.join(cycle_path)}")
+        raise MroError(
+            f"Cycle detected in inheritance hierarchy: {' -> '.join(cycle_path)}",
+            cls=cls,
+        )
 
     # 3. 获取父类
     parents = hierarchy.get(cls, ())

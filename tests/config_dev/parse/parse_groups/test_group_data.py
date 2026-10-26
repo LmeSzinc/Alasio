@@ -225,8 +225,8 @@ args:
         group = GroupData.from_group_data('Group', {'parent': parent})
         assert group.parent == ()
 
-    @pytest.mark.parametrize('parent', [1, 1.5, True, {'Base': 1}], ids=[
-        'int', 'float', 'true', 'dict',
+    @pytest.mark.parametrize('parent', [0, 0.0, False, 1, 1.5, True, {'Base': 1}], ids=[
+        'zero', 'float-zero', 'false', 'int', 'float', 'true', 'dict',
     ])
     def test_parent_invalid_scalar(self, parent):
         with pytest.raises(DefinitionError) as e:
@@ -238,14 +238,29 @@ args:
         assert e.value.value == parent
 
     def test_parent_invalid_element(self):
-        """A list parent is normalized to a tuple before msgspec validates it."""
+        """Parent names are validated before msgspec.convert()."""
         with pytest.raises(DefinitionError) as e:
             GroupData.from_group_data('Group', {'parent': ['Base', 1]})
-        assert e.value.msg == 'ValidationError(Expected `str`, got `int` - at `$.parent[1]`)'
-        assert e.value.keys == ['Group']
-        assert e.value.value == {
-            'parent': ('Base', 1), 'args': {}, 'name': 'Group',
-        }
+        assert e.value.msg == 'Group parent format invalid: "1"'
+        assert e.value.keys == ['Group', 'parent']
+        assert e.value.value == 1
+
+    @pytest.mark.parametrize('parent', ['bad-name', 'lower', '1Group'], ids=[
+        'dash', 'lower', 'digit-first',
+    ])
+    def test_parent_name_format(self, parent):
+        with pytest.raises(DefinitionError) as e:
+            GroupData.from_group_data('Group', {'parent': parent})
+        assert e.value.msg == f'Group parent format invalid: "{parent}"'
+        assert e.value.keys == ['Group', 'parent']
+        assert e.value.value == parent
+
+    def test_parent_duplicate(self):
+        with pytest.raises(DefinitionError) as e:
+            GroupData.from_group_data('Group', {'parent': ['Base', 'Base']})
+        assert e.value.msg == 'Duplicate group parent: "Base"'
+        assert e.value.keys == ['Group', 'parent']
+        assert e.value.value == ('Base', 'Base')
 
     def test_parent_cannot_include_self(self):
         with pytest.raises(DefinitionError) as e:

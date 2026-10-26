@@ -1,6 +1,6 @@
 import pytest
 
-from alasio.config_dev.parse.build_mro import build_mro
+from alasio.config_dev.parse.build_mro import MroError, build_mro
 
 
 def test_single_inheritance():
@@ -98,6 +98,26 @@ def test_circular_dependency():
     }
     with pytest.raises(TypeError, match="Cycle detected in inheritance hierarchy"):
         build_mro(hierarchy)
+
+
+def test_error_keeps_the_class_context():
+    """dict_group_mro() uses cls to locate the source file of the error."""
+    with pytest.raises(MroError) as e:
+        build_mro({
+            "X": (),
+            "Y": (),
+            "A": ("X", "Y"),
+            "B": ("Y", "X"),
+            "Z": ("A", "B"),
+        })
+    assert e.value.cls == "Z"
+
+    with pytest.raises(MroError) as e:
+        build_mro({
+            "A": ("B",),
+            "B": ("A",),
+        })
+    assert e.value.cls == "A"
 
 
 def test_no_parents():
