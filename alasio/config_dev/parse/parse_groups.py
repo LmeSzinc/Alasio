@@ -108,6 +108,8 @@ class GroupData(Struct):
         """
         if not self.dashboard:
             return
+        if self.dashboard == 'Planner':
+            self._validate_planner_pairs()
         populate_dt = {'input-int', 'input-float'}
         for arg in self.args.values():
             if arg is None:
@@ -131,6 +133,56 @@ class GroupData(Struct):
                     continue
             # no other constraint
             arg.ge = 0
+
+    def _validate_planner_pairs(self):
+        """
+        Validate that Planner Value/Total pairs are complete and adjacent.
+
+        A Value opens a pair and only its matching Total may follow, so the
+        pair order is the definition order of the Value args. Other args are
+        allowed between pairs, but not between a Value and its Total.
+        """
+        file = self.parser.file if self.parser else ''
+        # Value arg waiting for its Total, empty when the next arg may be a Value
+        current_value = ''
+        for arg_name in self.args:
+            if arg_name.endswith('Value'):
+                if current_value:
+                    expected = f'{current_value[:-5]}Total'
+                    raise DefinitionError(
+                        f'Dashboard planner arg "{current_value}" must be followed by "{expected}", '
+                        f'got "{arg_name}"',
+                        file=file, keys=[self.name, 'args', current_value], value=arg_name
+                    )
+                current_value = arg_name
+            elif arg_name.endswith('Total'):
+                if not current_value:
+                    value_name = f'{arg_name[:-5]}Value'
+                    raise DefinitionError(
+                        f'Dashboard planner arg "{arg_name}" is not paired with "{value_name}"',
+                        file=file, keys=[self.name, 'args', arg_name], value=value_name
+                    )
+                expected = f'{current_value[:-5]}Total'
+                if arg_name != expected:
+                    raise DefinitionError(
+                        f'Dashboard planner arg "{current_value}" must be followed by "{expected}", '
+                        f'got "{arg_name}"',
+                        file=file, keys=[self.name, 'args', current_value], value=arg_name
+                    )
+                current_value = ''
+            elif current_value:
+                expected = f'{current_value[:-5]}Total'
+                raise DefinitionError(
+                    f'Dashboard planner arg "{current_value}" must be followed by "{expected}", '
+                    f'got "{arg_name}"',
+                    file=file, keys=[self.name, 'args', current_value], value=arg_name
+                )
+        if current_value:
+            expected = f'{current_value[:-5]}Total'
+            raise DefinitionError(
+                f'Dashboard planner arg "{current_value}" is not paired with "{expected}"',
+                file=file, keys=[self.name, 'args', current_value], value=expected
+            )
 
 
 class ParseGroups(ParseBase):

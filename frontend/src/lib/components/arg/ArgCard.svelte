@@ -5,7 +5,15 @@
   import ArgGroupCard from "./ArgGroupCard.svelte";
   import CardEnable from "./CardEnable.svelte";
   import LayoutHorizontalLike from "./LayoutHorizontalLike.svelte";
-  import { type ArgData, type CardData, type InfoData, type InputProps, isDashboardInternalArg } from "./utils.svelte";
+  import {
+    type ArgData,
+    type CardData,
+    type InfoData,
+    type InputProps,
+    getDashboardPairText,
+    isDashboardInternalArg,
+    isDashboardPairArg,
+  } from "./utils.svelte";
 
   type Props = {
     cardData: CardData;
@@ -42,7 +50,11 @@
   function getDashboardArgs(groupData: Record<string, ArgData>, dashboardType: string): string[] {
     return Object.entries(groupData)
       .filter(([argKey, _]) => {
-        return !isDashboardInternalArg(argKey, dashboardType);
+        if (isDashboardInternalArg(argKey, dashboardType)) return false;
+        // A Planner only displays its complete Value/Total pairs; custom
+        // settings such as "Custom" stay in the model but out of the card.
+        if (dashboardType === "Planner" && !isDashboardPairArg(argKey, groupData)) return false;
+        return true;
       })
       .map(([argKey]) => argKey);
   }
@@ -65,6 +77,7 @@
     <hr />
     {@const dashboardType = (groupData._info as ArgData | undefined)?.dashboard ?? ""}
     {@const dashboardArgs = getDashboardArgs(groupData, dashboardType)}
+    {@const pairText = dashboardType === "Planner" ? getDashboardPairText(groupData) : ""}
     {#if dashboardType}
       <!-- Dashboard -->
       <div class="flex flex-col gap-y-1.5">
@@ -74,9 +87,14 @@
             <PrettyValue data={groupData} variant="primary" class="w-full text-left" />
           {/snippet}
           {#snippet PlaceholderSnippet()}
-            {#if groupData.Time}
-              <StaticDatetime data={groupData.Time} class="justify-start" />
-            {/if}
+            <div class="flex flex-col gap-y-0.5">
+              {#if pairText}
+                <div class="text-muted-foreground truncate text-xs" title={pairText}>{pairText}</div>
+              {/if}
+              {#if groupData.Time}
+                <StaticDatetime data={groupData.Time} class="justify-start" />
+              {/if}
+            </div>
           {/snippet}
         </LayoutHorizontalLike>
         <!-- Display extra dashboard args -->

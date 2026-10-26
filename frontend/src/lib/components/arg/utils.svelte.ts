@@ -151,10 +151,55 @@ export function getArgName(arg: ArgData | InfoData) {
  */
 export function isDashboardInternalArg(argKey: string, dashboardType: string): boolean {
   if (argKey === "_info") return true;
-  if (argKey === "Value" || argKey === "Time" || argKey === "ServerUpdate") return true;
+  if (argKey === "Time" || argKey === "ServerUpdate") return true;
+  // Value is the built-in dashboard value of every type except Planner, where
+  // it is a regular arg and may be used as a Value/Total pair.
+  if (argKey === "Value" && dashboardType !== "Planner") return true;
   if (dashboardType === "DynamicTotal" && argKey === "Total") return true;
   if (dashboardType === "Planner" && (argKey === "Progress" || argKey === "Eta")) return true;
   return false;
+}
+
+/**
+ * True when arg is one side of a complete Value/Total pair.
+ *
+ * @param argKey Arg name
+ * @param groupData Dashboard group args
+ * @returns True for both the Value and the Total of a complete pair
+ */
+export function isDashboardPairArg(argKey: string, groupData: Record<string, ArgData>): boolean {
+  if (argKey.endsWith("Value")) {
+    return `${argKey.slice(0, -"Value".length)}Total` in groupData;
+  }
+  if (argKey.endsWith("Total")) {
+    return `${argKey.slice(0, -"Total".length)}Value` in groupData;
+  }
+  return false;
+}
+
+/**
+ * Format the Value/Total pairs of a dashboard group for display.
+ *
+ * A pair is an arg ending with "Value" and its matching "Total" arg. Unpaired
+ * args are ignored. One pair renders as "8 / 10"; multiple pairs render as
+ * "(8, 33) / (10, 44)" in the order of the Value args.
+ *
+ * @param groupData Dashboard group args
+ * @returns Pair text, empty when no complete pair exists
+ */
+export function getDashboardPairText(groupData: Record<string, ArgData>): string {
+  const values: string[] = [];
+  const totals: string[] = [];
+  for (const [argKey, arg] of Object.entries(groupData)) {
+    if (!argKey.endsWith("Value")) continue;
+    const total = groupData[`${argKey.slice(0, -"Value".length)}Total`];
+    if (!total) continue;
+    values.push(String(arg.value ?? "NaN"));
+    totals.push(String(total.value ?? "NaN"));
+  }
+  if (values.length === 0) return "";
+  if (values.length === 1) return `${values[0]} / ${totals[0]}`;
+  return `(${values.join(", ")}) / (${totals.join(", ")})`;
 }
 
 /**

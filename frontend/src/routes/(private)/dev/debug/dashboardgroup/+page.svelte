@@ -77,6 +77,9 @@
       _info: info("Planner", "Planner", "#8e24aa", "Research"),
       Progress: arg("Planner", "Progress", "input-int", 80),
       Eta: arg("Planner", "Eta", "input", "01:23:45"),
+      GreenValue: arg("Planner", "GreenValue", "input-int", 8, { ge: 0 }),
+      GreenTotal: arg("Planner", "GreenTotal", "input-int", 10, { ge: 0 }),
+      Custom: arg("Planner", "Custom", "input", "hidden"),
       Time: timeArg("Planner", 30 * 1000),
     },
     PlannerDone: {
@@ -134,6 +137,10 @@
       _info: info("Research", "Planner", "#8e24aa", "Research"),
       Progress: arg("Research", "Progress", "input-int", 80),
       Eta: arg("Research", "Eta", "input", "01:23:45"),
+      GreenValue: arg("Research", "GreenValue", "input-int", 33, { ge: 0 }),
+      GreenTotal: arg("Research", "GreenTotal", "input-int", 33, { ge: 0 }),
+      BlueValue: arg("Research", "BlueValue", "input-int", 22, { ge: 0 }),
+      BlueTotal: arg("Research", "BlueTotal", "input-int", 44, { ge: 0 }),
       Time: timeArg("Research", 10 * 1000),
     },
     Advanced: {
