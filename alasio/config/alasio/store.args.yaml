@@ -21,3 +21,19 @@ DashboardDynamicTotal:
     Total:
       value: 0
       range: x>=0
+
+DashboardProgress:
+  parent: DashboardBase
+  args:
+    Value:
+      value: 0
+      dt: input-float
+      range: x>=0
+
+DashboardPlanner:
+  parent: DashboardBase
+  args:
+    Progress:
+      value: 0
+      range: x>=0
+    Eta: ""

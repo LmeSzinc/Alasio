@@ -11,12 +11,10 @@ Gems:
   dashboard_color: "#eb8efe"
 
 Progress:
-  dashboard: progress
-  args:
-    Value: 0
+  parent: DashboardProgress
 
 Planner:
-  dashboard: planner
+  parent: DashboardPlanner
   args:
     GreenValue: 0
     GreenTotal: 0

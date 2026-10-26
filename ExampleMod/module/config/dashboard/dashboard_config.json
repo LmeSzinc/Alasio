@@ -41,28 +41,67 @@
       }
     },
     "Progress": {
+      "_info": {"group": "Progress", "arg": "_info", "dashboard": "Progress"},
+      "Time": {
+        "task": "Dashboard",
+        "group": "Progress",
+        "arg": "Time",
+        "i18ngroup": "DashboardBase",
+        "dt": "datetime",
+        "value": "2020-01-01T00:00:00Z"
+      },
       "Value": {
         "task": "Dashboard",
         "group": "Progress",
         "arg": "Value",
-        "dt": "input-int",
-        "value": 0
+        "i18ngroup": "DashboardProgress",
+        "dt": "input-float",
+        "value": 0.0,
+        "ge": 0
       }
     },
     "Planner": {
+      "_info": {"group": "Planner", "arg": "_info", "dashboard": "Planner"},
+      "Time": {
+        "task": "Dashboard",
+        "group": "Planner",
+        "arg": "Time",
+        "i18ngroup": "DashboardBase",
+        "dt": "datetime",
+        "value": "2020-01-01T00:00:00Z"
+      },
+      "Progress": {
+        "task": "Dashboard",
+        "group": "Planner",
+        "arg": "Progress",
+        "i18ngroup": "DashboardPlanner",
+        "dt": "input-int",
+        "value": 0,
+        "ge": 0
+      },
+      "Eta": {
+        "task": "Dashboard",
+        "group": "Planner",
+        "arg": "Eta",
+        "i18ngroup": "DashboardPlanner",
+        "dt": "input",
+        "value": ""
+      },
       "GreenValue": {
         "task": "Dashboard",
         "group": "Planner",
         "arg": "GreenValue",
         "dt": "input-int",
-        "value": 0
+        "value": 0,
+        "ge": 0
       },
       "GreenTotal": {
         "task": "Dashboard",
         "group": "Planner",
         "arg": "GreenTotal",
         "dt": "input-int",
-        "value": 0
+        "value": 0,
+        "ge": 0
       }
     }
   }

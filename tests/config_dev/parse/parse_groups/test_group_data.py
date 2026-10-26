@@ -3,12 +3,13 @@ Tests of GroupData construction.
 
 GroupData.from_group_data() is the only entry used by ParseGroups: it validates
 the group skeleton, converts every arg through ArgData.from_arg_data() and
-normalizes the parent to a tuple. The dashboard branches of __post_init__ are
-covered by the test_dashboard_*.py files, because `dashboard` is an internal
-field that from_group_data() ignores.
+normalizes the parent to a tuple. Dashboard population is an explicit step:
+build_group_mro() assigns `dashboard` and calls group.populate_dashboard(),
+because a msgspec field assignment does not trigger any population hook.
 """
 
 import pytest
+from msgspec import UNSET
 
 from alasio.config_dev.parse.base import DefinitionError
 from alasio.config_dev.parse.parse_args import ArgData
@@ -29,24 +30,18 @@ class TestGroupDataDefaults:
         assert group.override_i18n is False
         assert group.dashboard == ''
 
-    def test_assign_dashboard_after_init_does_not_run_post_init(self):
-        """
-        __post_init__ runs on construction only.
+    def test_dashboard_is_populated_explicitly(self):
+        """Assigning dashboard does not populate args, the call is explicit."""
+        group = GroupData(name='Group', args={'Value': ArgData.from_arg_data(0)})
+        group.dashboard = 'Progress'
+        assert group.args['Value'].ge is UNSET
+        group.populate_dashboard()
+        assert group.args['Value'].ge == 0
 
-        The MRO build assigns `dashboard` to an existing object, so the
-        dashboard validation can not depend on this assignment.
-        """
-        group = GroupData(name='Group')
-        group.dashboard = 'progress'
-        assert group.dashboard == 'progress'
-        assert group.args == {}
-
-    def test_invalid_dashboard_datatype(self):
-        with pytest.raises(DefinitionError) as e:
-            GroupData(name='Group', dashboard='invalid')
-        assert e.value.msg == 'Invalid dashboard datatype: "invalid"'
-        assert e.value.keys == ['Group', 'dashboard']
-        assert e.value.value == 'invalid'
+    def test_populate_dashboard_without_dashboard(self):
+        group = GroupData(name='Group', args={'Value': ArgData.from_arg_data(0)})
+        group.populate_dashboard()
+        assert group.args['Value'].ge is UNSET
 
 
 class TestGroupDataFromGroupData:
@@ -100,12 +95,13 @@ class TestGroupDataFromGroupData:
         assert group.override_args == {}
         assert group.dashboard == ''
 
-    def test_dashboard_input_is_ignored(self):
+    def test_deprecated_dashboard_input_is_ignored(self):
         """
-        The yaml `dashboard:` key is dropped.
+        The yaml `dashboard:` key is deprecated and dropped.
 
-        Dashboard groups are detected from the "Dashboard{Type}" group name in
-        the MRO build, see doc/2026-10-26_parse-groups-test-findings.md.
+        A group becomes a dashboard item when its MRO contains a
+        "Dashboard{Type}" group, see gen_cross.build_group_mro() and
+        tests/config_dev/gen/test_gen_cross_dashboard.py.
         """
         group = make_group('Group', """\
 dashboard: progress

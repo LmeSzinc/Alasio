@@ -1,5 +1,8 @@
 import typing as t
 
+import msgspec as m
+import typing_extensions as e
+
 import alasio.config.alasio.group_base as a
 from alasio.base.timer import getnow
 from alasio.config.alasio.group_proxy import batch_set
@@ -383,3 +386,36 @@ class DashboardDynamicTotal(DashboardAmount):
             str:
         """
         return f'{self.Value}/{self.Total}'
+
+
+class DashboardProgress(DashboardBase):
+    """
+    Dashboard a progress in percent
+    Typical usage: to Dashboard item progress
+
+    Write this in {nav}.args.yaml
+        Progress:
+            parent: DashboardProgress
+    """
+    Value: e.Annotated[float, m.Meta(ge=0)] = 0
+
+
+class DashboardPlanner(DashboardBase):
+    """
+    Dashboard a progress with an ETA
+    Typical usage: to Dashboard item planner
+
+    Write this in {nav}.args.yaml
+        Planner:
+            parent: DashboardPlanner
+            args:
+                # Value/Total pairs are defined by the concrete group
+                GreenValue:
+                    value: 0
+                    range: x>=0
+                GreenTotal:
+                    value: 0
+                    range: x>=0
+    """
+    Progress: a.T_INT_GE0 = 0
+    Eta: str = ''

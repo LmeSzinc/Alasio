@@ -177,6 +177,8 @@ class CrossNavGenerator:
 
             group.args = args
             group.dashboard = dashboard
+            # dashboard is assigned after construction, populate its args explicitly
+            group.populate_dashboard()
 
         # build group model
         for task_name, task in self.tasks_data.items():

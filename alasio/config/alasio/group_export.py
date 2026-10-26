@@ -29,6 +29,8 @@ from alasio.config.alasio.store_model import (
     DashboardAmount,
     DashboardBase,
     DashboardDynamicTotal,
+    DashboardPlanner,
+    DashboardProgress,
     DashboardRemain,
     DashboardTotal,
 )

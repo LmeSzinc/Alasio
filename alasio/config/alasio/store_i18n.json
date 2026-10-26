@@ -64,5 +64,44 @@
       "zh-TW": {"name": "DashboardDynamicTotal.Total", "help": ""},
       "en-ES": {"name": "DashboardDynamicTotal.Total", "help": ""}
     }
+  },
+  "DashboardProgress": {
+    "_info": {
+      "zh-CN": {"name": "DashboardProgress", "help": ""},
+      "en-US": {"name": "DashboardProgress", "help": ""},
+      "ja-JP": {"name": "DashboardProgress", "help": ""},
+      "zh-TW": {"name": "DashboardProgress", "help": ""},
+      "en-ES": {"name": "DashboardProgress", "help": ""}
+    },
+    "Value": {
+      "zh-CN": {"name": "DashboardProgress.Value", "help": ""},
+      "en-US": {"name": "DashboardProgress.Value", "help": ""},
+      "ja-JP": {"name": "DashboardProgress.Value", "help": ""},
+      "zh-TW": {"name": "DashboardProgress.Value", "help": ""},
+      "en-ES": {"name": "DashboardProgress.Value", "help": ""}
+    }
+  },
+  "DashboardPlanner": {
+    "_info": {
+      "zh-CN": {"name": "DashboardPlanner", "help": ""},
+      "en-US": {"name": "DashboardPlanner", "help": ""},
+      "ja-JP": {"name": "DashboardPlanner", "help": ""},
+      "zh-TW": {"name": "DashboardPlanner", "help": ""},
+      "en-ES": {"name": "DashboardPlanner", "help": ""}
+    },
+    "Progress": {
+      "zh-CN": {"name": "DashboardPlanner.Progress", "help": ""},
+      "en-US": {"name": "DashboardPlanner.Progress", "help": ""},
+      "ja-JP": {"name": "DashboardPlanner.Progress", "help": ""},
+      "zh-TW": {"name": "DashboardPlanner.Progress", "help": ""},
+      "en-ES": {"name": "DashboardPlanner.Progress", "help": ""}
+    },
+    "Eta": {
+      "zh-CN": {"name": "DashboardPlanner.Eta", "help": ""},
+      "en-US": {"name": "DashboardPlanner.Eta", "help": ""},
+      "ja-JP": {"name": "DashboardPlanner.Eta", "help": ""},
+      "zh-TW": {"name": "DashboardPlanner.Eta", "help": ""},
+      "en-ES": {"name": "DashboardPlanner.Eta", "help": ""}
+    }
   }
 }

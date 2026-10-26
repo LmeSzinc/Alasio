@@ -16,10 +16,10 @@ class Gems(a.DashboardAmount):
     pass
 
 
-class Progress(a.GroupBase):
-    Value: int = 0
+class Progress(a.DashboardProgress):
+    pass
 
 
-class Planner(a.GroupBase):
-    GreenValue: int = 0
-    GreenTotal: int = 0
+class Planner(a.DashboardPlanner):
+    GreenValue: a.T_INT_GE0 = 0
+    GreenTotal: a.T_INT_GE0 = 0

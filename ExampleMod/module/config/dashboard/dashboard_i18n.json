@@ -19,10 +19,6 @@
     "_info": {
       "zh-CN": {"name": "Progress", "help": ""},
       "en-US": {"name": "Progress", "help": ""}
-    },
-    "Value": {
-      "zh-CN": {"name": "Progress.Value", "help": ""},
-      "en-US": {"name": "Progress.Value", "help": ""}
     }
   },
   "Planner": {

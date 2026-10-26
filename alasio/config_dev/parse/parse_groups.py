@@ -3,25 +3,12 @@ from typing import Dict, Optional, Tuple
 import msgspec
 from msgspec import UNSET, Struct
 
-from alasio.config.alasio.group_base import DEFAULT_TIME
 from alasio.config.entry.utils import validate_task_name
 from alasio.config_dev.format.validate_color import validate_dashboard_color
 from alasio.config_dev.parse.base import DefinitionError, ParseBase
 from alasio.config_dev.parse.parse_args import ArgData
 from alasio.ext.cache import cached_property
 from alasio.ext.deep import deep_iter_depth1
-
-TYPE_DASHBOARD = [
-    # 61549961
-    'value',
-    # 2437 / 3000
-    'total',
-    # 68.35%
-    'progress',
-    # 56.27% <3.6d
-    # (0, 0, 637) / (87, 91, 76)
-    'planner',
-]
 
 
 class GroupData(Struct):
@@ -111,84 +98,16 @@ class GroupData(Struct):
             raise
         return obj
 
-    def __post_init__(self):
+    def populate_dashboard(self):
+        """
+        Populate the args of a dashboard group.
+
+        Called by CrossNavGenerator.build_group_mro() after the dashboard type
+        is resolved, because assigning a msgspec field does not trigger any
+        automatic population. Numeric args of a dashboard group default to >= 0.
+        """
         if not self.dashboard:
             return
-        if self.dashboard not in TYPE_DASHBOARD:
-            raise DefinitionError(
-                f'Invalid dashboard datatype: "{self.dashboard}"',
-                keys=[self.name, 'dashboard'], value=self.dashboard
-            )
-        # dashboard group must have "Time"
-        if 'Time' in self.args:
-            raise DefinitionError(
-                f'Dashboard group cannot have custom arg "Time"',
-                keys=[self.name, 'args', 'Time'], value=self.args['Time']
-            )
-        self.args['Time'] = ArgData.from_arg_data(DEFAULT_TIME)
-        # validate dashboard="total"
-        if self.dashboard == 'total':
-            missing = [name for name in ('Value', 'Total') if name not in self.args]
-            if missing:
-                raise DefinitionError(
-                    f'Dashboard datatype "{self.dashboard}" must have args "Value" and "Total", missing {missing}',
-                    keys=[self.name, 'args'], value=self.args
-                )
-        # validate dashboard="value"
-        if self.dashboard in ['value', 'progress']:
-            if 'Value' not in self.args:
-                raise DefinitionError(
-                    f'Dashboard datatype "{self.dashboard}" must have arg "Value"',
-                    keys=[self.name, 'args'], value=self.args
-                )
-        # validate dashboard="progress"
-        if self.dashboard == 'progress':
-            arg = self.args['Value']
-            # bool is a subclass of int, but a bool is not a progress value
-            if isinstance(arg.value, bool) or not isinstance(arg.value, (int, float)):
-                raise DefinitionError(
-                    f'Dashboard datatype "{self.dashboard}" must have default value in int or float, '
-                    f'got "{arg.value}"',
-                    keys=[self.name, 'args', 'Value'], value=arg.value
-                )
-            arg.dt = 'input-float'
-        # validate dashboard="planner"
-        if self.dashboard == 'planner':
-            for gen in ['Progress', 'Eta']:
-                if gen in self.args:
-                    raise DefinitionError(
-                        f'Dashboard datatype "{self.dashboard}" cannot have custom arg "{gen}"',
-                        keys=[self.name, 'args', gen], value=self.args[gen]
-                    )
-            # add default Progress and Eta at top
-            args = dict(
-                Progress=ArgData.from_arg_data(0),
-                Eta=ArgData.from_arg_data(''),
-            )
-            args.update(self.args)
-            self.args = args
-            # check if "xxxValue" is paired with "xxxTotal"
-            for arg_name in self.args:
-                if arg_name.endswith('Value'):
-                    pair_name = f'{arg_name[:-5]}Total'
-                    if pair_name not in self.args:
-                        raise DefinitionError(
-                            f'Dashboard planner arg "{arg_name}" is not paired with "{pair_name}"',
-                            keys=[self.name, 'args', arg_name], value=pair_name
-                        )
-                if arg_name.endswith('Total'):
-                    pair_name = f'{arg_name[:-5]}Value'
-                    if pair_name not in self.args:
-                        raise DefinitionError(
-                            f'Dashboard planner arg "{arg_name}" is not paired with "{pair_name}"',
-                            keys=[self.name, 'args', arg_name], value=pair_name
-                        )
-        self._dashboard_populate_ge0()
-
-    def _dashboard_populate_ge0(self):
-        """
-        Add constraint >=0 to all args
-        """
         populate_dt = {'input-int', 'input-float'}
         for arg in self.args.values():
             if arg is None:
@@ -239,7 +158,6 @@ class ParseGroups(ParseBase):
             # Keep empty group in args, so they can be empty group to display on GUI
             try:
                 group = GroupData.from_group_data(group_name, group_value)
-                # self.populate_dashboard_group(group)
                 group.parser = self
             except DefinitionError as e:
                 e.file = self.file

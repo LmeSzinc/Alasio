@@ -5,24 +5,32 @@ A group fixture is a yaml document written at column 0 (the opening triple
 quote is followed by a backslash), so it keeps the layout of a real
 {nav}.args.yaml.
 
-The dashboard fixtures build GroupData directly. `dashboard` is an internal
-field filled by the MRO build, GroupData.from_group_data() pops it from the
-yaml, so the dashboard branches of __post_init__ are only reachable by direct
-construction.
+The dashboard fixtures parse a multi-line yaml document that contains the
+Dashboard* base groups and the concrete groups. A group becomes a dashboard
+item when its MRO contains a "Dashboard{Type}" group; this is resolved by
+CrossNavGenerator.build_group_mro(), which then calls
+GroupData.populate_dashboard() explicitly.
 
 Usage:
     from tests.config_dev.parse.parse_groups.helpers import (
-        make_dashboard_group, make_group, make_parser, yaml_data
+        YAML_DASHBOARD_BASE, make_group, make_parser, parse_dashboard_groups, yaml_data
     )
 """
 
 import textwrap
 
-from alasio.config_dev.parse.parse_args import ArgData
+from alasio.config_dev.gen.gen_cross import CrossNavGenerator
+from alasio.config_dev.parse.build_mro import build_mro
 from alasio.config_dev.parse.parse_groups import GroupData, ParseGroups
+from alasio.ext import env
 from alasio.ext.file.yamlfile import yaml_loads
 from alasio.ext.path import PathStr
 from alasio.ext.path.calc import joinpath
+
+# The real dashboard base groups, read from the store config so a change there
+# is exposed by these tests instead of being hidden behind a duplicated copy.
+DASHBOARD_STORE_FILE = env.ALASIO_ROOT.joinpath('alasio/config/alasio/store.args.yaml')
+YAML_DASHBOARD_BASE = DASHBOARD_STORE_FILE.atomic_read_text().rstrip() + '\n'
 
 
 def yaml_data(text):
@@ -53,21 +61,28 @@ def make_group(name, text=''):
     return GroupData.from_group_data(name, yaml_data(text))
 
 
-def make_dashboard_group(dashboard, args=None, name='Group', **kwargs):
+def parse_dashboard_groups(text):
     """
-    Build a GroupData with an explicit dashboard datatype.
+    Parse a multi-line yaml document of dashboard groups and build their MRO.
 
     Args:
-        dashboard (str): Dashboard datatype, e.g. "value"
-        args (dict): Arg definitions, {arg_name: arg_definition}
-        name (str): Group name
-        **kwargs: Other GroupData fields, e.g. parent
+        text (str): Yaml document at column 0, usually YAML_DASHBOARD_BASE plus
+            the concrete groups under test
 
     Returns:
-        GroupData: Parsed group
+        dict[str, GroupData]: Groups after CrossNavGenerator.build_group_mro()
     """
-    args = {arg_name: ArgData.from_arg_data(value) for arg_name, value in (args or {}).items()}
-    return GroupData(name=name, dashboard=dashboard, args=args, **kwargs)
+    data = yaml_data(text)
+    groups = {name: GroupData.from_group_data(name, value) for name, value in data.items()}
+    for group in groups.values():
+        group.override_args = group.args.copy()
+
+    generator = object.__new__(CrossNavGenerator)
+    generator.groups_data = groups
+    generator.dict_group_mro = build_mro({name: group.parent for name, group in groups.items()})
+    generator.tasks_data = {}
+    generator.build_group_mro()
+    return groups
 
 
 def make_parser(fs, nav='main', args_yaml=None, tasks_yaml=None, i18n_json=None):
