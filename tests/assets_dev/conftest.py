@@ -49,28 +49,12 @@ def restore_project_root():
     Restore env.PROJECT_ROOT after the test
 
     Importing alasio.assets_dev.extract points the project root to this
-    repository at import time, the code generator scans the project root to sort
-    imports by stdlib / third party / local project.
+    repository at import time, and the project root is a process wide setting
+    of the config and asset loaders.
     """
     saved = env.PROJECT_ROOT
     yield
     env.PROJECT_ROOT = saved
-
-
-@pytest.fixture(autouse=True)
-def reset_library_scanner():
-    """
-    Clear the library scan cache around every test of this folder
-
-    Code generation in these tests runs on the fake filesystem, the scanner
-    would cache the stdlib and site-packages paths of the fake root, and the
-    code generation of a later test file would sort imports by that cache.
-    """
-    from alasio.codegen.python.libscan import EnvLibraryScanner
-
-    EnvLibraryScanner.singleton_clear()
-    yield
-    EnvLibraryScanner.singleton_clear()
 
 
 @pytest.fixture

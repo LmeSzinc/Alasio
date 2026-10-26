@@ -1,97 +1,6 @@
-import importlib.util
-
 import alasio.codegen.python.libscan as libscan
 from alasio.codegen.python.libscan import EnvLibraryScanner, ModuleType
-from alasio.ext import env
 from alasio.testing.filesystem import fs  # noqa: F401
-
-# Alasio repo root, used as the scanner's classification root.
-PROJECT_ROOT = env.ALASIO_ROOT
-
-
-class TestEnvLibraryScanner:
-    def test_scanned_metadata(self):
-        """
-        Test that scanned_metadata is not empty and contains core modules
-        """
-        scanner = EnvLibraryScanner(PROJECT_ROOT)
-        meta = scanner._scanned_metadata
-
-        # Verify it's not empty
-        assert len(meta) > 0
-
-        # Verify core modules are identified as standard library
-        assert meta.get('os') == ModuleType.STANDARD_LIBRARY
-        assert meta.get('sys') == ModuleType.STANDARD_LIBRARY
-        assert meta.get('json') == ModuleType.STANDARD_LIBRARY
-
-    def test_all_importable(self):
-        """
-        Test that all_importable contains common top-level modules
-        """
-        scanner = EnvLibraryScanner(PROJECT_ROOT)
-        all_modules = scanner.all_importable
-
-        # Verify presence of core modules
-        assert 'os' in all_modules
-        assert 'sys' in all_modules
-        assert 'math' in all_modules
-
-    def test_scan_low_level_c_lib(self):
-        """
-        Test that low-level C libraries are correctly scanned as standard library
-        """
-        scanner = EnvLibraryScanner(PROJECT_ROOT)
-        stdlib = scanner.standard_library
-
-        # Specifically check _lzma as requested by user
-        # Note: _lzma is a C extension usually located in DLLs/ on Windows or built-in
-        assert '_lzma' in stdlib
-
-        # Check other common low-level C modules
-        assert '_ssl' in stdlib
-        assert '_socket' in stdlib
-        assert '_json' in stdlib
-
-    def test_third_party(self):
-        """
-        Test that known third-party libraries are correctly classified
-        """
-        scanner = EnvLibraryScanner(PROJECT_ROOT)
-        third_party = scanner.third_party
-
-        # Verify project dependencies are classified as third-party
-        assert 'pytest' in third_party
-        assert 'rich' in third_party
-
-        # Only check optional dependencies if they are installed
-        for mod_name in ('msgspec', 'starlette'):
-            if importlib.util.find_spec(mod_name) is not None:
-                assert mod_name in third_party, \
-                    f"Installed dependency '{mod_name}' should be classified as third_party"
-
-    def test_no_overlap(self):
-        """
-        Test that standard_library and third_party sets have no intersection
-        """
-        scanner = EnvLibraryScanner(PROJECT_ROOT)
-        stdlib = scanner.standard_library
-        third_party = scanner.third_party
-
-        overlap = stdlib.intersection(third_party)
-        assert len(overlap) == 0, f"Overlap found between stdlib and third_party: {overlap}"
-
-    def test_local_project(self):
-        """
-        Test that the local project itself is correctly classified
-        """
-        scanner = EnvLibraryScanner(PROJECT_ROOT)
-        meta = scanner._scanned_metadata
-
-        # 'alasio' should be classified as LOCAL_PROJECT
-        # if it is found during scanning and is within the project root
-        if 'alasio' in meta:
-            assert meta['alasio'] == ModuleType.LOCAL_PROJECT
 
 
 class TestClassifySingleModule:
@@ -105,7 +14,10 @@ class TestClassifySingleModule:
         symlinks of the real disk: with paths alone the module would fall back
         to the project root.
         """
-        monkeypatch.setattr(libscan, 'STDLIB_MODULE_NAMES', frozenset({'typing'}))
+        # the classification reads the name list of the singleton
+        monkeypatch.setitem(
+            libscan.StdlibModuleNames().__dict__, 'STDLIB_MODULE_NAMES', frozenset({'typing'})
+        )
         scanner = EnvLibraryScanner('/classify-stdlib-by-name')
         # the paths of sysconfig can not tell the stdlib of this interpreter
         scanner.stdlib_paths = {'/not/the/stdlib'}
@@ -115,3 +27,103 @@ class TestClassifySingleModule:
         """A module of site-packages is classified third-party."""
         scanner = EnvLibraryScanner('/classify-third-party')
         assert scanner._classify_single_module('msgspec') is ModuleType.THIRD_PARTY
+
+
+class TestIterModuleNames:
+    """The folder listing that replaces pkgutil.iter_modules()."""
+
+    def test_modules_packages_and_non_modules(self, fs):
+        """Source modules and packages are listed, other entries are not."""
+        fs.create_file('/mod.py', contents='')
+        fs.create_file('/pkg/__init__.py', contents='')
+        # a folder without __init__, and the bytecode folder of a module
+        fs.create_file('/data/readme.txt', contents='')
+        fs.create_file('/__pycache__/mod.cpython-38.pyc', contents='')
+        # a sub module of a dotted package is not a top level name
+        fs.create_file('/a.b.py', contents='')
+        fs.create_file('/pkg/sub.py', contents='')
+        # a distribution folder is not a package
+        fs.create_file('/demo-1.0.dist-info/METADATA', contents='')
+
+        names = set(libscan._iter_module_names('/'))
+        assert names == {'mod', 'pkg'}
+
+    def test_extension_module(self, fs):
+        """A file with an extension suffix of the interpreter is a module."""
+        suffix = libscan.MODULE_SUFFIXES[-1]
+        fs.create_file(f'/ext_mod{suffix}', contents='')
+        fs.create_file('/not_module.txt', contents='')
+
+        assert set(libscan._iter_module_names('/')) == {'ext_mod'}
+
+    def test_absent_and_non_folder_path(self, fs):
+        """A missing path and a file path list nothing."""
+        fs.create_file('/a_file.txt', contents='')
+        assert list(libscan._iter_module_names('/missing')) == []
+        assert list(libscan._iter_module_names('/a_file.txt')) == []
+
+    def test_module_name(self):
+        """Only a file name of a module at the top level has a module name."""
+        suffix = libscan.MODULE_SUFFIXES[-1]
+        assert libscan._module_name('mod.py') == 'mod'
+        assert libscan._module_name(f'ext_mod{suffix}') == 'ext_mod'
+        # the file that makes a folder a package
+        assert libscan._module_name('__init__.py') is None
+        # a sub module of a dotted package
+        assert libscan._module_name('a.b.py') is None
+        # a suffix alone, and a file that is no module
+        assert libscan._module_name('.py') is None
+        assert libscan._module_name('readme.txt') is None
+
+
+class TestStdlibModuleNames:
+    """The names of the standard library, read from the disk below python 3.10."""
+
+    def test_scan_reads_the_interpreter(self):
+        """The scan finds the modules the running interpreter imports."""
+        names = libscan.scan_stdlib_module_names()
+        assert 'os' in names
+        assert 'typing' in names
+        assert 'json' in names
+        # a built-in module has no file on the disk
+        assert 'sys' in names
+        # third party modules live outside the standard library directory
+        assert 'pytest' not in names
+        assert 'msgspec' not in names
+
+    def test_cached_once(self):
+        """The names are read once per process and kept on the singleton."""
+        names = libscan.StdlibModuleNames().STDLIB_MODULE_NAMES
+        assert libscan.StdlibModuleNames().STDLIB_MODULE_NAMES is names
+        # the property writes its result into the dict of the instance, so a
+        # later access returns the cached value instead of scanning again
+        assert libscan.StdlibModuleNames().__dict__['STDLIB_MODULE_NAMES'] is names
+
+    def test_scanner_caches_the_names(self):
+        """The scanner keeps the names, a classification does not call the singleton."""
+        scanner = EnvLibraryScanner('/cached-stdlib-names')
+        names = scanner.stdlib_module_names
+        assert names is scanner.stdlib_module_names
+        assert names is libscan.StdlibModuleNames().STDLIB_MODULE_NAMES
+
+    def test_classified_in_the_fake_filesystem(self, fs):
+        """A stdlib module is classified by name inside the fake filesystem.
+
+        The fake filesystem serves the directory of os.py from memory, so a
+        scan started here finds nothing but the built-in modules. The names
+        come from the scan that tests/conftest.py warms up before the session,
+        without it `typing` falls through to the path comparison and is not
+        classified at all.
+        """
+        scanner = EnvLibraryScanner('/classify-in-fake-filesystem')
+        # the paths of sysconfig can not tell the stdlib of this interpreter
+        scanner.stdlib_paths = {'/not/the/stdlib'}
+        assert scanner._classify_single_module('typing') is ModuleType.STANDARD_LIBRARY
+
+    def test_scan_of_the_fake_filesystem_finds_no_stdlib(self, fs):
+        """The reason of the warm up: the scan can not read the real disk here."""
+        names = libscan.scan_stdlib_module_names()
+        assert 'typing' not in names
+        assert 'json' not in names
+        # the built-in modules are a tuple of sys, they are always there
+        assert 'sys' in names

@@ -2,11 +2,16 @@ import os
 import site
 import sys
 import sysconfig
-import warnings
+from importlib.machinery import all_suffixes
 
 from alasio.backport.strenum import StrEnum
-from alasio.ext.cache import cached_property
-from alasio.ext.singleton import SingletonNamed
+from alasio.ext.cache import cached_property, cached_property_threadsafe
+from alasio.ext.singleton import Singleton, SingletonNamed
+
+# Suffixes of an importable file, source, bytecode and extension modules
+MODULE_SUFFIXES = tuple(all_suffixes())
+# Names of the file that makes a folder a package
+PACKAGE_INIT_FILES = frozenset(f'__init__{suffix}' for suffix in MODULE_SUFFIXES)
 
 
 # Module type classification Enum
@@ -17,13 +22,136 @@ class ModuleType(StrEnum):
     UNKNOWN = "unknown"
 
 
-# Top level names of the standard library, sys.stdlib_module_names since
-# python 3.10. A name is classified by it before the physical path: the module
-# path of a symlinked interpreter (uv installs python under a symlink) does not
-# always share the prefix of sysconfig, and a fake filesystem does not resolve
-# the symlinks of the real disk, so the path comparison would miss the stdlib
-# and fall back to the project root.
-STDLIB_MODULE_NAMES = frozenset(getattr(sys, 'stdlib_module_names', ()))
+def _iter_module_names(folder):
+    """
+    List the top level module names of a folder
+
+    A module is a file with one of the suffixes of the interpreter, a package
+    is a folder holding an `__init__` file of those suffixes. A name holding a
+    dot is a sub module of a dotted package, it is not importable as a top
+    level name.
+
+    An absent folder yields nothing, so the folders of the other platforms can
+    be named without checking them first.
+
+    Args:
+        folder (str): Folder to list
+
+    Yields:
+        str: Top level module names
+    """
+    try:
+        entries = os.scandir(folder)
+    except OSError:
+        # the folder does not exist on this platform, or the path is no folder
+        return
+    with entries:
+        for entry in entries:
+            name = entry.name
+            module = _module_name(name)
+            if module is not None:
+                yield module
+                continue
+            # a folder is a package only when it holds an __init__ file,
+            # __pycache__ and the resource folders of a distribution are not
+            try:
+                if not entry.is_dir():
+                    continue
+                inner_names = os.listdir(entry.path)
+            except OSError:
+                continue
+            if any(inner in PACKAGE_INIT_FILES for inner in inner_names):
+                yield name
+
+
+def _module_name(name):
+    """
+    Module name of a folder entry
+
+    Args:
+        name (str): File name
+
+    Returns:
+        str | None: Module name, None when the file name names no importable
+            top level module (an `__init__` file and a sub module of a dotted
+            package included)
+    """
+    for suffix in MODULE_SUFFIXES:
+        if name.endswith(suffix):
+            stem = name[:-len(suffix)]
+            if not stem or stem == '__init__' or '.' in stem:
+                return None
+            return stem
+    return None
+
+
+def scan_stdlib_module_names():
+    """
+    Read the top level names of the standard library from the disk
+
+    The directory of os.py is the anchor: it is the directory the running
+    interpreter imports its modules from, while the paths of sysconfig do not
+    always name the same directory as the interpreter (uv installs python under
+    a symlink). The extension modules are not in that directory, they are in a
+    sibling: DLLs next to Lib on Windows, lib-dynload inside or next to the
+    standard library on POSIX.
+
+    Returns:
+        frozenset[str]: Top level names of the standard library, built-in
+            modules included
+    """
+    stdlib = getattr(os, '__file__', None)
+    if stdlib:
+        stdlib = os.path.dirname(stdlib)
+    else:
+        # a frozen interpreter holds no os.py on the disk
+        stdlib = sysconfig.get_path('stdlib')
+    parent = os.path.dirname(stdlib)
+    roots = (
+        stdlib,
+        os.path.join(parent, 'DLLs'),
+        os.path.join(stdlib, 'lib-dynload'),
+        os.path.join(parent, 'lib-dynload'),
+    )
+    names = set(sys.builtin_module_names)
+    for root in roots:
+        names.update(_iter_module_names(root))
+    return frozenset(names)
+
+
+class StdlibModuleNames(metaclass=Singleton):
+    """
+    Top level names of the standard library of the running interpreter
+
+    The names are read at most once per process. python 3.10 reports its own
+    standard library, the older interpreters read the folders of the
+    interpreter on the disk from os.py.
+
+    A name is classified by it before the physical path: the module path of a
+    symlinked interpreter (uv installs python under a symlink) does not always
+    share the prefix of sysconfig, and a fake filesystem does not resolve the
+    symlinks of the real disk, so the path comparison would miss the stdlib and
+    fall back to the project root.
+
+    The disk is read, so the names have to be resolved before the fake
+    filesystem of the tests replaces os.listdir() / os.scandir(). The suite
+    warms the singleton up in the session fixture of tests/conftest.py, which is
+    set up before the function scoped `fs` fixture of the first test.
+    """
+
+    @cached_property_threadsafe
+    def STDLIB_MODULE_NAMES(self):
+        """
+        Top level names of the standard library
+
+        Returns:
+            frozenset[str]: Top level names, built-in modules included
+        """
+        names = getattr(sys, 'stdlib_module_names', None)
+        if names is not None:
+            # python 3.10+ reports the standard library itself
+            return names
+        return scan_stdlib_module_names()
 
 
 # ==========================================
@@ -31,10 +159,10 @@ STDLIB_MODULE_NAMES = frozenset(getattr(sys, 'stdlib_module_names', ()))
 # ==========================================
 class EnvLibraryScanner(metaclass=SingletonNamed):
     """
-    Named-singleton scanner of the current python environment's importable libraries.
+    Named-singleton classifier of the modules of the current environment.
 
-    Each project root gets its own scanner instance and its own scan cache,
-    since module classification depends on the project root.
+    Each project root gets its own scanner instance, since module
+    classification depends on the project root.
     """
 
     def __init__(self, project_root):
@@ -83,6 +211,19 @@ class EnvLibraryScanner(metaclass=SingletonNamed):
                     if 'site-packages' in real_p or 'dist-packages' in real_p:
                         self.site_paths.add(real_p)
 
+    @cached_property
+    def stdlib_module_names(self):
+        """
+        Top level names of the standard library
+
+        Cached on the scanner, so classifying many names does not go through
+        the metaclass call of the singleton every time.
+
+        Returns:
+            frozenset[str]: Top level names of the standard library
+        """
+        return StdlibModuleNames().STDLIB_MODULE_NAMES
+
     def _is_subpath(self, path, base_paths):
         """
         Safely determine if a path is under a set of directory trees
@@ -101,24 +242,6 @@ class EnvLibraryScanner(metaclass=SingletonNamed):
             except ValueError:
                 continue
         return False
-
-    def _get_path_category(self, path):
-        """
-        Determine the classification category of a directory path
-
-        Args:
-            path (str): Real path of the directory
-
-        Returns:
-            ModuleType: Classification category
-        """
-        if self._is_subpath(path, self.site_paths):
-            return ModuleType.THIRD_PARTY
-        if self._is_subpath(path, self.stdlib_paths):
-            return ModuleType.STANDARD_LIBRARY
-        if self._is_subpath(path, [self.project_root]):
-            return ModuleType.LOCAL_PROJECT
-        return ModuleType.UNKNOWN
 
     def _classify_single_module(self, name):
         """
@@ -139,8 +262,8 @@ class EnvLibraryScanner(metaclass=SingletonNamed):
             return ModuleType.STANDARD_LIBRARY
 
         # 2. Standard library modules are classified by name, the paths of the
-        # interpreter can not tell them reliably, see STDLIB_MODULE_NAMES
-        if name in STDLIB_MODULE_NAMES:
+        # interpreter can not tell them reliably, see StdlibModuleNames
+        if name in self.stdlib_module_names:
             return ModuleType.STANDARD_LIBRARY
 
         import importlib.util
@@ -174,92 +297,3 @@ class EnvLibraryScanner(metaclass=SingletonNamed):
             return ModuleType.LOCAL_PROJECT
 
         return ModuleType.UNKNOWN
-
-    # ==========================================
-    # 3. Core Cached Properties
-    # ==========================================
-
-    @cached_property
-    def _scanned_metadata(self):
-        """
-        Scan and classify all available modules
-
-        Returns:
-            dict[str, ModuleType]: Mapping of module name to its type
-        """
-        classified = {}
-
-        # 1. Built-in C modules (highest precedence, no physical path)
-        for name in sys.builtin_module_names:
-            classified[name] = ModuleType.STANDARD_LIBRARY
-
-        # Use warnings context to block UserWarning from setuptools
-        with warnings.catch_warnings():
-            warnings.filterwarnings(
-                "ignore",
-                category=UserWarning,
-                message=".*Setuptools is replacing distutils.*"
-            )
-
-            # 2. Scan and classify modules folder by folder in sys.path
-            import pkgutil
-            for path in sys.path:
-                if not path:
-                    real_path = self.project_root
-                else:
-                    real_path = os.path.realpath(path)
-
-                if not os.path.exists(real_path):
-                    continue
-
-                # Pre-determine the category of this path
-                path_category = self._get_path_category(real_path)
-
-                try:
-                    # Fast directory listing using pkgutil.iter_modules
-                    for module_info in pkgutil.iter_modules([real_path]):
-                        name = module_info.name
-                        # Shadowing: first module found in sys.path takes precedence
-                        if name not in classified:
-                            classified[name] = path_category
-                except Exception:
-                    # Gracefully skip inaccessible paths or broken zip files in sys.path
-                    continue
-
-        return classified
-
-    @cached_property
-    def all_importable(self):
-        """
-        Return a set of all scanned, directly importable top-level names
-
-        Returns:
-            set[str]: Set of module names
-        """
-        return set(self._scanned_metadata.keys())
-
-    @cached_property
-    def standard_library(self):
-        """
-        Return a set of scanned standard library names
-
-        Returns:
-            set[str]: Set of standard library module names
-        """
-        return {
-            name for name, mtype in self._scanned_metadata.items()
-            if mtype == ModuleType.STANDARD_LIBRARY
-        }
-
-    @cached_property
-    def third_party(self):
-        """
-        Return a set of installed third-party library import names
-
-        Returns:
-            set[str]: Set of third-party module names
-        """
-        return {
-            name for name, mtype in self._scanned_metadata.items()
-            if mtype == ModuleType.THIRD_PARTY
-        }
