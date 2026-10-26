@@ -157,6 +157,22 @@ x = os.getcwd()
 y = json.dumps(x)
 """
 
+    def test_file_level_ruff_noqa_keeps_unused_imports(self, fs, formatter):
+        """A file-level ruff noqa keeps re-export imports that F401 would remove."""
+        fs.create_file('test.py', contents=b"""\
+# ruff: noqa: F401
+from module_a import A, B
+
+x = 1
+""")
+        formatter.format_code('test.py')
+        assert _read(fs) == b"""\
+# ruff: noqa: F401
+from module_a import A, B
+
+x = 1
+"""
+
     def test_isort_multi_line_output_overrides_ruff(self, fs, formatter):
         """isort's multi_line_output=5 packs long imports into a hanging grid."""
         fs.create_file('test.py', contents=b"""\

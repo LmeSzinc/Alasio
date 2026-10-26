@@ -1,3 +1,4 @@
+# ruff: noqa: F401
 from alasio.base.timer import getnow
 from alasio.config.alasio.alasio_model import (
     Scheduler,

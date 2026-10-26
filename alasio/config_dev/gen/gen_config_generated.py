@@ -146,6 +146,10 @@ class GenConfigGenerated(GenNavIndex):
 
     def generate_group_export(self, gitadd=None):
         gen = CodeGen()
+        # This module only re-exports group classes, every import is part of the
+        # public API. Without the file-level noqa, ruff F401 would delete them
+        # all when the generated file is formatted.
+        gen.Comment('ruff: noqa: F401')
         for module_name in [
             'alasio.config.alasio.group_base',
             'alasio.config.alasio.store_model',
