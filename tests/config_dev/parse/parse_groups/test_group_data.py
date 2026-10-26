@@ -6,8 +6,12 @@ the group skeleton, converts every arg through ArgData.from_arg_data() and
 normalizes the parent to a tuple. Dashboard population is an explicit step:
 build_group_mro() assigns `dashboard` and calls group.populate_dashboard(),
 because a msgspec field assignment does not trigger any population hook.
+
+The parser back reference is runtime state, not a field: it lives in
+GroupData.__dict__, so a GroupData stays encodable.
 """
 
+import msgspec
 import pytest
 from msgspec import UNSET
 
@@ -42,6 +46,64 @@ class TestGroupDataDefaults:
         group = GroupData(name='Group', args={'Value': ArgData.from_arg_data(0)})
         group.populate_dashboard()
         assert group.args['Value'].ge is UNSET
+
+    def test_parser_is_not_a_field(self):
+        """The parser back reference is runtime state, it must not be encoded."""
+        assert 'parser' not in GroupData.__struct_fields__
+
+
+class TestGroupDataSerialization:
+    def test_parser_is_kept_out_of_the_encoding(self):
+        """
+        A group whose parser is set still encodes, and the parser is absent.
+
+        The parser is not a msgspec type, encoding it would fail, so the back
+        reference lives in __dict__ instead of being a field.
+        """
+        group = make_group('Group', """\
+parent: [Base]
+args:
+  Enable: true
+""")
+        group.parser = object()
+        assert msgspec.json.encode(group) == (
+            b'{"name":"Group","args":{"Enable":{"dt":"checkbox","value":true}},'
+            b'"parent":["Base"],"dashboard_color":"","mro":[],"override_args":{},'
+            b'"override_i18n":false,"dashboard":""}'
+        )
+
+    def test_round_trip(self):
+        """A decoded group equals the source group, the parser is not restored."""
+        group = make_group('Group', """\
+parent: [Base]
+override_i18n: true
+args:
+  Value: 5
+""")
+        group.parser = object()
+        decoded = msgspec.json.decode(msgspec.json.encode(group), type=GroupData)
+        assert decoded == group
+        assert decoded.parser is None
+
+    def test_to_builtins(self):
+        group = GroupData(name='Group', dashboard_color='#fff')
+        group.parser = object()
+        assert msgspec.to_builtins(group) == {
+            'name': 'Group', 'args': {}, 'parent': (), 'dashboard_color': '#fff',
+            'mro': (), 'override_args': {}, 'override_i18n': False, 'dashboard': '',
+        }
+
+    def test_parser_is_ignored_on_input(self):
+        """`parser` is an internal output, a yaml value is dropped like mro."""
+        group = GroupData.from_group_data('Group', {'parser': '/a/main.args.yaml'})
+        assert group.parser is None
+
+    def test_parser_assignment(self):
+        group = GroupData(name='Group')
+        parser = object()
+        group.parser = parser
+        assert group.parser is parser
+        assert group.__dict__ == {'parser': parser}
 
 
 class TestGroupDataFromGroupData:

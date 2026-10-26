@@ -12,7 +12,17 @@ from alasio.ext.cache import cached_property
 from alasio.ext.deep import deep_iter_depth1
 
 
-class GroupData(Struct, forbid_unknown_fields=True):
+class GroupData(Struct, forbid_unknown_fields=True, dict=True):
+    """
+    One group of {nav}.args.yaml
+
+    `dict=True` is for the parser back reference only: the parser holds the file
+    paths of the nav and forms a reference cycle with its groups, so it is kept
+    out of the msgspec fields (see the `parser` property). A GroupData therefore
+    encodes to json / msgpack without the parser, which is the only member that
+    msgspec can not handle.
+    """
+
     name: str
     args: Dict[str, ArgData] = msgspec.field(default_factory=dict)
     # parent group of variant, or empty tuple if this group is not a variant
@@ -20,7 +30,6 @@ class GroupData(Struct, forbid_unknown_fields=True):
     # color of the dot on frontend dashboard component, #RGB #RGBA #RRGGBB #RRGGBBAA
     dashboard_color: str = ''
 
-    parser: "Optional[ParseGroups]" = None
     # MRO inherit chain like python class
     mro: Tuple[str, ...] = msgspec.field(default_factory=tuple)
     # Args defined in the yaml of this group, copied before MRO merge
@@ -36,6 +45,24 @@ class GroupData(Struct, forbid_unknown_fields=True):
     # real value will be set in MRO build
     # if parent or any ancestor is dashboard group, `dashboard` will be set
     dashboard: str = ''
+
+    @property
+    def parser(self) -> "Optional[ParseGroups]":
+        """
+        Parser that owns this group, None when the group is built by hand.
+
+        Runtime state only, not a msgspec field: it is kept in `__dict__` so a
+        GroupData stays serializable. Use it for the file paths and the per nav
+        state, never as part of the group definition.
+
+        Returns:
+            ParseGroups | None: Owning parser
+        """
+        return self.__dict__.get('parser', None)
+
+    @parser.setter
+    def parser(self, value):
+        self.__dict__['parser'] = value
 
     @classmethod
     def from_group_data(cls, group: str, data: dict):
@@ -95,6 +122,7 @@ class GroupData(Struct, forbid_unknown_fields=True):
         data.pop('mro', None)
         data.pop('override_args', None)
         data.pop('dashboard', None)
+        data.pop('parser', None)
         # build object
         try:
             obj = msgspec.convert(data, cls)

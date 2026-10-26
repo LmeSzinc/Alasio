@@ -196,6 +196,16 @@ class CardNameBuilder:
 
 
 class TaskData(msgspec.Struct, dict=True, forbid_unknown_fields=True):
+    """
+    One task of {nav}.tasks.yaml
+
+    `dict=True` is for the parser back reference only: the parser holds the file
+    paths of the nav and forms a reference cycle with its tasks, so it is kept
+    out of the msgspec fields (see the `parser` property). A TaskData therefore
+    encodes to json / msgpack without the parser, which is the only member that
+    msgspec can not handle.
+    """
+
     task: str
     # groups to bind at runtime
     # key: group name
@@ -205,7 +215,24 @@ class TaskData(msgspec.Struct, dict=True, forbid_unknown_fields=True):
     displays: Dict[str, DisplayCard] = field(default_factory=dict)
     # whether to globally bind all groups
     global_bind: bool = False
-    parser: "Optional[ParseTasks]" = None
+
+    @property
+    def parser(self) -> "Optional[ParseTasks]":
+        """
+        Parser that owns this task, None when the task is built by hand.
+
+        Runtime state only, not a msgspec field: it is kept in `__dict__` so a
+        TaskData stays serializable. Use it for the file paths and the per nav
+        state, never as part of the task definition.
+
+        Returns:
+            ParseTasks | None: Owning parser
+        """
+        return self.__dict__.get('parser', None)
+
+    @parser.setter
+    def parser(self, value):
+        self.__dict__['parser'] = value
 
     @classmethod
     def from_task_data(cls, task: str, data: dict):
