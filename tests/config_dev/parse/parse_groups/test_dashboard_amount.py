@@ -68,19 +68,27 @@ Gems:
     @pytest.mark.parametrize('yaml_arg, expected_ge', [
         ('0', 0),
         ('0.5', 0),
-        ("{dt: input-int, value: 0, range: 'x>=2'}", 2),
-        ("{dt: input-int, value: 0, range: 'x>0'}", UNSET),
-        ("{dt: input-int, value: 0, range: 'x<=10'}", 0),
-        ("{dt: input-int, value: 0, range: 'x<=-1'}", UNSET),
-        ("{dt: input-int, value: 0, range: 'x<0'}", UNSET),
-        ("{dt: input-int, value: 0, range: 'x<5'}", 0),
+        # any explicit constraint disables the automatic ge=0
+        ("{dt: input-int, value: 3, range: 'x>=2'}", 2),
+        ("{dt: input-int, value: 1, range: 'x>0'}", UNSET),
+        ("{dt: input-int, value: 0, range: 'x<=10'}", UNSET),
+        ("{dt: input-int, value: -1, range: 'x<=-1'}", UNSET),
+        ("{dt: input-int, value: -1, range: 'x<0'}", UNSET),
+        ("{dt: input-int, value: 0, range: 'x<5'}", UNSET),
+        ('{dt: input-int, value: 3, le: 10}', UNSET),
         ('{dt: select, value: a, option: [a, b]}', UNSET),
         ('{dt: checkbox, value: true}', UNSET),
     ], ids=[
         'int', 'float', 'ge', 'gt', 'le-positive', 'le-negative', 'lt-zero', 'lt-positive',
-        'select', 'checkbox',
+        'explicit-le', 'select', 'checkbox',
     ])
     def test_populate_ge0_on_custom_args(self, yaml_arg, expected_ge):
+        """
+        A numeric arg without any range constraint gets ge=0.
+
+        An arg with an explicit constraint keeps exactly what the author wrote,
+        the dashboard contract does not add a bound next to it.
+        """
         groups = parse_dashboard_groups(YAML_DASHBOARD_BASE + f"""\
 Gems:
   parent: DashboardAmount

@@ -7,7 +7,9 @@ from msgspec import UNSET, Struct, UnsetType
 from alasio.backport import to_literal
 from alasio.codegen.python import ReprWrapper
 from alasio.config_dev.parse.base import DefinitionError
-from alasio.config_dev.parse.parse_arg_utils import validate_filter_order, validate_option
+from alasio.config_dev.parse.parse_arg_utils import (
+    TYPE_ARG_LITERAL, validate_filter_order, validate_option, validate_range_default
+)
 from alasio.config_dev.parse.parse_range import parse_range
 
 """
@@ -68,16 +70,10 @@ TYPE_DT_TO_PYTHON = {
     # the real annotation is Tuple[Literal[option...], ...], see get_python_type()
     'filter-order': 't.Tuple[str, ...]',
 }
-# Define which "dt" is literal type
-# Example:
-#   {'dt': 'select'} is a literal in python: Literal["option-A", "option-B"]
-#   {'dt': 'filter-order'} is a tuple of the literal: Tuple[Literal["option-A", "option-B"], ...]
-#     a "dt" in TYPE_ARG_TUPLE wraps the literal into a tuple
-TYPE_ARG_LITERAL = {
-    'static',
-    'select', 'radio', 'secondary-select',
-    'filter-order',
-}
+# Define which "dt" holds a number, see RANGE_CONSTRAINT in parse_arg_utils.py
+TYPE_ARG_NUMERIC = frozenset(
+    dt for dt, anno in TYPE_DT_TO_PYTHON.items() if anno in ('int', 'float')
+)
 # Define which "dt" is a tuple of value
 # Example:
 #   You define `value: option-A > option-B > option-C`
@@ -379,6 +375,11 @@ class ArgData(Struct, omit_defaults=True, forbid_unknown_fields=True):
         except msgspec.ValidationError as e:
             ne = DefinitionError(e, value=data)
             raise ne
+        try:
+            validate_range_default(arg)
+        except DefinitionError as e:
+            e.value = data
+            raise
         return arg
 
     def to_dict(self) -> dict:

@@ -13,7 +13,8 @@ GroupData.populate_dashboard() explicitly.
 
 Usage:
     from tests.config_dev.parse.parse_groups.helpers import (
-        YAML_DASHBOARD_BASE, make_group, make_parser, parse_dashboard_groups, yaml_data
+        YAML_DASHBOARD_BASE, build_dashboard_mro, make_group, make_parser,
+        parse_dashboard_groups, yaml_data
     )
 """
 
@@ -61,6 +62,28 @@ def make_group(name, text=''):
     return GroupData.from_group_data(name, yaml_data(text))
 
 
+def build_dashboard_mro(groups):
+    """
+    Build the MRO of parsed groups and populate their dashboard args.
+
+    Args:
+        groups (dict[str, GroupData]): Groups keyed by name, as returned by
+            ParseGroups.groups_data
+
+    Returns:
+        dict[str, GroupData]: The same groups after build_group_mro()
+    """
+    for group in groups.values():
+        group.override_args = group.args.copy()
+
+    generator = object.__new__(CrossNavGenerator)
+    generator.groups_data = groups
+    generator.dict_group_mro = build_mro({name: group.parent for name, group in groups.items()})
+    generator.tasks_data = {}
+    generator.build_group_mro()
+    return groups
+
+
 def parse_dashboard_groups(text):
     """
     Parse a multi-line yaml document of dashboard groups and build their MRO.
@@ -74,15 +97,7 @@ def parse_dashboard_groups(text):
     """
     data = yaml_data(text)
     groups = {name: GroupData.from_group_data(name, value) for name, value in data.items()}
-    for group in groups.values():
-        group.override_args = group.args.copy()
-
-    generator = object.__new__(CrossNavGenerator)
-    generator.groups_data = groups
-    generator.dict_group_mro = build_mro({name: group.parent for name, group in groups.items()})
-    generator.tasks_data = {}
-    generator.build_group_mro()
-    return groups
+    return build_dashboard_mro(groups)
 
 
 def make_parser(fs, nav='main', args_yaml=None, tasks_yaml=None, i18n_json=None):

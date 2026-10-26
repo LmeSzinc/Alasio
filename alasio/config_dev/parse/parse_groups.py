@@ -1,12 +1,13 @@
 from typing import Dict, Optional, Tuple
 
 import msgspec
-from msgspec import UNSET, Struct
+from msgspec import Struct
 
 from alasio.config.entry.utils import validate_task_name
 from alasio.config_dev.format.validate_color import validate_dashboard_color
 from alasio.config_dev.parse.base import DefinitionError, ParseBase
-from alasio.config_dev.parse.parse_args import ArgData
+from alasio.config_dev.parse.parse_arg_utils import has_range_constraint, validate_range_default
+from alasio.config_dev.parse.parse_args import TYPE_ARG_NUMERIC, ArgData
 from alasio.ext.cache import cached_property
 from alasio.ext.deep import deep_iter_depth1
 
@@ -114,35 +115,38 @@ class GroupData(Struct, forbid_unknown_fields=True):
 
         Called by CrossNavGenerator.build_group_mro() after the dashboard type
         is resolved, because assigning a msgspec field does not trigger any
-        automatic population. Numeric args of a dashboard group default to >= 0.
+        automatic population. A numeric arg without any range constraint gets
+        ge=0: a dashboard value is a count or a percentage, a negative value is
+        meaningless. An arg with an explicit constraint keeps exactly what the
+        author wrote.
+
+        The default value is validated against the final range afterwards, see
+        validate_range_default(): msgspec does not re-validate a default value
+        against the constraint of its own field, so an out of range default
+        would be generated into the model and only fail when a config is loaded.
+
+        Raises:
+            DefinitionError: The args of a Planner group are not paired, or the
+                range of an arg excludes its default value
         """
         if not self.dashboard:
             return
         if self.dashboard == 'Planner':
             self._validate_planner_pairs()
-        populate_dt = {'input-int', 'input-float'}
-        for arg in self.args.values():
+        for arg_name, arg in self.args.items():
             if arg is None:
                 continue
-            if arg.dt not in populate_dt:
+            if arg.dt not in TYPE_ARG_NUMERIC:
                 continue
-            # already having minimum value
-            if arg.ge is not UNSET or arg.gt is not UNSET:
-                continue
-            # 0 <= value <= arg.le
-            if arg.le is not UNSET:
-                if arg.le >= 0:
-                    arg.ge = 0
-                else:
-                    continue
-            # 0 <= value < arg.lt
-            if arg.lt is not UNSET:
-                if arg.lt > 0:
-                    arg.ge = 0
-                else:
-                    continue
-            # no other constraint
-            arg.ge = 0
+            if not has_range_constraint(arg):
+                arg.ge = 0
+            try:
+                validate_range_default(arg)
+            except DefinitionError as e:
+                # same keys as the arg errors of from_group_data()
+                e.file = self.parser.file if self.parser else ''
+                e.keys = [self.name, arg_name]
+                raise
 
     def _validate_planner_pairs(self):
         """
