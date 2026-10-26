@@ -12,10 +12,21 @@ import textwrap
 
 import pytest
 
+import alasio.config_dev.parse.postprocess as postprocess_module
 from alasio.config_dev.parse.base import DefinitionError, ParseBase, args_yaml_postprocess, i18n_json_postprocess
+from alasio.config_dev.parse.postprocess import PostprocessInfo
 from alasio.ext.path import PathStr
 from alasio.ext.path.calc import joinpath
 from alasio.testing.filesystem import fs  # noqa: F401
+
+
+def process_missing_class(cls, data):
+    return data
+
+
+# A class body qualname that passes registration, but the class is not in the
+# module globals when the postprocess runs.
+process_missing_class.__qualname__ = 'MissingClass.process'
 
 
 def make_base(fs, nav='main', args_yaml=None, tasks_yaml=None, i18n_json=None):
@@ -170,21 +181,48 @@ Group:
         parser = make_base(fs, 'main', args_yaml='{}\n')
         assert parser.read_args_yaml() == {'A': 1, 'B': 2}
 
-    def test_postprocess_returning_none(self, fs, monkeypatch):
-        """A None result is not checked for args yaml, the next function sees None."""
+    def test_registered_plan_is_used(self, fs, monkeypatch):
+        """The call plan is built at registration, runtime does not inspect again."""
         monkeypatch.setattr(ParseBase, 'dict_args_yaml_postprocess', {})
         monkeypatch.setattr(ParseBase, 'alasio_nav', {'alasio', 'device'})
 
         @args_yaml_postprocess('main')
+        def process(data):
+            data['A'] = 1
+            return data
+
+        def fail(_):
+            raise AssertionError('_get_postprocess_plan must not be called at runtime')
+
+        monkeypatch.setattr(postprocess_module, '_get_postprocess_plan', fail)
+        parser = make_base(fs, 'main', args_yaml='{}\n')
+        assert parser.read_args_yaml() == {'A': 1}
+
+    def test_postprocess_returning_none(self, fs, monkeypatch):
+        """A postprocess returning None is a config error, the chain stops."""
+        monkeypatch.setattr(ParseBase, 'dict_args_yaml_postprocess', {})
+        monkeypatch.setattr(ParseBase, 'alasio_nav', {'alasio', 'device'})
+        calls = []
+
+        @args_yaml_postprocess('main')
         def first(data):
+            calls.append('first')
             return None
 
         @args_yaml_postprocess('main')
         def second(data):
-            return {'seen': data}
+            calls.append('second')
+            return data
 
         parser = make_base(fs, 'main', args_yaml='{}\n')
-        assert parser.read_args_yaml() == {'seen': None}
+        with pytest.raises(DefinitionError) as e:
+            parser.read_args_yaml()
+        assert e.value.msg == (
+            'Postprocess function "first" returned None, '
+            'did you forget "return data"?'
+        )
+        assert e.value.file == parser.file
+        assert calls == ['first']
 
     def test_protected_nav_skips_postprocess(self, fs, monkeypatch):
         monkeypatch.setattr(ParseBase, 'dict_args_yaml_postprocess', {})
@@ -213,6 +251,24 @@ Group:
     A: 1
 """)
         assert parser.read_args_yaml() == {'Group': {'args': {'A': 1}}}
+
+    def test_postprocess_error_gets_file(self, fs, monkeypatch):
+        """A postprocess class resolution error points at the args yaml."""
+        info = PostprocessInfo.from_function(process_missing_class)
+        monkeypatch.setattr(ParseBase, 'dict_args_yaml_postprocess', {
+            'main': [info],
+        })
+        monkeypatch.setattr(ParseBase, 'alasio_nav', {'alasio', 'device'})
+        parser = make_base(fs, 'main', args_yaml='{}\n')
+        with pytest.raises(DefinitionError) as e:
+            parser.read_args_yaml()
+        assert e.value.msg == (
+            'Cannot resolve the class of postprocess function '
+            '"process_missing_class" from __qualname__ '
+            '"MissingClass.process", define it in a class body '
+            'or use a 1-arg (data) function'
+        )
+        assert e.value.file == parser.file
 
 
 class TestReadTasksYaml:
@@ -303,39 +359,52 @@ class TestReadI18nJson:
         parser = make_base(fs, 'main', i18n_json='{}')
         assert parser.read_i18n_json() == {'A': 1, 'B': 2}
 
-    def test_postprocess_returning_none_warns(self, fs, monkeypatch, capsys):
-        """Unlike args yaml, a None result is reported and passed on."""
+    def test_postprocess_returning_none_raises(self, fs, monkeypatch):
+        """A postprocess returning None is a config error."""
         monkeypatch.setattr(ParseBase, 'dict_i18n_json_postprocess', {})
         monkeypatch.setattr(ParseBase, 'alasio_nav', {'alasio', 'device'})
+        calls = []
 
         @i18n_json_postprocess('main')
         def process(data):
+            calls.append('process')
             return None
 
         parser = make_base(fs, 'main', i18n_json='{}')
-        assert parser.read_i18n_json() is None
-        assert capsys.readouterr().out == (
-            'Warning: postprocess function process returns None\n'
+        with pytest.raises(DefinitionError) as e:
+            parser.read_i18n_json()
+        assert e.value.msg == (
+            'Postprocess function "process" returned None, '
+            'did you forget "return data"?'
         )
+        assert e.value.file == parser.i18n_file
+        assert calls == ['process']
 
-    def test_postprocess_chain_after_none(self, fs, monkeypatch, capsys):
-        """The next postprocess still runs after a None result."""
+    def test_postprocess_chain_stops_after_none(self, fs, monkeypatch):
+        """A None result stops the chain, the next postprocess does not run."""
         monkeypatch.setattr(ParseBase, 'dict_i18n_json_postprocess', {})
         monkeypatch.setattr(ParseBase, 'alasio_nav', {'alasio', 'device'})
+        calls = []
 
         @i18n_json_postprocess('main')
         def first(data):
+            calls.append('first')
             return None
 
         @i18n_json_postprocess('main')
         def second(data):
-            return {'seen': data}
+            calls.append('second')
+            return data
 
         parser = make_base(fs, 'main', i18n_json='{}')
-        assert parser.read_i18n_json() == {'seen': None}
-        assert capsys.readouterr().out == (
-            'Warning: postprocess function first returns None\n'
+        with pytest.raises(DefinitionError) as e:
+            parser.read_i18n_json()
+        assert e.value.msg == (
+            'Postprocess function "first" returned None, '
+            'did you forget "return data"?'
         )
+        assert e.value.file == parser.i18n_file
+        assert calls == ['first']
 
     def test_protected_nav_skips_postprocess(self, fs, monkeypatch):
         monkeypatch.setattr(ParseBase, 'dict_i18n_json_postprocess', {})
@@ -356,3 +425,21 @@ class TestReadI18nJson:
         monkeypatch.setattr(ParseBase, 'alasio_nav', {'alasio', 'device'})
         parser = make_base(fs, 'main', i18n_json='{"Group": {}}')
         assert parser.read_i18n_json() == {'Group': {}}
+
+    def test_postprocess_error_gets_file(self, fs, monkeypatch):
+        """A postprocess class resolution error points at the i18n json."""
+        info = PostprocessInfo.from_function(process_missing_class)
+        monkeypatch.setattr(ParseBase, 'dict_i18n_json_postprocess', {
+            'main': [info],
+        })
+        monkeypatch.setattr(ParseBase, 'alasio_nav', {'alasio', 'device'})
+        parser = make_base(fs, 'main', i18n_json='{}')
+        with pytest.raises(DefinitionError) as e:
+            parser.read_i18n_json()
+        assert e.value.msg == (
+            'Cannot resolve the class of postprocess function '
+            '"process_missing_class" from __qualname__ '
+            '"MissingClass.process", define it in a class body '
+            'or use a 1-arg (data) function'
+        )
+        assert e.value.file == parser.i18n_file
