@@ -434,7 +434,7 @@ class RestartStep(RestartBase):
         if check is None or check.mirrors is None:
             return True
         mod = check.mod
-        if not mod.entry.pack_update_deps:
+        if not mod.entry.update_pack_deps:
             return True
         logger.info(f'[Update] Updating the dependencies of "{name}"')
         try:

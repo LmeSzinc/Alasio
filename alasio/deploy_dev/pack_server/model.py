@@ -93,7 +93,7 @@ class PythonDepsConfig(Struct):
     The dependency files of RequirementFiles are sampled over the lookback
     window, the wheels of the versions the repo asked for are fetched from
     PypiMirror, and the packs of the names the mod entry declares in
-    pack_update_deps are built. An empty group builds nothing, the packs of
+    update_pack_deps are built. An empty group builds nothing, the packs of
     the project tree are the same as without it.
     """
     RequirementFiles: Annotated[List[str], Meta(extra={"help": [

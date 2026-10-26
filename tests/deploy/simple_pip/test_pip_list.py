@@ -169,10 +169,10 @@ class FakeMod:
     def __init__(self, *names):
         """
         Args:
-            *names (str): Names to declare in pack_update_deps
+            *names (str): Names to declare in update_pack_deps
         """
         self.name = 'alas'
-        self.entry = ModEntryInfo(name='alas', pack_update_deps=dict.fromkeys(names))
+        self.entry = ModEntryInfo(name='alas', update_pack_deps=tuple(names))
 
 
 def run_pack_list(names, root=SITE):
@@ -180,7 +180,7 @@ def run_pack_list(names, root=SITE):
     List the pack ledgers of a mod that declares the names.
 
     Args:
-        names (Iterable[str]): Names declared in pack_update_deps
+        names (Iterable[str]): Names declared in update_pack_deps
         root (str): Path of the site-packages directory. Defaults to SITE
 
     Returns:
@@ -194,7 +194,7 @@ def run_aggregate(names=(), root=SITE):
     List the distributions of a site-packages directory, the aggregate.
 
     Args:
-        names (Iterable[str]): Names declared in pack_update_deps of the
+        names (Iterable[str]): Names declared in update_pack_deps of the
             mod. Defaults to (), no ledger is declared
         root (str): Path of the site-packages directory. Defaults to SITE
 

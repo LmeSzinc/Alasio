@@ -3,7 +3,7 @@ Tests for InstallBase: the dependency install of one mod.
 
 InstallBase reads the requirements file of the mod (the requirements_file
 of its entry): _dict_update is the intersection of its pins and the names
-the entry declares for pack updates (pack_update_deps). install_pack hands
+the entry declares for pack updates (update_pack_deps). install_pack hands
 every declared pin to the pack channel of the mod, one PipPack install per
 distribution, and leaves the other pins to the pip install of the caller.
 The deploy job decides whether the pin is an update or a validation of the
@@ -123,7 +123,7 @@ class FakeMod:
     """Mod stand-in: a name, a root and an entry carrying the dependency settings."""
 
     def __init__(self, name='alas', mirrors=MIRROR, root='/mod',
-                 requirements_file='requirements.txt', pack_update_deps=()):
+                 requirements_file='requirements.txt', update_pack_deps=()):
         self.name = name
         self.root = PathStr.new(root)
         self.entry = ModEntryInfo(
@@ -131,7 +131,7 @@ class FakeMod:
             root=root,
             mirrors=mirrors,
             requirements_file=requirements_file,
-            pack_update_deps=dict.fromkeys(pack_update_deps),
+            update_pack_deps=tuple(update_pack_deps),
         )
 
 
@@ -144,7 +144,7 @@ def make_mod(fake, content=None, root='/mod', **kwargs):
         content (str, optional): Content of the requirements file of the
             mod. Defaults to None, no file is written
         root (str): Root of the mod, a path of the fake filesystem
-        **kwargs: Arguments of FakeMod, e.g. pack_update_deps
+        **kwargs: Arguments of FakeMod, e.g. update_pack_deps
 
     Returns:
         FakeMod: The mod, with an absolute root path of the fake filesystem
@@ -227,7 +227,7 @@ def patch_servers(monkeypatch, expected_name, *dists):
 
 
 class TestDictUpdate:
-    """The declared pins: the intersection of requirements and pack_update_deps."""
+    """The declared pins: the intersection of requirements and update_pack_deps."""
 
     @pytest.mark.trio
     async def test_the_declared_pins(self, fs):
@@ -243,7 +243,7 @@ httpx==0.28.1
 ruamel.yaml==0.18.6
 missing==3.1
 nopin>=1.0
-""", pack_update_deps=['Demo', 'missing', 'nopin'])
+""", update_pack_deps=['Demo', 'missing', 'nopin'])
         install = InstallBase(mod, site)
         # the names compare normalized, a declaration without a pin is not a
         # dependency, and undeclared pins are left to pip
@@ -257,7 +257,7 @@ nopin>=1.0
         fs.create_file(f'{root}/requirements.txt', contents='demo==1.0\n')
         fs.create_file(f'{root}/deploy/requirements-lock.txt', contents='demo==2.0\n')
         mod = FakeMod(root=root, requirements_file='deploy/requirements-lock.txt',
-                      pack_update_deps=['demo'])
+                      update_pack_deps=['demo'])
         install = InstallBase(mod, site)
         assert install.path_requirements == f'{root}/deploy/requirements-lock.txt'
         assert await install._dict_update == {'demo': '2.0'}
@@ -266,7 +266,7 @@ nopin>=1.0
     async def test_missing_file(self, fs):
         """A mod without a requirements file has nothing to install."""
         with logger.mock_capture_writer() as capture:
-            install = InstallBase(make_mod(fs, pack_update_deps=['demo']), site_packages(fs))
+            install = InstallBase(make_mod(fs, update_pack_deps=['demo']), site_packages(fs))
             assert await install._dict_update == {}
         assert capture.fd.any_contains('no requirements file')
 
@@ -274,7 +274,7 @@ nopin>=1.0
     async def test_cached(self, fs):
         """The declared pins are read once and cached on the instance."""
         site = site_packages(fs)
-        install = InstallBase(make_mod(fs, content='demo==1.0\n', pack_update_deps=['demo']), site)
+        install = InstallBase(make_mod(fs, content='demo==1.0\n', update_pack_deps=['demo']), site)
         assert await install._dict_update == {'demo': '1.0'}
         # the folder reaching the version does not change the declared pins,
         # and a new instance reads the same file
@@ -309,7 +309,7 @@ class TestInstallPack:
 demo==2.0
 other==1.0
 plain==1.0
-""", pack_update_deps=['Demo', 'other'])
+""", update_pack_deps=['Demo', 'other'])
         demo_full, demo_index = build_dist('demo', '2.0')
         other_full, other_index = build_dist('other', '1.0')
         servers = patch_servers(monkeypatch, 'alas', 'demo', 'other')
@@ -343,7 +343,7 @@ plain==1.0
         snapshot, not skipped locally."""
         site = site_packages(fs)
         fs.create_dir(site)
-        mod = make_mod(fs, content='demo==1.0\n', pack_update_deps=['demo'])
+        mod = make_mod(fs, content='demo==1.0\n', update_pack_deps=['demo'])
         full, index = build_dist('demo', '1.0')
         await UnpackJob(full, root=site, name='demo').run()
         servers = patch_servers(monkeypatch, 'alas', 'demo')
@@ -359,7 +359,7 @@ plain==1.0
         reported False and the others are installed."""
         site = site_packages(fs)
         fs.create_dir(site)
-        mod = make_mod(fs, content='demo==2.0\nother==1.0\n', pack_update_deps=['demo', 'other'])
+        mod = make_mod(fs, content='demo==2.0\nother==1.0\n', update_pack_deps=['demo', 'other'])
         full, index = build_dist('other', '1.0')
         _, demo_index = build_dist('demo', '3.0')
         servers = patch_servers(monkeypatch, 'alas', 'demo', 'other')
@@ -388,7 +388,7 @@ plain==1.0
         the other distributions are installed."""
         site = site_packages(fs)
         fs.create_dir(site)
-        mod = make_mod(fs, content='demo==2.0\nother==1.0\n', pack_update_deps=['demo', 'other'])
+        mod = make_mod(fs, content='demo==2.0\nother==1.0\n', update_pack_deps=['demo', 'other'])
         full, index = build_dist('other', '1.0')
         _, demo_index = build_dist('demo', '2.0')
         servers = patch_servers(monkeypatch, 'alas', 'demo', 'other')
@@ -415,7 +415,7 @@ plain==1.0
         """A mod that declares pack updates but no update source cannot install
         them: the refusal of PipPack surfaces."""
         site = site_packages(fs)
-        mod = make_mod(fs, content='demo==1.0\n', mirrors='', pack_update_deps=['demo'])
+        mod = make_mod(fs, content='demo==1.0\n', mirrors='', update_pack_deps=['demo'])
         with pytest.raises(ValueError, match='declares no update source'):
             await InstallBase(mod, site).install_pack()
 
@@ -428,7 +428,7 @@ plain==1.0
         """
         site = site_packages(fs)
         fs.create_dir(site)
-        mod = make_mod(fs, content='demo==1.0\n', pack_update_deps=['demo'])
+        mod = make_mod(fs, content='demo==1.0\n', update_pack_deps=['demo'])
         full, index = build_dist('demo', '1.0')
         servers = patch_servers(monkeypatch, 'alas', 'demo')
         servers['demo'].register_version('1.0', full, index)
@@ -494,7 +494,7 @@ class TestInstallPackAllDeclared:
         latest.pack request, a damaged file uses the full pack range only."""
         site = site_packages(fs)
         fs.create_dir(site)
-        mod = make_mod(fs, content='demo==1.0\n', pack_update_deps=['demo'])
+        mod = make_mod(fs, content='demo==1.0\n', update_pack_deps=['demo'])
         full, index = build_dist('demo', '1.0')
         await UnpackJob(full, root=site, name='demo').run()
         servers = patch_servers(monkeypatch, 'alas', 'demo')
@@ -517,7 +517,7 @@ class TestInstallPackAllDeclared:
         channel is never asked."""
         site = site_packages(fs)
         fs.create_dir(site)
-        mod = make_mod(fs, content='demo==1.0\n', pack_update_deps=['demo'])
+        mod = make_mod(fs, content='demo==1.0\n', update_pack_deps=['demo'])
         full, index = build_dist('demo', '1.0')
         servers = patch_servers(monkeypatch, 'alas', 'demo')
         servers['demo'].register_version('1.0', full, index)
@@ -535,7 +535,7 @@ class TestInstallPackAllDeclared:
         """The dependency snapshot follows the mod path and is cached on the
         instance like the requirements file."""
         site = site_packages(fs)
-        mod = make_mod(fs, content='demo==1.0\n', pack_update_deps=['demo'])
+        mod = make_mod(fs, content='demo==1.0\n', update_pack_deps=['demo'])
         reads = []
         monkeypatch.setattr(
             install_base.PackDep, 'read',
@@ -552,7 +552,7 @@ class TestInstallPackAllDeclared:
         file against the index) and a damaged file is downloaded again."""
         site = site_packages(fs)
         fs.create_dir(site)
-        mod = make_mod(fs, content='demo==1.0\n', pack_update_deps=['demo'])
+        mod = make_mod(fs, content='demo==1.0\n', update_pack_deps=['demo'])
         full, index = build_dist('demo', '1.0')
         await UnpackJob(full, root=site, name='demo').run()
         servers = patch_servers(monkeypatch, 'alas', 'demo')
@@ -581,7 +581,7 @@ class TestInstallPackAllDeclared:
         call that verifies the satisfied ones."""
         site = site_packages(fs)
         fs.create_dir(site)
-        mod = make_mod(fs, content='demo==1.0\n', pack_update_deps=['demo', 'other'])
+        mod = make_mod(fs, content='demo==1.0\n', update_pack_deps=['demo', 'other'])
         demo_full, demo_index = build_dist('demo', '1.0')
         other_full, other_index = build_dist('other', '2.0')
         servers = patch_servers(monkeypatch, 'alas', 'demo', 'other')
@@ -624,7 +624,7 @@ class TestInstallPackAllDeclared:
     async def test_without_a_requirements_file(self, fs):
         """A mod without a requirements file has nothing to reconcile."""
         with logger.mock_capture_writer() as capture:
-            install = InstallBase(make_mod(fs, pack_update_deps=['demo']), site_packages(fs))
+            install = InstallBase(make_mod(fs, update_pack_deps=['demo']), site_packages(fs))
             assert await install.install_pack() == {}
         assert capture.fd.any_contains('no requirements file')
 
@@ -636,7 +636,7 @@ class TestInstallPackAllDeclared:
         site = site_packages(fs)
         fs.create_dir(site)
         create_dist(fs, {}, name='demo', version='1.0')
-        mod = make_mod(fs, content='demo==1.0\n', pack_update_deps=['demo'])
+        mod = make_mod(fs, content='demo==1.0\n', update_pack_deps=['demo'])
         pinned_full, pinned_index = build_dist('demo', '1.0')
         _, index = build_dist('demo', '3.0')
         servers = patch_servers(monkeypatch, 'alas', 'demo')
@@ -662,7 +662,7 @@ class TestInstallPackAllDeclared:
         # the residue of an installation of another version (pip leaves the
         # REQUESTED file of a direct installation behind)
         create_dist(fs, {'demo-0.9.dist-info/REQUESTED': b''}, name='demo', version='0.9')
-        mod = make_mod(fs, content='demo==1.0\n', pack_update_deps=['demo'])
+        mod = make_mod(fs, content='demo==1.0\n', update_pack_deps=['demo'])
         full, index = build_dist('demo', '1.0')
         servers = patch_servers(monkeypatch, 'alas', 'demo')
         servers['demo'].register_version('1.0', full, index)

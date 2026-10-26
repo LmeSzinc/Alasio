@@ -1,8 +1,8 @@
 """
-Tests for parse_entry: read pack_update_deps from the source of a mod entry.
+Tests for parse_entry: read update_pack_deps from the source of a mod entry.
 
 The parser reads the module level `entry` of a mod entry and its
-pack_update_deps declaration with ast, without executing the source. The
+update_pack_deps declaration with ast, without executing the source. The
 tests cover the static forms the parser accepts, the order of the names and
 the source forms it refuses: a pack must never silently lose a dependency
 channel because the declaration could not be read.
@@ -10,7 +10,7 @@ channel because the declaration could not be read.
 import pytest
 
 from alasio.deploy_dev.pack_server import parse_entry
-from alasio.deploy_dev.pack_server.parse_entry import ENTRY_FILE, PackRepoEntry, parse_pack_update_deps
+from alasio.deploy_dev.pack_server.parse_entry import ENTRY_FILE, PackRepoEntry, parse_update_pack_deps
 from alasio.git.mock.mock_repo import MockGitRepo
 
 
@@ -22,12 +22,12 @@ def parse(source):
         source (str | bytes): Source of an entry module
 
     Returns:
-        dict[str, None]: Declared pack_update_deps names
+        tuple[str, ...]: Declared update_pack_deps names
     """
-    return parse_pack_update_deps(source)
+    return parse_update_pack_deps(source)
 
 
-class TestPackUpdateDepsForms:
+class TestUpdatePackDepsForms:
     """The static declarations the parser reads."""
 
     def test_dict(self):
@@ -37,124 +37,123 @@ from alasio.config.entry.const import ModEntryInfo
 
 entry = ModEntryInfo(
     name='m',
-    pack_update_deps={'httpx': None, 'ruamel.yaml': None},
+    update_pack_deps={'httpx': None, 'ruamel.yaml': None},
 )
 """
         result = parse(source)
-        assert result == {'httpx': None, 'ruamel.yaml': None}
-        assert list(result) == ['httpx', 'ruamel.yaml']
+        assert result == ('httpx', 'ruamel.yaml')
 
     def test_list(self):
         """A list literal declares its items."""
         source = """\
-entry = ModEntryInfo(name='m', pack_update_deps=['httpx', 'starlette'])
+entry = ModEntryInfo(name='m', update_pack_deps=['httpx', 'starlette'])
 """
-        assert parse(source) == {'httpx': None, 'starlette': None}
+        assert parse(source) == ('httpx', 'starlette')
 
     def test_tuple(self):
         """A tuple literal declares its items."""
         source = """\
-entry = ModEntryInfo(name='m', pack_update_deps=('httpx', 'starlette'))
+entry = ModEntryInfo(name='m', update_pack_deps=('httpx', 'starlette'))
 """
-        assert parse(source) == {'httpx': None, 'starlette': None}
+        assert parse(source) == ('httpx', 'starlette')
 
     def test_set(self):
         """A set literal declares its items."""
         source = """\
-entry = ModEntryInfo(name='m', pack_update_deps={'httpx', 'starlette'})
+entry = ModEntryInfo(name='m', update_pack_deps={'httpx', 'starlette'})
 """
-        assert parse(source) == {'httpx': None, 'starlette': None}
+        assert parse(source) == ('httpx', 'starlette')
 
     def test_dict_fromkeys(self):
         """dict.fromkeys() declares the keys of its iterable."""
         source = """\
-entry = ModEntryInfo(name='m', pack_update_deps=dict.fromkeys(['httpx', 'starlette']))
+entry = ModEntryInfo(name='m', update_pack_deps=dict.fromkeys(['httpx', 'starlette']))
 """
-        assert parse(source) == {'httpx': None, 'starlette': None}
+        assert parse(source) == ('httpx', 'starlette')
 
     def test_dict_fromkeys_with_value(self):
         """The value of dict.fromkeys() is ignored, only the names matter."""
         source = """\
-entry = ModEntryInfo(name='m', pack_update_deps=dict.fromkeys(('httpx',), True))
+entry = ModEntryInfo(name='m', update_pack_deps=dict.fromkeys(('httpx',), True))
 """
-        assert parse(source) == {'httpx': None}
+        assert parse(source) == ('httpx',)
 
     def test_dict_fromkeys_of_constant(self):
         """dict.fromkeys() reads a module level constant as its iterable."""
         source = """\
 NAMES = ['httpx', 'starlette']
-entry = ModEntryInfo(name='m', pack_update_deps=dict.fromkeys(NAMES))
+entry = ModEntryInfo(name='m', update_pack_deps=dict.fromkeys(NAMES))
 """
-        assert parse(source) == {'httpx': None, 'starlette': None}
+        assert parse(source) == ('httpx', 'starlette')
 
     def test_module_constant_dict(self):
         """A module level dict constant is read by name."""
         source = """\
 DEPS = {'httpx': None, 'ruamel.yaml': None}
-entry = ModEntryInfo(name='m', pack_update_deps=DEPS)
+entry = ModEntryInfo(name='m', update_pack_deps=DEPS)
 """
-        assert parse(source) == {'httpx': None, 'ruamel.yaml': None}
+        assert parse(source) == ('httpx', 'ruamel.yaml')
 
     def test_module_constant_list(self):
         """A module level list constant is read by name."""
         source = """\
 DEPS = ['httpx', 'starlette']
-entry = ModEntryInfo(name='m', pack_update_deps=DEPS)
+entry = ModEntryInfo(name='m', update_pack_deps=DEPS)
 """
-        assert parse(source) == {'httpx': None, 'starlette': None}
+        assert parse(source) == ('httpx', 'starlette')
 
     def test_attribute_assignment(self):
-        """entry.pack_update_deps may be assigned after the construction."""
+        """entry.update_pack_deps may be assigned after the construction."""
         source = """\
 entry = ModEntryInfo(name='m')
-entry.pack_update_deps = ['httpx', 'starlette']
+entry.update_pack_deps = ['httpx', 'starlette']
 """
-        assert parse(source) == {'httpx': None, 'starlette': None}
+        assert parse(source) == ('httpx', 'starlette')
 
     def test_attribute_overrides_keyword(self):
         """A later attribute assignment replaces the keyword value."""
         source = """\
-entry = ModEntryInfo(name='m', pack_update_deps=['httpx'])
-entry.pack_update_deps = ['starlette']
+entry = ModEntryInfo(name='m', update_pack_deps=['httpx'])
+entry.update_pack_deps = ['starlette']
 """
-        assert parse(source) == {'starlette': None}
+        assert parse(source) == ('starlette',)
 
     def test_last_entry_wins(self):
         """A later construction of entry replaces the earlier declaration."""
         source = """\
-entry = ModEntryInfo(name='m', pack_update_deps=['httpx'])
-entry = ModEntryInfo(name='m', pack_update_deps=['starlette'])
+entry = ModEntryInfo(name='m', update_pack_deps=['httpx'])
+entry = ModEntryInfo(name='m', update_pack_deps=['starlette'])
 """
-        assert parse(source) == {'starlette': None}
+        assert parse(source) == ('starlette',)
 
     def test_new_entry_resets(self):
-        """A construction without pack_update_deps clears the earlier names."""
+        """A construction without update_pack_deps clears the earlier names."""
         source = """\
-entry = ModEntryInfo(name='m', pack_update_deps=['httpx'])
+entry = ModEntryInfo(name='m', update_pack_deps=['httpx'])
 entry = ModEntryInfo(name='m')
 """
-        assert parse(source) == {}
+        assert parse(source) == ()
 
-    def test_no_pack_update_deps(self):
+    def test_no_update_pack_deps(self):
         """An entry without the declaration has no pack updated dependency."""
         source = """\
 entry = ModEntryInfo(name='m')
 """
-        assert parse(source) == {}
+        assert parse(source) == ()
 
     def test_no_entry(self):
         """A module without an entry has no declaration."""
         source = """\
 from alasio.config.entry.const import ModEntryInfo
 """
-        assert parse(source) == {}
+        assert parse(source) == ()
 
     def test_none(self):
         """None is an empty declaration."""
         source = """\
-entry = ModEntryInfo(name='m', pack_update_deps=None)
+entry = ModEntryInfo(name='m', update_pack_deps=None)
 """
-        assert parse(source) == {}
+        assert parse(source) == ()
 
     @pytest.mark.parametrize('value', [
         '{}',
@@ -164,56 +163,56 @@ entry = ModEntryInfo(name='m', pack_update_deps=None)
     ])
     def test_empty(self, value):
         """An empty collection declares no name."""
-        source = f"entry = ModEntryInfo(name='m', pack_update_deps={value})\n"
-        assert parse(source) == {}
+        source = f"entry = ModEntryInfo(name='m', update_pack_deps={value})\n"
+        assert parse(source) == ()
 
     def test_values_are_ignored(self):
         """Only the keys of the declaration are read, a dynamic value is fine."""
         source = """\
-entry = ModEntryInfo(name='m', pack_update_deps={'httpx': build_marker()})
+entry = ModEntryInfo(name='m', update_pack_deps={'httpx': build_marker()})
 """
-        assert parse(source) == {'httpx': None}
+        assert parse(source) == ('httpx',)
 
     def test_key_constant(self):
         """A dict key may be a module level constant."""
         source = """\
 NAME = 'httpx'
-entry = ModEntryInfo(name='m', pack_update_deps={NAME: None})
+entry = ModEntryInfo(name='m', update_pack_deps={NAME: None})
 """
-        assert parse(source) == {'httpx': None}
+        assert parse(source) == ('httpx',)
 
     def test_duplicates_collapse(self):
         """A name that appears several times is declared once."""
         source = """\
-entry = ModEntryInfo(name='m', pack_update_deps=['httpx', 'httpx', 'starlette'])
+entry = ModEntryInfo(name='m', update_pack_deps=['httpx', 'httpx', 'starlette'])
 """
-        assert parse(source) == {'httpx': None, 'starlette': None}
+        assert parse(source) == ('httpx', 'starlette')
 
     def test_other_fields_are_ignored(self):
         """The other fields and attributes of the entry do not matter."""
         source = """\
-entry = ModEntryInfo(name='m', root='mod', pack_update_deps=['httpx'])
+entry = ModEntryInfo(name='m', root='mod', update_pack_deps=['httpx'])
 entry.root = 'elsewhere'
 """
-        assert parse(source) == {'httpx': None}
+        assert parse(source) == ('httpx',)
 
     def test_conditional_unrelated_attribute(self):
         """A conditional assignment to another entry attribute is not a declaration."""
         source = """\
-entry = ModEntryInfo(name='m', pack_update_deps=['httpx'])
+entry = ModEntryInfo(name='m', update_pack_deps=['httpx'])
 if True:
     entry.root = 'elsewhere'
 """
-        assert parse(source) == {'httpx': None}
+        assert parse(source) == ('httpx',)
 
     def test_bytes_source(self):
         """Bytes are parsed with the encoding declaration of the source."""
         source = """\
 # -*- coding: utf-8 -*-
 # 中文注释
-entry = ModEntryInfo(name='m', pack_update_deps=['httpx'])
+entry = ModEntryInfo(name='m', update_pack_deps=['httpx'])
 """.encode('utf-8')
-        assert parse(source) == {'httpx': None}
+        assert parse(source) == ('httpx',)
 
     def test_qualified_entry_class(self):
         """The entry may be constructed through a qualified ModEntryInfo."""
@@ -222,7 +221,7 @@ import alasio.config.entry.const as const
 
 entry = const.ModEntryInfo(name='m')
 """
-        assert parse(source) == {}
+        assert parse(source) == ()
 
 
 class TestPackRepoEntry:
@@ -256,55 +255,55 @@ class TestPackRepoEntry:
     def test_missing(self):
         """A commit without an entry file declares no dependency."""
         repo = self.make_repo({'c1': None})
-        assert PackRepoEntry(repo).pack_update_deps('c1') == {}
+        assert PackRepoEntry(repo).update_pack_deps('c1') == ()
 
     def test_read(self):
         """The declaration is read from the entry blob of the commit."""
-        source = "entry = ModEntryInfo(name='m', pack_update_deps=['httpx'])\n"
+        source = "entry = ModEntryInfo(name='m', update_pack_deps=['httpx'])\n"
         repo = self.make_repo({'c1': source})
-        assert PackRepoEntry(repo).pack_update_deps('c1') == {'httpx': None}
+        assert PackRepoEntry(repo).update_pack_deps('c1') == ('httpx',)
 
     def test_cache_by_blob(self, monkeypatch):
         """Commits that share the entry blob parse it once."""
-        source = "entry = ModEntryInfo(name='m', pack_update_deps=['httpx'])\n"
+        source = "entry = ModEntryInfo(name='m', update_pack_deps=['httpx'])\n"
         repo = self.make_repo({'c1': source, 'c2': source})
         calls = []
-        real = parse_entry.parse_pack_update_deps
+        real = parse_entry.parse_update_pack_deps
 
         def counting(source, source_name=''):
             calls.append(source_name)
             return real(source, source_name=source_name)
 
-        monkeypatch.setattr(parse_entry, 'parse_pack_update_deps', counting)
+        monkeypatch.setattr(parse_entry, 'parse_update_pack_deps', counting)
         entry = PackRepoEntry(repo)
-        assert entry.pack_update_deps('c1') == {'httpx': None}
-        assert entry.pack_update_deps('c2') == {'httpx': None}
+        assert entry.update_pack_deps('c1') == ('httpx',)
+        assert entry.update_pack_deps('c2') == ('httpx',)
         assert len(calls) == 1
 
     def test_different_blobs(self, monkeypatch):
         """A changed entry file is parsed again."""
-        first = "entry = ModEntryInfo(name='m', pack_update_deps=['httpx'])\n"
-        second = "entry = ModEntryInfo(name='m', pack_update_deps=['starlette'])\n"
+        first = "entry = ModEntryInfo(name='m', update_pack_deps=['httpx'])\n"
+        second = "entry = ModEntryInfo(name='m', update_pack_deps=['starlette'])\n"
         repo = self.make_repo({'c1': first, 'c2': second})
         calls = []
-        real = parse_entry.parse_pack_update_deps
+        real = parse_entry.parse_update_pack_deps
 
         def counting(source, source_name=''):
             calls.append(source_name)
             return real(source, source_name=source_name)
 
-        monkeypatch.setattr(parse_entry, 'parse_pack_update_deps', counting)
+        monkeypatch.setattr(parse_entry, 'parse_update_pack_deps', counting)
         entry = PackRepoEntry(repo)
-        assert entry.pack_update_deps('c1') == {'httpx': None}
-        assert entry.pack_update_deps('c2') == {'starlette': None}
+        assert entry.update_pack_deps('c1') == ('httpx',)
+        assert entry.update_pack_deps('c2') == ('starlette',)
         assert len(calls) == 2
 
     def test_error_names_the_commit(self):
         """A broken entry reports the file and the commit."""
-        source = "entry = ModEntryInfo(name='m', pack_update_deps=get_deps())\n"
+        source = "entry = ModEntryInfo(name='m', update_pack_deps=get_deps())\n"
         repo = self.make_repo({'c1': source})
         with pytest.raises(ValueError, match='module/config/const.py at commit c1'):
-            PackRepoEntry(repo).pack_update_deps('c1')
+            PackRepoEntry(repo).update_pack_deps('c1')
 
     def test_symlink(self):
         """An entry path that is a symlink is refused, its blob is a path."""
@@ -323,7 +322,7 @@ class TestPackRepoEntry:
                 raise AssertionError('the symlink blob must not be read')
 
         with pytest.raises(ValueError, match='is a symlink'):
-            PackRepoEntry(FakeRepo()).pack_update_deps('c1')
+            PackRepoEntry(FakeRepo()).update_pack_deps('c1')
 
     def test_repo_is_read_lazily(self):
         """A repo that was not read is read before the entry is looked up."""
@@ -342,11 +341,11 @@ class TestPackRepoEntry:
                 return None
 
         repo = LazyRepo()
-        assert PackRepoEntry(repo).pack_update_deps('c1') == {}
+        assert PackRepoEntry(repo).update_pack_deps('c1') == ()
         assert repo.read is True
 
 
-class TestPackUpdateDepsErrors:
+class TestUpdatePackDepsErrors:
     """The source forms the parser refuses."""
 
     def test_invalid_python(self):
@@ -356,9 +355,9 @@ class TestPackUpdateDepsErrors:
 
     def test_source_name(self):
         """The name of the source is added to the error message."""
-        source = "entry = ModEntryInfo(name='m', pack_update_deps=get_deps())\n"
+        source = "entry = ModEntryInfo(name='m', update_pack_deps=get_deps())\n"
         with pytest.raises(ValueError, match='module/config/const.py at c3'):
-            parse_pack_update_deps(source, source_name='module/config/const.py at c3')
+            parse_update_pack_deps(source, source_name='module/config/const.py at c3')
 
     def test_entry_is_not_a_call(self):
         """The entry must be constructed by a call."""
@@ -366,8 +365,8 @@ class TestPackUpdateDepsErrors:
             parse("entry = 1\n")
 
     def test_entry_is_a_helper_call(self):
-        """A helper call that does not name pack_update_deps is not read."""
-        with pytest.raises(ValueError, match='does not declare pack_update_deps'):
+        """A helper call that does not name update_pack_deps is not read."""
+        with pytest.raises(ValueError, match='does not declare update_pack_deps'):
             parse('entry = build_entry()\n')
 
     def test_entry_kwargs(self):
@@ -383,18 +382,18 @@ class TestPackUpdateDepsErrors:
     def test_dynamic_value(self):
         """A function call is not a static declaration."""
         with pytest.raises(ValueError, match='unsupported call'):
-            parse("entry = ModEntryInfo(name='m', pack_update_deps=get_deps())\n")
+            parse("entry = ModEntryInfo(name='m', update_pack_deps=get_deps())\n")
 
     def test_unknown_name(self):
         """A name that is not assigned before the declaration is unknown."""
         with pytest.raises(ValueError, match='unknown name'):
-            parse("entry = ModEntryInfo(name='m', pack_update_deps=DEPS)\n")
+            parse("entry = ModEntryInfo(name='m', update_pack_deps=DEPS)\n")
 
     def test_name_of_dynamic_value(self):
         """A name that holds a dynamic value is not a static declaration."""
         source = """\
 DEPS = get_deps()
-entry = ModEntryInfo(name='m', pack_update_deps=DEPS)
+entry = ModEntryInfo(name='m', update_pack_deps=DEPS)
 """
         with pytest.raises(ValueError, match='is not a static value'):
             parse(source)
@@ -402,54 +401,54 @@ entry = ModEntryInfo(name='m', pack_update_deps=DEPS)
     def test_bare_string(self):
         """A bare string is not a collection of names."""
         with pytest.raises(ValueError, match='must be a dict, list, tuple or set'):
-            parse("entry = ModEntryInfo(name='m', pack_update_deps='httpx')\n")
+            parse("entry = ModEntryInfo(name='m', update_pack_deps='httpx')\n")
 
     def test_non_string_name(self):
         """Every declared name must be a string."""
         with pytest.raises(ValueError, match='names must be str'):
-            parse("entry = ModEntryInfo(name='m', pack_update_deps=[1])\n")
+            parse("entry = ModEntryInfo(name='m', update_pack_deps=[1])\n")
 
     def test_non_string_key(self):
         """Every key of a dict declaration must be a string."""
         with pytest.raises(ValueError, match='names must be str'):
-            parse("entry = ModEntryInfo(name='m', pack_update_deps={1: None})\n")
+            parse("entry = ModEntryInfo(name='m', update_pack_deps={1: None})\n")
 
     def test_dict_unpacking(self):
         """A dict unpacking is not a static declaration of keys."""
         with pytest.raises(ValueError, match='dict unpacking'):
-            parse("entry = ModEntryInfo(name='m', pack_update_deps={**OTHER})\n")
+            parse("entry = ModEntryInfo(name='m', update_pack_deps={**OTHER})\n")
 
     def test_fromkeys_of_string(self):
         """dict.fromkeys() over a bare string is not an accepted collection."""
         with pytest.raises(ValueError, match='requires a dict, list, tuple or set'):
-            parse("entry = ModEntryInfo(name='m', pack_update_deps=dict.fromkeys('httpx'))\n")
+            parse("entry = ModEntryInfo(name='m', update_pack_deps=dict.fromkeys('httpx'))\n")
 
     def test_fromkeys_arguments(self):
         """dict.fromkeys() takes one or two positional arguments."""
         with pytest.raises(ValueError, match='takes one or two positional arguments'):
             parse(
                 "entry = ModEntryInfo(name='m', "
-                "pack_update_deps=dict.fromkeys(['httpx'], None, None))\n")
+                "update_pack_deps=dict.fromkeys(['httpx'], None, None))\n")
 
     def test_list_comprehension(self):
         """A comprehension is a dynamic declaration."""
         with pytest.raises(ValueError, match='unsupported expression'):
             parse(
                 "entry = ModEntryInfo(name='m', "
-                "pack_update_deps=[name for name in ['httpx']])\n")
+                "update_pack_deps=[name for name in ['httpx']])\n")
 
     def test_dict_union(self):
         """An operation is a dynamic declaration."""
         with pytest.raises(ValueError, match='unsupported expression'):
             parse(
                 "entry = ModEntryInfo(name='m', "
-                "pack_update_deps={'httpx': None} | {})\n")
+                "update_pack_deps={'httpx': None} | {})\n")
 
     def test_update_call(self):
         """A mutation after the declaration is not read."""
         source = """\
 entry = ModEntryInfo(name='m')
-entry.pack_update_deps.update({'httpx': None})
+entry.update_pack_deps.update({'httpx': None})
 """
         with pytest.raises(ValueError, match='module level assignments'):
             parse(source)
@@ -458,16 +457,16 @@ entry.pack_update_deps.update({'httpx': None})
         """An item assignment after the declaration is not read."""
         source = """\
 entry = ModEntryInfo(name='m')
-entry.pack_update_deps['httpx'] = None
+entry.update_pack_deps['httpx'] = None
 """
-        with pytest.raises(ValueError, match='item of pack_update_deps'):
+        with pytest.raises(ValueError, match='item of update_pack_deps'):
             parse(source)
 
     def test_augmented_assignment(self):
         """An augmented assignment after the declaration is not read."""
         source = """\
 entry = ModEntryInfo(name='m')
-entry.pack_update_deps |= {'httpx': None}
+entry.update_pack_deps |= {'httpx': None}
 """
         with pytest.raises(ValueError, match='augmented assignment'):
             parse(source)
@@ -476,9 +475,9 @@ entry.pack_update_deps |= {'httpx': None}
         """A deletion after the declaration is not read."""
         source = """\
 entry = ModEntryInfo(name='m')
-del entry.pack_update_deps['httpx']
+del entry.update_pack_deps['httpx']
 """
-        with pytest.raises(ValueError, match='deleting pack_update_deps'):
+        with pytest.raises(ValueError, match='deleting update_pack_deps'):
             parse(source)
 
     def test_conditional_declaration(self):
@@ -486,7 +485,7 @@ del entry.pack_update_deps['httpx']
         source = """\
 entry = ModEntryInfo(name='m')
 if True:
-    entry.pack_update_deps = ['httpx']
+    entry.update_pack_deps = ['httpx']
 """
         with pytest.raises(ValueError, match='module level assignments'):
             parse(source)

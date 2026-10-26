@@ -45,7 +45,7 @@ the target of the dependency (the version a client updates to, the only
 version with a full pack), the pins of the old commits are the versions a
 client may still be on, every one of them gets an update path to the target (a
 full pack is only built of the target). The names to build are the
-pack_update_deps of the mod entry at the latest commit, read from its source
+update_pack_deps of the mod entry at the latest commit, read from its source
 by PackRepoEntry: a name the entry does not declare is not fetched and gets no
 pack, and a declared name that no commit of the window pins yields no wheel
 and no pack and is reported with a warning (a range constraint builds nothing,
@@ -182,7 +182,7 @@ class DepGen:
         # the pins of the dependency files over the lookback window, the
         # latest commit first, see LookbackWheel
         self.wheel = LookbackWheel(repo, config)
-        # the pack_update_deps of the mod entry at the latest commit, read
+        # the update_pack_deps of the mod entry at the latest commit, read
         # from its source when the sample needs it
         self.entry = PackRepoEntry(repo)
         # the folder name is checked before anything is written, see repo_folder
@@ -239,7 +239,7 @@ class DepGen:
         """
         The dependency names the mod entry declares for pack updates.
 
-        The names come from the pack_update_deps of the entry at the latest
+        The names come from the update_pack_deps of the entry at the latest
         commit of the repo, the version a client updates to: the client reads
         the entry of the updated tree before it reconciles its dependencies.
         The names are PEP 503 normalized and deduplicated, keeping the order
@@ -250,18 +250,18 @@ class DepGen:
 
         Raises:
             ValueError: If the repo has no branch to pack, the entry cannot
-                be read, or its pack_update_deps is written in a form the
+                be read, or its update_pack_deps is written in a form the
                 parser does not support, see PackRepoEntry
         """
         commit = self.wheel.lookback.latest_commit
-        names = self.entry.pack_update_deps(commit)
+        names = self.entry.update_pack_deps(commit)
         if not names:
             logger.info(
-                f'No pack_update_deps declared by {ENTRY_FILE} at {commit}, '
+                f'No update_pack_deps declared by {ENTRY_FILE} at {commit}, '
                 f'no dependency pack is built')
             return {}
         logger.info(
-            f'Using pack_update_deps of {ENTRY_FILE} at {commit}: {", ".join(names)}')
+            f'Using update_pack_deps of {ENTRY_FILE} at {commit}: {", ".join(names)}')
         return dict.fromkeys(normalize_name(name) for name in names)
 
     @cached_property
@@ -269,7 +269,7 @@ class DepGen:
         """
         The dependencies to build: the pins of the window, managed names only.
 
-        Only the names of the mod entry pack_update_deps are kept (PEP 503
+        Only the names of the mod entry update_pack_deps are kept (PEP 503
         normalized): a dependency the entry does not declare is not fetched
         and gets no pack. The pins of the latest commit come first (the
         target of an update), then the pins of the lookback commits, in the
@@ -309,7 +309,7 @@ class DepGen:
             if name not in sample:
                 logger.warning(
                     f'Dependency "{name}" is not pinned to a version in the lookback window, '
-                    f'nothing is built of it; a dependency of the mod entry pack_update_deps '
+                    f'nothing is built of it; a dependency of the mod entry update_pack_deps '
                     f'must be pinned with "==" in a dependency file of the config')
         return sample
 

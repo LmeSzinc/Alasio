@@ -4,7 +4,7 @@ the update source of a mod (mirrors), in the input forms of
 Mirrors.from_input (see doc/2026-10-05_mod-update-backend-integration.md
 §9), the source of the distributions installed with pip (pypi_mirrors and
 its default), and the dependency fields (requirements_file and
-pack_update_deps).
+update_pack_deps).
 """
 from copy import deepcopy
 
@@ -192,23 +192,22 @@ class TestModEntryInfoDependencies:
         """By default a mod reads requirements.txt and updates nothing by pack."""
         entry = ModEntryInfo(name='m')
         assert entry.requirements_file == 'requirements.txt'
-        assert entry.pack_update_deps == {}
+        assert entry.update_pack_deps == ()
 
     def test_declared(self):
         """The declared names and the requirements path are kept."""
         entry = ModEntryInfo(
             name='m',
             requirements_file='deploy/AidLux/0.92/requirements.txt',
-            pack_update_deps={'httpx': None, 'ruamel.yaml': None},
+            update_pack_deps=('httpx', 'ruamel.yaml'),
         )
         assert entry.requirements_file == 'deploy/AidLux/0.92/requirements.txt'
-        assert list(entry.pack_update_deps) == ['httpx', 'ruamel.yaml']
+        assert entry.update_pack_deps == ('httpx', 'ruamel.yaml')
 
     def test_copy_keeps_the_dependencies(self):
         """ModEntryInfo.copy() (deepcopy) keeps the declared pack updated names."""
-        entry = ModEntryInfo(name='m', pack_update_deps={'httpx': None})
+        entry = ModEntryInfo(name='m', update_pack_deps=('httpx',))
 
         other = entry.copy()
 
-        assert other.pack_update_deps == entry.pack_update_deps
-        assert other.pack_update_deps is not entry.pack_update_deps
+        assert other.update_pack_deps == entry.update_pack_deps

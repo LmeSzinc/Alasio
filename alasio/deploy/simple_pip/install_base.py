@@ -8,7 +8,7 @@ The requirements file of the mod (mod.entry.requirements_file, default
 with, every one pinned to an exact version -- the file style the mod entry
 names (ModEntryInfo.requirements_file, see
 alasio.deploy.simple_pip.parse_req). The distributions a mod updates by pack are declared on its entry
-(mod.entry.pack_update_deps, an entry attribute like mirrors); the other
+(mod.entry.update_pack_deps, an entry attribute like mirrors); the other
 pins install with pip, by the flow of the caller. install_pack() hands every
 declared pin to the pack channel of the mod, one distribution at a time
 (PipPack and the deploy job machine): the job updates a different local
@@ -60,7 +60,7 @@ class InstallBase:
     Attributes:
         mod (Mod): The mounted mod, its entry carries the requirements
             file and the pack updated names (entry.requirements_file and
-            entry.pack_update_deps are read, entry.mirrors is handed to
+            entry.update_pack_deps are read, entry.mirrors is handed to
             PipPack)
         site_packages (PathStr): Folder the distributions are checked in
             and installed into, the root of the deploy jobs
@@ -149,7 +149,7 @@ class InstallBase:
         for pack updates, read on the first await and cached on the instance.
 
         The result is the intersection of the pins of the requirements file
-        and the names of pack_update_deps, keyed by the PEP 503 normalized
+        and the names of update_pack_deps, keyed by the PEP 503 normalized
         name. It is not a local version check: the deploy job of a
         distribution decides whether the version is an update or a file
         validation, from the local ledger of that distribution. Every
@@ -164,7 +164,7 @@ class InstallBase:
                 updated pin
         """
         pins = await self._requirements_deps
-        names = {normalize_name(name) for name in self.mod.entry.pack_update_deps}
+        names = {normalize_name(name) for name in self.mod.entry.update_pack_deps}
         return {
             name: version
             for name, version in pins.items()
@@ -175,7 +175,7 @@ class InstallBase:
         """
         Reconcile the requirements pins the mod updates by pack.
 
-        The pins in pack_update_deps are handed to PipPack one distribution
+        The pins in update_pack_deps are handed to PipPack one distribution
         at a time. The pack job updates a different local version and
         validates or repairs the files of an equal one, so every declared pin
         is checked even when there is no update. The mod's packdep snapshot is

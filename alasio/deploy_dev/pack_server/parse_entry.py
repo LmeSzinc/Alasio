@@ -1,5 +1,5 @@
 """
-Parse the pack_update_deps declaration from the source of a mod entry.
+Parse the update_pack_deps declaration from the source of a mod entry.
 
 The pack server builds the dependency channels a mod declares for pack
 updates. The declaration lives in the mod entry, the module-level variable
@@ -9,25 +9,25 @@ updates. The declaration lives in the mod entry, the module-level variable
 
     entry = ModEntryInfo(
         name='alas',
-        pack_update_deps={'httpx': None, 'ruamel.yaml': None},
+        update_pack_deps=('httpx', 'ruamel.yaml'),
     )
 
 The pack server reads the source from the git blob of a commit, not from a
 working tree, and it must not execute code of the repo it packs. This module
 provides the reader of the blob and the parser of the declaration:
 
-- PackRepoEntry.pack_update_deps(commit) reads module/config/const.py from
+- PackRepoEntry.update_pack_deps(commit) reads module/config/const.py from
 the commit and parses it, caching the result by the blob sha1;
-- parse_pack_update_deps(source) parses the source itself, with ast: the
+- parse_update_pack_deps(source) parses the source itself, with ast: the
 source is never imported, compiled into a callable or evaluated. Only the
-`pack_update_deps` argument of the entry is read, the other arguments and the
+`update_pack_deps` argument of the entry is read, the other arguments and the
 other statements of the module are ignored.
 
 The declaration may be the keyword of the entry construction or an attribute
 assignment after it:
 
     entry = ModEntryInfo(name='alas')
-    entry.pack_update_deps = {'httpx': None}
+    entry.update_pack_deps = ('httpx',)
 
 The value must be a static expression, read in the order of the source:
 
@@ -37,22 +37,22 @@ The value must be a static expression, read in the order of the source:
 - a module-level name that was assigned one of the forms above.
 
 A later assignment to entry resets the declaration, a later assignment to
-entry.pack_update_deps replaces it. A value of None, an empty dict / list /
-tuple / set or a missing pack_update_deps means no dependency is updated by
+entry.update_pack_deps replaces it. A value of None, an empty dict / list /
+tuple / set or a missing update_pack_deps means no dependency is updated by
 pack. The names are returned as they are written, the caller normalizes them
 with PEP 503, like the other names of the pack files.
 
 Everything else raises ValueError: a dynamic expression, a mutation of
-entry.pack_update_deps after the declaration (e.g. .update() or an item
+entry.update_pack_deps after the declaration (e.g. .update() or an item
 assignment), an entry built by a helper call that does not name the keyword,
 or a declaration outside the module level. A pack must never silently lose a
 dependency channel because this parser could not read the declaration.
 
 Usage:
-    from alasio.deploy_dev.pack_server.parse_entry import PackRepoEntry, parse_pack_update_deps
+    from alasio.deploy_dev.pack_server.parse_entry import PackRepoEntry, parse_update_pack_deps
 
-    names = parse_pack_update_deps(source, source_name='module/config/const.py at c3')
-    names = PackRepoEntry(repo).pack_update_deps(commit)
+    names = parse_update_pack_deps(source, source_name='module/config/const.py at c3')
+    names = PackRepoEntry(repo).update_pack_deps(commit)
 """
 
 import ast
@@ -88,9 +88,9 @@ class _Unsupported(ValueError):
         super().__init__(message)
 
 
-def parse_pack_update_deps(source, source_name=''):
+def parse_update_pack_deps(source, source_name=''):
     """
-    Parse the pack_update_deps declaration of a mod entry.
+    Parse the update_pack_deps declaration of a mod entry.
 
     The source is parsed with ast and never executed. See the module
     docstring for the accepted declarations.
@@ -104,13 +104,13 @@ def parse_pack_update_deps(source, source_name=''):
             the message only carries the reason
 
     Returns:
-        dict[str, None]: The declared distribution names in source order,
+        tuple[str, ...]: The declared distribution names in source order,
             empty when the module declares no entry or an empty
-            pack_update_deps
+            update_pack_deps
 
     Raises:
         ValueError: If the source is not valid Python, the entry declaration
-            cannot be read, or pack_update_deps is not a static collection of
+            cannot be read, or update_pack_deps is not a static collection of
             str
     """
     try:
@@ -124,7 +124,7 @@ def parse_pack_update_deps(source, source_name=''):
         parser.visit(tree)
     except _Unsupported as e:
         raise ValueError(_with_source_name(source_name, str(e))) from None
-    return parser.pack_update_deps
+    return parser.update_pack_deps
 
 
 def _with_source_name(source_name, message):
@@ -145,7 +145,7 @@ def _with_source_name(source_name, message):
 
 class PackRepoEntry:
     """
-    Read the pack_update_deps of a mod entry from the commits of a git repo.
+    Read the update_pack_deps of a mod entry from the commits of a git repo.
 
     The entry file is read from the git blob of a commit, never from a
     working tree: the pack server clones a repo without a working tree. The
@@ -154,7 +154,7 @@ class PackRepoEntry:
 
     Usage:
         entry = PackRepoEntry(repo)
-        names = entry.pack_update_deps(commit)
+        names = entry.update_pack_deps(commit)
     """
 
     def __init__(self, repo):
@@ -164,18 +164,18 @@ class PackRepoEntry:
                 read lazily when the caller did not read it
         """
         self.repo = repo
-        # blob sha1 -> {name: None}
+        # blob sha1 -> tuple[str, ...]
         self._cache = {}
 
-    def pack_update_deps(self, commit):
+    def update_pack_deps(self, commit):
         """
-        Read the pack_update_deps declaration of an entry from a commit.
+        Read the update_pack_deps declaration of an entry from a commit.
 
         Args:
             commit (str): Commit sha1 to read the entry from
 
         Returns:
-            dict[str, None]: Declared names in source order, empty when the
+            tuple[str, ...]: Declared names in source order, empty when the
                 commit has no entry file or the entry declares no name
 
         Raises:
@@ -185,7 +185,7 @@ class PackRepoEntry:
         self._read_repo()
         file = self.repo.get_file(commit, ENTRY_FILE)
         if file is None:
-            return {}
+            return ()
         if file.mode == b'120000':
             raise ValueError(
                 f'{ENTRY_FILE} at commit {commit} is a symlink, not a file')
@@ -193,7 +193,7 @@ class PackRepoEntry:
         if cached is not None:
             return cached
         source = self.repo.cat(file.sha1).decoded
-        names = parse_pack_update_deps(
+        names = parse_update_pack_deps(
             source, source_name=f'{ENTRY_FILE} at commit {commit}')
         self._cache[file.sha1] = names
         return names
@@ -251,53 +251,53 @@ def _is_mod_entry_info(func):
     return False
 
 
-def _is_pack_update_deps_attr(node):
+def _is_update_pack_deps_attr(node):
     """
-    Check whether an expression is the entry.pack_update_deps attribute.
+    Check whether an expression is the entry.update_pack_deps attribute.
 
     Args:
         node (ast.AST): Expression to inspect
 
     Returns:
-        bool: True for entry.pack_update_deps
+        bool: True for entry.update_pack_deps
     """
     return (
         isinstance(node, ast.Attribute)
-        and node.attr == 'pack_update_deps'
+        and node.attr == 'update_pack_deps'
         and isinstance(node.value, ast.Name)
         and node.value.id == 'entry'
     )
 
 
-def _is_pack_update_deps_member(node):
+def _is_update_pack_deps_member(node):
     """
-    Check whether an expression is a member or an item of pack_update_deps.
+    Check whether an expression is a member or an item of update_pack_deps.
 
-    The forms are entry.pack_update_deps.update, entry.pack_update_deps['x']
+    The forms are entry.update_pack_deps.update, entry.update_pack_deps['x']
     and an attribute of them, the mutations the parser refuses.
 
     Args:
         node (ast.AST): Expression to inspect
 
     Returns:
-        bool: True when the expression is rooted at entry.pack_update_deps
+        bool: True when the expression is rooted at entry.update_pack_deps
     """
     if isinstance(node, ast.Attribute):
-        return _is_pack_update_deps_attr(node.value)
+        return _is_update_pack_deps_attr(node.value)
     if isinstance(node, ast.Subscript):
-        return _is_pack_update_deps_attr(node.value)
+        return _is_update_pack_deps_attr(node.value)
     return False
 
 
 def _mentions_entry(node):
     """
-    Check whether a statement mentions the entry or pack_update_deps.
+    Check whether a statement mentions the entry or update_pack_deps.
 
     It is used on the statements the parser does not read, e.g. a conditional
     block or an import, so a declaration hidden there fails loudly instead of
     silently producing an empty list. A plain use of entry, e.g. setting
-    entry.root, does not count: only an assignment to the entry name, a
-    pack_update_deps keyword or attribute, and an import of entry do.
+    entry.root, does not count: only an assignment to the entry name, an
+    update_pack_deps keyword or attribute, and an import of entry do.
 
     Args:
         node (ast.AST): Statement to inspect
@@ -306,9 +306,9 @@ def _mentions_entry(node):
         bool: True when the statement may declare the entry
     """
     for child in ast.walk(node):
-        if isinstance(child, ast.keyword) and child.arg == 'pack_update_deps':
+        if isinstance(child, ast.keyword) and child.arg == 'update_pack_deps':
             return True
-        if isinstance(child, ast.Attribute) and child.attr == 'pack_update_deps':
+        if isinstance(child, ast.Attribute) and child.attr == 'update_pack_deps':
             return True
         if isinstance(child, ast.alias) and child.name == 'entry':
             return True
@@ -328,7 +328,7 @@ def _mentions_entry(node):
 
 def _coerce_names(value, node=None):
     """
-    Convert a static pack_update_deps value into {name: None}.
+    Convert a static update_pack_deps value into a tuple of names.
 
     Args:
         value: Evaluated value of the declaration
@@ -336,29 +336,29 @@ def _coerce_names(value, node=None):
             message. Defaults to None.
 
     Returns:
-        dict[str, None]: Declared names in their order, deduplicated
+        tuple[str, ...]: Declared names in their order, deduplicated
 
     Raises:
         _Unsupported: If the value is not a collection of str
     """
     if value is None:
-        return {}
+        return ()
     if isinstance(value, dict):
         names = list(value)
     elif isinstance(value, (list, tuple, set, frozenset)):
         names = list(value)
     else:
         raise _Unsupported(
-            'pack_update_deps must be a dict, list, tuple or set of str, '
+            'update_pack_deps must be a dict, list, tuple or set of str, '
             f'got {type(value).__name__}', node)
 
     out = {}
     for name in names:
         if not isinstance(name, str):
             raise _Unsupported(
-                f'pack_update_deps names must be str, got {type(name).__name__}', node)
+                f'update_pack_deps names must be str, got {type(name).__name__}', node)
         out[name] = None
-    return out
+    return tuple(out)
 
 
 class _EntryParser:
@@ -366,15 +366,15 @@ class _EntryParser:
     Walk the module level statements of an entry module.
 
     The parser keeps the module level names it can evaluate and the last
-    pack_update_deps declaration it read. Only module level assignments are
+    update_pack_deps declaration it read. Only module level assignments are
     read, see _mentions_entry for the guard of the other statements.
     """
 
     def __init__(self):
         # module level names that hold a static value, {name: value}
         self.constants = {}
-        # last declaration read, {name: None}
-        self.pack_update_deps = {}
+        # last declaration read, tuple[str, ...]
+        self.update_pack_deps = ()
 
     def visit(self, tree):
         """
@@ -414,18 +414,18 @@ class _EntryParser:
             return
 
         if isinstance(node, ast.AugAssign):
-            if _is_pack_update_deps_attr(node.target):
+            if _is_update_pack_deps_attr(node.target):
                 raise _Unsupported(
-                    'augmented assignment to pack_update_deps is not supported', node)
+                    'augmented assignment to update_pack_deps is not supported', node)
             self._check_other(node)
             return
 
         if isinstance(node, ast.Delete):
             if any(
-                    _is_pack_update_deps_attr(target) or _is_pack_update_deps_member(target)
+                    _is_update_pack_deps_attr(target) or _is_update_pack_deps_member(target)
                     for target in node.targets
             ):
-                raise _Unsupported('deleting pack_update_deps is not supported', node)
+                raise _Unsupported('deleting update_pack_deps is not supported', node)
             self._check_other(node)
             return
 
@@ -443,7 +443,7 @@ class _EntryParser:
         """
         if _mentions_entry(node):
             raise _Unsupported(
-                'entry and pack_update_deps must be declared by module level assignments',
+                'entry and update_pack_deps must be declared by module level assignments',
                 node)
 
     def _assign(self, target, value):
@@ -465,13 +465,13 @@ class _EntryParser:
                 self._record_constant(target.id, value)
             return
 
-        if _is_pack_update_deps_attr(target):
-            self.pack_update_deps = _coerce_names(self._eval(value), value)
+        if _is_update_pack_deps_attr(target):
+            self.update_pack_deps = _coerce_names(self._eval(value), value)
             return
 
-        if _is_pack_update_deps_member(target):
+        if _is_update_pack_deps_member(target):
             raise _Unsupported(
-                'assignment to an item of pack_update_deps is not supported', target)
+                'assignment to an item of update_pack_deps is not supported', target)
 
         # other attributes and items, e.g. entry.root or a plain dict item,
         # do not declare the dependency names
@@ -493,7 +493,7 @@ class _EntryParser:
             raise _Unsupported('**kwargs in the entry construction is not supported', value)
 
         keyword = next(
-            (keyword for keyword in value.keywords if keyword.arg == 'pack_update_deps'),
+            (keyword for keyword in value.keywords if keyword.arg == 'update_pack_deps'),
             None,
         )
         if keyword is None:
@@ -502,19 +502,19 @@ class _EntryParser:
             # declaration in its own body, where this parser cannot see it
             if not _is_mod_entry_info(value.func):
                 raise _Unsupported(
-                    'entry is constructed by a call that does not declare pack_update_deps',
+                    'entry is constructed by a call that does not declare update_pack_deps',
                     value)
-            self.pack_update_deps = {}
+            self.update_pack_deps = ()
             return
 
-        self.pack_update_deps = _coerce_names(self._eval(keyword.value), keyword.value)
+        self.update_pack_deps = _coerce_names(self._eval(keyword.value), keyword.value)
 
     def _record_constant(self, name, value):
         """
         Record a module level name for a later reference.
 
         A value the parser cannot evaluate is recorded as unknown: the name is
-        only an error when pack_update_deps actually references it, so an
+        only an error when update_pack_deps actually references it, so an
         unrelated dynamic module level value does not fail the parse.
 
         Args:

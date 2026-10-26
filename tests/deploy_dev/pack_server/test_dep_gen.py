@@ -57,12 +57,12 @@ REQUIREMENTS = {
 
 # entry of the mock repo: by default it declares the dependency the tests
 # build a channel of, see entry_source
-DEFAULT_ENTRY = "entry = ModEntryInfo(name='m', pack_update_deps={'httpx': None})\n"
+DEFAULT_ENTRY = "entry = ModEntryInfo(name='m', update_pack_deps=('httpx',))\n"
 
 
 def entry_source(*names):
     """
-    Build the source of a mod entry declaring pack_update_deps.
+    Build the source of a mod entry declaring update_pack_deps.
 
     Args:
         *names (str): Names to declare, none for an entry without the
@@ -73,8 +73,7 @@ def entry_source(*names):
     """
     if not names:
         return "entry = ModEntryInfo(name='m')\n"
-    body = ', '.join(f"'{name}': None" for name in names)
-    return f"entry = ModEntryInfo(name='m', pack_update_deps={{{body}}})\n"
+    return f"entry = ModEntryInfo(name='m', update_pack_deps={tuple(names)!r})\n"
 
 
 # folder of the packs of the config in the run directory, see PackRepoModel
@@ -347,8 +346,8 @@ class TestSample:
                 make_config(mirror.base))
             assert gen.sample == {}
         assert capture.concat() == """\
-INFO | Using pack_update_deps of module/config/const.py at c3: requests
-WARNING | Dependency "requests" is not pinned to a version in the lookback window, nothing is built of it; a dependency of the mod entry pack_update_deps must be pinned with "==" in a dependency file of the config
+INFO | Using update_pack_deps of module/config/const.py at c3: requests
+WARNING | Dependency "requests" is not pinned to a version in the lookback window, nothing is built of it; a dependency of the mod entry update_pack_deps must be pinned with "==" in a dependency file of the config
 """
 
     def test_name_is_normalized(self, fs, run_dir, mirror):
@@ -361,8 +360,8 @@ WARNING | Dependency "requests" is not pinned to a version in the lookback windo
         assert list(sample) == ['ruamel-yaml']
         assert [(dep.version, dep.target) for dep in sample['ruamel-yaml']] == [('0.18.6', True)]
 
-    def test_entry_without_pack_update_deps(self, fs, run_dir, mirror):
-        """An entry without pack_update_deps declares no dependency."""
+    def test_entry_without_update_pack_deps(self, fs, run_dir, mirror):
+        """An entry without update_pack_deps declares no dependency."""
         gen = DepGen(
             make_repo(REQUIREMENTS, entry=entry_source()),
             make_config(mirror.base))
@@ -374,12 +373,12 @@ WARNING | Dependency "requests" is not pinned to a version in the lookback windo
             gen = DepGen(make_repo(REQUIREMENTS, entry=None), make_config(mirror.base))
             assert gen.sample == {}
         assert capture.concat() == """\
-INFO | No pack_update_deps declared by module/config/const.py at c3, no dependency pack is built
+INFO | No update_pack_deps declared by module/config/const.py at c3, no dependency pack is built
 """
 
     def test_entry_broken(self, fs, run_dir, mirror):
         """A dynamic declaration fails the sample, no dependency is silently dropped."""
-        entry = "entry = ModEntryInfo(name='m', pack_update_deps=get_deps())\n"
+        entry = "entry = ModEntryInfo(name='m', update_pack_deps=get_deps())\n"
         gen = DepGen(make_repo(REQUIREMENTS, entry=entry), make_config(mirror.base))
         with pytest.raises(ValueError, match='unsupported call'):
             _ = gen.sample
@@ -403,7 +402,7 @@ INFO | No pack_update_deps declared by module/config/const.py at c3, no dependen
         def fail(commit):
             raise AssertionError('the entry must not be read')
 
-        monkeypatch.setattr(gen.entry, 'pack_update_deps', fail)
+        monkeypatch.setattr(gen.entry, 'update_pack_deps', fail)
         assert gen.sample == {}
 
 
@@ -490,7 +489,7 @@ class TestRun:
 
         # the progress of the run is logged
         assert capture.concat() == f"""\
-INFO | Using pack_update_deps of module/config/const.py at c3: httpx
+INFO | Using update_pack_deps of module/config/const.py at c3: httpx
 INFO | Generating the dependency packs of "Author_Repo_master": 1 dependencies, 3 versions
 INFO | [1/3] Fetching wheel of "httpx==0.28.1", mirror="http://mirror", commit=c3
 INFO | Index data cached: "http://mirror/httpx/" -> "{run_dir}/pack/Author_Repo_master/wheel/httpx/0.28.1/index_data.json"
@@ -598,7 +597,7 @@ INFO | Dependency packs of "Author_Repo_master" generated
             gen = DepGen(make_repo(REQUIREMENTS, entry=None), make_config(mirror.base))
             assert gen.run() is None
         assert capture.concat() == """\
-INFO | No pack_update_deps declared by module/config/const.py at c3, no dependency pack is built
+INFO | No update_pack_deps declared by module/config/const.py at c3, no dependency pack is built
 INFO | No dependency to build of "Author_Repo_master", skipped
 """
         assert gen.published == {}
@@ -622,7 +621,7 @@ INFO | No dependency to build of "Author_Repo_master", skipped
             DepGen(make_repo(requirements), make_config(mirror.base), client=mirror.client).run()
 
         assert capture.concat() == """\
-INFO | Using pack_update_deps of module/config/const.py at c2: httpx
+INFO | Using update_pack_deps of module/config/const.py at c2: httpx
 WARNING | Dependency "httpx" is not pinned by the latest commit, no pack is built of it, its historical packs are kept
 INFO | Generating the dependency packs of "Author_Repo_master": 0 dependencies, 0 versions
 INFO | Dependency packs of "Author_Repo_master" generated
@@ -793,7 +792,7 @@ class TestExistingPacks:
             DepGen(repo, make_config(mirror.base), client=mirror.client).run()
 
         assert capture.concat() == f"""\
-INFO | Using pack_update_deps of module/config/const.py at c3: httpx
+INFO | Using update_pack_deps of module/config/const.py at c3: httpx
 INFO | Generating the dependency packs of "Author_Repo_master": 1 dependencies, 3 versions
 INFO | [1/3] Fetching wheel of "httpx==0.28.1", mirror="http://mirror", commit=c3
 INFO | Index data exists, loaded: "{run_dir}/pack/Author_Repo_master/wheel/httpx/0.28.1/index_data.json"
@@ -829,7 +828,7 @@ INFO | Dependency packs of "Author_Repo_master" generated
             DepGen(repo, make_config(mirror.base), client=mirror.client).run()
 
         assert capture.concat() == f"""\
-INFO | Using pack_update_deps of module/config/const.py at c3: httpx
+INFO | Using update_pack_deps of module/config/const.py at c3: httpx
 INFO | Generating the dependency packs of "Author_Repo_master": 1 dependencies, 3 versions
 INFO | [1/3] Fetching wheel of "httpx==0.28.1", mirror="http://mirror", commit=c3
 INFO | Index data exists, loaded: "{run_dir}/pack/Author_Repo_master/wheel/httpx/0.28.1/index_data.json"
@@ -874,7 +873,7 @@ class TestCleanup:
             run_commit(make_repo(REQUIREMENTS), make_config(mirror.base), mirror.client)
 
         assert capture.concat() == f"""\
-INFO | Using pack_update_deps of module/config/const.py at c3: httpx
+INFO | Using update_pack_deps of module/config/const.py at c3: httpx
 INFO | Generating the dependency packs of "Author_Repo_master": 1 dependencies, 3 versions
 INFO | [1/3] Fetching wheel of "httpx==0.28.1", mirror="http://mirror", commit=c3
 INFO | Index data cached: "http://mirror/httpx/" -> "{run_dir}/pack/Author_Repo_master/wheel/httpx/0.28.1/index_data.json"
@@ -910,7 +909,7 @@ INFO | Dependency packs of "Author_Repo_master" committed
         # of the target only)
         fs.create_file(pack_file(run_dir, '0.26.0', 'full.pack'), contents=b'stale')
         fs.create_file(pack_file(run_dir, '0.27.8', 'full.pack'), contents=b'stale')
-        # a dependency of another config (or of a name removed from pack_update_deps)
+        # a dependency of another config (or of a name removed from update_pack_deps)
         fs.create_file(join_path(run_dir, REPO_FOLDER, 'packdep', 'other', 'latest.pack'), contents=b'stale')
         fs.create_file(join_path(
             run_dir, REPO_FOLDER, 'packdep', 'other', '1.0', 'full.pack'), contents=b'stale')
@@ -923,7 +922,7 @@ INFO | Dependency packs of "Author_Repo_master" committed
         assert pack_file(run_dir, '0.26.0', 'full.pack').isfile()
         assert join_path(run_dir, REPO_FOLDER, 'packdep', 'other').isdir()
         assert capture.concat() == f"""\
-INFO | Using pack_update_deps of module/config/const.py at c3: httpx
+INFO | Using update_pack_deps of module/config/const.py at c3: httpx
 INFO | Generating the dependency packs of "Author_Repo_master": 1 dependencies, 3 versions
 INFO | [1/3] Fetching wheel of "httpx==0.28.1", mirror="http://mirror", commit=c3
 INFO | Index data cached: "http://mirror/httpx/" -> "{run_dir}/pack/Author_Repo_master/wheel/httpx/0.28.1/index_data.json"
@@ -972,7 +971,7 @@ INFO | Dependency packs of "Author_Repo_master" committed
             run_commit(repo, make_config(mirror.base), mirror.client)
 
         assert capture.concat() == f"""\
-INFO | Using pack_update_deps of module/config/const.py at c3: httpx
+INFO | Using update_pack_deps of module/config/const.py at c3: httpx
 INFO | Generating the dependency packs of "Author_Repo_master": 1 dependencies, 3 versions
 INFO | [1/3] Fetching wheel of "httpx==0.28.1", mirror="http://mirror", commit=c3
 INFO | Index data exists, loaded: "{run_dir}/pack/Author_Repo_master/wheel/httpx/0.28.1/index_data.json"
@@ -1039,7 +1038,7 @@ INFO | Dependency packs of "Author_Repo_master" committed
             run_commit(make_repo(REQUIREMENTS), make_config(mirror.base), mirror.client)
 
         assert capture.concat() == f"""\
-INFO | Using pack_update_deps of module/config/const.py at c3: httpx
+INFO | Using update_pack_deps of module/config/const.py at c3: httpx
 INFO | Generating the dependency packs of "Author_Repo_master": 1 dependencies, 3 versions
 INFO | [1/3] Fetching wheel of "httpx==0.28.1", mirror="http://mirror", commit=c3
 INFO | Index data cached: "http://mirror/httpx/" -> "{run_dir}/pack/Author_Repo_master/wheel/httpx/0.28.1/index_data.json"

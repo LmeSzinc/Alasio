@@ -1,6 +1,6 @@
 import os.path
 from copy import deepcopy
-from typing import Dict, Union
+from typing import Dict, Tuple, Union
 
 from msgspec import Struct, field
 
@@ -80,7 +80,7 @@ class ModEntryInfo(Struct, dict=True):
     # compare is on the PEP 503 normalized name). A distribution not
     # declared here installs with pip. Defaults to empty, see
     # alasio.deploy.simple_pip.install_base
-    pack_update_deps: Dict[str, None] = field(default_factory=dict)
+    update_pack_deps: Tuple[str, ...] = ()
 
     def copy(self):
         """

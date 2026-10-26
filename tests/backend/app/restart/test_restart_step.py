@@ -496,7 +496,7 @@ class FakePerMod:
                 without a usable update source
             states (list): The recorded states of the mod
             pack_deps (Iterable[str]): The names the entry declares for pack
-                updates (entry.pack_update_deps)
+                updates (entry.update_pack_deps)
         """
         self.name = name
         self._job = job
@@ -508,7 +508,7 @@ class FakePerMod:
         self.mod = SimpleNamespace(
             name=name,
             root=f'/mod-{name}',
-            entry=SimpleNamespace(pack_update_deps=dict.fromkeys(pack_deps)),
+            entry=SimpleNamespace(update_pack_deps=tuple(pack_deps)),
         )
 
     async def job(self):
