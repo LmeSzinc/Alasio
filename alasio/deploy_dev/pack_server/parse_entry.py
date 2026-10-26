@@ -20,14 +20,27 @@ provides the reader of the blob and the parser of the declaration:
 the commit and parses it, caching the result by the blob sha1;
 - parse_update_pack_deps(source) parses the source itself, with ast: the
 source is never imported, compiled into a callable or evaluated. Only the
-`update_pack_deps` argument of the entry is read, the other arguments and the
-other statements of the module are ignored.
+`update_pack_deps` field of the entry is read, the other fields and the other
+statements of the module are ignored.
 
 The declaration may be the keyword of the entry construction or an attribute
 assignment after it:
 
     entry = ModEntryInfo(name='alas')
     entry.update_pack_deps = ('httpx',)
+
+The entry may also be one of the default entries of the library, looked up by
+key:
+
+    from alasio.config.entry.const import DICT_MOD_ENTRY
+
+    entry = DICT_MOD_ENTRY['alas']
+    entry.update_pack_deps = ('httpx',)
+
+The lookup is resolved against the library's own DICT_MOD_ENTRY, never against
+the source of the repo: the source is not imported or executed. The base
+entry's update_pack_deps is the starting value, a later attribute assignment
+replaces it, and a later ModEntryInfo construction resets it.
 
 The value must be a static expression, read in the order of the source:
 
@@ -44,9 +57,11 @@ with PEP 503, like the other names of the pack files.
 
 Everything else raises ValueError: a dynamic expression, a mutation of
 entry.update_pack_deps after the declaration (e.g. .update() or an item
-assignment), an entry built by a helper call that does not name the keyword,
-or a declaration outside the module level. A pack must never silently lose a
-dependency channel because this parser could not read the declaration.
+assignment), an entry built by a helper call that does not name the keyword, a
+DICT_MOD_ENTRY lookup whose name is not imported from the library module, whose
+key is not a static str of the library dict, or a declaration outside the module
+level. A pack must never silently lose a dependency channel because this parser
+could not read the declaration.
 
 Usage:
     from alasio.deploy_dev.pack_server.parse_entry import PackRepoEntry, parse_update_pack_deps
@@ -57,10 +72,16 @@ Usage:
 
 import ast
 
+from alasio.config.entry.const import DICT_MOD_ENTRY as _LIBRARY_MOD_ENTRY
+
 # Path of the mod entry in a repo, the file ModLoader.self_mod reads. It is
 # kept here so the caller that reads the git blob and the parser agree on the
 # layout of a mod.
 ENTRY_FILE = 'module/config/const.py'
+
+# module of the library default entries, the only module a DICT_MOD_ENTRY
+# lookup is resolved from
+_ENTRY_CONST_MODULE = 'alasio.config.entry.const'
 
 # Sentinel of a module level name whose value is not a static expression. The
 # name is recorded so a reference to it reports the unsupported value instead
@@ -365,14 +386,19 @@ class _EntryParser:
     """
     Walk the module level statements of an entry module.
 
-    The parser keeps the module level names it can evaluate and the last
-    update_pack_deps declaration it read. Only module level assignments are
-    read, see _mentions_entry for the guard of the other statements.
+    The parser keeps the module level names it can evaluate, the local names
+    of the library entry imports, and the last update_pack_deps declaration it
+    read. Only module level assignments are read, see _mentions_entry for the
+    guard of the other statements.
     """
 
     def __init__(self):
         # module level names that hold a static value, {name: value}
         self.constants = {}
+        # local names bound to the library DICT_MOD_ENTRY by an import
+        self.dict_mod_entry_names = set()
+        # local names bound to the library entry module by an import
+        self.entry_module_names = set()
         # last declaration read, tuple[str, ...]
         self.update_pack_deps = ()
 
@@ -429,6 +455,8 @@ class _EntryParser:
             self._check_other(node)
             return
 
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            self._record_import(node)
         self._check_other(node)
 
     def _check_other(self, node):
@@ -445,6 +473,101 @@ class _EntryParser:
             raise _Unsupported(
                 'entry and update_pack_deps must be declared by module level assignments',
                 node)
+
+    def _record_import(self, node):
+        """
+        Record the local names of the library entry imports.
+
+        Only the module that holds the default entries is accepted: a
+        DICT_MOD_ENTRY imported from another module is not the library dict,
+        and the parser must not resolve it to the library entry.
+
+        Args:
+            node (ast.Import | ast.ImportFrom): Import statement to read
+        """
+        if isinstance(node, ast.ImportFrom):
+            if node.level == 0 and node.module == _ENTRY_CONST_MODULE:
+                for alias in node.names:
+                    if alias.name == 'DICT_MOD_ENTRY':
+                        self.dict_mod_entry_names.add(alias.asname or alias.name)
+            return
+        for alias in node.names:
+            if alias.name == _ENTRY_CONST_MODULE and alias.asname:
+                self.entry_module_names.add(alias.asname)
+
+    def _is_dict_mod_entry(self, node):
+        """
+        Check whether an expression is the library DICT_MOD_ENTRY.
+
+        The accepted forms are the name imported from the library entry
+        module, e.g. DICT_MOD_ENTRY or an alias of it, and the attribute of a
+        module imported as an alias, e.g. const.DICT_MOD_ENTRY.
+
+        Args:
+            node (ast.AST): Expression to inspect
+
+        Returns:
+            bool: True when the expression is the library DICT_MOD_ENTRY
+        """
+        if isinstance(node, ast.Name):
+            return node.id in self.dict_mod_entry_names
+        if isinstance(node, ast.Attribute):
+            return (
+                node.attr == 'DICT_MOD_ENTRY'
+                and isinstance(node.value, ast.Name)
+                and node.value.id in self.entry_module_names
+            )
+        return False
+
+    def _eval_subscript_key(self, node):
+        """
+        Evaluate the key of a subscript, across the ast of python 3.8.
+
+        In python 3.8 the slice of a subscript is an ast.Index that wraps the
+        expression; from python 3.9 on it is the expression itself.
+
+        Args:
+            node (ast.AST): Slice of a subscript
+
+        Returns:
+            The static value of the key
+
+        Raises:
+            _Unsupported: If the key is not a static expression
+        """
+        index_type = getattr(ast, 'Index', None)
+        if index_type is not None and isinstance(node, index_type):
+            node = node.value
+        return self._eval(node)
+
+    def _assign_dict_mod_entry(self, value):
+        """
+        Read an entry assigned from the library DICT_MOD_ENTRY.
+
+        The lookup is resolved by the key in the library dict, never by the
+        source of the repo: the entry module is not imported or executed. The
+        key must be a static str, and the base value is the entry's
+        update_pack_deps.
+
+        Args:
+            value (ast.Subscript): The DICT_MOD_ENTRY[key] expression
+
+        Raises:
+            _Unsupported: If the expression is not the library DICT_MOD_ENTRY,
+                the key is not a static str, or the key is unknown
+        """
+        if not self._is_dict_mod_entry(value.value):
+            raise _Unsupported(
+                'entry must be constructed by a call or a DICT_MOD_ENTRY lookup', value)
+        key = self._eval_subscript_key(value.slice)
+        if not isinstance(key, str):
+            raise _Unsupported(
+                f'DICT_MOD_ENTRY key must be a str, got {type(key).__name__}', value)
+        try:
+            entry = _LIBRARY_MOD_ENTRY[key]
+        except KeyError:
+            raise _Unsupported(f'unknown DICT_MOD_ENTRY key "{key}"', value) from None
+        self.update_pack_deps = tuple(entry.update_pack_deps)
 
     def _assign(self, target, value):
         """
@@ -480,13 +603,19 @@ class _EntryParser:
         """
         Read an assignment to the entry name.
 
+        The value is an entry construction or a lookup of a default entry of
+        the library, see the module docstring.
+
         Args:
             value (ast.AST): Value of the assignment
 
         Raises:
-            _Unsupported: If the value is not an entry construction the
-                parser can read
+            _Unsupported: If the value is not an entry construction or a
+                DICT_MOD_ENTRY lookup the parser can read
         """
+        if isinstance(value, ast.Subscript):
+            self._assign_dict_mod_entry(value)
+            return
         if not isinstance(value, ast.Call):
             raise _Unsupported('entry must be constructed by a call', value)
         if any(keyword.arg is None for keyword in value.keywords):
