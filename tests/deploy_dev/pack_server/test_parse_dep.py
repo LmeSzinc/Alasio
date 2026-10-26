@@ -15,6 +15,7 @@ from alasio.deploy.simple_pip import parse_req
 from alasio.deploy.simple_pip.parse_req import Requirements
 from alasio.deploy_dev.pack_server import parse_dep
 from alasio.deploy_dev.pack_server.parse_dep import PyprojectParser, RequirementsParser
+from alasio.logger import logger
 
 
 def parse_requirements(content):
@@ -164,16 +165,22 @@ charset-normalizer==3.3.2 \\
         assert parse_requirements('httpx==0.28.1\nhttpx==0.28.1') == {'httpx': '0.28.1'}
 
     def test_conflicting(self):
-        """Two different versions of one name raise a ValueError on the read."""
+        """Two different versions keep the first, the later one is a warning."""
         parser = RequirementsParser('httpx==0.28.1\nhttpx==0.28.2')
-        with pytest.raises(ValueError, match='Conflicting versions of "httpx"'):
-            _ = parser.dict_deps
+        with logger.mock_capture_writer() as capture:
+            assert parser.dict_deps == {'httpx': '0.28.1'}
+        assert capture.concat() == """\
+WARNING | Conflicting versions of "httpx" in the requirements: "0.28.1" and "0.28.2", keeping "0.28.1"
+"""
 
     def test_conflicting_normalized(self):
         """The conflict is checked on the normalized name."""
         content = 'PyYAML==6.0.1\npyyaml==6.0.2'
-        with pytest.raises(ValueError, match='Conflicting versions of "pyyaml"'):
-            parse_requirements(content)
+        with logger.mock_capture_writer() as capture:
+            assert parse_requirements(content) == {'pyyaml': '6.0.1'}
+        assert capture.concat() == """\
+WARNING | Conflicting versions of "pyyaml" in the requirements: "6.0.1" and "6.0.2", keeping "6.0.1"
+"""
 
 
 class TestPyprojectParser:
@@ -315,7 +322,7 @@ pytest = "==8.3.4"
         assert parser.dict_deps is parser.dict_deps
 
     def test_conflicting(self):
-        """Two different versions of one name raise a ValueError on the read."""
+        """Two different versions keep the first, the later one is a warning."""
         content = """\
 [project]
 dependencies = ["httpx==0.28.1"]
@@ -324,8 +331,11 @@ dependencies = ["httpx==0.28.1"]
 httpx = "==0.28.2"
 """
         parser = PyprojectParser(content)
-        with pytest.raises(ValueError, match='Conflicting versions of "httpx"'):
-            _ = parser.dict_deps
+        with logger.mock_capture_writer() as capture:
+            assert parser.dict_deps == {'httpx': '0.28.1'}
+        assert capture.concat() == """\
+WARNING | Conflicting versions of "httpx" in the requirements: "0.28.1" and "0.28.2", keeping "0.28.1"
+"""
 
     def test_invalid_toml(self):
         """A content that is not a TOML document is refused on the read."""
@@ -348,9 +358,25 @@ class TestClientRules:
         assert RequirementsParser('httpx==0.28.1').dict_deps == {'httpx': '0.28.1'}
 
     def test_the_requirement_rules_are_the_client_ones(self):
-        """The pin rules of the release side are the client functions."""
+        """The requirement text rule of the release side is the client function."""
         assert parse_dep.parse_requirement is parse_req.parse_requirement
-        assert parse_dep.build_pins is parse_req.build_pins
+
+    def test_build_pins(self):
+        """The pins of a pyproject.toml are keyed by the normalized name."""
+        assert parse_dep.build_pins([('PyYAML', '6.0.1'), ('ruamel.yaml', '0.18.6')]) == {
+            'pyyaml': '6.0.1',
+            'ruamel-yaml': '0.18.6',
+        }
+
+    def test_build_pins_conflicting_versions(self):
+        """Two different versions keep the first, the later one is a warning."""
+        with logger.mock_capture_writer() as capture:
+            assert parse_dep.build_pins([('PyYAML', '6.0.1'), ('pyyaml', '6.0.2')]) == {
+                'pyyaml': '6.0.1',
+            }
+        assert capture.concat() == """\
+WARNING | Conflicting versions of "pyyaml" in the requirements: "6.0.1" and "6.0.2", keeping "6.0.1"
+"""
 
     def test_name_normalization_uses_packaging(self):
         """The release side normalizes names with packaging, not a copy."""

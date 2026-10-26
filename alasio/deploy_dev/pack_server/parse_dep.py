@@ -12,8 +12,8 @@ modules:
   format; the rules are the client parser's, Requirements
 - PyprojectParser parses a pyproject.toml: the [project] tables of PEP 621,
   the [dependency-groups] table of PEP 735 and the dependency tables of
-  poetry; its PEP 508 texts and its pins are parsed by the client rules too,
-  parse_requirement and build_pins
+  poetry; its PEP 508 texts are read by the client rule parse_requirement,
+  its pins are built here by build_pins
 
 A parser takes the content of its file as a string -- the caller reads the
 files, e.g. the file of every commit of the lookback window, so no parser
@@ -42,12 +42,42 @@ from packaging.utils import canonicalize_name as normalize_name  # noqa: F401
 
 # The requirement file format rules are shared with the client on purpose:
 # the release side parses the same files the client installs from.
-from alasio.deploy.simple_pip.parse_req import Requirements, build_pins, parse_requirement
+from alasio.deploy.simple_pip.parse_req import Requirements, parse_requirement
 # Re-exported for the release modules that normalize a distribution name,
 # e.g. fetch_wheel and dep_gen. The release side uses packaging; the client
 # keeps its own normalize_name in alasio.deploy.simple_pip.pip_list.
 from alasio.ext.cache import cached_property
 from alasio.ext.file.tomlfile import toml_loads
+from alasio.logger import logger
+
+
+def build_pins(deps):
+    """
+    Build the pins of a dependency file from its parsed (name, version) pairs.
+
+    The requirements file format rules are shared with the client, see
+    alasio.deploy.simple_pip.parse_req; the pins of a pyproject.toml are built
+    here, from the pairs the client rule parse_requirement returns. The first
+    version of a name wins, a later different one is a warning.
+
+    Args:
+        deps (Iterable[tuple[str, str]]): (name, version) pairs, name as
+            written in the file
+
+    Returns:
+        dict[str, str]: PEP 503 normalized name -> version
+    """
+    pins = {}
+    for name, version in deps:
+        name = normalize_name(name)
+        other = pins.get(name)
+        if other is None:
+            pins[name] = version
+        elif other != version:
+            logger.warning(
+                f'Conflicting versions of "{name}" in the requirements: '
+                f'"{other}" and "{version}", keeping "{other}"')
+    return pins
 
 
 def _parse_requirement_list(items):
