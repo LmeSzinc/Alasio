@@ -123,18 +123,15 @@ class GroupData(Struct, forbid_unknown_fields=True, dict=True):
         data.pop('override_args', None)
         data.pop('dashboard', None)
         data.pop('parser', None)
+        # Validate the raw color before convert: msgspec would report a wrong
+        # type as a group level error, which points one level too high
+        validate_dashboard_color(data.get('dashboard_color', ''), group=group)
         # build object
         try:
             obj = msgspec.convert(data, cls)
         except msgspec.ValidationError as e:
             e = DefinitionError(e, keys=[group], value=data)
             raise e
-        # validate dashboard color
-        try:
-            validate_dashboard_color(obj.dashboard_color)
-        except DefinitionError as e:
-            e.keys = [group, 'dashboard_color']
-            raise
         return obj
 
     def populate_dashboard(self):

@@ -358,15 +358,18 @@ class TestGroupDataDashboardColor:
         group = GroupData.from_group_data('Group', {'dashboard_color': ''})
         assert group.dashboard_color == ''
 
-    def test_non_str_color(self):
-        """msgspec rejects a non-str before the color validator sees it."""
+    @pytest.mark.parametrize('color', [
+        1, 0, 1.5, True, False, None, [], {},
+    ], ids=['int', 'zero', 'float', 'true', 'false', 'none', 'list', 'dict'])
+    def test_non_str_color(self, color):
+        """A non-str color points at the color, not at the whole group."""
         with pytest.raises(DefinitionError) as e:
-            GroupData.from_group_data('Group', {'dashboard_color': 1})
-        assert e.value.msg == 'ValidationError(Expected `str`, got `int` - at `$.dashboard_color`)'
-        assert e.value.keys == ['Group']
-        assert e.value.value == {
-            'dashboard_color': 1, 'args': {}, 'name': 'Group', 'parent': (),
-        }
+            GroupData.from_group_data('Group', {'dashboard_color': color})
+        assert e.value.msg == (
+            f'Invalid dashboard_color, expects a str, got {type(color).__name__}'
+        )
+        assert e.value.keys == ['Group', 'dashboard_color']
+        assert e.value.value == color
 
 
 class TestGroupDataUnknownKeys:

@@ -87,3 +87,26 @@ class TestValidateDashboardColor:
         with pytest.raises(DefinitionError) as exc:
             validate_dashboard_color('#ZZZ')
         assert exc.value.value == '#ZZZ'
+
+    @pytest.mark.parametrize('color', [
+        1, 0, 1.5, True, False, None, [], {}, ('#fff',),
+    ], ids=[
+        'int', 'zero', 'float', 'true', 'false', 'none', 'list', 'dict', 'tuple',
+    ])
+    def test_non_str_is_rejected(self, color):
+        """A non-str color is reported instead of reaching re.match()."""
+        with pytest.raises(DefinitionError) as exc:
+            validate_dashboard_color(color)
+        assert exc.value.msg == (
+            f'Invalid dashboard_color, expects a str, got {type(color).__name__}'
+        )
+        assert exc.value.keys == ['dashboard_color']
+        assert exc.value.value == color
+
+    def test_non_str_is_checked_before_the_empty_shortcut(self):
+        """A falsy non-str is not an empty color, it is a wrong type."""
+        with pytest.raises(DefinitionError) as exc:
+            validate_dashboard_color(0, group='MyGroup')
+        assert exc.value.msg == 'Invalid dashboard_color, expects a str, got int'
+        assert exc.value.keys == ['MyGroup', 'dashboard_color']
+        assert exc.value.value == 0

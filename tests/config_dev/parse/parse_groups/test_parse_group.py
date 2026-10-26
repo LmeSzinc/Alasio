@@ -263,6 +263,21 @@ Group:
         assert e.value.file == parser.file
         assert e.value.keys == ['Group', 'dashboard_color']
 
+    def test_non_str_dashboard_color_gets_file(self, fs):
+        """A wrong type keeps the color location and the source file."""
+        parser = make_parser(fs, 'main', args_yaml="""\
+Group:
+  dashboard_color: 1
+  args:
+    A: 1
+""")
+        with pytest.raises(DefinitionError) as e:
+            _ = parser.groups_data
+        assert e.value.msg == 'Invalid dashboard_color, expects a str, got int'
+        assert e.value.file == parser.file
+        assert e.value.keys == ['Group', 'dashboard_color']
+        assert e.value.value == 1
+
 
 class TestGroupsDataPostprocess:
     def test_postprocess_injected_group(self, fs, monkeypatch):
