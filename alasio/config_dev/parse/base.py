@@ -5,9 +5,11 @@ from msgspec.json import decode
 from alasio.backport import removesuffix
 from alasio.config.entry.utils import validate_nav_name
 from alasio.config_dev.parse.postprocess import PostprocessInfo, run_postprocess
+from alasio.ext import env
 from alasio.ext.file.yamlfile import yaml_loads
 from alasio.ext.path import PathStr
 from alasio.ext.path.atomic import atomic_read_bytes
+from alasio.ext.path.calc import subpath_to, to_posix
 from alasio.logger import logger
 
 _EMPTY = object()
@@ -133,8 +135,11 @@ def read_json_mapping(file):
 
 
 class ParseBase:
-    # a set of protected alasio nav name
-    alasio_nav = {'alasio', 'device'}
+    # Navs reserved for the alasio entry: their generated files are shared by
+    # every mod, so only alasio itself may declare a postprocess on them, see
+    # defined_by_alasio(). Immutable on purpose: it describes the nav layout,
+    # it is not a switch to turn off.
+    alasio_nav = frozenset(('alasio', 'device'))
     # key: nav_name, value: list of registered PostprocessInfo
     dict_args_yaml_postprocess: "dict[str, list[PostprocessInfo]]" = {}
     # key: nav_name, value: list of registered PostprocessInfo
@@ -172,8 +177,6 @@ class ParseBase:
             dict:
         """
         data = read_yaml_mapping(self.file)
-        if self.nav_name in ParseBase.alasio_nav:
-            return data
         list_postprocess = ParseBase.dict_args_yaml_postprocess.get(self.nav_name, None)
         if not list_postprocess:
             return data
@@ -217,8 +220,6 @@ class ParseBase:
             dict:
         """
         data = read_json_mapping(self.i18n_file)
-        if self.nav_name in ParseBase.alasio_nav:
-            return data
         list_postprocess = ParseBase.dict_i18n_json_postprocess.get(self.nav_name, None)
         if not list_postprocess:
             return data
@@ -230,6 +231,41 @@ class ParseBase:
                     e.file = self.i18n_file
                 raise
         return data
+
+
+# Directory of the alasio package: the code that owns the navs shared by every
+# mod. It is {ALASIO_ROOT}/alasio, the project layout, not the folder of a file
+# of the package, so moving a module does not change it.
+ALASIO_PACKAGE = to_posix(env.ALASIO_ROOT.joinpath('alasio'))
+
+
+def defined_by_alasio(func):
+    """
+    Check whether a postprocess is declared by alasio itself.
+
+    The navs of the alasio entry are generated once and shared by every mod, so
+    only the code of alasio may postprocess them. The decorator runs at import
+    time, before any generator or project root exists, so the file a postprocess
+    is written in is the ownership it can check.
+
+    Args:
+        func (callable): Postprocess function or callable object
+
+    Returns:
+        bool: True if the postprocess is declared in the alasio package
+    """
+    func = getattr(func, '__func__', func)
+    code = getattr(func, '__code__', None)
+    if code is not None:
+        file = to_posix(PathStr.new(code.co_filename).abspath())
+        if subpath_to(file, ALASIO_PACKAGE) is not None:
+            return True
+    # A module imported from a zip file or frozen has no usable path, it still
+    # declares the package it belongs to
+    module = getattr(func, '__module__', None)
+    if not isinstance(module, str):
+        module = type(func).__module__
+    return module.partition('.')[0] == 'alasio'
 
 
 def args_yaml_postprocess(nav_name):
@@ -260,7 +296,7 @@ def args_yaml_postprocess(nav_name):
     """
 
     def decorator(func):
-        if nav_name in ParseBase.alasio_nav:
+        if nav_name in ParseBase.alasio_nav and not defined_by_alasio(func):
             logger.warning(f'{nav_name} is a protected nav name, postprocess ignored')
             return func
 
@@ -302,7 +338,7 @@ def i18n_json_postprocess(nav_name):
     """
 
     def decorator(func):
-        if nav_name in ParseBase.alasio_nav:
+        if nav_name in ParseBase.alasio_nav and not defined_by_alasio(func):
             logger.warning(f'{nav_name} is a protected nav name, postprocess ignored')
             return func
 

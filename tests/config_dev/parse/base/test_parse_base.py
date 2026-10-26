@@ -15,6 +15,7 @@ import pytest
 import alasio.config_dev.parse.postprocess as postprocess_module
 from alasio.config_dev.parse.base import DefinitionError, ParseBase, args_yaml_postprocess, i18n_json_postprocess
 from alasio.config_dev.parse.postprocess import PostprocessInfo
+from alasio.ext import env
 from alasio.ext.path import PathStr
 from alasio.ext.path.calc import joinpath
 from alasio.testing.filesystem import fs  # noqa: F401
@@ -443,3 +444,24 @@ class TestReadI18nJson:
             'or use a 1-arg (data) function'
         )
         assert e.value.file == parser.i18n_file
+
+
+class TestAlasioNav:
+    """
+    The navs of the alasio entry are shared by every mod.
+
+    Only alasio itself may postprocess them, and the reserved set is a property
+    of the nav layout, not a switch that an import can turn off.
+    """
+
+    def test_reserved_navs_are_immutable(self):
+        assert isinstance(ParseBase.alasio_nav, frozenset)
+
+    def test_reserved_navs_exist_in_the_alasio_entry(self):
+        root = env.ALASIO_ROOT.joinpath('alasio/config/alasio')
+        for nav in ParseBase.alasio_nav:
+            assert root.joinpath(f'{nav}.args.yaml').exists(), nav
+
+    def test_importing_gen_alasio_keeps_the_reserved_navs(self):
+        import alasio.config_dev.gen_alasio  # noqa: F401
+        assert ParseBase.alasio_nav == frozenset(('alasio', 'device'))

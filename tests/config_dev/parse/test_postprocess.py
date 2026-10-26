@@ -9,7 +9,9 @@ through monkeypatch.
 
 import pytest
 
-from alasio.config_dev.parse.base import DefinitionError, ParseBase, args_yaml_postprocess, i18n_json_postprocess
+from alasio.config_dev.parse.base import (
+    ALASIO_PACKAGE, DefinitionError, ParseBase, args_yaml_postprocess, defined_by_alasio, i18n_json_postprocess
+)
 from alasio.config_dev.parse.postprocess import PostprocessInfo, run_postprocess
 from alasio.logger import logger
 
@@ -133,6 +135,46 @@ def assert_registered_list(infos, expected):
 
 def assert_registered(infos, func, plan):
     assert_registered_list(infos, [(func, plan)])
+
+
+def pretend_in_alasio(func):
+    """
+    Pretend a function of the tests is written in the alasio package.
+
+    Args:
+        func (callable): Function to move
+
+    Returns:
+        callable: The same function
+    """
+    file = f'{ALASIO_PACKAGE}/config_dev/gen_alasio.py'
+    func.__code__ = func.__code__.replace(co_filename=file)
+    return func
+
+
+class TestDefinedByAlasio:
+    """
+    Only alasio itself may postprocess the navs of the alasio entry.
+
+    The ownership is the file the postprocess is written in, the tests are not
+    a part of the alasio package.
+    """
+
+    def test_test_code(self):
+        def process(data):
+            return data
+
+        assert defined_by_alasio(process) is False
+
+    def test_alasio_code(self):
+        def process(data):
+            return data
+
+        assert defined_by_alasio(pretend_in_alasio(process)) is True
+
+    def test_alas_i18n_json_of_the_alasio_generator(self):
+        from alasio.config_dev.gen_alasio import Generator
+        assert defined_by_alasio(Generator.alas_i18n_json) is True
 
 
 class TestPostprocessInfoFromFunction:
@@ -495,6 +537,18 @@ class TestArgsYamlPostprocessDecorator:
             f'WARNING | {nav} is a protected nav name, postprocess ignored\n'
         )
 
+    def test_alasio_itself_may_register(self, monkeypatch):
+        """The navs of the alasio entry are postprocessed by alasio itself."""
+        monkeypatch.setattr(ParseBase, 'dict_args_yaml_postprocess', {})
+
+        def process(data):
+            return data
+
+        process = pretend_in_alasio(process)
+        assert args_yaml_postprocess('alasio')(process) is process
+        assert_registered(
+            ParseBase.dict_args_yaml_postprocess['alasio'], process, ('data', ''))
+
 
 class TestI18nJsonPostprocessDecorator:
     def test_returns_the_function(self, monkeypatch):
@@ -638,3 +692,15 @@ class TestI18nJsonPostprocessDecorator:
         assert capture.concat() == (
             f'WARNING | {nav} is a protected nav name, postprocess ignored\n'
         )
+
+    def test_alasio_itself_may_register(self, monkeypatch):
+        """The navs of the alasio entry are postprocessed by alasio itself."""
+        monkeypatch.setattr(ParseBase, 'dict_i18n_json_postprocess', {})
+
+        def process(data):
+            return data
+
+        process = pretend_in_alasio(process)
+        assert i18n_json_postprocess('alasio')(process) is process
+        assert_registered(
+            ParseBase.dict_i18n_json_postprocess['alasio'], process, ('data', ''))

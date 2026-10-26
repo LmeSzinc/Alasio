@@ -1,11 +1,9 @@
 from alasio.config.entry.const import ModEntryInfo
 from alasio.config_dev.gen_index import IndexGenerator
-from alasio.config_dev.parse.base import ParseBase, i18n_json_postprocess
+from alasio.config_dev.parse.base import i18n_json_postprocess
 from alasio.ext import env
 from alasio.ext.deep import deep_get, deep_keys_depth1, deep_set
 from alasio.logger import logger
-
-ParseBase.alasio_nav.clear()
 
 
 class Generator(IndexGenerator):
