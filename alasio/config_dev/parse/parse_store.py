@@ -1,8 +1,8 @@
 from alasio.config_dev.format.format_yaml import yaml_formatter
 from alasio.config_dev.gen.gen_config import ConfigGenerator
-from alasio.config_dev.parse.base import DefinitionError
+from alasio.config_dev.parse.base import DefinitionError, read_yaml_mapping
 from alasio.ext.file.jsonfile import write_json_custom_indent
-from alasio.ext.file.yamlfile import format_yaml, read_yaml
+from alasio.ext.file.yamlfile import format_yaml
 from alasio.logger import logger
 
 
@@ -14,7 +14,7 @@ class ParseStore(ConfigGenerator):
 
     def read_args_yaml(self):
         # Bypass plugin postprocess
-        data = read_yaml(self.file)
+        data = read_yaml_mapping(self.file)
         if not data:
             raise DefinitionError('Empty dashboard.args.yaml', file=self.file)
         return data

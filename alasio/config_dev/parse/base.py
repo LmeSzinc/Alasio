@@ -1,8 +1,12 @@
+import yaml
+from msgspec import DecodeError
+from msgspec.json import decode
+
 from alasio.backport import removesuffix
 from alasio.config.entry.utils import validate_nav_name
-from alasio.ext.file.msgspecfile import read_msgspec
-from alasio.ext.file.yamlfile import read_yaml
+from alasio.ext.file.yamlfile import yaml_loads
 from alasio.ext.path import PathStr
+from alasio.ext.path.atomic import atomic_read_bytes
 
 _EMPTY = object()
 
@@ -58,6 +62,74 @@ class DefinitionError(Exception):
             return f'{self.__class__.__name__},\n    error={repr(self.msg)}'
 
 
+def read_yaml_mapping(file):
+    """
+    Read a generation input yaml file as a mapping.
+
+    Unlike read_yaml, malformed yaml is an error. A missing or empty document
+    is an empty mapping.
+
+    Args:
+        file (str): Source file path
+
+    Returns:
+        dict: Parsed mapping
+
+    Raises:
+        DefinitionError: Malformed yaml or a non-mapping document root
+    """
+    try:
+        data = atomic_read_bytes(file)
+    except FileNotFoundError:
+        return {}
+    try:
+        data = yaml_loads(data)
+    except yaml.YAMLError as e:
+        raise DefinitionError(f'Invalid yaml: {e}', file=file) from e
+    if data is None:
+        return {}
+    if not isinstance(data, dict):
+        raise DefinitionError(
+            f'Expected a mapping at yaml root, got {type(data).__name__}',
+            file=file, value=data)
+    return data
+
+
+def read_json_mapping(file):
+    """
+    Read a generation input json file as a mapping.
+
+    Unlike read_msgspec, malformed json is an error. A missing or empty
+    document is an empty mapping.
+
+    Args:
+        file (str): Source file path
+
+    Returns:
+        dict: Parsed mapping
+
+    Raises:
+        DefinitionError: Malformed json or a non-mapping document root
+    """
+    try:
+        data = atomic_read_bytes(file)
+    except FileNotFoundError:
+        return {}
+    if not data:
+        return {}
+    try:
+        data = decode(data)
+    except DecodeError as e:
+        raise DefinitionError(f'Invalid json: {e}', file=file) from e
+    if data is None:
+        return {}
+    if not isinstance(data, dict):
+        raise DefinitionError(
+            f'Expected a mapping at json root, got {type(data).__name__}',
+            file=file, value=data)
+    return data
+
+
 class ParseBase:
     # a set of protected alasio nav name
     alasio_nav = {'alasio', 'device'}
@@ -97,7 +169,7 @@ class ParseBase:
         Returns:
             dict:
         """
-        data = read_yaml(self.file)
+        data = read_yaml_mapping(self.file)
         if self.nav_name in ParseBase.alasio_nav:
             return data
         list_postprocess = ParseBase.dict_args_yaml_postprocess.get(self.nav_name, None)
@@ -153,14 +225,14 @@ class ParseBase:
         Returns:
             dict:
         """
-        return read_yaml(self.tasks_file)
+        return read_yaml_mapping(self.tasks_file)
 
     def read_i18n_json(self):
         """
         Returns:
             dict:
         """
-        data = read_msgspec(self.i18n_file)
+        data = read_json_mapping(self.i18n_file)
         if self.nav_name in ParseBase.alasio_nav:
             return data
         list_postprocess = ParseBase.dict_i18n_json_postprocess.get(self.nav_name, None)

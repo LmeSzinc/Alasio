@@ -56,17 +56,26 @@ class TestGroupsDataEmpty:
         assert parser.groups_data == {}
 
     def test_malformed_yaml(self, fs):
-        """Malformed yaml is swallowed by read_yaml, all groups disappear."""
+        """Malformed yaml stops the build instead of silently dropping groups."""
         parser = make_parser(fs, 'main', args_yaml='Group: [\n')
-        assert parser.groups_data == {}
+        with pytest.raises(DefinitionError) as e:
+            _ = parser.groups_data
+        assert e.value.msg.startswith('Invalid yaml: ')
+        assert e.value.file == parser.file
 
     def test_yaml_root_is_list(self, fs):
         parser = make_parser(fs, 'main', args_yaml='- Group\n- Other\n')
-        assert parser.groups_data == {}
+        with pytest.raises(DefinitionError) as e:
+            _ = parser.groups_data
+        assert e.value.msg == 'Expected a mapping at yaml root, got list'
+        assert e.value.file == parser.file
 
     def test_yaml_root_is_scalar(self, fs):
         parser = make_parser(fs, 'main', args_yaml='Group\n')
-        assert parser.groups_data == {}
+        with pytest.raises(DefinitionError) as e:
+            _ = parser.groups_data
+        assert e.value.msg == 'Expected a mapping at yaml root, got str'
+        assert e.value.file == parser.file
 
 
 class TestGroupsData:

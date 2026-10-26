@@ -1,6 +1,6 @@
+from alasio.config_dev.parse.base import read_json_mapping
 from alasio.ext.cache import cached_property
 from alasio.ext.deep import *
-from alasio.ext.file.msgspecfile import read_msgspec
 from alasio.ext.path import PathStr
 from alasio.ext.singleton import Singleton
 
@@ -57,7 +57,7 @@ class LoadAlasI18n(metaclass=Singleton):
         # Each module/config/i18n/{lang}.json has {group}.{arg}.{key} = text
         out = {}
         for file in self.folder.iter_files(ext='.json'):
-            data = read_msgspec(file)
+            data = read_json_mapping(file)
             if not data:
                 continue
             lang = file.stem

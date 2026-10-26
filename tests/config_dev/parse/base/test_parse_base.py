@@ -104,19 +104,31 @@ Group:
         assert parser.read_args_yaml() == {'Group': {'args': {'Enable': True}}}
 
     def test_empty_file(self, fs):
-        """An empty yaml document is None, not an empty dict."""
+        """An empty yaml document is an empty mapping for generator inputs."""
         parser = make_base(fs, 'main', args_yaml='')
-        assert parser.read_args_yaml() is None
-
-    def test_malformed_yaml(self, fs):
-        """Malformed yaml falls back to the default, the error is swallowed."""
-        parser = make_base(fs, 'main', args_yaml='Group: [\n')
         assert parser.read_args_yaml() == {}
 
+    def test_malformed_yaml(self, fs):
+        """Malformed yaml is an error, not an empty mapping."""
+        parser = make_base(fs, 'main', args_yaml='Group: [\n')
+        with pytest.raises(DefinitionError) as e:
+            parser.read_args_yaml()
+        assert e.value.msg.startswith('Invalid yaml: ')
+        assert e.value.file == parser.file
+
     def test_yaml_root_is_list(self, fs):
-        """The reader returns whatever the yaml document is."""
         parser = make_base(fs, 'main', args_yaml='- Group\n- Other\n')
-        assert parser.read_args_yaml() == ['Group', 'Other']
+        with pytest.raises(DefinitionError) as e:
+            parser.read_args_yaml()
+        assert e.value.msg == 'Expected a mapping at yaml root, got list'
+        assert e.value.file == parser.file
+
+    def test_yaml_root_is_scalar(self, fs):
+        parser = make_base(fs, 'main', args_yaml='Group\n')
+        with pytest.raises(DefinitionError) as e:
+            parser.read_args_yaml()
+        assert e.value.msg == 'Expected a mapping at yaml root, got str'
+        assert e.value.file == parser.file
 
     def test_postprocess_applied(self, fs, monkeypatch):
         monkeypatch.setattr(ParseBase, 'dict_args_yaml_postprocess', {})
@@ -216,9 +228,23 @@ Task:
 """)
         assert parser.read_tasks_yaml() == {'Task': {'groups': {'Group': None}}}
 
+    def test_empty_file(self, fs):
+        parser = make_base(fs, 'main', tasks_yaml='')
+        assert parser.read_tasks_yaml() == {}
+
     def test_malformed_yaml(self, fs):
         parser = make_base(fs, 'main', tasks_yaml='Task: [\n')
-        assert parser.read_tasks_yaml() == {}
+        with pytest.raises(DefinitionError) as e:
+            parser.read_tasks_yaml()
+        assert e.value.msg.startswith('Invalid yaml: ')
+        assert e.value.file == parser.tasks_file
+
+    def test_yaml_root_is_list(self, fs):
+        parser = make_base(fs, 'main', tasks_yaml='- Task\n')
+        with pytest.raises(DefinitionError) as e:
+            parser.read_tasks_yaml()
+        assert e.value.msg == 'Expected a mapping at yaml root, got list'
+        assert e.value.file == parser.tasks_file
 
 
 class TestReadI18nJson:
@@ -230,13 +256,23 @@ class TestReadI18nJson:
         parser = make_base(fs, 'main', i18n_json='{"Group": {"A": {"en-US": "A"}}}')
         assert parser.read_i18n_json() == {'Group': {'A': {'en-US': 'A'}}}
 
+    def test_empty_file(self, fs):
+        parser = make_base(fs, 'main', i18n_json='')
+        assert parser.read_i18n_json() == {}
+
     def test_invalid_json(self, fs):
         parser = make_base(fs, 'main', i18n_json='{not json')
-        assert parser.read_i18n_json() == {}
+        with pytest.raises(DefinitionError) as e:
+            parser.read_i18n_json()
+        assert e.value.msg.startswith('Invalid json: ')
+        assert e.value.file == parser.i18n_file
 
     def test_json_root_is_list(self, fs):
         parser = make_base(fs, 'main', i18n_json='[1, 2]')
-        assert parser.read_i18n_json() == [1, 2]
+        with pytest.raises(DefinitionError) as e:
+            parser.read_i18n_json()
+        assert e.value.msg == 'Expected a mapping at json root, got list'
+        assert e.value.file == parser.i18n_file
 
     def test_postprocess_applied(self, fs, monkeypatch):
         monkeypatch.setattr(ParseBase, 'dict_i18n_json_postprocess', {})
