@@ -39,6 +39,10 @@ def normalize_name(name):
     Returns:
         str: Normalized name, e.g. "ruamel-yaml"
     """
+    # a lowercase name whose only separator is a single '-' is already
+    # normalized, the common case of a requirements file
+    if name.islower() and '_' not in name and '.' not in name and '--' not in name:
+        return name
     # A run of "-", "_" and "." is a single "-", PEP 503. The compiled
     # pattern of a str pattern is cached by re, no global compile is needed
     return re.sub(r'[-_.]+', '-', name).lower()

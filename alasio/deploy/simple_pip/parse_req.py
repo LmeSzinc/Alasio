@@ -206,8 +206,8 @@ class Requirements:
                 requirements.txt
         """
         self.content = content
-        # normalized source of every '# from' URL: a file has many pins but
-        # only a few distinct sources, so the cache hits often
+        # the final result of every '# from' comment: a file repeats the same
+        # annotation line for every pin of an index, so the cache hits often
         self._source_cache = {}
 
     @staticmethod
@@ -219,7 +219,9 @@ class Requirements:
         '\\' are handled here, e.g. the --hash lines of a pip-compile output.
         A line that starts with '#' is one comment and is not split again;
         on a requirement line the first '#' after whitespace starts the inline
-        comment. uv and pip-compile write every annotation on its own line.
+        comment. Only a comment that carries 'from' is yielded, the via lines
+        and the other comments are skipped. uv and pip-compile write every
+        annotation on its own line.
 
         Args:
             content (str): Content of a requirements file
@@ -231,27 +233,36 @@ class Requirements:
                 yields an empty text.
         """
         # the UTF-8 BOM and the line endings
-        content = content.lstrip('\ufeff').replace('\r\n', '\n').replace('\r', '\n')
+        content = content.lstrip('\ufeff')
+        if '\r' in content:
+            content = content.replace('\r\n', '\n').replace('\r', '\n')
         # a line that ends with a '\' continues on the next one
-        content = re.sub(r'\\[ \t]*\n', '', content)
+        if '\\' in content:
+            content = re.sub(r'\\[ \t]*\n', '', content)
         for line in content.split('\n'):
             line = line.strip()
             if not line:
                 continue
             if line.startswith('#'):
-                # a comment line is one comment, it is not split again
-                yield '', line[1:].strip()
+                # only a '# from' comment matters, the via lines and the
+                # other comments are skipped here
+                comment = line[1:].strip()
+                if 'from' in comment:
+                    yield '', comment
                 continue
             # the first '#' after whitespace starts the inline comment
-            match = re.search(r'\s#', line)
-            if match:
-                text = line[:match.start()].strip()
-                comment = line[match.end():].strip()
+            text, sep, comment = line.partition('#')
+            if sep and text and text[-1].isspace():
+                text = text.strip()
+                comment = comment.strip()
+                if 'from' not in comment:
+                    comment = ''
             else:
                 text = line
                 comment = ''
             # the options after a requirement, e.g. --hash, are not part of it
-            text = re.split(r'\s+(?=-)', text, maxsplit=1)[0]
+            if '--' in text:
+                text = re.split(r'\s+(?=-)', text, maxsplit=1)[0]
             yield text, comment
 
     @staticmethod
@@ -292,22 +303,27 @@ class Requirements:
         # fast path: most comments are '# via' or not annotations at all
         if 'from' not in comment:
             return ''
-        match = re.match(r'from\s+(?P<text>\S+)', comment, re.IGNORECASE)
-        if not match:
-            return ''
-        text = match.group('text')
-        source = self._source_cache.get(text)
-        if source is None:
+        cached = self._source_cache.get(comment)
+        if cached is not None:
+            source, text, error = cached
+        else:
+            match = re.match(r'from\s+(?P<text>\S+)', comment, re.IGNORECASE)
+            if not match:
+                return ''
+            text = match.group('text')
             # local import: yarl is only needed for a cache miss
             from yarl import URL
 
+            error = False
             try:
                 url = URL(text)
             except (TypeError, ValueError):
                 source = ''
+                error = True
             else:
                 if url.scheme not in ('http', 'https') or not url.host:
                     source = ''
+                    error = True
                 else:
                     source = str(URL.build(
                         scheme=url.scheme,
@@ -316,22 +332,17 @@ class Requirements:
                         query_string=url.raw_query_string,
                         encoded=True,
                     ))
-            self._source_cache[text] = source
-        if source == _OFFICIAL_INDEX:
-            # an empty source lets the download side probe the mirrors of the
-            # mod entry
-            return ''
-        if not source:
+                    if source == _OFFICIAL_INDEX:
+                        # an empty source lets the download side probe the
+                        # mirrors of the mod entry
+                        source = ''
+                    elif url.path.lower().rstrip('/').endswith(_ARTIFACT_SUFFIXES):
+                        source = ''
+                        error = True
+            self._source_cache[comment] = (source, text, error)
+        if error:
             logger.warning(
                 f'The "# from" annotation of "{name}" is not an index url: {text!r}, the source is undefined')
-            return ''
-        # local import: yarl is only needed for a source that is checked here
-        from yarl import URL
-
-        if URL(source).path.lower().endswith(_ARTIFACT_SUFFIXES):
-            logger.warning(
-                f'The "# from" annotation of "{name}" is not an index url: {text!r}, the source is undefined')
-            return ''
         return source
 
     def _iter_dep_info(self):
