@@ -19,7 +19,9 @@ class TestDefinitionErrorAttributes:
         assert e.file == ''
         assert e.keys == ''
         # value has a private "not provided" sentinel, it is not None
-        assert str(e) == "DefinitionError,\n    error='broken'"
+        assert str(e) == """\
+DefinitionError,
+    error='broken'"""
 
     def test_explicit_attributes(self):
         e = DefinitionError('broken', file='/a/main.args.yaml', keys=['Group', 'Arg'], value='x')
@@ -32,15 +34,16 @@ class TestDefinitionErrorAttributes:
         """An exception message is rendered as ClassName(message)."""
         e = DefinitionError(ValueError('bad value'))
         assert e.msg == 'ValueError(bad value)'
-        assert str(e) == "DefinitionError,\n    error='ValueError(bad value)'"
+        assert str(e) == """\
+DefinitionError,
+    error='ValueError(bad value)'"""
 
     def test_nested_definition_error_is_not_flattened(self):
         e = DefinitionError(DefinitionError('inner'))
         assert e.msg.startswith('DefinitionError(')
-        assert str(e) == (
-            "DefinitionError,\n"
-            '    error="DefinitionError(DefinitionError,\\n    error=\'inner\')"'
-        )
+        assert str(e) == '''\
+DefinitionError,
+    error="DefinitionError(DefinitionError,\\n    error='inner')"'''
 
     def test_can_be_raised_and_caught(self):
         with pytest.raises(DefinitionError) as caught:
@@ -50,49 +53,46 @@ class TestDefinitionErrorAttributes:
 
 class TestDefinitionErrorStr:
     def test_message_only(self):
-        assert str(DefinitionError('broken')) == "DefinitionError,\n    error='broken'"
+        assert str(DefinitionError('broken')) == """\
+DefinitionError,
+    error='broken'"""
 
     def test_file_only(self):
-        assert str(DefinitionError('broken', file='/a/main.args.yaml')) == (
-            "DefinitionError,\n"
-            "    file='/a/main.args.yaml',\n"
-            "    error='broken'"
-        )
+        assert str(DefinitionError('broken', file='/a/main.args.yaml')) == """\
+DefinitionError,
+    file='/a/main.args.yaml',
+    error='broken'"""
 
     def test_keys_only(self):
-        assert str(DefinitionError('broken', keys=['Group'])) == (
-            "DefinitionError,\n"
-            "    keys=['Group'],\n"
-            "    error='broken'"
-        )
+        assert str(DefinitionError('broken', keys=['Group'])) == """\
+DefinitionError,
+    keys=['Group'],
+    error='broken'"""
 
     def test_keys_as_str(self):
-        assert str(DefinitionError('broken', keys='Group')) == (
-            "DefinitionError,\n"
-            "    keys='Group',\n"
-            "    error='broken'"
-        )
+        assert str(DefinitionError('broken', keys='Group')) == """\
+DefinitionError,
+    keys='Group',
+    error='broken'"""
 
     @pytest.mark.parametrize('value', [0, '', False, [], {}, None], ids=[
         'zero', 'empty-str', 'false', 'empty-list', 'empty-dict', 'none',
     ])
     def test_falsy_value_is_printed(self, value):
         """A falsy value is still a location, only the sentinel is omitted."""
-        assert str(DefinitionError('broken', value=value)) == (
-            f"DefinitionError,\n"
-            f"    value={value!r},\n"
-            f"    error='broken'"
-        )
+        assert str(DefinitionError('broken', value=value)) == f"""\
+DefinitionError,
+    value={value!r},
+    error='broken'"""
 
     def test_all_locations(self):
         e = DefinitionError('broken', file='/a/main.args.yaml', keys=['Group', 'Arg'], value='x')
-        assert str(e) == (
-            "DefinitionError,\n"
-            "    file='/a/main.args.yaml',\n"
-            "    keys=['Group', 'Arg'],\n"
-            "    value='x',\n"
-            "    error='broken'"
-        )
+        assert str(e) == """\
+DefinitionError,
+    file='/a/main.args.yaml',
+    keys=['Group', 'Arg'],
+    value='x',
+    error='broken'"""
 
     @pytest.mark.parametrize('file, keys', [
         ('', ''),
@@ -100,14 +100,12 @@ class TestDefinitionErrorStr:
         (None, None),
     ], ids=['empty-str', 'empty-list', 'none'])
     def test_no_location(self, file, keys):
-        assert str(DefinitionError('broken', file=file, keys=keys)) == (
-            "DefinitionError,\n"
-            "    error='broken'"
-        )
+        assert str(DefinitionError('broken', file=file, keys=keys)) == """\
+DefinitionError,
+    error='broken'"""
 
     def test_message_is_repr(self):
         """The message is quoted with repr, a quote in it is escaped."""
-        assert str(DefinitionError("it's broken")) == (
-            'DefinitionError,\n'
-            '    error="it\'s broken"'
-        )
+        assert str(DefinitionError("it's broken")) == '''\
+DefinitionError,
+    error="it's broken"'''
