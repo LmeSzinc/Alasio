@@ -5,7 +5,7 @@
   import ArgGroupCard from "./ArgGroupCard.svelte";
   import CardEnable from "./CardEnable.svelte";
   import LayoutHorizontalLike from "./LayoutHorizontalLike.svelte";
-  import type { ArgData, CardData, InfoData, InputProps } from "./utils.svelte";
+  import { type ArgData, type CardData, type InfoData, type InputProps, isDashboardInternalArg } from "./utils.svelte";
 
   type Props = {
     cardData: CardData;
@@ -45,14 +45,6 @@
         return !isDashboardInternalArg(argKey, dashboardType);
       })
       .map(([argKey]) => argKey);
-  }
-  // Arg name "_info", "Value", "Time", "ServerUpdate" will be removed from the group
-  // If dashboard type is "DynamicTotal", arg name "Total" will be removed
-  function isDashboardInternalArg(argKey: string, dashboardType: string): boolean {
-    if (argKey === "_info") return true;
-    if (argKey === "Value" || argKey === "Time" || argKey === "ServerUpdate") return true;
-    if (dashboardType === "DynamicTotal" && argKey === "Total") return true;
-    return false;
   }
 </script>
 

@@ -16,7 +16,7 @@ export type ArgData = {
 
   /**
    * Dashboard type if arg is dashboard arg (`dt` startswith "dashboard")
-   * Might be "Amount", "Total", "DynamicTotal", "Progress", "Planner"
+   * Might be "Amount", "Total", "Remain", "DynamicTotal", "Progress", "Planner"
    */
   dashboard?: string;
   /**
@@ -139,6 +139,22 @@ export function getArgName(arg: ArgData | InfoData) {
   }
   // Othersize show as {group_name}.{arg_name}
   return `${arg.group || "<UnknownGroup>"}.${arg.arg || "<UnknownArg>"}`;
+}
+
+/**
+ * Args of a dashboard group that are managed by the framework and must not be
+ * rendered as editable rows in the config card.
+ *
+ * @param argKey Arg name
+ * @param dashboardType Dashboard type from `_info.dashboard`, e.g. "Planner"
+ * @returns True if the arg is internal to the dashboard type
+ */
+export function isDashboardInternalArg(argKey: string, dashboardType: string): boolean {
+  if (argKey === "_info") return true;
+  if (argKey === "Value" || argKey === "Time" || argKey === "ServerUpdate") return true;
+  if (dashboardType === "DynamicTotal" && argKey === "Total") return true;
+  if (dashboardType === "Planner" && (argKey === "Progress" || argKey === "Eta")) return true;
+  return false;
 }
 
 /**

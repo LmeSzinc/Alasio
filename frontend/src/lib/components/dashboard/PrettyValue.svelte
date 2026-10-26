@@ -86,7 +86,7 @@
       class={cn(
         "max-w-max min-w-0 grow basis-[2.5em] truncate text-[0.8em] transition-colors duration-200",
         mutedClass,
-      )}>&gt;{data.Eta?.value ?? "NaN"}</span
+      )}>&gt;{data.Eta?.value || "NaN"}</span
     >
   {/if}
 </div>
