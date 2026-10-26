@@ -47,6 +47,22 @@ export interface SvelteDropDevPageOptions {
 }
 
 /**
+ * True when this process is `svelte-kit sync`.
+ *
+ * The sync command resolves the Vite config with command "build" and
+ * SvelteKit writes the client route manifest while resolving it. Dropping
+ * the marked routes there would generate a manifest without the dev pages,
+ * while a running dev server still holds the full route table: the node ids
+ * shift and a dev URL renders the page of another route (e.g. the login
+ * page). The production build is `vite build`, not a sync process, so the
+ * routes are still dropped there.
+ */
+function isSvelteKitSync(): boolean {
+  const entry = process.argv[1] ?? "";
+  return entry.endsWith("svelte-kit.js") && process.argv.includes("sync");
+}
+
+/**
  * Vite plugin to drop dev-only pages from the production build.
  *
  * Route files (e.g. `+page.svelte`) containing the marker comment are
@@ -59,10 +75,10 @@ export interface SvelteDropDevPageOptions {
  * The files are restored in `configResolved`, right after the route scan:
  * sveltekit scans routes in its own `config` hook, and Vite runs every
  * `config` hook before any `configResolved` hook. `svelte-kit sync`
- * resolves the Vite config through the same path, but writes its type
- * files after `load_config()` returns, so it re-scans the routes with
- * every file back in place. `svelte-check` therefore keeps checking the
- * dropped pages, while only the build output excludes them.
+ * resolves the Vite config through the same path with command "build",
+ * but it is excluded here (see isSvelteKitSync): its generated route
+ * manifest must keep the dev pages so `svelte-check` keeps checking them.
+ * Only a real `vite build` drops the routes.
  *
  * Interrupted build repair:
  * - The drop only lives inside config resolution, so an interrupted build
@@ -99,7 +115,7 @@ export function svelteDropDevPage(options: SvelteDropDevPageOptions = {}): Plugi
       order: "pre",
       async handler(config, env) {
         const root = path.resolve(config.root ?? process.cwd(), routesDir);
-        if (env.command === "build") {
+        if (env.command === "build" && !isSvelteKitSync()) {
           // Drop marked route files so the route scan does not see them.
           // Files already dropped by an interrupted build are kept as-is,
           // and the remaining marked files are dropped to complete it.
