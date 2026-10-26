@@ -175,6 +175,9 @@ class EnvLibraryScanner(metaclass=SingletonNamed):
         """
         # Determine project root directory (absolute path)
         self.project_root = os.path.realpath(project_root)
+        # Classification results by module name, the same name is classified
+        # once however many imports of it are generated
+        self._classified = {}
 
         # Pre-fetch standard library physical paths
         self.stdlib_paths = {
@@ -242,6 +245,26 @@ class EnvLibraryScanner(metaclass=SingletonNamed):
             except ValueError:
                 continue
         return False
+
+    def classify_single_module(self, name):
+        """
+        Classify a single module name, the result is cached by name
+
+        A name is classified at most once per project root: the generator asks
+        for the same module for every import of it, in every generated file.
+
+        Args:
+            name (str): Module name
+
+        Returns:
+            ModuleType: Classification of the module
+        """
+        result = self._classified.get(name, None)
+        if result is not None:
+            return result
+        result = self._classify_single_module(name)
+        self._classified[name] = result
+        return result
 
     def _classify_single_module(self, name):
         """

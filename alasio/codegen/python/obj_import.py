@@ -81,7 +81,7 @@ class Import(AutoBlankLineMixin):
         """
         Get module type (standard_library, third_party, local_project)
         """
-        return self.gen.scanner._classify_single_module(self.lib)
+        return self.gen.scanner.classify_single_module(self.lib)
 
     @cached_property
     def item_str(self):
@@ -129,7 +129,7 @@ class FromImport(ClosureObject, AutoBlankLineMixin):
         Get module type (standard_library, third_party, local_project)
         """
         lib = self.module.partition('.')[0]
-        return self.gen.scanner._classify_single_module(lib)
+        return self.gen.scanner.classify_single_module(lib)
 
     def Import(self, name, alias=None):
         item = Import(self.gen, name, alias=alias)

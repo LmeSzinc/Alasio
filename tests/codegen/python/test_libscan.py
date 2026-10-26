@@ -21,12 +21,28 @@ class TestClassifySingleModule:
         scanner = EnvLibraryScanner('/classify-stdlib-by-name')
         # the paths of sysconfig can not tell the stdlib of this interpreter
         scanner.stdlib_paths = {'/not/the/stdlib'}
-        assert scanner._classify_single_module('typing') is ModuleType.STANDARD_LIBRARY
+        assert scanner.classify_single_module('typing') is ModuleType.STANDARD_LIBRARY
 
     def test_third_party_by_path(self, fs):
         """A module of site-packages is classified third-party."""
         scanner = EnvLibraryScanner('/classify-third-party')
-        assert scanner._classify_single_module('msgspec') is ModuleType.THIRD_PARTY
+        assert scanner.classify_single_module('msgspec') is ModuleType.THIRD_PARTY
+
+    def test_cached_by_name(self, monkeypatch):
+        """A name is classified once, however many times it is asked for."""
+        scanner = EnvLibraryScanner('/classify-cached-by-name')
+        calls = []
+
+        def fake_classify(name):
+            calls.append(name)
+            return ModuleType.THIRD_PARTY
+
+        monkeypatch.setattr(scanner, '_classify_single_module', fake_classify)
+        assert scanner.classify_single_module('mod_a') is ModuleType.THIRD_PARTY
+        assert scanner.classify_single_module('mod_a') is ModuleType.THIRD_PARTY
+        assert scanner.classify_single_module('mod_b') is ModuleType.THIRD_PARTY
+        assert scanner.classify_single_module('mod_b') is ModuleType.THIRD_PARTY
+        assert calls == ['mod_a', 'mod_b']
 
 
 class TestIterModuleNames:
@@ -118,7 +134,7 @@ class TestStdlibModuleNames:
         scanner = EnvLibraryScanner('/classify-in-fake-filesystem')
         # the paths of sysconfig can not tell the stdlib of this interpreter
         scanner.stdlib_paths = {'/not/the/stdlib'}
-        assert scanner._classify_single_module('typing') is ModuleType.STANDARD_LIBRARY
+        assert scanner.classify_single_module('typing') is ModuleType.STANDARD_LIBRARY
 
     def test_scan_of_the_fake_filesystem_finds_no_stdlib(self, fs):
         """The reason of the warm up: the scan can not read the real disk here."""
