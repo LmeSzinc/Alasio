@@ -60,7 +60,6 @@ Error:
     SaveError: true
     OnePushConfig:
       dt: textarea
-      mode: yaml
       value: 'provider: null'
     ScreenshotLength: 1
 

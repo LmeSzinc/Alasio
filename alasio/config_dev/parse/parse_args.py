@@ -179,6 +179,9 @@ def preprocess_arg(arg: dict) -> dict:
         except ValueError as e:
             raise DefinitionError(f'Cannot parse range "{range_str}", {e}')
         arg.update(dict_range)
+    # "range" is a yaml-only shorthand, it is expanded into msgspec
+    # constraints above and removed so ArgData can reject unknown fields
+    arg.pop('range', None)
 
     # 'static-hide' is an alias of dt='static' and hide=True
     if dt == 'static-hide':
@@ -284,7 +287,7 @@ MSGSPEC_CONSTRAINT = [
 ]
 
 
-class ArgData(Struct, omit_defaults=True):
+class ArgData(Struct, omit_defaults=True, forbid_unknown_fields=True):
     # data type
     dt: to_literal(TYPE_DT_TO_PYTHON.keys())
     # default value
@@ -362,6 +365,9 @@ class ArgData(Struct, omit_defaults=True):
 
     @classmethod
     def from_arg_data(cls, data) -> "ArgData":
+        # preprocess_arg adds and removes keys, do not mutate the caller's dict
+        if type(data) is dict:
+            data = dict(data)
         try:
             data = populate_arg(data)
             data = preprocess_arg(data)

@@ -11,7 +11,7 @@ from alasio.ext.cache import cached_property
 from alasio.ext.deep import deep_iter_depth1
 
 
-class GroupData(Struct):
+class GroupData(Struct, forbid_unknown_fields=True):
     name: str
     args: Dict[str, ArgData] = msgspec.field(default_factory=dict)
     # parent group of variant, or empty tuple if this group is not a variant

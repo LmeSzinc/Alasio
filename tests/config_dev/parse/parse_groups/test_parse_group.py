@@ -236,6 +236,20 @@ Group:
         assert e.value.file == parser.file
         assert e.value.keys == ['Group', 'Value']
 
+    def test_unknown_group_field_gets_file(self, fs):
+        """A typo in a group field must fail with the source file, not be dropped."""
+        parser = make_parser(fs, 'main', args_yaml="""\
+Group:
+  parrent: Base
+  args:
+    A: 1
+""")
+        with pytest.raises(DefinitionError) as e:
+            _ = parser.groups_data
+        assert e.value.msg == 'ValidationError(Object contains unknown field `parrent`)'
+        assert e.value.file == parser.file
+        assert e.value.keys == ['Group']
+
     def test_dashboard_color_error_gets_file(self, fs):
         parser = make_parser(fs, 'main', args_yaml="""\
 Group:

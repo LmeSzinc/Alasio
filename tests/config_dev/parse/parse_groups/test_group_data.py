@@ -293,10 +293,27 @@ class TestGroupDataDashboardColor:
 
 
 class TestGroupDataUnknownKeys:
-    def test_unknown_keys_are_ignored(self):
+    def test_unknown_keys_are_rejected(self):
         """
-        Known limitation: msgspec ignores unknown fields by default, so a typo
-        such as `parrent` is silently dropped instead of being reported.
+        A typo such as `parrent` must not silently disable inheritance,
+        GroupData forbids unknown fields.
         """
-        group = GroupData.from_group_data('Group', {'parrent': 'Base'})
-        assert group.parent == ()
+        with pytest.raises(DefinitionError) as e:
+            GroupData.from_group_data('Group', {'parrent': 'Base'})
+        assert e.value.msg == 'ValidationError(Object contains unknown field `parrent`)'
+        assert e.value.keys == ['Group']
+        assert e.value.value == {
+            'parrent': 'Base', 'args': {}, 'name': 'Group', 'parent': (),
+        }
+
+    def test_unknown_arg_field_is_rejected(self):
+        with pytest.raises(DefinitionError) as e:
+            make_group('Group', """\
+args:
+  A:
+    dt: input
+    value: text
+    modo: typo
+""")
+        assert e.value.msg == 'ValidationError(Object contains unknown field `modo`)'
+        assert e.value.keys == ['Group', 'A']

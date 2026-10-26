@@ -9,8 +9,36 @@ from alasio.config_dev.parse.parse_args import DefinitionError
 from alasio.ext.cache import cached_property
 from alasio.ext.deep import deep_iter_depth1, deep_set
 
+# Key sets of {nav}.tasks.yaml definitions.
+# msgspec.convert() is not used by the task parser, so unknown fields are
+# checked explicitly here, keeping task definitions as strict as GroupData /
+# ArgData, which enable forbid_unknown_fields.
+TASK_FIELDS = {'groups', 'displays', 'global_bind'}
+TASK_GROUP_FIELDS = {'task'}
+TASK_DISPLAY_FIELDS = {'info', 'groups'}
+TASK_DISPLAY_GROUP_FIELDS = {'task', 'group'}
 
-class TaskGroup(msgspec.Struct):
+
+def validate_definition_keys(data, allowed, keys, what):
+    """
+    Reject unknown keys in a hand-parsed yaml mapping.
+
+    Args:
+        data (dict): Input mapping
+        allowed (set[str]): Allowed key names
+        keys (list[str]): Error location
+        what (str): Definition name in the error message
+
+    Raises:
+        DefinitionError: If any key is not allowed
+    """
+    unknown = [key for key in data if key not in allowed]
+    if unknown:
+        show = ', '.join(repr(key) for key in unknown)
+        raise DefinitionError(f'Unknown {what} field: {show}', keys=keys, value=data)
+
+
+class TaskGroup(msgspec.Struct, forbid_unknown_fields=True):
     # A wrapper for group reference
     task: str
     group: str
@@ -33,6 +61,8 @@ class TaskGroup(msgspec.Struct):
         if type(value) is cls:
             return value
         if type(value) is dict:
+            validate_definition_keys(
+                value, TASK_GROUP_FIELDS, keys=[task, 'groups', str(group)], what='group reference')
             task = value.get('task', task)
             return cls(task=task, group=str(group))
         if value:
@@ -58,6 +88,8 @@ class TaskGroup(msgspec.Struct):
         if type(value) is cls:
             return value
         if type(value) is dict:
+            validate_definition_keys(
+                value, TASK_DISPLAY_GROUP_FIELDS, keys=[task, 'displays'], what='display group')
             task = value.get('task', task)
             group = value.get('group', '')
             if not group:
@@ -67,7 +99,7 @@ class TaskGroup(msgspec.Struct):
         return cls(task=task, group=str(value))
 
 
-class DisplayCard(msgspec.Struct, dict=True):
+class DisplayCard(msgspec.Struct, dict=True, forbid_unknown_fields=True):
     task: str
     # display {group_name}._info as card info
     raw_info: str
@@ -90,10 +122,15 @@ class DisplayCard(msgspec.Struct, dict=True):
             {"info": "Commission", "groups": [{"task": "Commission", "group": "Preset"}, "Custom"]}
         """
         if type(row) is dict:
-            raw_info = row.get('info', '')
-            groups = row.get('groups', {})
-            if not raw_info and not groups:
-                # may be a dict like {"task": "Commission", "group": "Preset"}
+            # a dict with "info" / "groups" is a card, otherwise it is a group reference
+            if 'info' in row or 'groups' in row:
+                validate_definition_keys(
+                    row, TASK_DISPLAY_FIELDS, keys=[task, 'displays'], what='display')
+                raw_info = row.get('info', '')
+                groups = row.get('groups', {})
+            else:
+                validate_definition_keys(
+                    row, TASK_DISPLAY_GROUP_FIELDS, keys=[task, 'displays'], what='display group')
                 raw_info = ''
                 groups = [TaskGroup.from_display(task, row)]
         else:
@@ -158,7 +195,7 @@ class CardNameBuilder:
         return builder.cards
 
 
-class TaskData(msgspec.Struct, dict=True):
+class TaskData(msgspec.Struct, dict=True, forbid_unknown_fields=True):
     task: str
     # groups to bind at runtime
     # key: group name
@@ -175,6 +212,7 @@ class TaskData(msgspec.Struct, dict=True):
         if type(data) is not dict:
             raise DefinitionError('Task data must be a dict', keys=[task], value=data)
         task = str(task)
+        validate_definition_keys(data, TASK_FIELDS, keys=[task], what='task')
         # Example groups:
         # - A dict of values that satisfy TaskGroup.from_row()
         #   key: group name
