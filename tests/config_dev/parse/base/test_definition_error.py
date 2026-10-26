@@ -23,6 +23,23 @@ class TestDefinitionErrorAttributes:
 DefinitionError,
     error='broken'"""
 
+    def test_args_hold_the_message(self):
+        """Code that reads Exception.args must see the same message as str()."""
+        assert DefinitionError('broken').args == ('broken',)
+        assert DefinitionError('broken', file='/a', keys=['G'], value=1).args == ('broken',)
+
+    def test_wrapped_exception_args_is_the_formatted_message(self):
+        """args must not leak the wrapped exception object, only its message."""
+        e = DefinitionError(ValueError('bad value'))
+        assert e.msg == 'ValueError(bad value)'
+        assert e.args == ('ValueError(bad value)',)
+        assert repr(e) == "DefinitionError('ValueError(bad value)')"
+
+    def test_repr(self):
+        """repr is built from args, so it shows the message only."""
+        e = DefinitionError('broken', file='/a/main.args.yaml', keys=['Group'], value='x')
+        assert repr(e) == "DefinitionError('broken')"
+
     def test_explicit_attributes(self):
         e = DefinitionError('broken', file='/a/main.args.yaml', keys=['Group', 'Arg'], value='x')
         assert e.msg == 'broken'

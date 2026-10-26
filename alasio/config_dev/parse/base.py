@@ -20,12 +20,16 @@ class DefinitionError(Exception):
         """
         Args:
             msg (str | Exception): Error message
-            file (str):
-            keys (list[str] | str):
-            value (Any):
+            file (str): Source file of the definition, empty if unknown
+            keys (list[str] | str): Key path to the broken definition
+            value (Any): Offending value, omitted from the rendered error if not given
         """
         if isinstance(msg, Exception):
             msg = f'{msg.__class__.__name__}({msg})'
+        # Fill Exception.args with the formatted message, not with the original
+        # argument: the traceback, the logger and the third party exception
+        # handlers read args, they must not see the wrapped exception object
+        super().__init__(msg)
         self.msg = msg
         self.file = file
         self.keys = keys
@@ -35,11 +39,14 @@ class DefinitionError(Exception):
         """
         Show error as:
 
-        {self.__class__.__name__},
-            error={self.msg}
-            file={self.file}
-            keys={self.keys}
-            value={self.value}
+        DefinitionError,
+            file={self.file!r},
+            keys={self.keys!r},
+            value={self.value!r},
+            error={self.msg!r}
+
+        The location lines are printed only when they are set, value is printed
+        as long as it is given, even when it is falsy.
         """
         parts = [self.__class__.__name__]
 
