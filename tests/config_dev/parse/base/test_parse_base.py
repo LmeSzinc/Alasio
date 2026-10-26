@@ -1,0 +1,322 @@
+"""
+Tests of ParseBase.
+
+ParseBase owns the file naming contract of a nav ({nav}.args.yaml ->
+{nav}.tasks.yaml / {nav}_i18n.json / {nav}_config.json / {nav}_model.py) and
+the yaml/json readers with their postprocess hooks. The postprocess registry
+itself is covered by test_postprocess.py, here the readers are tested with a
+real file on the fake filesystem.
+"""
+
+import textwrap
+
+import pytest
+
+from alasio.config_dev.parse.base import DefinitionError, ParseBase, args_yaml_postprocess, i18n_json_postprocess
+from alasio.ext.path import PathStr
+from alasio.ext.path.calc import joinpath
+from alasio.testing.filesystem import fs  # noqa: F401
+
+
+def make_base(fs, nav='main', args_yaml=None, tasks_yaml=None, i18n_json=None):
+    """
+    Create a ParseBase of a nav on the fake filesystem.
+
+    Args:
+        fs (FakeFilesystem): The in-memory filesystem fixture
+        nav (str): Nav name
+        args_yaml (str): Content of {nav}.args.yaml, None to leave it missing
+        tasks_yaml (str): Content of {nav}.tasks.yaml, None to leave it missing
+        i18n_json (str): Content of {nav}_i18n.json, None to leave it missing
+
+    Returns:
+        ParseBase: Parser of the nav
+    """
+    root = fs.root_dir.path
+    file = joinpath(root, f'module/config/{nav}/{nav}.args.yaml')
+    if args_yaml is not None:
+        fs.create_file(file, contents=textwrap.dedent(args_yaml))
+    parser = ParseBase(PathStr.new(file))
+    if tasks_yaml is not None:
+        fs.create_file(parser.tasks_file, contents=textwrap.dedent(tasks_yaml))
+    if i18n_json is not None:
+        fs.create_file(parser.i18n_file, contents=textwrap.dedent(i18n_json))
+    return parser
+
+
+class TestParseBaseInit:
+    def test_file_and_nav_name(self):
+        file = PathStr.new('/project/module/config/main/main.args.yaml')
+        parser = ParseBase(file)
+        assert parser.file == file
+        assert parser.nav_name == 'main'
+
+    def test_derived_files(self):
+        parser = ParseBase(PathStr.new('/project/module/config/main/main.args.yaml'))
+        assert parser.tasks_file == '/project/module/config/main/main.tasks.yaml'
+        assert parser.i18n_file == '/project/module/config/main/main_i18n.json'
+        assert parser.config_file == '/project/module/config/main/main_config.json'
+        assert parser.model_file == '/project/module/config/main/main_model.py'
+
+    @pytest.mark.parametrize('file', [
+        '/project/module/config/main/main.yaml',
+        '/project/module/config/main/main_args.yaml',
+        '/project/module/config/main/main.args.yaml.bak',
+        '/project/module/config/main/main.args.yml',
+    ])
+    def test_invalid_suffix(self, file):
+        with pytest.raises(DefinitionError) as e:
+            ParseBase(PathStr.new(file))
+        assert e.value.msg == 'Arg file must endswith ".args.yaml"'
+        assert e.value.file == file
+
+    @pytest.mark.parametrize('file', [
+        '/project/module/config/main/Main.args.yaml',
+        '/project/module/config/main/main_1.args.yaml',
+        '/project/module/config/main/main-1.args.yaml',
+        '/project/module/config/main/1main.args.yaml',
+        '/project/module/config/main/.args.yaml',
+    ])
+    def test_invalid_nav_name(self, file):
+        with pytest.raises(DefinitionError) as e:
+            ParseBase(PathStr.new(file))
+        nav = PathStr.new(file).name[: -len('.args.yaml')]
+        assert e.value.msg == f'Invalid nav name: "{nav}"'
+        assert e.value.file == file
+
+    @pytest.mark.parametrize('nav', ['main', 'nav2', 'a1', 'abcdefghijklmnopqrstuvwxyz'])
+    def test_valid_nav_name(self, nav):
+        parser = ParseBase(PathStr.new(f'/project/module/config/{nav}/{nav}.args.yaml'))
+        assert parser.nav_name == nav
+
+
+class TestReadArgsYaml:
+    def test_missing_file(self, fs):
+        parser = make_base(fs, 'main')
+        assert parser.read_args_yaml() == {}
+
+    def test_valid_yaml(self, fs):
+        parser = make_base(fs, 'main', args_yaml="""\
+Group:
+  args:
+    Enable: true
+""")
+        assert parser.read_args_yaml() == {'Group': {'args': {'Enable': True}}}
+
+    def test_empty_file(self, fs):
+        """An empty yaml document is None, not an empty dict."""
+        parser = make_base(fs, 'main', args_yaml='')
+        assert parser.read_args_yaml() is None
+
+    def test_malformed_yaml(self, fs):
+        """Malformed yaml falls back to the default, the error is swallowed."""
+        parser = make_base(fs, 'main', args_yaml='Group: [\n')
+        assert parser.read_args_yaml() == {}
+
+    def test_yaml_root_is_list(self, fs):
+        """The reader returns whatever the yaml document is."""
+        parser = make_base(fs, 'main', args_yaml='- Group\n- Other\n')
+        assert parser.read_args_yaml() == ['Group', 'Other']
+
+    def test_postprocess_applied(self, fs, monkeypatch):
+        monkeypatch.setattr(ParseBase, 'dict_args_yaml_postprocess', {})
+        monkeypatch.setattr(ParseBase, 'alasio_nav', {'alasio', 'device'})
+        calls = []
+
+        @args_yaml_postprocess('main')
+        def add_group(data):
+            calls.append('add_group')
+            data['Injected'] = {'args': {'A': 1}}
+            return data
+
+        parser = make_base(fs, 'main', args_yaml="""\
+Group:
+  args:
+    A: 1
+""")
+        assert parser.read_args_yaml() == {
+            'Group': {'args': {'A': 1}},
+            'Injected': {'args': {'A': 1}},
+        }
+        assert calls == ['add_group']
+
+    def test_postprocess_chain_order(self, fs, monkeypatch):
+        """The output of a postprocess is the input of the next one."""
+        monkeypatch.setattr(ParseBase, 'dict_args_yaml_postprocess', {})
+        monkeypatch.setattr(ParseBase, 'alasio_nav', {'alasio', 'device'})
+
+        @args_yaml_postprocess('main')
+        def first(data):
+            data['A'] = 1
+            return data
+
+        @args_yaml_postprocess('main')
+        def second(data):
+            data['B'] = data['A'] + 1
+            return data
+
+        parser = make_base(fs, 'main', args_yaml='{}\n')
+        assert parser.read_args_yaml() == {'A': 1, 'B': 2}
+
+    def test_postprocess_returning_none(self, fs, monkeypatch):
+        """A None result is not checked for args yaml, the next function sees None."""
+        monkeypatch.setattr(ParseBase, 'dict_args_yaml_postprocess', {})
+        monkeypatch.setattr(ParseBase, 'alasio_nav', {'alasio', 'device'})
+
+        @args_yaml_postprocess('main')
+        def first(data):
+            return None
+
+        @args_yaml_postprocess('main')
+        def second(data):
+            return {'seen': data}
+
+        parser = make_base(fs, 'main', args_yaml='{}\n')
+        assert parser.read_args_yaml() == {'seen': None}
+
+    def test_protected_nav_skips_postprocess(self, fs, monkeypatch):
+        monkeypatch.setattr(ParseBase, 'dict_args_yaml_postprocess', {})
+        monkeypatch.setattr(ParseBase, 'alasio_nav', {'alasio', 'device'})
+        calls = []
+
+        @args_yaml_postprocess('alasio')
+        def process(data):
+            calls.append('process')
+            return {'injected': True}
+
+        parser = make_base(fs, 'alasio', args_yaml="""\
+Group:
+  args:
+    A: 1
+""")
+        assert parser.read_args_yaml() == {'Group': {'args': {'A': 1}}}
+        assert calls == []
+
+    def test_no_postprocess_keeps_data(self, fs, monkeypatch):
+        monkeypatch.setattr(ParseBase, 'dict_args_yaml_postprocess', {})
+        monkeypatch.setattr(ParseBase, 'alasio_nav', {'alasio', 'device'})
+        parser = make_base(fs, 'main', args_yaml="""\
+Group:
+  args:
+    A: 1
+""")
+        assert parser.read_args_yaml() == {'Group': {'args': {'A': 1}}}
+
+
+class TestReadTasksYaml:
+    def test_missing_file(self, fs):
+        parser = make_base(fs, 'main')
+        assert parser.read_tasks_yaml() == {}
+
+    def test_valid_yaml(self, fs):
+        parser = make_base(fs, 'main', tasks_yaml="""\
+Task:
+  groups:
+    Group:
+""")
+        assert parser.read_tasks_yaml() == {'Task': {'groups': {'Group': None}}}
+
+    def test_malformed_yaml(self, fs):
+        parser = make_base(fs, 'main', tasks_yaml='Task: [\n')
+        assert parser.read_tasks_yaml() == {}
+
+
+class TestReadI18nJson:
+    def test_missing_file(self, fs):
+        parser = make_base(fs, 'main')
+        assert parser.read_i18n_json() == {}
+
+    def test_valid_json(self, fs):
+        parser = make_base(fs, 'main', i18n_json='{"Group": {"A": {"en-US": "A"}}}')
+        assert parser.read_i18n_json() == {'Group': {'A': {'en-US': 'A'}}}
+
+    def test_invalid_json(self, fs):
+        parser = make_base(fs, 'main', i18n_json='{not json')
+        assert parser.read_i18n_json() == {}
+
+    def test_json_root_is_list(self, fs):
+        parser = make_base(fs, 'main', i18n_json='[1, 2]')
+        assert parser.read_i18n_json() == [1, 2]
+
+    def test_postprocess_applied(self, fs, monkeypatch):
+        monkeypatch.setattr(ParseBase, 'dict_i18n_json_postprocess', {})
+        monkeypatch.setattr(ParseBase, 'alasio_nav', {'alasio', 'device'})
+
+        @i18n_json_postprocess('main')
+        def add_translation(data):
+            data['Group'] = {'A': {'en-US': 'A'}}
+            return data
+
+        parser = make_base(fs, 'main', i18n_json='{}')
+        assert parser.read_i18n_json() == {'Group': {'A': {'en-US': 'A'}}}
+
+    def test_postprocess_chain_order(self, fs, monkeypatch):
+        monkeypatch.setattr(ParseBase, 'dict_i18n_json_postprocess', {})
+        monkeypatch.setattr(ParseBase, 'alasio_nav', {'alasio', 'device'})
+
+        @i18n_json_postprocess('main')
+        def first(data):
+            data['A'] = 1
+            return data
+
+        @i18n_json_postprocess('main')
+        def second(data):
+            data['B'] = data['A'] + 1
+            return data
+
+        parser = make_base(fs, 'main', i18n_json='{}')
+        assert parser.read_i18n_json() == {'A': 1, 'B': 2}
+
+    def test_postprocess_returning_none_warns(self, fs, monkeypatch, capsys):
+        """Unlike args yaml, a None result is reported and passed on."""
+        monkeypatch.setattr(ParseBase, 'dict_i18n_json_postprocess', {})
+        monkeypatch.setattr(ParseBase, 'alasio_nav', {'alasio', 'device'})
+
+        @i18n_json_postprocess('main')
+        def process(data):
+            return None
+
+        parser = make_base(fs, 'main', i18n_json='{}')
+        assert parser.read_i18n_json() is None
+        assert capsys.readouterr().out == (
+            'Warning: postprocess function process returns None\n'
+        )
+
+    def test_postprocess_chain_after_none(self, fs, monkeypatch, capsys):
+        """The next postprocess still runs after a None result."""
+        monkeypatch.setattr(ParseBase, 'dict_i18n_json_postprocess', {})
+        monkeypatch.setattr(ParseBase, 'alasio_nav', {'alasio', 'device'})
+
+        @i18n_json_postprocess('main')
+        def first(data):
+            return None
+
+        @i18n_json_postprocess('main')
+        def second(data):
+            return {'seen': data}
+
+        parser = make_base(fs, 'main', i18n_json='{}')
+        assert parser.read_i18n_json() == {'seen': None}
+        assert capsys.readouterr().out == (
+            'Warning: postprocess function first returns None\n'
+        )
+
+    def test_protected_nav_skips_postprocess(self, fs, monkeypatch):
+        monkeypatch.setattr(ParseBase, 'dict_i18n_json_postprocess', {})
+        monkeypatch.setattr(ParseBase, 'alasio_nav', {'alasio', 'device'})
+        calls = []
+
+        @i18n_json_postprocess('alasio')
+        def process(data):
+            calls.append('process')
+            return {'injected': True}
+
+        parser = make_base(fs, 'alasio', i18n_json='{"Group": {}}')
+        assert parser.read_i18n_json() == {'Group': {}}
+        assert calls == []
+
+    def test_no_postprocess_keeps_data(self, fs, monkeypatch):
+        monkeypatch.setattr(ParseBase, 'dict_i18n_json_postprocess', {})
+        monkeypatch.setattr(ParseBase, 'alasio_nav', {'alasio', 'device'})
+        parser = make_base(fs, 'main', i18n_json='{"Group": {}}')
+        assert parser.read_i18n_json() == {'Group': {}}

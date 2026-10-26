@@ -3,15 +3,35 @@ import re
 
 def validate_task_name(name: str) -> bool:
     """
-    validate task name, group name, arg name,
-    must match regex ^[A-Z][a-zA-Z0-9]*$
+    Validate a task name, group name or arg name.
+    Must match ^[A-Z][a-zA-Z0-9]*$
+
+    Args:
+        name (str): Name to validate, a non-str is invalid
+
+    Returns:
+        bool: True if the name is valid, False for other types
     """
-    return bool(re.match(r'^[A-Z][a-zA-Z0-9]*$', name))
+    try:
+        return bool(re.match(r'^[A-Z][a-zA-Z0-9]*$', name))
+    except TypeError:
+        # Not a str, e.g. a yaml key like `1:`
+        return False
 
 
 def validate_nav_name(name: str) -> bool:
     """
-    validate nav name,
-    must match regex ^[a-z][a-z0-9]*$
+    Validate a nav name.
+    Must match ^[a-z][a-z0-9]*$
+
+    Args:
+        name (str): Name to validate, a non-str is invalid
+
+    Returns:
+        bool: True if the name is valid, False for other types
     """
-    return bool(re.match(r'^[a-z][a-z0-9]*$', name))
+    try:
+        return bool(re.match(r'^[a-z][a-z0-9]*$', name))
+    except TypeError:
+        # Not a str, e.g. a yaml key like `1:`
+        return False

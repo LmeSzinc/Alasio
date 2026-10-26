@@ -27,17 +27,17 @@ TYPE_DASHBOARD = [
 class GroupData(Struct):
     name: str
     args: Dict[str, ArgData] = msgspec.field(default_factory=dict)
-    # parent group of variant, or empty string if this group is not a variant
-    parent: Tuple[str, ...] = msgspec.field(default=tuple)
+    # parent group of variant, or empty tuple if this group is not a variant
+    parent: Tuple[str, ...] = msgspec.field(default_factory=tuple)
     # color of the dot on frontend dashboard component, #RGB #RGBA #RRGGBB #RRGGBBAA
     dashboard_color: str = ''
 
     parser: "Optional[ParseGroups]" = None
     # MRO inherit chain like python class
-    mro: Tuple[str, ...] = msgspec.field(default=tuple)
-    # override args in variant
-    # - equals input args if is a variant (having `parent`)
-    # - empty dict if not a variant
+    mro: Tuple[str, ...] = msgspec.field(default_factory=tuple)
+    # Args defined in the yaml of this group, copied before MRO merge
+    # - for a variant group: the override args
+    # - for a base group: all args, kept so variants can resolve their i18ngroup
     override_args: Dict[str, ArgData] = msgspec.field(default_factory=dict)
     # override i18n of this group
     # - if True and this group has a parent, generate its own _info in i18n
@@ -51,10 +51,12 @@ class GroupData(Struct):
 
     @classmethod
     def from_group_data(cls, group: str, data: dict):
-        if not data:
+        if data is None:
             data = {}
         if not isinstance(data, dict):
             raise DefinitionError(f'Group data must be a dict', keys=[group], value=data)
+        # Do not mutate the input yaml data, it may be reused by the caller
+        data = dict(data)
         args: dict = data.get('args', {})
         if not isinstance(args, dict):
             raise DefinitionError(f'Group args must be a dict', keys=[group, 'args'], value=data)
@@ -126,11 +128,10 @@ class GroupData(Struct):
         self.args['Time'] = ArgData.from_arg_data(DEFAULT_TIME)
         # validate dashboard="total"
         if self.dashboard == 'total':
-            have = {'Value', 'Total'}
-            missing = have - set(self.args)
+            missing = [name for name in ('Value', 'Total') if name not in self.args]
             if missing:
                 raise DefinitionError(
-                    f'Dashboard datatype "{self.dashboard}" must have args {have}, missing {missing}',
+                    f'Dashboard datatype "{self.dashboard}" must have args "Value" and "Total", missing {missing}',
                     keys=[self.name, 'args'], value=self.args
                 )
         # validate dashboard="value"
@@ -143,7 +144,8 @@ class GroupData(Struct):
         # validate dashboard="progress"
         if self.dashboard == 'progress':
             arg = self.args['Value']
-            if not isinstance(arg.value, (int, float)):
+            # bool is a subclass of int, but a bool is not a progress value
+            if isinstance(arg.value, bool) or not isinstance(arg.value, (int, float)):
                 raise DefinitionError(
                     f'Dashboard datatype "{self.dashboard}" must have default value in int or float, '
                     f'got "{arg.value}"',
@@ -155,8 +157,8 @@ class GroupData(Struct):
             for gen in ['Progress', 'Eta']:
                 if gen in self.args:
                     raise DefinitionError(
-                        f'Dashboard datatype "{self.dashboard}" cannot have custom arg "Eta"',
-                        keys=[self.name, 'args', 'Eta'], value=self.args['Eta']
+                        f'Dashboard datatype "{self.dashboard}" cannot have custom arg "{gen}"',
+                        keys=[self.name, 'args', gen], value=self.args[gen]
                     )
             # add default Progress and Eta at top
             args = dict(
@@ -202,7 +204,7 @@ class GroupData(Struct):
                     arg.ge = 0
                 else:
                     continue
-            # 0 <= value < arg.le
+            # 0 <= value < arg.lt
             if arg.lt is not UNSET:
                 if arg.lt > 0:
                     arg.ge = 0
