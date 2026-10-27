@@ -405,6 +405,32 @@ class TestFailure:
     MIRRORS = {'g': {'a': 'http://a', 'b': 'http://b'}}
 
     @pytest.mark.trio
+    async def test_content_failure_of_the_first_request_reselects(self, fake_clock):
+        """The probe of the first request only proves that a candidate serves
+        the path (a HEAD): a content failure of the work right after it makes
+        the instance probe the path again without that candidate, exactly like
+        a failure on a mirror that came from the record."""
+        table = FakeMirrorTable()
+        probe = StubProbe(self.MIRRORS, table=table)
+        # no record: the probe of the path selects a, its request fails
+        probe.results = {'a': None, 'b': None}
+        probe.requests = {'a': RangeUnsupportedError('no ranges'), 'b': 'PAY'}
+        with logger.mock_capture_writer() as capture:
+            assert await probe.fetch(PATH) == 'PAY'
+        assert capture.concat() == f"""\
+INFO | Probing `probe` for "{PATH}": a, b
+INFO | Mirror "a" responded in 0ms
+INFO | [Mirror `probe`] a
+INFO | Probing `probe` for "{PATH}": a, b
+INFO | Mirror "b" responded in 0ms
+INFO | [Mirror `probe`] b
+"""
+        # the failed candidate is excluded from the re-probe, the other one wins
+        assert probe.probed == [('a', 'http://a', PATH), ('b', 'http://b', PATH)]
+        assert probe.called == [('a', 'http://a', PATH), ('b', 'http://b', PATH)]
+        assert table.select_one(scene='probe', name='').result == 'b'
+
+    @pytest.mark.trio
     async def test_content_failure_excludes_the_mirror(self, fake_clock):
         """A content failure (the domain's own: the bytes are not usable) does
         not get better by asking the same mirror again: the mirror that failed

@@ -152,6 +152,7 @@ class SyncProbe(ProbeBase):
                 no usable candidate, before any request of the flow had a
                 chance to run
         """
+        probed = self.was_probed(path)
         name, payload = self.resolve(path)
         if payload is not None:
             # the probe was the request itself: its payload is the answer of
@@ -161,7 +162,9 @@ class SyncProbe(ProbeBase):
             return self.work(name, path, work)
         except self.failures() as e:
             failure = e
-        if self.mirrors.single or self.was_probed(path):
+        if self.mirrors.single or probed:
+            # nothing to select from, or the path was probed by an earlier
+            # request of this instance: the failure is the answer
             raise failure
         try:
             with probe_lock(self.SCENE, self.name):

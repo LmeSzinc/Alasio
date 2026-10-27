@@ -472,6 +472,33 @@ class TestMirrors:
         ]
 
     @pytest.mark.trio
+    async def test_first_request_moves_to_another_mirror(self, record_table, two_mirrors, dest):
+        """No record yet: the probe of the page selects a mirror, and a page
+        of it without the version makes the instance probe again without it."""
+        first, second = two_mirrors
+        # the index of a is behind: it only lists the previous version
+        first.register('httpx', '0.28.0')
+        content = second.register('httpx', '0.28.1')
+        mirrors = {'cn': {'a': first.base, 'b': second.base}}
+        pypi = PypiFile(mirrors, dest, client=make_client(first, second), target=PY38_WIN)
+        with logger.mock_capture_writer():
+            files = await pypi.download('httpx', '0.28.1', 'py3-any')
+        assert len(files) == 1
+        assert files[0].atomic_read_bytes() == content
+        # a wins the probe of the page (a HEAD), its page has no such version
+        assert first.requests == [
+            ('HEAD', first.page_url('httpx')),
+            ('GET', first.page_url('httpx')),
+        ]
+        # the page is probed again without a, the winner serves the wheel
+        assert second.requests == [
+            ('HEAD', second.page_url('httpx')),
+            ('GET', second.page_url('httpx')),
+            ('GET', second.file_url('httpx', 'httpx-0.28.1-py3-none-any.whl')),
+        ]
+        assert record_table.select_one(scene=PypiFile.SCENE, name='').result == 'b'
+
+    @pytest.mark.trio
     async def test_missing_wheel_moves_to_another_mirror(self, record_table, two_mirrors, dest):
         """A page without a wheel of the version is a failure of the mirror:
         the download continues on a mirror whose page has it."""

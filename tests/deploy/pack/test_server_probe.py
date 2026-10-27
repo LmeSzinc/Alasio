@@ -152,7 +152,9 @@ INFO | [Mirror `repo`] b
 
     @pytest.mark.trio
     async def test_full_pack_target_is_head_probed(self, fake_clock):
-        """A whole target is probed with a HEAD before the real request."""
+        """A whole target is probed with a HEAD before the real request, and a
+        pack the first mirror serves broken is downloaded again from another
+        one."""
         requests = []
 
         def handler(request):
@@ -171,11 +173,18 @@ INFO | [Mirror `repo`] b
         assert requests == [
             ('HEAD', 'http://a/new/update_old.pack'),
             ('GET', 'http://a/new/update_old.pack'),
+            # the pack of a does not decode: the path is probed again without
+            # it and the pack is downloaded from b
+            ('HEAD', 'http://b/new/update_old.pack'),
+            ('GET', 'http://b/new/update_old.pack'),
         ]
         assert capture.concat() == """\
 INFO | Probing `repo` for "/new/update_old.pack": a, b
 INFO | Mirror "a" responded in 0ms
 INFO | [Mirror `repo`] a
+INFO | Probing `repo` for "/new/update_old.pack": a, b
+INFO | Mirror "b" responded in 0ms
+INFO | [Mirror `repo`] b
 """
 
     @pytest.mark.trio
@@ -201,12 +210,21 @@ INFO | [Mirror `repo`] a
             ('HEAD', '/new/update_old.pack', ''),
             ('GET', '/new/update_old.pack', 'bytes=0-0'),
             ('GET', '/new/update_old.pack', ''),
+            # the pack of a does not decode: the path is probed again without
+            # it, and its fallback range GET is the probe of b
+            ('HEAD', '/new/update_old.pack', ''),
+            ('GET', '/new/update_old.pack', 'bytes=0-0'),
+            ('GET', '/new/update_old.pack', ''),
         ]
         assert capture.concat() == """\
 INFO | Probing `repo` for "/new/update_old.pack": a, b
 WARNING | Request to "http://a/new/update_old.pack" failed (attempt 1/3): HTTPStatusError: Client error '405 Method Not Allowed' for url 'http://a/new/update_old.pack'
 INFO | Mirror "a" responded in 0ms
 INFO | [Mirror `repo`] a
+INFO | Probing `repo` for "/new/update_old.pack": a, b
+WARNING | Request to "http://b/new/update_old.pack" failed (attempt 1/3): HTTPStatusError: Client error '405 Method Not Allowed' for url 'http://b/new/update_old.pack'
+INFO | Mirror "b" responded in 0ms
+INFO | [Mirror `repo`] b
 """
 
     @pytest.mark.trio
@@ -235,6 +253,11 @@ INFO | [Mirror `repo`] a
             ('GET', 'a'),
             ('HEAD', 'b'),
             ('GET', 'b'),
+            # the pack of b does not decode: b is excluded from the re-probe,
+            # a cannot serve the target either and no candidate is left, so the
+            # failure of the work is the answer
+            ('HEAD', 'a'),
+            ('GET', 'a'),
         ]
         assert capture.concat() == """\
 INFO | Probing `repo` for "/new/update_old.pack": a, b
@@ -243,6 +266,11 @@ WARNING | Request to "http://a/new/update_old.pack" failed (attempt 1/3): HTTPSt
 WARNING | Mirror "a" is not usable: HTTPStatusError: Client error '404 Not Found' for url 'http://a/new/update_old.pack'
 INFO | Mirror "b" responded in 0ms
 INFO | [Mirror `repo`] b
+INFO | Probing `repo` for "/new/update_old.pack": a, b
+WARNING | Request to "http://a/new/update_old.pack" failed (attempt 1/3): HTTPStatusError: Client error '405 Method Not Allowed' for url 'http://a/new/update_old.pack'
+WARNING | Request to "http://a/new/update_old.pack" failed (attempt 1/3): HTTPStatusError: Client error '404 Not Found' for url 'http://a/new/update_old.pack'
+WARNING | Mirror "a" is not usable: HTTPStatusError: Client error '404 Not Found' for url 'http://a/new/update_old.pack'
+ERROR | Failed to probe `repo` for "/new/update_old.pack": no mirror is usable
 """
 
     @pytest.mark.trio

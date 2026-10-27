@@ -113,14 +113,24 @@ class AsyncProbe(ProbeBase):
         fetched and validated it, the flow consumes it and makes no request of
         its own. When the probe fetched nothing (a HEAD), the work of the flow
         runs: the caller's own, or the plain request of the flavour. When the
-        work fails, the instance probes the same path once, unless it already
-        probed that path (one probe per path per instance), and runs the work
+        work fails, the instance probes the same path once and runs the work
         once more on the winner - or takes the payload of the new probe when it
-        was the request itself again; a second failure is raised as-is. With no
-        candidate able to serve the path, the original failure is raised as-is,
-        so the caller keeps its own fallback (see DeployJob.update()); the
-        failed probe itself is logged with an ERROR (see run()), the fallback
-        would otherwise hide it.
+        was the request itself again; a second failure is raised as-is.
+
+        The re-probe happens both when the record selected the mirror and when
+        the probe of this very call did: a probe only proves that a candidate
+        serves the path (the default HEAD), it does not validate the content
+        the work reads, so a content failure of the work is a failure of the
+        mirror either way, and another one may serve a usable copy (see
+        ServerFile.get_index_pack, whose checksum is only known after the
+        download). The one exception is a path an earlier request of this
+        instance probed: the candidates already answered for it and the failure
+        is the answer (one probe per path per instance, at most one re-probe).
+
+        With no candidate able to serve the path, the original failure is
+        raised as-is, so the caller keeps its own fallback (see
+        DeployJob.update()); the failed probe itself is logged with an ERROR
+        (see run()), the fallback would otherwise hide it.
 
         Args:
             path (str): Path of the request
@@ -142,6 +152,11 @@ class AsyncProbe(ProbeBase):
                 no usable candidate, before any request of the flow had a
                 chance to run
         """
+        # whether an earlier request of this instance probed the path: such a
+        # probe already knows what the candidates answer, the failure below is
+        # the answer (the probe of this call, by contrast, only proves that a
+        # candidate serves the path, see the docstring)
+        probed = self.was_probed(path)
         name, payload = await self.resolve(path)
         if payload is not None:
             # the probe was the request itself: its payload is the answer of
@@ -151,9 +166,9 @@ class AsyncProbe(ProbeBase):
             return await self.work(name, path, work)
         except self.failures() as e:
             failure = e
-        if self.mirrors.single or self.was_probed(path):
-            # nothing to select from, or the path was already probed by this
-            # instance: the failure is the answer
+        if self.mirrors.single or probed:
+            # nothing to select from, or the path was probed by an earlier
+            # request of this instance: the failure is the answer
             raise failure
         try:
             async with probe_lock(self.SCENE, self.name):
