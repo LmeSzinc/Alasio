@@ -13,7 +13,10 @@ transport error. get() and the future verbs (post, ...) are thin
 wrappers that only fill in the method, mirroring the
 request()/get()/post() structure of httpx2 itself; the clients also
 stream a response into a consumer and retry the whole transfer
-(HttpClient.stream() / AsyncHttpClient.stream()).
+(HttpClient.stream() / AsyncHttpClient.stream()). The keywords a wrapper
+does not own are handed to httpx2 unchanged (**kwargs), so an option of
+httpx (follow_redirects, params, cookies, auth, content, ...) needs no
+new argument here.
 
 Only a transport error is retried, i.e. a failure without a status
 code: dns lookup failure, connect refusal, ssl handshake failure,

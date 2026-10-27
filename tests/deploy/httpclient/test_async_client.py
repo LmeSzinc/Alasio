@@ -105,6 +105,62 @@ WARNING | Request to "http://test/a" failed (attempt 1/3): ReadTimeout: read tim
         assert default.read == default.write
         assert default.read > AsyncHttpClient.PROBE_TIMEOUT
 
+    @pytest.mark.trio
+    async def test_kwargs_are_passed_to_httpx(self):
+        """The keywords the wrapper does not own go to httpx unchanged:
+        follow_redirects and params, no argument per option here."""
+        requests = []
+
+        def handler(request):
+            requests.append(request)
+            if request.url.path == '/httpx/':
+                return httpx2.Response(302, headers={'Location': '/httpx/index/'})
+            return httpx2.Response(200, content=b'ok')
+
+        client = AsyncHttpClient(make_aclient(handler))
+        # follow_redirects
+        assert (await client.get('http://mirror/httpx/', follow_redirects=True)).content == b'ok'
+        assert [str(request.url) for request in requests] == [
+            'http://mirror/httpx/', 'http://mirror/httpx/index/']
+        # params, a keyword the wrapper never names
+        requests.clear()
+        assert (await client.get(
+            'http://mirror/httpx/', follow_redirects=True, params={'a': '1'})).content == b'ok'
+        assert [str(request.url) for request in requests] == [
+            'http://mirror/httpx/?a=1', 'http://mirror/httpx/index/']
+        # an argument httpx does not know is its own TypeError
+        with pytest.raises(TypeError, match='unknown_option'):
+            await client.get('http://mirror/b', unknown_option=1)
+        # without follow_redirects the redirect is not followed and the
+        # 3xx is raised by the wrapper like any other status error
+        requests.clear()
+        with pytest.raises(httpx2.HTTPStatusError, match='302'):
+            await client.get('http://mirror/httpx/')
+        assert [str(request.url) for request in requests] == ['http://mirror/httpx/']
+
+    @pytest.mark.trio
+    async def test_stream_follows_redirects(self):
+        """The streamed transfer follows the redirects of the call too: a
+        files host may send the wheel to another host."""
+        requests = []
+
+        def handler(request):
+            requests.append(str(request.url))
+            if request.url.path == '/wheel.whl':
+                return httpx2.Response(302, headers={'Location': '/cdn/wheel.whl'})
+            return httpx2.Response(200, content=b'wheel')
+
+        client = AsyncHttpClient(make_aclient(handler))
+        chunks = []
+
+        async def consume(response):
+            async for chunk in response.aiter_bytes():
+                chunks.append(chunk)
+
+        await client.stream('http://mirror/wheel.whl', consume, follow_redirects=True)
+        assert b''.join(chunks) == b'wheel'
+        assert requests == ['http://mirror/wheel.whl', 'http://mirror/cdn/wheel.whl']
+
 
 class TestAsyncRetry:
     """A transport error is retried up to the attempts of the request,

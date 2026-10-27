@@ -61,7 +61,7 @@ def fake_sleep(monkeypatch):
 
 class TestSyncRequest:
     """The request core of HttpClient: the verb, the headers, the
-    timeout and the redirects."""
+    timeout and the keywords handed to httpx."""
 
     def test_get_sends_get(self):
         """get() sends the GET method with the headers of the call."""
@@ -139,27 +139,38 @@ WARNING | Request to "http://test/a" failed (attempt 1/3): ReadTimeout: read tim
         assert default.read == default.write
         assert default.read > HttpClient.PROBE_TIMEOUT
 
-    def test_follow_redirects(self):
-        """follow_redirects=True is handed to httpx: the redirect of the
-        mirror is followed, the default of the client applies without
-        it."""
+    def test_kwargs_are_passed_to_httpx(self):
+        """The keywords the wrapper does not own go to httpx unchanged:
+        follow_redirects and params, no argument per option here."""
         requests = []
 
         def handler(request):
-            requests.append(str(request.url))
+            requests.append(request)
             if request.url.path == '/httpx/':
                 return httpx2.Response(302, headers={'Location': '/httpx/index/'})
             return httpx2.Response(200, content=b'ok')
 
         client = HttpClient(make_sclient(handler))
+        # follow_redirects
         assert client.get('http://mirror/httpx/', follow_redirects=True).content == b'ok'
-        assert requests == ['http://mirror/httpx/', 'http://mirror/httpx/index/']
+        assert [str(request.url) for request in requests] == [
+            'http://mirror/httpx/', 'http://mirror/httpx/index/']
+        # params, a keyword the wrapper never names
         requests.clear()
+        assert client.get(
+            'http://mirror/httpx/', follow_redirects=True, params={'a': '1'}).content == b'ok'
+        assert [str(request.url) for request in requests] == [
+            'http://mirror/httpx/?a=1', 'http://mirror/httpx/index/']
+        # an argument httpx does not know is its own TypeError: no allow-list
+        # here would swallow a typo
+        with pytest.raises(TypeError, match='unknown_option'):
+            client.get('http://mirror/b', unknown_option=1)
         # without follow_redirects the redirect is not followed and the
         # 3xx is raised by the wrapper like any other status error
+        requests.clear()
         with pytest.raises(httpx2.HTTPStatusError, match='302'):
             client.get('http://mirror/httpx/')
-        assert requests == ['http://mirror/httpx/']
+        assert [str(request.url) for request in requests] == ['http://mirror/httpx/']
 
 
 class TestSyncRetry:

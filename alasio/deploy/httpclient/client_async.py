@@ -123,7 +123,8 @@ class AsyncHttpClient(HttpClientBase):
         if self._own_client and client is not None:
             await client.aclose()
 
-    async def request(self, method, url, headers=None, timeout=None, attempts=HttpClientBase.REQUEST_ATTEMPTS):
+    async def request(self, method, url, headers=None, timeout=None, attempts=HttpClientBase.REQUEST_ATTEMPTS,
+                      **kwargs):
         """
         Send one http request and return its response, retrying a
         transport error up to `attempts` attempts.
@@ -162,6 +163,10 @@ class AsyncHttpClient(HttpClientBase):
             attempts (int): Attempts of the request, the retry waits
                 RETRY_BACKOFF seconds. Defaults to REQUEST_ATTEMPTS, a
                 single-shot request passes 1
+            **kwargs: Any other argument of httpx2.AsyncClient.request(),
+                passed through unchanged (e.g. follow_redirects, params,
+                cookies, auth, content). An argument httpx does not know
+                raises its TypeError, this wrapper adds none of its own
 
         Returns:
             httpx2.Response: The response
@@ -181,7 +186,8 @@ class AsyncHttpClient(HttpClientBase):
                 # network: wait a moment, then retry the same request
                 await trio.sleep(self.RETRY_BACKOFF)
             try:
-                response = await client.request(method, url, headers=headers, timeout=timeout)
+                response = await client.request(
+                    method, url, headers=headers, timeout=timeout, **kwargs)
                 self._raise_for_status(response)
                 return response
             except httpx2.TransportError as e:
@@ -197,10 +203,11 @@ class AsyncHttpClient(HttpClientBase):
                 self._log_attempt_failure(url, attempt, attempts, e)
                 raise
 
-    async def get(self, url, headers=None, timeout=None, attempts=HttpClientBase.REQUEST_ATTEMPTS):
+    async def get(self, url, headers=None, timeout=None, attempts=HttpClientBase.REQUEST_ATTEMPTS,
+                  **kwargs):
         """
         Get a url: the GET wrapper of request(), see it for the retry,
-        the timeout and the raised errors.
+        the timeout, the extra arguments and the raised errors.
 
         Args:
             url (str): URL to get
@@ -210,6 +217,8 @@ class AsyncHttpClient(HttpClientBase):
                 given, see request()
             attempts (int): Attempts of the request. Defaults to
                 REQUEST_ATTEMPTS, a single-shot request passes 1
+            **kwargs: Any other argument of httpx2.AsyncClient.get(), see
+                request()
 
         Returns:
             httpx2.Response: The response
@@ -217,12 +226,14 @@ class AsyncHttpClient(HttpClientBase):
         Raises:
             httpx2.HTTPError: If the request fails
         """
-        return await self.request('GET', url, headers=headers, timeout=timeout, attempts=attempts)
+        return await self.request(
+            'GET', url, headers=headers, timeout=timeout, attempts=attempts, **kwargs)
 
-    async def head(self, url, headers=None, timeout=None, attempts=HttpClientBase.REQUEST_ATTEMPTS):
+    async def head(self, url, headers=None, timeout=None, attempts=HttpClientBase.REQUEST_ATTEMPTS,
+                   **kwargs):
         """
         Head a url: the HEAD wrapper of request(), see it for the retry,
-        the timeout and the raised errors.
+        the timeout, the extra arguments and the raised errors.
 
         A HEAD response carries no body: the status and the headers are the
         answer of the request (the probe of a path asks HEAD to learn whether
@@ -236,6 +247,8 @@ class AsyncHttpClient(HttpClientBase):
                 given, see request()
             attempts (int): Attempts of the request. Defaults to
                 REQUEST_ATTEMPTS, a single-shot request passes 1
+            **kwargs: Any other argument of httpx2.AsyncClient.head(), see
+                request()
 
         Returns:
             httpx2.Response: The response
@@ -243,9 +256,11 @@ class AsyncHttpClient(HttpClientBase):
         Raises:
             httpx2.HTTPError: If the request fails
         """
-        return await self.request('HEAD', url, headers=headers, timeout=timeout, attempts=attempts)
+        return await self.request(
+            'HEAD', url, headers=headers, timeout=timeout, attempts=attempts, **kwargs)
 
-    async def stream(self, url, consume, headers=None, timeout=None, attempts=HttpClientBase.REQUEST_ATTEMPTS):
+    async def stream(self, url, consume, headers=None, timeout=None, attempts=HttpClientBase.REQUEST_ATTEMPTS,
+                     **kwargs):
         """
         Get a url and hand the streamed response to an async consumer,
         retrying the whole transfer.
@@ -276,6 +291,8 @@ class AsyncHttpClient(HttpClientBase):
                 given, see request()
             attempts (int): Attempts of the transfer. Defaults to
                 REQUEST_ATTEMPTS, a single-shot transfer passes 1
+            **kwargs: Any other argument of httpx2.AsyncClient.stream(),
+                see request()
 
         Raises:
             httpx2.HTTPError: If the transfer fails on every attempt:
@@ -293,7 +310,7 @@ class AsyncHttpClient(HttpClientBase):
                 # network: wait a moment, then retry the same transfer
                 await trio.sleep(self.RETRY_BACKOFF)
             try:
-                async with client.stream('GET', url, headers=headers, timeout=timeout) as response:
+                async with client.stream('GET', url, headers=headers, timeout=timeout, **kwargs) as response:
                     self._raise_for_status(response)
                     await consume(response)
                 return

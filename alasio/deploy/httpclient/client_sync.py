@@ -118,7 +118,7 @@ class HttpClient(HttpClientBase):
         if self._own_client and client is not None:
             client.close()
 
-    def request(self, method, url, headers=None, timeout=None, attempts=HttpClientBase.REQUEST_ATTEMPTS, follow_redirects=None):
+    def request(self, method, url, headers=None, timeout=None, attempts=HttpClientBase.REQUEST_ATTEMPTS, **kwargs):
         """
         Send one http request and return its response, retrying a
         transport error up to `attempts` attempts.
@@ -148,9 +148,10 @@ class HttpClient(HttpClientBase):
             attempts (int): Attempts of the request, the retry waits
                 RETRY_BACKOFF seconds. Defaults to REQUEST_ATTEMPTS, a
                 single-shot request passes 1
-            follow_redirects (bool, optional): Whether httpx follows the
-                redirects of the response, the default of the client
-                when not given
+            **kwargs: Any other argument of httpx2.Client.request(),
+                passed through unchanged (e.g. follow_redirects, params,
+                cookies, auth, content). An argument httpx does not know
+                raises its TypeError, this wrapper adds none of its own
 
         Returns:
             httpx2.Response: The response
@@ -162,9 +163,6 @@ class HttpClient(HttpClientBase):
         import httpx2
 
         timeout = self._get_timeout(timeout)
-        # follow_redirects is only passed when set: the default of the
-        # client applies otherwise
-        kwargs = {'follow_redirects': follow_redirects} if follow_redirects is not None else {}
         client = self._get_client()
         for attempt in range(attempts):
             if attempt:
@@ -188,10 +186,10 @@ class HttpClient(HttpClientBase):
                 self._log_attempt_failure(url, attempt, attempts, e)
                 raise
 
-    def get(self, url, headers=None, timeout=None, attempts=HttpClientBase.REQUEST_ATTEMPTS, follow_redirects=None):
+    def get(self, url, headers=None, timeout=None, attempts=HttpClientBase.REQUEST_ATTEMPTS, **kwargs):
         """
         Get a url: the GET wrapper of request(), see it for the retry,
-        the timeout, the redirects and the raised errors.
+        the timeout, the extra arguments and the raised errors.
 
         Args:
             url (str): URL to get
@@ -201,9 +199,8 @@ class HttpClient(HttpClientBase):
                 given, see request()
             attempts (int): Attempts of the request. Defaults to
                 REQUEST_ATTEMPTS, a single-shot request passes 1
-            follow_redirects (bool, optional): Whether httpx follows the
-                redirects of the response, the default of the client
-                when not given
+            **kwargs: Any other argument of httpx2.Client.get(), see
+                request()
 
         Returns:
             httpx2.Response: The response
@@ -212,13 +209,12 @@ class HttpClient(HttpClientBase):
             httpx2.HTTPError: If the request fails
         """
         return self.request(
-            'GET', url, headers=headers, timeout=timeout, attempts=attempts,
-            follow_redirects=follow_redirects)
+            'GET', url, headers=headers, timeout=timeout, attempts=attempts, **kwargs)
 
-    def head(self, url, headers=None, timeout=None, attempts=HttpClientBase.REQUEST_ATTEMPTS, follow_redirects=None):
+    def head(self, url, headers=None, timeout=None, attempts=HttpClientBase.REQUEST_ATTEMPTS, **kwargs):
         """
         Head a url: the HEAD wrapper of request(), see it for the retry,
-        the timeout, the redirects and the raised errors.
+        the timeout, the extra arguments and the raised errors.
 
         A HEAD response carries no body: the status and the headers are the
         answer of the request (the probe of a path asks HEAD to learn whether
@@ -232,9 +228,8 @@ class HttpClient(HttpClientBase):
                 given, see request()
             attempts (int): Attempts of the request. Defaults to
                 REQUEST_ATTEMPTS, a single-shot request passes 1
-            follow_redirects (bool, optional): Whether httpx follows the
-                redirects of the response, the default of the client
-                when not given
+            **kwargs: Any other argument of httpx2.Client.head(), see
+                request()
 
         Returns:
             httpx2.Response: The response
@@ -243,10 +238,10 @@ class HttpClient(HttpClientBase):
             httpx2.HTTPError: If the request fails
         """
         return self.request(
-            'HEAD', url, headers=headers, timeout=timeout, attempts=attempts,
-            follow_redirects=follow_redirects)
+            'HEAD', url, headers=headers, timeout=timeout, attempts=attempts, **kwargs)
 
-    def stream(self, url, consume, headers=None, timeout=None, attempts=HttpClientBase.REQUEST_ATTEMPTS, follow_redirects=None):
+    def stream(self, url, consume, headers=None, timeout=None, attempts=HttpClientBase.REQUEST_ATTEMPTS,
+               **kwargs):
         """
         Get a url and hand the streamed response to a consumer, retrying
         the whole transfer.
@@ -275,9 +270,8 @@ class HttpClient(HttpClientBase):
                 given, see request()
             attempts (int): Attempts of the transfer. Defaults to
                 REQUEST_ATTEMPTS, a single-shot transfer passes 1
-            follow_redirects (bool, optional): Whether httpx follows the
-                redirects of the response, the default of the client
-                when not given
+            **kwargs: Any other argument of httpx2.Client.stream(), see
+                request()
 
         Raises:
             httpx2.HTTPError: If the transfer fails on every attempt:
@@ -288,7 +282,6 @@ class HttpClient(HttpClientBase):
         import httpx2
 
         timeout = self._get_timeout(timeout)
-        kwargs = {'follow_redirects': follow_redirects} if follow_redirects is not None else {}
         client = self._get_client()
         for attempt in range(attempts):
             if attempt:
