@@ -76,12 +76,13 @@ class Watchdog:
             list[PathEvent]:
 
         Examples:
-            self = Watchdog(r'E:\ProgramData\Pycharm\AzurLaneAutoScript')
+            # paths are normalized with '/' as separator
+            self = Watchdog('E:/ProgramData/Pycharm/AzurLaneAutoScript')
             while 1:
                 for row in self.watch(interval=2):
                     print(row)
-            # PathEvent('M', 'E:\\ProgramData\\Pycharm\\AzurLaneAutoScript\\config', 'D', 1746358905.0225341)
-            # PathEvent('M', 'E:\\ProgramData\\Pycharm\\AzurLaneAutoScript\\config\\alas.json', 'F', 1746358905.0210333)
+            # PathEvent('M', 'E:/ProgramData/Pycharm/AzurLaneAutoScript/config', 'D', 1746358905.0225341)
+            # PathEvent('M', 'E:/ProgramData/Pycharm/AzurLaneAutoScript/config/alas.json', 'F', 1746358905.0210333)
         """
         if interval > 0:
             now = time.time()

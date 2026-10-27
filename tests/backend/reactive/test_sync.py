@@ -295,7 +295,7 @@ def test_reactive_callback_invocation():
 
 
 def test_parallel_dependencies_no_unnecessary_recompute():
-    """
+    r"""
     Tests that in a tree where C depends on both A and B (parallel dependencies),
     when A changes, C recomputes but B does not.
 
@@ -432,7 +432,7 @@ def test_chain_dependencies_no_propagate_if_value_unchanged():
 
 
 def test_complex_tree_selective_recomputation():
-    """
+    r"""
     Tests a more complex dependency tree to verify selective recomputation.
 
     Dependency graph:

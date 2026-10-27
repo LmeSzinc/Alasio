@@ -61,7 +61,7 @@ def test_parse_filter_simple_chain():
 
 
 def test_parse_filter_removes_internal_whitespace():
-    """
+    r"""
     The code does re.sub('\s', '', s).
     Verify that spaces *inside* items are removed (e.g., 'Gem - 8' -> 'Gem-8').
     """

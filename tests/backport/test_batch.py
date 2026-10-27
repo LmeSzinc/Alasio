@@ -16,7 +16,7 @@ class TestBatched:
 
     def test_batched_strict_error(self):
         # Final batch smaller than n, strict=True (should raise ValueError)
-        with pytest.raises(ValueError, match="batched\(\): incomplete batch"):
+        with pytest.raises(ValueError, match=r"batched\(\): incomplete batch"):
             list(batched("ABCDE", 3, strict=True))
 
     def test_batched_strict_success(self):
@@ -41,7 +41,7 @@ class TestBatched:
 
     def test_batched_large_n_strict(self):
         # n larger than the iterable length, strict=True
-        with pytest.raises(ValueError, match="batched\(\): incomplete batch"):
+        with pytest.raises(ValueError, match=r"batched\(\): incomplete batch"):
             list(batched("ABC", 10, strict=True))
 
     def test_batched_n_1(self):
