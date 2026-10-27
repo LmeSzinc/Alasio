@@ -183,7 +183,7 @@ def _requires_python_ok(link, target):
         return True
 
 
-def select_wheels(links, name, version, mode, target=None):
+def select_wheels(links, name, version, mode: DownloadMode, target=None):
     """
     Select the wheels of one version from the links of an index page.
 
@@ -197,7 +197,7 @@ def select_wheels(links, name, version, mode, target=None):
         links (Iterable[Link]): Links of the index page
         name (str): Distribution name, any case and separator style
         version (str): Exact version of the distribution
-        mode (str): One of DOWNLOAD_MODES
+        mode (DownloadMode): One of DOWNLOAD_MODES
         target (TargetPython | None): The interpreter the wheels are selected
             for. Defaults to None, the running interpreter
 
@@ -394,7 +394,7 @@ class PypiFile(AsyncHttpProbe):
         if name:
             self._mirror = name
 
-    async def download(self, name, version, mode):
+    async def download(self, name, version, mode: DownloadMode):
         """
         Download the wheels of one version to the destination folder.
 
@@ -417,7 +417,8 @@ class PypiFile(AsyncHttpProbe):
             name (str): Distribution name, e.g. 'numpy', any case and
                 separator style
             version (str): Exact version, e.g. '2.1.0'
-            mode (str): 'current', 'py3-any' or 'all', see select_wheels()
+            mode (DownloadMode): 'current', 'py3-any' or 'all', see
+                select_wheels()
 
         Returns:
             list[PathStr]: Paths of the wheels, the order of select_wheels()
