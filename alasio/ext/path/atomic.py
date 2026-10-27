@@ -273,6 +273,27 @@ def file_open(file, mode='r', encoding=None, makedir_on_write=True, **kwargs):
     return open(file, mode=mode, encoding=encoding, **kwargs)
 
 
+def stream_open_args(first_chunk):
+    """
+    Detect the open() arguments of a stream from its first chunk
+
+    Args:
+        first_chunk (str | bytes | bytearray | memoryview | Any):
+            First chunk of the stream, b'' for an empty stream
+
+    Returns:
+        tuple[str, str | None, str | None]: mode, encoding and newline, to be
+            passed to open(), encoding and newline are None in binary mode
+    """
+    if isinstance(first_chunk, str):
+        return 'w', 'utf-8', ''
+    elif isinstance(first_chunk, (bytes, bytearray, memoryview)):
+        return 'wb', None, None
+    else:
+        # Default to text mode for other types
+        return 'w', 'utf-8', ''
+
+
 def file_write(file, data):
     """
     Write data into file, auto create directory
@@ -338,68 +359,12 @@ def file_write_stream(file, data_generator):
         first_chunk = b''
 
     # Determine mode, encoding and newline from first chunk
-    if isinstance(first_chunk, str):
-        mode = 'w'
-        encoding = 'utf-8'
-        newline = ''
-    elif isinstance(first_chunk, (bytes, bytearray, memoryview)):
-        mode = 'wb'
-        encoding = None
-        newline = None
-    else:
-        # Default to text mode for other types
-        mode = 'w'
-        encoding = 'utf-8'
-        newline = ''
+    mode, encoding, newline = stream_open_args(first_chunk)
 
     # Parent directory is created when it is missing
     with file_open(file, mode=mode, encoding=encoding, newline=newline) as f:
         f.write(first_chunk)
         for chunk in data_iter:
-            f.write(chunk)
-        # Ensure data flush to disk
-        f.flush()
-        os.fsync(f.fileno())
-
-
-async def afile_write_stream(file, data_iter):
-    """
-    Creates the file even if the generator yields no data chunk,
-    an empty generator writes an empty file, replacing the content of the target.
-    Auto determines write mode based on the type of first chunk.
-
-    Args:
-        file (str): Target file path
-        data_iter (Iterable): An iterable that yields data chunks (str or bytes)
-    """
-    # Try to get the first chunk
-    try:
-        first_chunk = await data_iter.__anext__()
-    except StopAsyncIteration:
-        # Generator is empty, an empty file is still written:
-        # no chunk to tell text from bytes, and an empty file has no content
-        # to encode, so an empty bytes chunk goes through the binary mode
-        first_chunk = b''
-
-    # Determine mode, encoding and newline from first chunk
-    if isinstance(first_chunk, str):
-        mode = 'w'
-        encoding = 'utf-8'
-        newline = ''
-    elif isinstance(first_chunk, bytes):
-        mode = 'wb'
-        encoding = None
-        newline = None
-    else:
-        # Default to text mode for other types
-        mode = 'w'
-        encoding = 'utf-8'
-        newline = ''
-
-    # Parent directory is created when it is missing
-    with file_open(file, mode=mode, encoding=encoding, newline=newline) as f:
-        f.write(first_chunk)
-        async for chunk in data_iter:
             f.write(chunk)
         # Ensure data flush to disk
         f.flush()
