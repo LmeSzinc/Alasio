@@ -9,7 +9,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "alasio"
-version = "2.0.0"
+version = "2.0.1"
 description = "Mobile game bot framework abstracted from AzurLaneAutoScript and StarRailCopilot"
 readme = "README.md"
 requires-python = ">=3.8"
