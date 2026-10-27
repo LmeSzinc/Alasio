@@ -13,11 +13,14 @@ target version has a full pack, see the module docstring of dep_gen.
 import os
 
 import pytest
+import trio
 
+from alasio.config.entry.const import DEFAULT_PYPI_MIRRORS
 from alasio.deploy.pack.decode_base import PackDecodeBase
 from alasio.deploy.pack.job_unpack import UnpackJob
 from alasio.deploy.pack.job_update import UpdateJob
 from alasio.deploy.pack.packdep import PACKDEP_PATH, decode_packdep
+from alasio.deploy.pip_download.pypi_file import PypiFile
 from alasio.deploy_dev.pack import pack_wheel
 from alasio.deploy_dev.pack._pack_cache import PackCache
 from alasio.deploy_dev.pack.encode_packdep import encode_packdep
@@ -25,9 +28,7 @@ from alasio.deploy_dev.pack.pack_wheel import PackWheel
 from alasio.deploy_dev.pack_server import dep_gen
 from alasio.deploy_dev.pack_server.dep_gen import DepGen
 from alasio.deploy_dev.pack_server.fetch_wheel import WheelNotFoundError
-from alasio.deploy_dev.pack_server.model import (
-    LookbackConfig, PackRepoModel, PythonDepsConfig, PythonMirrorInfo, RepoConfig
-)
+from alasio.deploy_dev.pack_server.model import LookbackConfig, PackRepoModel, PythonDepsConfig, RepoConfig
 from alasio.deploy_dev.pack_server.pack_gen import PackRepoGen
 from alasio.deploy_dev.pack_server.parse_entry import ENTRY_FILE
 from alasio.ext import env
@@ -37,6 +38,7 @@ from alasio.ext.path.iter import iter_files
 from alasio.git.mock.mock_repo import MockGitRepo
 from alasio.logger import logger
 from alasio.testing.filesystem import fs  # noqa: F401
+from tests.deploy_dev.pack.conftest import FakeMirrorTable
 from tests.deploy_dev.pack_server.test_fetch_wheel import MockMirror
 
 # the client of the mirror is a starlette TestClient and the code under test
@@ -55,25 +57,34 @@ REQUIREMENTS = {
     'c3': 'httpx==0.28.1\ndemo==1.0\n',
 }
 
+# base url of the mock mirror, the pypi_mirrors the entry of the mock repo
+# declares: the pack server fetches the wheels from the mirrors of the mod
+# entry at the latest commit, not from the config
+MIRROR_URL = 'http://mirror'
+
 # entry of the mock repo: by default it declares the dependency the tests
 # build a channel of, see entry_source
-DEFAULT_ENTRY = "entry = ModEntryInfo(name='m', update_pack_deps=('httpx',))\n"
+DEFAULT_ENTRY = "entry = ModEntryInfo(name='m', pypi_mirrors='http://mirror', update_pack_deps=('httpx',))\n"
 
 
-def entry_source(*names):
+def entry_source(*names, pypi_mirrors=MIRROR_URL):
     """
     Build the source of a mod entry declaring update_pack_deps.
 
     Args:
         *names (str): Names to declare, none for an entry without the
             declaration
+        pypi_mirrors (str | dict): Value of the pypi_mirrors declaration,
+            the source of the wheels. Defaults to MIRROR_URL, the mock mirror
+            of the tests.
 
     Returns:
         str: Source of the entry module
     """
+    declared = f', pypi_mirrors={pypi_mirrors!r}'
     if not names:
-        return "entry = ModEntryInfo(name='m')\n"
-    return f"entry = ModEntryInfo(name='m', update_pack_deps={tuple(names)!r})\n"
+        return f"entry = ModEntryInfo(name='m'{declared})\n"
+    return f"entry = ModEntryInfo(name='m'{declared}, update_pack_deps={tuple(names)!r})\n"
 
 
 # folder of the packs of the config in the run directory, see PackRepoModel
@@ -182,12 +193,11 @@ def make_repo(requirements, branch='master', entry=DEFAULT_ENTRY):
     return repo
 
 
-def make_config(mirror, requirement_files=('requirements.txt',)):
+def make_config(requirement_files=('requirements.txt',)):
     """
     Build a pack config with the PythonDeps group of the tests.
 
     Args:
-        mirror (str | list): PythonDepsConfig.PypiMirror
         requirement_files (Iterable[str]): PythonDepsConfig.RequirementFiles.
             Defaults to ('requirements.txt',)
 
@@ -204,7 +214,6 @@ def make_config(mirror, requirement_files=('requirements.txt',)):
         Lookback=LookbackConfig(MaxCommitDay=0),
         PythonDeps=PythonDepsConfig(
             RequirementFiles=list(requirement_files),
-            PypiMirror=mirror,
         ),
     )
 
@@ -320,7 +329,7 @@ class TestSample:
 
     def test_sample(self, fs, run_dir, mirror):
         """The pins of the latest commit are the target, the pins of the old commits the history."""
-        gen = DepGen(make_repo(REQUIREMENTS), make_config(mirror.base))
+        gen = DepGen(make_repo(REQUIREMENTS), make_config())
         sample = gen.sample
         # demo is pinned by the files but not a managed name: no entry
         assert list(sample) == ['httpx']
@@ -334,7 +343,7 @@ class TestSample:
         """A pinned name the mod entry does not declare is not sampled."""
         gen = DepGen(
             make_repo(REQUIREMENTS, entry=entry_source('demo')),
-            make_config(mirror.base))
+            make_config())
         assert list(gen.sample) == ['demo']
         assert [dep.version for dep in gen.sample['demo']] == ['1.0']
 
@@ -343,7 +352,7 @@ class TestSample:
         with logger.mock_capture_writer() as capture:
             gen = DepGen(
                 make_repo(REQUIREMENTS, entry=entry_source('requests')),
-                make_config(mirror.base))
+                make_config())
             assert gen.sample == {}
         assert capture.concat() == """\
 INFO | Using update_pack_deps of module/config/const.py at c3: requests
@@ -355,7 +364,7 @@ WARNING | Dependency "requests" is not pinned to a version in the lookback windo
         requirements = {'c1': 'ruamel.yaml==0.18.6\n'}
         gen = DepGen(
             make_repo(requirements, entry=entry_source('ruamel_yaml')),
-            make_config(mirror.base))
+            make_config())
         sample = gen.sample
         assert list(sample) == ['ruamel-yaml']
         assert [(dep.version, dep.target) for dep in sample['ruamel-yaml']] == [('0.18.6', True)]
@@ -364,13 +373,13 @@ WARNING | Dependency "requests" is not pinned to a version in the lookback windo
         """An entry without update_pack_deps declares no dependency."""
         gen = DepGen(
             make_repo(REQUIREMENTS, entry=entry_source()),
-            make_config(mirror.base))
+            make_config())
         assert gen.sample == {}
 
     def test_entry_missing(self, fs, run_dir, mirror):
         """A repo without an entry builds no dependency, the reason is logged."""
         with logger.mock_capture_writer() as capture:
-            gen = DepGen(make_repo(REQUIREMENTS, entry=None), make_config(mirror.base))
+            gen = DepGen(make_repo(REQUIREMENTS, entry=None), make_config())
             assert gen.sample == {}
         assert capture.concat() == """\
 INFO | No update_pack_deps declared by module/config/const.py at c3, no dependency pack is built
@@ -379,7 +388,7 @@ INFO | No update_pack_deps declared by module/config/const.py at c3, no dependen
     def test_entry_broken(self, fs, run_dir, mirror):
         """A dynamic declaration fails the sample, no dependency is silently dropped."""
         entry = "entry = ModEntryInfo(name='m', update_pack_deps=get_deps())\n"
-        gen = DepGen(make_repo(REQUIREMENTS, entry=entry), make_config(mirror.base))
+        gen = DepGen(make_repo(REQUIREMENTS, entry=entry), make_config())
         with pytest.raises(ValueError, match='unsupported call'):
             _ = gen.sample
 
@@ -390,14 +399,14 @@ INFO | No update_pack_deps declared by module/config/const.py at c3, no dependen
             'c2': entry_source('httpx'),
             'c3': entry_source('httpx'),
         }
-        gen = DepGen(make_repo(REQUIREMENTS, entry=entries), make_config(mirror.base))
+        gen = DepGen(make_repo(REQUIREMENTS, entry=entries), make_config())
         assert list(gen.sample) == ['httpx']
 
     def test_no_requirement_files(self, fs, run_dir, mirror, monkeypatch):
         """A config without dependency files does not read the entry."""
         gen = DepGen(
             make_repo(REQUIREMENTS),
-            make_config(mirror.base, requirement_files=()))
+            make_config(requirement_files=()))
 
         def fail(commit):
             raise AssertionError('the entry must not be read')
@@ -407,27 +416,67 @@ INFO | No update_pack_deps declared by module/config/const.py at c3, no dependen
 
 
 class TestMirror:
-    """The download source of the dependencies: PythonDeps.PypiMirror."""
+    """The download source of the dependencies: the pypi_mirrors of the entry."""
 
-    def test_str(self, fs, run_dir):
-        """A str mirror feeds every dependency."""
-        gen = DepGen(make_repo(REQUIREMENTS), make_config('http://mirror'))
-        assert gen._mirror_of('httpx') == 'http://mirror'
-        assert gen._mirror_of('other') == 'http://mirror'
+    def test_single(self, fs, run_dir):
+        """A single url of the entry is the only mirror of the fetch."""
+        gen = DepGen(make_repo(REQUIREMENTS), make_config())
+        assert gen.mirrors.urls == {'default': MIRROR_URL}
 
-    def test_list(self, fs, run_dir):
-        """A list feeds each dependency from the first entry that lists it."""
-        config = make_config([
-            PythonMirrorInfo(Url='http://a', Deps=['httpx']),
-            PythonMirrorInfo(Url='http://b', Deps=['httpx2', 'starlette']),
-        ])
-        gen = DepGen(make_repo(REQUIREMENTS), config)
-        assert gen._mirror_of('httpx') == 'http://a'
-        assert gen._mirror_of('starlette') == 'http://b'
-        # a name no entry lists is fetched from the official PyPI
-        assert gen._mirror_of('requests') == dep_gen.DEFAULT_PYPI_MIRROR
-        # the names of the entries are compared PEP 503 normalized
-        assert gen._mirror_of('httpx2') == 'http://b'
+    def test_groups(self, fs, run_dir):
+        """The groups and the members of the dict form are kept."""
+        entry = entry_source('httpx', pypi_mirrors={
+            'cn': {'aliyun': 'https://a.example/simple'},
+            'global': {'pypi': 'https://b.example/simple'},
+        })
+        gen = DepGen(make_repo(REQUIREMENTS, entry=entry), make_config())
+        assert list(gen.mirrors.groups) == ['cn', 'global']
+        assert gen.mirrors.urls == {
+            'aliyun': 'https://a.example/simple',
+            'pypi': 'https://b.example/simple',
+        }
+
+    def test_default(self, fs, run_dir):
+        """An entry that declares no mirror uses the default of ModEntryInfo."""
+        entry = "entry = ModEntryInfo(name='m', update_pack_deps=('httpx',))\n"
+        gen = DepGen(make_repo(REQUIREMENTS, entry=entry), make_config())
+        assert list(gen.mirrors.groups) == list(DEFAULT_PYPI_MIRRORS)
+        assert gen.mirrors.urls == {
+            name: url
+            for members in DEFAULT_PYPI_MIRRORS.values()
+            for name, url in members.items()
+        }
+
+    def test_entry_missing(self, fs, run_dir):
+        """A repo without an entry uses the default mirrors too."""
+        gen = DepGen(make_repo(REQUIREMENTS, entry=None), make_config())
+        assert gen.mirrors.urls['pypi'] == 'https://pypi.org/simple'
+
+    def test_latest_commit(self, fs, run_dir):
+        """The mirrors come from the entry of the latest commit."""
+        entries = {
+            'c1': entry_source('httpx', pypi_mirrors='http://old'),
+            'c2': entry_source('httpx', pypi_mirrors='http://new'),
+            'c3': entry_source('httpx', pypi_mirrors='http://new'),
+        }
+        gen = DepGen(make_repo(REQUIREMENTS, entry=entries), make_config())
+        assert gen.mirrors.urls == {'default': 'http://new'}
+
+    def test_invalid(self, fs, run_dir):
+        """A declaration that is not a mirror structure fails the run."""
+        gen = DepGen(make_repo(REQUIREMENTS, entry=entry_source('httpx', pypi_mirrors='not a url')),
+                     make_config())
+        with pytest.raises(ValueError, match='Invalid pypi_mirrors of module/config/const.py at commit c3'):
+            _ = gen.mirrors
+
+    def test_dynamic(self, fs, run_dir):
+        """A declaration the parser cannot read is refused, not silently ignored."""
+        entry = (
+            "entry = ModEntryInfo(name='m', pypi_mirrors=get_mirrors(), "
+            "update_pack_deps=('httpx',))\n")
+        gen = DepGen(make_repo(REQUIREMENTS, entry=entry), make_config())
+        with pytest.raises(ValueError, match='pypi_mirrors: unsupported call'):
+            _ = gen.mirrors
 
 
 class TestRun:
@@ -437,7 +486,7 @@ class TestRun:
         """The wheels are fetched and the channel of the dependency is written."""
         register_wheels(mirror)
         repo = make_repo(REQUIREMENTS)
-        gen = DepGen(repo, make_config(mirror.base), client=mirror.client)
+        gen = DepGen(repo, make_config(), client=mirror.client)
         with logger.mock_capture_writer() as capture:
             assert gen.run() is None
         payload = encode_packdep(gen.published)
@@ -445,8 +494,6 @@ class TestRun:
         # 1. the wheel of every version is fetched, unmanaged names are not
         for version in ('0.27.7', '0.27.8', '0.28.1'):
             assert wheel_file(run_dir, version).isfile()
-            assert join_path(
-                run_dir, REPO_FOLDER, 'wheel', 'httpx', version, 'index_data.json').isfile()
         assert not join_path(run_dir, REPO_FOLDER, 'wheel', 'demo').exists()
         assert not any('demo' in url for url in mirror.requests)
 
@@ -492,13 +539,10 @@ class TestRun:
 INFO | Using update_pack_deps of module/config/const.py at c3: httpx
 INFO | Generating the dependency packs of "Author_Repo_master": 1 dependencies, 3 versions
 INFO | [1/3] Fetching wheel of "httpx==0.28.1", mirror="http://mirror", commit=c3
-INFO | Index data cached: "http://mirror/httpx/" -> "{run_dir}/pack/Author_Repo_master/wheel/httpx/0.28.1/index_data.json"
 INFO | Download wheel: "http://mirror/packages/httpx-0.28.1-py3-none-any.whl" -> "{run_dir}/pack/Author_Repo_master/wheel/httpx/0.28.1/httpx-0.28.1-py3-none-any.whl"
 INFO | [2/3] Fetching wheel of "httpx==0.27.8", mirror="http://mirror", commit=c2
-INFO | Index data cached: "http://mirror/httpx/" -> "{run_dir}/pack/Author_Repo_master/wheel/httpx/0.27.8/index_data.json"
 INFO | Download wheel: "http://mirror/packages/httpx-0.27.8-py3-none-any.whl" -> "{run_dir}/pack/Author_Repo_master/wheel/httpx/0.27.8/httpx-0.27.8-py3-none-any.whl"
 INFO | [3/3] Fetching wheel of "httpx==0.27.7", mirror="http://mirror", commit=c1
-INFO | Index data cached: "http://mirror/httpx/" -> "{run_dir}/pack/Author_Repo_master/wheel/httpx/0.27.7/index_data.json"
 INFO | Download wheel: "http://mirror/packages/httpx-0.27.7-py3-none-any.whl" -> "{run_dir}/pack/Author_Repo_master/wheel/httpx/0.27.7/httpx-0.27.7-py3-none-any.whl"
 INFO | [1/1] Building dependency packs of "httpx": 3 versions, target=0.28.1
 INFO | Writing full pack: "{run_dir}/pack/Author_Repo_master/packdep/httpx/0.28.1/full.pack"
@@ -509,45 +553,45 @@ INFO | Dependency packs of "Author_Repo_master" generated
 
     def test_commit_requires_run(self, fs, run_dir, mirror):
         """commit() before run() cannot clean a channel that was not generated."""
-        gen = DepGen(make_repo(REQUIREMENTS), make_config(mirror.base), client=mirror.client)
+        gen = DepGen(make_repo(REQUIREMENTS), make_config(), client=mirror.client)
         with pytest.raises(RuntimeError, match='run\\(\\) must be called'):
             gen.commit()
 
-    @pytest.mark.trio
-    async def test_full_pack_is_the_install_tree(self, fs, run_dir, mirror):
+    def test_full_pack_is_the_install_tree(self, fs, run_dir, mirror):
         """The full pack of a version unpacks to the install tree of its wheel."""
         register_wheels(mirror)
-        DepGen(make_repo(REQUIREMENTS), make_config(mirror.base), client=mirror.client).run()
+        DepGen(make_repo(REQUIREMENTS), make_config(), client=mirror.client).run()
 
         site = site_packages(fs)
         with logger.mock_capture_writer():
-            assert await UnpackJob(
+            assert trio.run(UnpackJob(
                 file_read_bytes(pack_file(run_dir, '0.28.1', 'full.pack')),
-                root=site, name='httpx').run()
+                root=site, name='httpx'
+            ).run)
         pack = PackWheel(wheel_file(run_dir, '0.28.1'))
         for path, file in pack.tree.items():
             assert file_read_bytes(f'{site}/{path}') == file.content, path
         assert file_read_bytes(f'{site}/.pack/httpx/index.pack') == pack.index_pack
 
-    @pytest.mark.trio
-    async def test_update_applies(self, fs, run_dir, mirror):
+    def test_update_applies(self, fs, run_dir, mirror):
         """The update pack of a version pair upgrades the old tree to the new one."""
         register_wheels(mirror)
-        DepGen(make_repo(REQUIREMENTS), make_config(mirror.base), client=mirror.client).run()
+        DepGen(make_repo(REQUIREMENTS), make_config(), client=mirror.client).run()
 
         # the client that has been running the old version: the channel has no
         # full pack of an old version, the tree of the version is the install
         # tree of its wheel (what the client installed before the update)
         site = site_packages(fs)
         with logger.mock_capture_writer():
-            assert await UnpackJob(
+            assert trio.run(UnpackJob(
                 b''.join(PackWheel(wheel_file(run_dir, '0.27.8')).iter_pack_data()),
-                root=site, name='httpx').run()
+                root=site, name='httpx'
+            ).run)
 
         update = file_read_bytes(pack_file(run_dir, '0.28.1', 'update_0.27.8.pack'))
         job = UpdateJob(update, root=site, name='httpx')
         with logger.mock_capture_writer():
-            assert await job.run()
+            assert trio.run(job.run)
         assert job.error == []
 
         # the tree of the new version, the ledger included, and the file of
@@ -562,7 +606,7 @@ INFO | Dependency packs of "Author_Repo_master" generated
         """Neither run() nor commit() writes a per dependency latest.pack."""
         register_wheels(mirror)
         repo = make_repo(REQUIREMENTS)
-        gen = DepGen(repo, make_config(mirror.base), client=mirror.client)
+        gen = DepGen(repo, make_config(), client=mirror.client)
         assert gen.run() is None
         assert not pack_file(run_dir, 'latest.pack').exists()
         gen.commit()
@@ -572,7 +616,7 @@ INFO | Dependency packs of "Author_Repo_master" generated
         """The payload of DepGen is a generated file of the repo version."""
         register_wheels(mirror)
         repo = make_repo(REQUIREMENTS)
-        config = make_config(mirror.base)
+        config = make_config()
         dep = DepGen(repo, config, client=mirror.client)
         assert dep.run() is None
         assert dep.published
@@ -594,7 +638,7 @@ INFO | Dependency packs of "Author_Repo_master" generated
     def test_no_dependency(self, fs, run_dir, mirror):
         """A repo whose entry declares no dependency writes nothing and removes nothing."""
         with logger.mock_capture_writer() as capture:
-            gen = DepGen(make_repo(REQUIREMENTS, entry=None), make_config(mirror.base))
+            gen = DepGen(make_repo(REQUIREMENTS, entry=None), make_config())
             assert gen.run() is None
         assert capture.concat() == """\
 INFO | No update_pack_deps declared by module/config/const.py at c3, no dependency pack is built
@@ -618,7 +662,7 @@ INFO | No dependency to build of "Author_Repo_master", skipped
         fs.create_file(pack_file(run_dir, 'latest.pack'), contents=b'old latest')
 
         with logger.mock_capture_writer() as capture:
-            DepGen(make_repo(requirements), make_config(mirror.base), client=mirror.client).run()
+            DepGen(make_repo(requirements), make_config(), client=mirror.client).run()
 
         assert capture.concat() == """\
 INFO | Using update_pack_deps of module/config/const.py at c2: httpx
@@ -641,7 +685,7 @@ INFO | Dependency packs of "Author_Repo_master" generated
 
         with pytest.raises(
                 WheelNotFoundError, match='historical dependency "httpx==0.27.7"'):
-            DepGen(repo, make_config(mirror.base), client=mirror.client).run()
+            DepGen(repo, make_config(), client=mirror.client).run()
 
         # every version of the channel is required: nothing of the target is
         # published when an update side is missing
@@ -658,7 +702,7 @@ INFO | Dependency packs of "Author_Repo_master" generated
 
         with pytest.raises(
                 WheelNotFoundError, match='target dependency "httpx==0.28.1"'):
-            DepGen(repo, make_config(mirror.base), client=mirror.client).run()
+            DepGen(repo, make_config(), client=mirror.client).run()
 
         # the run stopped before any pack of the target was written
         assert not wheel_file(run_dir, '0.28.1').exists()
@@ -666,42 +710,24 @@ INFO | Dependency packs of "Author_Repo_master" generated
         assert not pack_file(run_dir, '0.28.1', 'update_0.27.8.pack').exists()
         assert not pack_file(run_dir, 'latest.pack').exists()
 
-    def test_mirror_list(self, fs, run_dir, mirror):
-        """A list mirror fetches each dependency from its own url."""
-        httpx_wheel = build_wheel(
-            '/w/httpx-0.28.1-py3-none-any.whl', demo_files('0.28.1', CORE_V2),
-            name='httpx', version='0.28.1')
-        mirror.register('httpx', '0.28.1', content=file_read_bytes(httpx_wheel))
-        demo_wheel = build_wheel(
-            '/w/demo-1.0-py3-none-any.whl', {'demo/__init__.py': b''}, name='demo', version='1.0')
-        mirror.register('demo', '1.0', content=file_read_bytes(demo_wheel))
-        config = make_config(
-            [
-                PythonMirrorInfo(Url='http://mirror-a', Deps=['httpx']),
-                PythonMirrorInfo(Url='http://mirror-b', Deps=['demo']),
-            ],
-        )
-        DepGen(
-            make_repo(
-                {'c1': 'httpx==0.28.1\ndemo==1.0\n'},
-                entry=entry_source('httpx', 'demo')),
-            config, client=mirror.client).run()
+    def test_mirror_set(self, fs, run_dir, mirror, monkeypatch):
+        """A mirror set fetches from the first candidate that serves the page."""
+        # the selection of a mirror set is recorded in gui.db: the in-memory
+        # table keeps the run off the real database
+        monkeypatch.setattr(PypiFile, 'RECORD_TABLE', FakeMirrorTable())
+        register_wheels(mirror)
+        entry = entry_source('httpx', pypi_mirrors={
+            # a base url of the mock server that serves nothing: a 404 on the
+            # index page, the probe falls through to the next member
+            'cn': {'dead': 'http://mirror/missing', 'mock': MIRROR_URL},
+        })
+        DepGen(make_repo(REQUIREMENTS, entry=entry), make_config(), client=mirror.client).run()
 
-        # every request of a dependency goes to the url of its entry
-        assert mirror.requests
-        httpx_requests = [url for url in mirror.requests if 'httpx' in url]
-        demo_requests = [url for url in mirror.requests if 'demo' in url]
-        assert httpx_requests and all('mirror-a' in url for url in httpx_requests)
-        assert demo_requests and all('mirror-b' in url for url in demo_requests)
-        assert len(httpx_requests) + len(demo_requests) == len(mirror.requests)
-        # both dependencies got their channel
+        # the fetch fell back to the mirror of the second member
+        assert any(url.startswith(f'{MIRROR_URL}/httpx/') for url in mirror.requests)
         assert join_path(
             run_dir, REPO_FOLDER, 'packdep', 'httpx', '0.28.1', 'full.pack').isfile()
-        assert join_path(
-            run_dir, REPO_FOLDER, 'packdep', 'demo', '1.0', 'full.pack').isfile()
         assert not pack_file(run_dir, 'latest.pack').exists()
-        assert not join_path(
-            run_dir, REPO_FOLDER, 'packdep', 'demo', 'latest.pack').exists()
 
 
 class TestExistingPacks:
@@ -711,7 +737,7 @@ class TestExistingPacks:
         """A complete channel is kept as it is: nothing is fetched or built again."""
         register_wheels(mirror)
         repo = make_repo(REQUIREMENTS)
-        DepGen(repo, make_config(mirror.base), client=mirror.client).run()
+        DepGen(repo, make_config(), client=mirror.client).run()
         tree = read_tree(join_path(run_dir, REPO_FOLDER))
         requests = list(mirror.requests)
 
@@ -728,19 +754,19 @@ class TestExistingPacks:
         monkeypatch.setattr(dep_gen, 'PackWheelUpdate', NoBuild)
         monkeypatch.setattr(
             dep_gen, 'atomic_write_stream', lambda file, data: written.append(str(file)))
-        DepGen(repo, make_config(mirror.base), client=mirror.client).run()
+        DepGen(repo, make_config(), client=mirror.client).run()
 
         assert written == []
-        # the fetch of the second run is answered by the local cache: the
-        # index data files and the wheels are used as they are
-        assert mirror.requests == requests
+        # the wheels of the second run are answered by the local files: the
+        # index page of every version is requested, no wheel is downloaded
+        assert mirror.requests == requests + ['http://mirror/httpx/'] * 3
         assert read_tree(join_path(run_dir, REPO_FOLDER)) == tree
 
     def test_missing_pack_is_built_again(self, fs, run_dir, mirror, monkeypatch):
         """Only the pack that is missing is built again."""
         register_wheels(mirror)
         repo = make_repo(REQUIREMENTS)
-        DepGen(repo, make_config(mirror.base), client=mirror.client).run()
+        DepGen(repo, make_config(), client=mirror.client).run()
         target = pack_file(run_dir, '0.28.1', 'update_0.27.7.pack')
         data = file_read_bytes(target)
         os.remove(target)
@@ -753,7 +779,7 @@ class TestExistingPacks:
             real_write(file, stream)
 
         monkeypatch.setattr(dep_gen, 'atomic_write_stream', write_stream)
-        DepGen(repo, make_config(mirror.base), client=mirror.client).run()
+        DepGen(repo, make_config(), client=mirror.client).run()
 
         assert written == [str(target)]
         assert file_read_bytes(target) == data
@@ -762,7 +788,7 @@ class TestExistingPacks:
         """A pack of another format is not kept: a channel mixes no formats."""
         register_wheels(mirror)
         repo = make_repo(REQUIREMENTS)
-        DepGen(repo, make_config(mirror.base), client=mirror.client).run()
+        DepGen(repo, make_config(), client=mirror.client).run()
 
         names = (('0.28.1', 'full.pack'), ('0.28.1', 'update_0.27.7.pack'), ('0.28.1', 'update_0.27.8.pack'))
         original = {parts: file_read_bytes(pack_file(run_dir, *parts)) for parts in names}
@@ -773,7 +799,7 @@ class TestExistingPacks:
             data[4] = 1
             atomic_write(file, bytes(data))
 
-        DepGen(repo, make_config(mirror.base), client=mirror.client).run()
+        DepGen(repo, make_config(), client=mirror.client).run()
 
         # the packs are written again, byte for byte the packs of the version
         for parts in names:
@@ -784,24 +810,21 @@ class TestExistingPacks:
         """A kept file that cannot be read as a pack is overwritten, the run goes on."""
         register_wheels(mirror)
         repo = make_repo(REQUIREMENTS)
-        DepGen(repo, make_config(mirror.base), client=mirror.client).run()
+        DepGen(repo, make_config(), client=mirror.client).run()
         file = pack_file(run_dir, '0.28.1', 'update_0.27.7.pack')
         atomic_write(file, b'NOPE' + b'\x00' * 60)
 
         with logger.mock_capture_writer() as capture:
-            DepGen(repo, make_config(mirror.base), client=mirror.client).run()
+            DepGen(repo, make_config(), client=mirror.client).run()
 
         assert capture.concat() == f"""\
 INFO | Using update_pack_deps of module/config/const.py at c3: httpx
 INFO | Generating the dependency packs of "Author_Repo_master": 1 dependencies, 3 versions
 INFO | [1/3] Fetching wheel of "httpx==0.28.1", mirror="http://mirror", commit=c3
-INFO | Index data exists, loaded: "{run_dir}/pack/Author_Repo_master/wheel/httpx/0.28.1/index_data.json"
 INFO | Wheel exists, skipped: "{run_dir}/pack/Author_Repo_master/wheel/httpx/0.28.1/httpx-0.28.1-py3-none-any.whl"
 INFO | [2/3] Fetching wheel of "httpx==0.27.8", mirror="http://mirror", commit=c2
-INFO | Index data exists, loaded: "{run_dir}/pack/Author_Repo_master/wheel/httpx/0.27.8/index_data.json"
 INFO | Wheel exists, skipped: "{run_dir}/pack/Author_Repo_master/wheel/httpx/0.27.8/httpx-0.27.8-py3-none-any.whl"
 INFO | [3/3] Fetching wheel of "httpx==0.27.7", mirror="http://mirror", commit=c1
-INFO | Index data exists, loaded: "{run_dir}/pack/Author_Repo_master/wheel/httpx/0.27.7/index_data.json"
 INFO | Wheel exists, skipped: "{run_dir}/pack/Author_Repo_master/wheel/httpx/0.27.7/httpx-0.27.7-py3-none-any.whl"
 INFO | [1/1] Building dependency packs of "httpx": 3 versions, target=0.28.1
 INFO | Full pack exists, skipped: "{run_dir}/pack/Author_Repo_master/packdep/httpx/0.28.1/full.pack"
@@ -818,26 +841,23 @@ INFO | Dependency packs of "Author_Repo_master" generated
         """A pack of another version pair is not kept, a channel mixes no versions."""
         register_wheels(mirror)
         repo = make_repo(REQUIREMENTS)
-        DepGen(repo, make_config(mirror.base), client=mirror.client).run()
+        DepGen(repo, make_config(), client=mirror.client).run()
         # the update pack of 0.27.8, put at the path of the update pack of 0.27.7
         source = pack_file(run_dir, '0.28.1', 'update_0.27.8.pack')
         file = pack_file(run_dir, '0.28.1', 'update_0.27.7.pack')
         atomic_write(file, file_read_bytes(source))
 
         with logger.mock_capture_writer() as capture:
-            DepGen(repo, make_config(mirror.base), client=mirror.client).run()
+            DepGen(repo, make_config(), client=mirror.client).run()
 
         assert capture.concat() == f"""\
 INFO | Using update_pack_deps of module/config/const.py at c3: httpx
 INFO | Generating the dependency packs of "Author_Repo_master": 1 dependencies, 3 versions
 INFO | [1/3] Fetching wheel of "httpx==0.28.1", mirror="http://mirror", commit=c3
-INFO | Index data exists, loaded: "{run_dir}/pack/Author_Repo_master/wheel/httpx/0.28.1/index_data.json"
 INFO | Wheel exists, skipped: "{run_dir}/pack/Author_Repo_master/wheel/httpx/0.28.1/httpx-0.28.1-py3-none-any.whl"
 INFO | [2/3] Fetching wheel of "httpx==0.27.8", mirror="http://mirror", commit=c2
-INFO | Index data exists, loaded: "{run_dir}/pack/Author_Repo_master/wheel/httpx/0.27.8/index_data.json"
 INFO | Wheel exists, skipped: "{run_dir}/pack/Author_Repo_master/wheel/httpx/0.27.8/httpx-0.27.8-py3-none-any.whl"
 INFO | [3/3] Fetching wheel of "httpx==0.27.7", mirror="http://mirror", commit=c1
-INFO | Index data exists, loaded: "{run_dir}/pack/Author_Repo_master/wheel/httpx/0.27.7/index_data.json"
 INFO | Wheel exists, skipped: "{run_dir}/pack/Author_Repo_master/wheel/httpx/0.27.7/httpx-0.27.7-py3-none-any.whl"
 INFO | [1/1] Building dependency packs of "httpx": 3 versions, target=0.28.1
 INFO | Full pack exists, skipped: "{run_dir}/pack/Author_Repo_master/packdep/httpx/0.28.1/full.pack"
@@ -870,19 +890,16 @@ class TestCleanup:
             contents=b'stale')
 
         with logger.mock_capture_writer() as capture:
-            run_commit(make_repo(REQUIREMENTS), make_config(mirror.base), mirror.client)
+            run_commit(make_repo(REQUIREMENTS), make_config(), mirror.client)
 
         assert capture.concat() == f"""\
 INFO | Using update_pack_deps of module/config/const.py at c3: httpx
 INFO | Generating the dependency packs of "Author_Repo_master": 1 dependencies, 3 versions
 INFO | [1/3] Fetching wheel of "httpx==0.28.1", mirror="http://mirror", commit=c3
-INFO | Index data cached: "http://mirror/httpx/" -> "{run_dir}/pack/Author_Repo_master/wheel/httpx/0.28.1/index_data.json"
 INFO | Download wheel: "http://mirror/packages/httpx-0.28.1-py3-none-any.whl" -> "{run_dir}/pack/Author_Repo_master/wheel/httpx/0.28.1/httpx-0.28.1-py3-none-any.whl"
 INFO | [2/3] Fetching wheel of "httpx==0.27.8", mirror="http://mirror", commit=c2
-INFO | Index data cached: "http://mirror/httpx/" -> "{run_dir}/pack/Author_Repo_master/wheel/httpx/0.27.8/index_data.json"
 INFO | Download wheel: "http://mirror/packages/httpx-0.27.8-py3-none-any.whl" -> "{run_dir}/pack/Author_Repo_master/wheel/httpx/0.27.8/httpx-0.27.8-py3-none-any.whl"
 INFO | [3/3] Fetching wheel of "httpx==0.27.7", mirror="http://mirror", commit=c1
-INFO | Index data cached: "http://mirror/httpx/" -> "{run_dir}/pack/Author_Repo_master/wheel/httpx/0.27.7/index_data.json"
 INFO | Download wheel: "http://mirror/packages/httpx-0.27.7-py3-none-any.whl" -> "{run_dir}/pack/Author_Repo_master/wheel/httpx/0.27.7/httpx-0.27.7-py3-none-any.whl"
 INFO | [1/1] Building dependency packs of "httpx": 3 versions, target=0.28.1
 INFO | Writing full pack: "{run_dir}/pack/Author_Repo_master/packdep/httpx/0.28.1/full.pack"
@@ -916,7 +933,7 @@ INFO | Dependency packs of "Author_Repo_master" committed
 
         with logger.mock_capture_writer() as capture:
             gen = DepGen(
-                make_repo(REQUIREMENTS), make_config(mirror.base), client=mirror.client)
+                make_repo(REQUIREMENTS), make_config(), client=mirror.client)
             gen.run()
         # run() only generates: the old packs stay until commit()
         assert pack_file(run_dir, '0.26.0', 'full.pack').isfile()
@@ -925,13 +942,10 @@ INFO | Dependency packs of "Author_Repo_master" committed
 INFO | Using update_pack_deps of module/config/const.py at c3: httpx
 INFO | Generating the dependency packs of "Author_Repo_master": 1 dependencies, 3 versions
 INFO | [1/3] Fetching wheel of "httpx==0.28.1", mirror="http://mirror", commit=c3
-INFO | Index data cached: "http://mirror/httpx/" -> "{run_dir}/pack/Author_Repo_master/wheel/httpx/0.28.1/index_data.json"
 INFO | Download wheel: "http://mirror/packages/httpx-0.28.1-py3-none-any.whl" -> "{run_dir}/pack/Author_Repo_master/wheel/httpx/0.28.1/httpx-0.28.1-py3-none-any.whl"
 INFO | [2/3] Fetching wheel of "httpx==0.27.8", mirror="http://mirror", commit=c2
-INFO | Index data cached: "http://mirror/httpx/" -> "{run_dir}/pack/Author_Repo_master/wheel/httpx/0.27.8/index_data.json"
 INFO | Download wheel: "http://mirror/packages/httpx-0.27.8-py3-none-any.whl" -> "{run_dir}/pack/Author_Repo_master/wheel/httpx/0.27.8/httpx-0.27.8-py3-none-any.whl"
 INFO | [3/3] Fetching wheel of "httpx==0.27.7", mirror="http://mirror", commit=c1
-INFO | Index data cached: "http://mirror/httpx/" -> "{run_dir}/pack/Author_Repo_master/wheel/httpx/0.27.7/index_data.json"
 INFO | Download wheel: "http://mirror/packages/httpx-0.27.7-py3-none-any.whl" -> "{run_dir}/pack/Author_Repo_master/wheel/httpx/0.27.7/httpx-0.27.7-py3-none-any.whl"
 INFO | [1/1] Building dependency packs of "httpx": 3 versions, target=0.28.1
 INFO | Writing full pack: "{run_dir}/pack/Author_Repo_master/packdep/httpx/0.28.1/full.pack"
@@ -961,26 +975,23 @@ INFO | Dependency packs of "Author_Repo_master" committed
         """An update pack of another target folder, or of a version out of the window, is removed."""
         register_wheels(mirror)
         repo = make_repo(REQUIREMENTS)
-        DepGen(repo, make_config(mirror.base), client=mirror.client).run()
+        DepGen(repo, make_config(), client=mirror.client).run()
         # the leftovers of an earlier run: an update pack in the folder of a
         # version that is not the target, and one of a version out of the window
         fs.create_file(pack_file(run_dir, '0.27.8', 'update_0.27.7.pack'), contents=b'stale')
         fs.create_file(pack_file(run_dir, '0.28.1', 'update_0.26.0.pack'), contents=b'stale')
 
         with logger.mock_capture_writer() as capture:
-            run_commit(repo, make_config(mirror.base), mirror.client)
+            run_commit(repo, make_config(), mirror.client)
 
         assert capture.concat() == f"""\
 INFO | Using update_pack_deps of module/config/const.py at c3: httpx
 INFO | Generating the dependency packs of "Author_Repo_master": 1 dependencies, 3 versions
 INFO | [1/3] Fetching wheel of "httpx==0.28.1", mirror="http://mirror", commit=c3
-INFO | Index data exists, loaded: "{run_dir}/pack/Author_Repo_master/wheel/httpx/0.28.1/index_data.json"
 INFO | Wheel exists, skipped: "{run_dir}/pack/Author_Repo_master/wheel/httpx/0.28.1/httpx-0.28.1-py3-none-any.whl"
 INFO | [2/3] Fetching wheel of "httpx==0.27.8", mirror="http://mirror", commit=c2
-INFO | Index data exists, loaded: "{run_dir}/pack/Author_Repo_master/wheel/httpx/0.27.8/index_data.json"
 INFO | Wheel exists, skipped: "{run_dir}/pack/Author_Repo_master/wheel/httpx/0.27.8/httpx-0.27.8-py3-none-any.whl"
 INFO | [3/3] Fetching wheel of "httpx==0.27.7", mirror="http://mirror", commit=c1
-INFO | Index data exists, loaded: "{run_dir}/pack/Author_Repo_master/wheel/httpx/0.27.7/index_data.json"
 INFO | Wheel exists, skipped: "{run_dir}/pack/Author_Repo_master/wheel/httpx/0.27.7/httpx-0.27.7-py3-none-any.whl"
 INFO | [1/1] Building dependency packs of "httpx": 3 versions, target=0.28.1
 INFO | Full pack exists, skipped: "{run_dir}/pack/Author_Repo_master/packdep/httpx/0.28.1/full.pack"
@@ -1002,7 +1013,7 @@ INFO | Dependency packs of "Author_Repo_master" committed
         """A new target gets its update packs, the update packs of the old target are removed."""
         register_wheels(mirror)
         repo = make_repo(REQUIREMENTS)
-        DepGen(repo, make_config(mirror.base), client=mirror.client).run()
+        DepGen(repo, make_config(), client=mirror.client).run()
         assert pack_file(run_dir, '0.28.1', 'update_0.27.7.pack').isfile()
 
         # the pin of the dependency moves to a new version
@@ -1014,7 +1025,7 @@ INFO | Dependency packs of "Author_Repo_master" committed
         repo.register_branch('master', 'c4')
         repo.register_head('c4')
 
-        run_commit(repo, make_config(mirror.base), mirror.client)
+        run_commit(repo, make_config(), mirror.client)
 
         # the new target holds the only full pack and an update pack of every
         # other version
@@ -1035,19 +1046,16 @@ INFO | Dependency packs of "Author_Repo_master" committed
         fs.create_file(pack_file(run_dir, '0.26.0', 'full.pack'), contents=b'stale')
 
         with logger.mock_capture_writer() as capture:
-            run_commit(make_repo(REQUIREMENTS), make_config(mirror.base), mirror.client)
+            run_commit(make_repo(REQUIREMENTS), make_config(), mirror.client)
 
         assert capture.concat() == f"""\
 INFO | Using update_pack_deps of module/config/const.py at c3: httpx
 INFO | Generating the dependency packs of "Author_Repo_master": 1 dependencies, 3 versions
 INFO | [1/3] Fetching wheel of "httpx==0.28.1", mirror="http://mirror", commit=c3
-INFO | Index data cached: "http://mirror/httpx/" -> "{run_dir}/pack/Author_Repo_master/wheel/httpx/0.28.1/index_data.json"
 INFO | Download wheel: "http://mirror/packages/httpx-0.28.1-py3-none-any.whl" -> "{run_dir}/pack/Author_Repo_master/wheel/httpx/0.28.1/httpx-0.28.1-py3-none-any.whl"
 INFO | [2/3] Fetching wheel of "httpx==0.27.8", mirror="http://mirror", commit=c2
-INFO | Index data cached: "http://mirror/httpx/" -> "{run_dir}/pack/Author_Repo_master/wheel/httpx/0.27.8/index_data.json"
 INFO | Download wheel: "http://mirror/packages/httpx-0.27.8-py3-none-any.whl" -> "{run_dir}/pack/Author_Repo_master/wheel/httpx/0.27.8/httpx-0.27.8-py3-none-any.whl"
 INFO | [3/3] Fetching wheel of "httpx==0.27.7", mirror="http://mirror", commit=c1
-INFO | Index data cached: "http://mirror/httpx/" -> "{run_dir}/pack/Author_Repo_master/wheel/httpx/0.27.7/index_data.json"
 INFO | Download wheel: "http://mirror/packages/httpx-0.27.7-py3-none-any.whl" -> "{run_dir}/pack/Author_Repo_master/wheel/httpx/0.27.7/httpx-0.27.7-py3-none-any.whl"
 INFO | [1/1] Building dependency packs of "httpx": 3 versions, target=0.28.1
 INFO | Writing full pack: "{run_dir}/pack/Author_Repo_master/packdep/httpx/0.28.1/full.pack"

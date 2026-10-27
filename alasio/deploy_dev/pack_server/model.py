@@ -1,4 +1,4 @@
-from typing import List, Literal, Union
+from typing import List, Literal
 
 from msgspec import Meta, Struct, field
 from typing_extensions import Annotated
@@ -69,45 +69,23 @@ class LookbackConfig(Struct):
     ]})] = field(default_factory=list)
 
 
-class PythonMirrorInfo(Struct):
-    """
-    Download source of the dependencies of one PythonDepsConfig.PypiMirror entry
-    """
-    Url: Annotated[str, Meta(extra={"help": [
-        "Base url of a PyPI simple index (PEP 503)",
-        "Defaults to the official PyPI, 'https://pypi.org/simple'",
-        "Example: 'https://mirrors.aliyun.com/pypi/simple'",
-    ]})] = 'https://pypi.org/simple'
-    Deps: Annotated[List[str], Meta(extra={"help": [
-        "Dependencies to download from this url, PEP 503 normalized names",
-        "A dependency that no entry of PypiMirror lists is downloaded from",
-        "the official PyPI (https://pypi.org/simple)",
-        "Example: ['httpx2', 'starlette']",
-    ]})] = field(default_factory=list)
-
-
 class PythonDepsConfig(Struct):
     """
     Build packs of the python dependencies of the repo.
 
     The dependency files of RequirementFiles are sampled over the lookback
     window, the wheels of the versions the repo asked for are fetched from
-    PypiMirror, and the packs of the names the mod entry declares in
-    update_pack_deps are built. An empty group builds nothing, the packs of
-    the project tree are the same as without it.
+    the PyPI mirrors the mod entry of the latest commit declares
+    (ModEntryInfo.pypi_mirrors, the default mirrors when it declares none),
+    and the packs of the names the mod entry declares in update_pack_deps are
+    built. An empty group builds nothing, the packs of the project tree are
+    the same as without it.
     """
     RequirementFiles: Annotated[List[str], Meta(extra={"help": [
         "Dependency files to sample, paths relative to the root of the repo",
         "A file named 'pyproject.toml' is parsed as TOML, any other file as requirements",
         "Example: ['requirements.txt']",
     ]})] = field(default_factory=list)
-    PypiMirror: Annotated[Union[str, List[PythonMirrorInfo]], Meta(extra={"help": [
-        "Where the wheels of the dependencies are downloaded from",
-        "Defaults to the official PyPI, 'https://pypi.org/simple'",
-        "[str] Download every dependency from this index, e.g. 'https://mirrors.aliyun.com/pypi/simple'",
-        "[list] Download the dependencies of each entry from its own Url, e.g. a private index",
-        "[list] A dependency that no entry lists is downloaded from the official PyPI",
-    ]})] = 'https://pypi.org/simple'
 
 
 class PackRepoModel(Struct):

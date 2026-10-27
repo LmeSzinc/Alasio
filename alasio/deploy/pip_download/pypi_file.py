@@ -483,9 +483,9 @@ class PypiFile(AsyncHttpProbe):
         """
         Request and parse the index page of one mirror.
 
-        The page is requested with the default timeout of the client, and a
-        redirect is not followed by the shared client: a mirror is expected to
-        serve its index at the url it is configured with.
+        The page is requested with the default timeout of the client, and the
+        redirects of the mirror are followed: a mirror may send `/{dist}` to
+        `/{dist}/`, or serve its index below another host.
 
         Args:
             url (str): Base url of the mirror
@@ -501,7 +501,7 @@ class PypiFile(AsyncHttpProbe):
             httpx2.HTTPError: If the request fails
         """
         page_url = f'{url}{path}'
-        response = await self._http.get(page_url)
+        response = await self._http.get(page_url, follow_redirects=True)
         content_type = response.headers.get('content-type', '')
         try:
             return parse_links(response.content, page_url, content_type)
@@ -582,8 +582,9 @@ class PypiFile(AsyncHttpProbe):
             collected.extend(chunks)
 
         # a transport error of the transfer is retried as a whole by the http
-        # client, the chunks of a failed attempt are dropped with it
-        await self._http.stream(source, consume)
+        # client, the chunks of a failed attempt are dropped with it; the
+        # redirects of the files host (a CDN, another host) are followed
+        await self._http.stream(source, consume, follow_redirects=True)
         await trio.to_thread.run_sync(file.atomic_write, b''.join(collected))
         return file
 

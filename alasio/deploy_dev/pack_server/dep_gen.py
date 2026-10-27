@@ -7,7 +7,8 @@ asked for in its dependency files, the wheels of those versions are the input
 of the build, and every dependency gets a channel of its own:
 
 1. fetch the wheel of every version of every dependency from the PyPI simple
-   index (PEP 503) of the config to
+   index (PEP 503) the mod entry of the latest commit declares (its
+   pypi_mirrors, the default mirrors when it declares none) to
    pack/{Author}_{Repo}_{Branch}/wheel/{name}/{version}/{filename}.whl, see
    WheelFetcher. Every wheel is required, the target and the historical
    versions alike: a run that cannot fetch one of them fails, no repo pack is
@@ -45,8 +46,9 @@ the target of the dependency (the version a client updates to, the only
 version with a full pack), the pins of the old commits are the versions a
 client may still be on, every one of them gets an update path to the target (a
 full pack is only built of the target). The names to build are the
-update_pack_deps of the mod entry at the latest commit, read from its source
-by PackRepoEntry: a name the entry does not declare is not fetched and gets no
+update_pack_deps of the mod entry at the latest commit, and the mirrors the
+wheels are fetched from are its pypi_mirrors, both read from its source by
+PackRepoEntry: a name the entry does not declare is not fetched and gets no
 pack, and a declared name that no commit of the window pins yields no wheel
 and no pack and is reported with a warning (a range constraint builds nothing,
 the version must be pinned with '=='). A name the latest commit does not pin
@@ -88,8 +90,10 @@ Usage:
     dep.commit()
 """
 
+import trio
 from msgspec import Struct
 
+from alasio.deploy.httpclient.probe_mirrors import Mirrors
 from alasio.deploy.pack.packdep import validate_packdep_name
 from alasio.deploy_dev.pack.pack_wheel import PackWheel
 from alasio.deploy_dev.pack.pack_wheel_update import PackWheelUpdate
@@ -115,10 +119,6 @@ PACKDEP_FOLDER = 'packdep'
 
 # file of the full pack of a version, in the folder of the version
 FULL_PACK_FILE = 'full.pack'
-
-# mirror of the dependencies no PythonDeps.PypiMirror entry lists: the base
-# url of the official PyPI, the default of PythonMirrorInfo.Url
-DEFAULT_PYPI_MIRROR = 'https://pypi.org/simple'
 
 
 class DepVersion(Struct):
@@ -159,11 +159,12 @@ class DepGen:
                 of a dependency file is read from it
             config (PackRepoModel): Config of the repo, read from a
                 PackRepoConfig: the PythonDeps group holds the files to
-                sample and the mirror to fetch from
-            client (httpx2.Client, optional): Client the wheel fetches are
-                sent with, e.g. the injected client of a test. Its lifetime
-                belongs to the caller. Defaults to None, every fetch creates
-                and closes the client of its own
+                sample; the pypi mirrors to fetch from are declared by the
+                mod entry of the latest commit
+            client (httpx2.AsyncClient | AsyncHttpClient, optional): Client
+                the wheel fetches are sent with, e.g. the injected client of a
+                test. Its lifetime belongs to the caller. Defaults to None,
+                every fetch creates and closes the client of its own
 
         Raises:
             ValueError: If the config makes a folder name that is not a
@@ -182,11 +183,26 @@ class DepGen:
         # the pins of the dependency files over the lookback window, the
         # latest commit first, see LookbackWheel
         self.wheel = LookbackWheel(repo, config)
-        # the update_pack_deps of the mod entry at the latest commit, read
-        # from its source when the sample needs it
-        self.entry = PackRepoEntry(repo)
         # the folder name is checked before anything is written, see repo_folder
         _ = self.repo_folder
+
+    @cached_property
+    def entry(self):
+        """
+        The mod entry of the latest commit of the repo.
+
+        The latest commit is the version a client updates to: its entry is
+        the one the updated client reads before it reconciles its
+        dependencies, so the declarations the pack server follows are the
+        ones of that commit.
+
+        Returns:
+            PackRepoEntry: The declarations of the entry
+
+        Raises:
+            ValueError: If the repo has no branch to pack
+        """
+        return PackRepoEntry(self.repo, self.wheel.lookback.latest_commit)
 
     @cached_property
     def repo_folder(self):
@@ -215,7 +231,7 @@ class DepGen:
         Folder of the fetched wheels: {repo folder}/wheel
 
         The layout is the one of WheelFetcher:
-        {wheel folder}/{name}/{version}/index_data.json and the wheel file.
+        {wheel folder}/{name}/{version}/{filename}.whl
 
         Returns:
             PathStr: Absolute path of the folder
@@ -253,8 +269,8 @@ class DepGen:
                 be read, or its update_pack_deps is written in a form the
                 parser does not support, see PackRepoEntry
         """
-        commit = self.wheel.lookback.latest_commit
-        names = self.entry.update_pack_deps(commit)
+        names = self.entry.update_pack_deps
+        commit = self.entry.commit
         if not names:
             logger.info(
                 f'No update_pack_deps declared by {ENTRY_FILE} at {commit}, '
@@ -263,6 +279,37 @@ class DepGen:
         logger.info(
             f'Using update_pack_deps of {ENTRY_FILE} at {commit}: {", ".join(names)}')
         return dict.fromkeys(normalize_name(name) for name in names)
+
+    @cached_property
+    def mirrors(self):
+        """
+        The pypi mirrors the wheels are fetched from.
+
+        The pypi_mirrors of the mod entry at the latest commit of the repo,
+        the version a client updates to: the wheels are the ones the updated
+        client installs, and it fetches them from the source its own entry
+        declares. An entry that keeps the default of ModEntryInfo gives the
+        library default mirrors, see PackRepoEntry.pypi_mirrors.
+
+        Returns:
+            Mirrors: The candidate structure of the PyPI simple index
+
+        Raises:
+            ValueError: If the repo has no branch to pack, the entry cannot
+                be read, or its pypi_mirrors is not a valid mirror structure
+                (see PackRepoEntry and Mirrors.from_input)
+        """
+        commit = self.entry.commit
+        value = self.entry.pypi_mirrors
+        try:
+            mirrors = Mirrors.from_input(value)
+        except (TypeError, ValueError) as e:
+            raise ValueError(
+                f'Invalid pypi_mirrors of {ENTRY_FILE} at commit {commit}: {e}') from None
+        logger.debug(
+            f'Using pypi_mirrors of {ENTRY_FILE} at commit {commit}: '
+            f'{", ".join(f"{name}={url}" for name, url in mirrors.urls.items())}')
+        return mirrors
 
     @cached_property
     def sample(self):
@@ -328,8 +375,8 @@ class DepGen:
             RunDirError: If env.PROJECT_ROOT is not a run directory of the
                 pack server, see check_run_dir
             ValueError: If the repo has no branch to pack, a dependency file
-                of the config cannot be read, or a wheel is not a pack target
-                (see PackWheel)
+                of the config cannot be read, the mod entry cannot be read, or
+                a wheel is not a pack target (see PackWheel)
             WheelNotFoundError: If a wheel of a dependency cannot be fetched,
                 the target and the historical versions alike: every update
                 path of the published channel must be complete
@@ -366,8 +413,9 @@ class DepGen:
         atomic_failure_cleanup(self.wheel_folder, recursive=True)
         atomic_failure_cleanup(self.packdep_folder, recursive=True)
 
-        # 1. the wheel of every version of every dependency
-        wheel_files = self._fetch_wheels(targets)
+        # 1. the wheel of every version of every dependency, on one event
+        # loop of its own: the fetch is the only async step of the run
+        wheel_files = trio.run(self._fetch_wheels, targets)
         # 2. the full packs, the update packs and the published snapshots
         self._write_packs(targets, wheel_files)
         # commit() may clean the channel only after every pack of the run is
@@ -395,7 +443,7 @@ class DepGen:
         self._remove_stale_packs(self.sample)
         logger.info(f'Dependency packs of "{self.repo_folder.name}" committed')
 
-    def _fetch_wheels(self, targets):
+    async def _fetch_wheels(self, targets):
         """
         Fetch the wheel of every version of every dependency.
 
@@ -414,31 +462,31 @@ class DepGen:
                 be fetched has no entry
 
         Raises:
-            httpx2.HTTPError: If a request fails: the retrying client of the
-                fetcher absorbs a transport blip, an error that survives the
-                attempts fails the run of the config
+            WheelNotFoundError: If a wheel of a dependency cannot be fetched,
+                the target and the historical versions alike
+            httpx2.HTTPError: If a request fails
             OSError: If a wheel cannot be written
         """
         out = {}
         total = sum(len(deps) for deps in targets.values())
         index = 0
+        mirrors = self.mirrors
         for name, deps in targets.items():
-            mirror = self._mirror_of(name)
             for dep in deps:
                 index += 1
+                fetcher = WheelFetcher(
+                    self.repo_folder, mirrors, name, dep.version, client=self.client)
                 logger.info(
                     f'[{index}/{total}] Fetching wheel of "{name}=={dep.version}", '
-                    f'mirror="{mirror}", commit={dep.commit}')
-                with WheelFetcher(
-                        self.repo_folder, mirror, name, dep.version, client=self.client) as fetcher:
-                    try:
-                        out[(name, dep.version)] = fetcher.fetch()
-                    except WheelNotFoundError as e:
-                        role = 'target' if dep.target else 'historical'
-                        raise WheelNotFoundError(
-                            f'No usable wheel of the {role} dependency "{name}=={dep.version}", '
-                            f'the dependency packs cannot be generated: {e}'
-                        ) from e
+                    f'mirror="{fetcher.mirrors_text}", commit={dep.commit}')
+                try:
+                    out[(name, dep.version)] = await fetcher.fetch_async()
+                except WheelNotFoundError as e:
+                    role = 'target' if dep.target else 'historical'
+                    raise WheelNotFoundError(
+                        f'No usable wheel of the {role} dependency "{name}=={dep.version}", '
+                        f'the dependency packs cannot be generated: {e}'
+                    ) from e
         return out
 
     def _write_packs(self, targets, wheel_files):
@@ -672,26 +720,3 @@ class DepGen:
             if dep.target:
                 return dep
         return None
-
-    def _mirror_of(self, name):
-        """
-        The mirror to fetch a dependency from: PythonDeps.PypiMirror.
-
-        A str mirror feeds every dependency; a list feeds the dependencies of
-        each entry from its own Url, the first entry that lists the name
-        wins. A name no entry lists is fetched from the official PyPI, the
-        same default the model documents.
-
-        Args:
-            name (str): PEP 503 normalized distribution name
-
-        Returns:
-            str: Base url of a PyPI simple index (PEP 503)
-        """
-        mirror = self.config.PythonDeps.PypiMirror
-        if isinstance(mirror, str):
-            return mirror or DEFAULT_PYPI_MIRROR
-        for entry in mirror:
-            if any(normalize_name(dep) == name for dep in entry.Deps):
-                return entry.Url or DEFAULT_PYPI_MIRROR
-        return DEFAULT_PYPI_MIRROR

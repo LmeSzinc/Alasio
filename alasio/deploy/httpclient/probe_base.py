@@ -99,6 +99,20 @@ class ProbeBase:
         """
         return probe_db.key_text(self.SCENE, self.name)
 
+    @property
+    def mirror_url(self):
+        """
+        Url of the mirror resolved for this instance.
+
+        The mirror is resolved by the record of the machine or by a probe of
+        the first request, see the flavor's resolve().
+
+        Returns:
+            str: The url of the resolved mirror, '' when no mirror is resolved
+                yet
+        """
+        return self.mirrors.url_of(self._mirror)
+
     # ------------------------------------------------------------------
     # The record (a hint, see probe_db): synchronous, the async flavor
     # wraps the calls in a worker thread

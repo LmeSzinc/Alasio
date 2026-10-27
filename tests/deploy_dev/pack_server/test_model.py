@@ -13,7 +13,7 @@ import pytest
 from alasio.deploy_dev.pack_server import model
 from alasio.deploy_dev.pack_server.gate import RunDirError, check_run_dir
 from alasio.deploy_dev.pack_server.model import (
-    LookbackConfig, PackRepoConfig, PackRepoModel, PythonDepsConfig, PythonMirrorInfo, RepoConfig
+    LookbackConfig, PackRepoConfig, PackRepoModel, PythonDepsConfig, RepoConfig
 )
 from alasio.ext import env
 from alasio.ext.file.yamlconfig import build_help_map
@@ -93,30 +93,14 @@ class TestLookbackConfig:
         assert LookbackConfig().AdditionalCommit == []
 
 
-class TestPythonMirrorInfo:
-    """One download source of the dependencies of a PypiMirror list."""
-
-    def test_default(self):
-        """The default entry downloads from the official PyPI."""
-        info = PythonMirrorInfo()
-        assert info.Url == 'https://pypi.org/simple'
-        assert info.Deps == []
-
-    def test_default_not_shared(self):
-        """The default dependency list is not shared among instances, a filled one stays empty."""
-        first = PythonMirrorInfo(Deps=['httpx'])
-        first.Deps.append('trio')
-        assert PythonMirrorInfo().Deps == []
-
-
 class TestPythonDepsConfig:
     """The python dependencies to build packs of."""
 
     def test_default(self):
-        """The default group is empty: no dependency file, the official PyPI."""
+        """The default group is empty: no dependency file, no mirror setting."""
         deps = PythonDepsConfig()
         assert deps.RequirementFiles == []
-        assert deps.PypiMirror == 'https://pypi.org/simple'
+        assert not hasattr(deps, 'PypiMirror')
         assert not hasattr(deps, 'PackUpdate')
 
     def test_default_not_shared(self):
@@ -259,7 +243,7 @@ Lookback:
         assert config.data.Lookback.AdditionalCommit == ['4f3a8b2c1d5e6f708192a3b4c5d6e7f8091a2b3c']
 
     def test_read_python_deps(self, fs, run_dir):
-        """The PythonDeps group is read: the files and the list form of the mirror."""
+        """The PythonDeps group is read: the dependency files."""
         fs.create_file(config_file(run_dir), contents="""\
 Repo:
   Remote: https://github.com/LmeSzinc/AzurLaneAutoScript
@@ -270,23 +254,12 @@ PythonDeps:
   RequirementFiles:
     - requirements.txt
     - backend/pyproject.toml
-  PypiMirror:
-    - Url: https://mirrors.aliyun.com/pypi/simple
-      Deps:
-        - requests
-    - Url: https://pack.example.com/pypi
-      Deps:
-        - httpx2
-        - starlette
 """)
         config = PackRepoConfig(FILE)
         assert config.errors == []
         deps = config.data.PythonDeps
         assert deps.RequirementFiles == ['requirements.txt', 'backend/pyproject.toml']
-        assert deps.PypiMirror == [
-            PythonMirrorInfo(Url='https://mirrors.aliyun.com/pypi/simple', Deps=['requests']),
-            PythonMirrorInfo(Url='https://pack.example.com/pypi', Deps=['httpx2', 'starlette']),
-        ]
+        assert not hasattr(deps, 'PypiMirror')
         assert not hasattr(deps, 'PackUpdate')
 
     def test_stale_pack_update_is_ignored(self, fs, run_dir):
@@ -309,8 +282,9 @@ PythonDeps:
         assert deps.RequirementFiles == ['requirements.txt']
         assert not hasattr(deps, 'PackUpdate')
 
-    def test_read_python_deps_mirror_url(self, fs, run_dir):
-        """PypiMirror accepts one url string, every dependency is downloaded from it."""
+    def test_read_python_deps_ignores_mirror(self, fs, run_dir):
+        """A PypiMirror key of an earlier version is ignored: the mirrors come
+        from the mod entry."""
         fs.create_file(config_file(run_dir), contents="""\
 Repo:
   Remote: https://github.com/LmeSzinc/AzurLaneAutoScript
@@ -318,31 +292,15 @@ Repo:
   Repo: AzurLaneAutoScript
   Branch: master
 PythonDeps:
+  RequirementFiles:
+    - requirements.txt
   PypiMirror: https://mirrors.aliyun.com/pypi/simple
 """)
         config = PackRepoConfig(FILE)
         assert config.errors == []
-        assert config.data.PythonDeps.PypiMirror == 'https://mirrors.aliyun.com/pypi/simple'
-
-    def test_read_python_deps_invalid_mirror(self, fs, run_dir):
-        """A PypiMirror that is neither a url nor a list falls back to the official PyPI."""
-        fs.create_file(config_file(run_dir), contents="""\
-Repo:
-  Remote: https://github.com/LmeSzinc/AzurLaneAutoScript
-  Author: LmeSzinc
-  Repo: AzurLaneAutoScript
-  Branch: master
-PythonDeps:
-  PypiMirror: 123
-""")
-        with logger.mock_capture_writer() as capture:
-            config = PackRepoConfig(FILE)
-        assert capture.concat() == f"""\
-WARNING | Invalid pack config value: ErrorInfo(msg='Expected `str | array`, got `int` - at `$.PythonDeps.PypiMirror`', type=<ErrorType.TYPE_MISMATCH>, loc=('PythonDeps', 'PypiMirror'), ctx=ErrorCtx(expected='str | array', got='int')), file={run_dir}/config/LmeSzinc_AzurLaneAutoScript.yaml
-INFO | Write config {run_dir}/config/LmeSzinc_AzurLaneAutoScript.yaml
-"""
-        assert len(config.errors) == 1
-        assert config.data.PythonDeps.PypiMirror == 'https://pypi.org/simple'
+        deps = config.data.PythonDeps
+        assert deps.RequirementFiles == ['requirements.txt']
+        assert not hasattr(deps, 'PypiMirror')
 
     def test_read_invalid_parent_rule(self, fs, run_dir):
         """A parent rule that is not one of the model values falls back to the default."""
