@@ -299,26 +299,6 @@ class DistInfo:
         return files, folders
 
 
-def is_absolute_env_path(path):
-    """
-    Check that a path of a python environment is absolute.
-
-    The paths of this module are posix style: an environment of Windows keeps
-    its drive (``E:/envs/alasio/Lib/site-packages``), an environment of another
-    platform starts at the posix root (``/envs/alasio/lib/python3.8``). Both
-    forms are absolute for is_abspath(), which reads a rooted path as the root
-    of the current drive instead of asking os.path.isabs(): the answer of
-    os.path.isabs() for a posix path on Windows changed in python 3.13.
-
-    Args:
-        path (str): Path to check
-
-    Returns:
-        bool: True if the path is absolute
-    """
-    return is_abspath(path)
-
-
 class SimplePip:
     """
     A minimal pip, install and uninstall wheels in a python environment.
@@ -366,7 +346,13 @@ class SimplePip:
             ValueError: If site_packages or prefix is not an absolute path
         """
         site_packages = PathStr.new(site_packages)
-        if not is_absolute_env_path(site_packages):
+        # The paths of this module are posix style: an environment of Windows
+        # keeps its drive (E:/envs/alasio/Lib/site-packages), an environment of
+        # another platform starts at the root (/envs/alasio/lib/python3.8).
+        # is_abspath() reads both as absolute, whatever the interpreter: it
+        # does not ask os.path.isabs(), whose answer for a posix path on
+        # Windows changed in python 3.13.
+        if not is_abspath(site_packages):
             raise ValueError(f'site-packages is not an absolute path: "{site_packages}"')
         self.site_packages = site_packages
 
@@ -374,7 +360,7 @@ class SimplePip:
             self.prefix = prefix_of(site_packages)
         else:
             prefix = PathStr.new(prefix)
-            if not is_absolute_env_path(prefix):
+            if not is_abspath(prefix):
                 raise ValueError(f'prefix is not an absolute path: "{prefix}"')
             self.prefix = prefix
 
