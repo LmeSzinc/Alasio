@@ -228,6 +228,51 @@ def atomic_rename(path_from, path_to):
         os.rename(path_from, path_to)
 
 
+def _is_write_mode(mode):
+    """
+    Check if an open() mode writes to the file, so the file can be created
+
+    Args:
+        mode (str): Open mode, e.g. 'w', 'a+', 'rb'
+
+    Returns:
+        bool: True if the mode is a write mode
+    """
+    return any(char in mode for char in 'wax')
+
+
+def file_open(file, mode='r', encoding=None, makedir_on_write=True, **kwargs):
+    """
+    Open a file, create the parent directory on write mode if it is missing
+
+    Read modes never create anything, a missing file raises FileNotFoundError
+    like open(). Write modes create the parent directory when the first open()
+    fails, so the caller does not have to prepare the directory.
+
+    Args:
+        file (str): Target file path
+        mode (str): File open mode. Defaults to 'r'.
+        encoding (str): Text encoding. Defaults to None.
+        makedir_on_write (bool): True to create the missing parent directory
+            on write mode. False to behave exactly like open(). Defaults to True.
+        **kwargs: Additional arguments passed to open()
+
+    Returns:
+        file object: Opened file handle
+    """
+    try:
+        return open(file, mode=mode, encoding=encoding, **kwargs)
+    except FileNotFoundError:
+        # Read modes behave like open(), the missing path is the caller's problem
+        if not makedir_on_write or not _is_write_mode(mode):
+            raise
+    # Only a missing parent directory makes a write mode fail on the first open
+    directory = os.path.dirname(file)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+    return open(file, mode=mode, encoding=encoding, **kwargs)
+
+
 def file_write(file, data):
     """
     Write data into file, auto create directory
@@ -262,22 +307,8 @@ def file_write(file, data):
             encoding = 'utf-8'
             newline = ''
 
-    try:
-        # Write temp file
-        with open(file, mode=mode, encoding=encoding, newline=newline) as f:
-            f.write(data)
-            # Ensure data flush to disk
-            f.flush()
-            os.fsync(f.fileno())
-        return
-    except FileNotFoundError:
-        pass
-    # Create parent directory
-    directory = os.path.dirname(file)
-    if directory:
-        os.makedirs(directory, exist_ok=True)
-    # Write again
-    with open(file, mode=mode, encoding=encoding, newline=newline) as f:
+    # Parent directory is created when it is missing
+    with file_open(file, mode=mode, encoding=encoding, newline=newline) as f:
         f.write(data)
         # Ensure data flush to disk
         f.flush()
@@ -321,24 +352,8 @@ def file_write_stream(file, data_generator):
         encoding = 'utf-8'
         newline = ''
 
-    try:
-        # Write temp file
-        with open(file, mode=mode, encoding=encoding, newline=newline) as f:
-            f.write(first_chunk)
-            for chunk in data_iter:
-                f.write(chunk)
-            # Ensure data flush to disk
-            f.flush()
-            os.fsync(f.fileno())
-        return
-    except FileNotFoundError:
-        pass
-    # Create parent directory
-    directory = os.path.dirname(file)
-    if directory:
-        os.makedirs(directory, exist_ok=True)
-    # Write again
-    with open(file, mode=mode, encoding=encoding, newline=newline) as f:
+    # Parent directory is created when it is missing
+    with file_open(file, mode=mode, encoding=encoding, newline=newline) as f:
         f.write(first_chunk)
         for chunk in data_iter:
             f.write(chunk)
@@ -381,24 +396,8 @@ async def afile_write_stream(file, data_iter):
         encoding = 'utf-8'
         newline = ''
 
-    try:
-        # Write temp file
-        with open(file, mode=mode, encoding=encoding, newline=newline) as f:
-            f.write(first_chunk)
-            async for chunk in data_iter:
-                f.write(chunk)
-            # Ensure data flush to disk
-            f.flush()
-            os.fsync(f.fileno())
-        return
-    except FileNotFoundError:
-        pass
-    # Create parent directory
-    directory = os.path.dirname(file)
-    if directory:
-        os.makedirs(directory, exist_ok=True)
-    # Write again
-    with open(file, mode=mode, encoding=encoding, newline=newline) as f:
+    # Parent directory is created when it is missing
+    with file_open(file, mode=mode, encoding=encoding, newline=newline) as f:
         f.write(first_chunk)
         async for chunk in data_iter:
             f.write(chunk)
@@ -720,18 +719,21 @@ def atomic_read_bytes_into(file, buffer):
         return
 
 
-def atomic_open(file, mode='r', encoding=None, **kwargs):
+def atomic_open(file, mode='r', encoding=None, makedir_on_write=True, **kwargs):
     """
     Open a file atomically with retry on PermissionError (Windows only).
 
     Unlike atomic_write, this returns an open file handle rather than
     writing data atomically. The PermissionError retry handles cases
     where the file is temporarily locked by another process.
+    file_open() creates the missing parent directory on write mode.
 
     Args:
         file (str): Target file path
         mode (str): File open mode. Defaults to 'r'.
         encoding (str): Text encoding. Defaults to None.
+        makedir_on_write (bool): True to create the missing parent directory
+            on write mode. False to behave exactly like open(). Defaults to True.
         **kwargs: Additional arguments passed to open()
 
     Returns:
@@ -751,7 +753,9 @@ def atomic_open(file, mode='r', encoding=None, **kwargs):
         last_error = None
         for attempt in range(WINDOWS_MAX_ATTEMPT):
             try:
-                return open(file, mode=mode, encoding=encoding, **kwargs)
+                return file_open(
+                    file, mode=mode, encoding=encoding, makedir_on_write=makedir_on_write, **kwargs
+                )
             except PermissionError as e:
                 last_error = e
                 delay = windows_attempt_delay(attempt)
@@ -760,7 +764,7 @@ def atomic_open(file, mode='r', encoding=None, **kwargs):
         if last_error is not None:
             raise last_error from None
     else:
-        return open(file, mode=mode, encoding=encoding, **kwargs)
+        return file_open(file, mode=mode, encoding=encoding, makedir_on_write=makedir_on_write, **kwargs)
 
 
 def _copy_iter(source, buffer, chunk_size):

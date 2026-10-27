@@ -46,12 +46,7 @@ class LogWriter(metaclass=Singleton):
 
     @cached_property_threadsafe
     def fd(self):
-        file = self.file
-        try:
-            return atomic_open(file, mode='a', encoding='utf-8')
-        except FileNotFoundError:
-            file.uppath().makedirs(exist_ok=True)
-            return atomic_open(file, mode='a', encoding='utf-8')
+        return atomic_open(self.file, mode='a', encoding='utf-8')
 
     @cached_property_threadsafe
     def stdout(self):

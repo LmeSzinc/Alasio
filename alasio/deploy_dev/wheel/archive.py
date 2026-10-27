@@ -7,7 +7,7 @@ from contextlib import ExitStack, suppress
 
 from alasio.ext.cache import cached_property
 from alasio.ext.path import PathStr
-from alasio.ext.path.atomic import file_remove
+from alasio.ext.path.atomic import file_open, file_remove
 
 # Permission of every member of the built archives.
 # The content is packed from git objects, which record a file mode, but a pure
@@ -58,28 +58,6 @@ def _remove_tmp_file(file):
         file_remove(file)
     except OSError:
         pass
-
-
-def _open_wb(file):
-    """
-    Open a file for writing, create the parent folder only when it is missing.
-
-    The folder of a build target usually exists, so the open is tried first
-    and a missing folder is created on FileNotFoundError, no extra IO is done
-    on the normal path.
-
-    Args:
-        file (str): File path to open
-
-    Returns:
-        io.BufferedWriter: Opened file
-    """
-    try:
-        return open(file, 'wb')
-    except FileNotFoundError:
-        pass
-    PathStr.new(file).uppath().makedirs(exist_ok=True)
-    return open(file, 'wb')
 
 
 class ZipFileExtend:
@@ -223,7 +201,7 @@ class GzipFileExtend:
         # tmp file is closed
         stack = ExitStack()
         try:
-            raw = stack.enter_context(_open_wb(self.tmp))
+            raw = stack.enter_context(file_open(self.tmp, 'wb'))
             gz = stack.enter_context(gzip.GzipFile(
                 filename='', fileobj=raw, mode='wb',
                 compresslevel=self.compresslevel, mtime=self.mtime,
