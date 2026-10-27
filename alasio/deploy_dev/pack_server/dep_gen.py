@@ -1,10 +1,11 @@
 """
 Generate the packs of the python dependencies of a repo for the pack server.
 
-A pack config with PythonDeps builds the packs of the python distributions the
-repository depends on. The versions to build are the versions the repository
-asked for in its dependency files, the wheels of those versions are the input
-of the build, and every dependency gets a channel of its own:
+A pack config builds the packs of the python distributions the repository
+depends on. The versions to build are the versions the repository asked for in
+the dependency file its mod entry names (ModEntryInfo.requirements_file), the
+wheels of those versions are the input of the build, and every dependency gets
+a channel of its own:
 
 1. fetch the wheel of every version of every dependency from the PyPI simple
    index (PEP 503) the mod entry of the latest commit declares (its
@@ -40,20 +41,20 @@ git flow, so the channel URL is
 {BaseUrl}/{Author}_{Repo}_{Branch}/packdep/{name} and the wheels are served
 under .../wheel/ with no change of the client.
 
-The versions of a dependency are the pins of PythonDeps.RequirementFiles over
-the lookback window, sampled by LookbackWheel: the pin of the latest commit is
-the target of the dependency (the version a client updates to, the only
-version with a full pack), the pins of the old commits are the versions a
-client may still be on, every one of them gets an update path to the target (a
-full pack is only built of the target). The names to build are the
-update_pack_deps of the mod entry at the latest commit, and the mirrors the
-wheels are fetched from are its pypi_mirrors, both read from its source by
-PackRepoEntry: a name the entry does not declare is not fetched and gets no
-pack, and a declared name that no commit of the window pins yields no wheel
-and no pack and is reported with a warning (a range constraint builds nothing,
-the version must be pinned with '=='). A name the latest commit does not pin
-has no target: nothing is built of it this run and its historical packs are
-kept.
+The versions of a dependency are the pins of the dependency file the mod
+entry of each commit names (ModEntryInfo.requirements_file) over the lookback
+window, sampled by LookbackWheel: the pin of the latest commit is the target
+of the dependency (the version a client updates to, the only version with a
+full pack), the pins of the old commits are the versions a client may still
+be on, every one of them gets an update path to the target (a full pack is
+only built of the target). The names to build and the mirrors the wheels are
+fetched from are the update_pack_deps and the pypi_mirrors of the mod entry
+at the latest commit, read from its source by PackRepoEntry: a name the entry
+does not declare is not fetched and gets no pack, and a declared name that no
+commit of the window pins yields no wheel and no pack and is reported with a
+warning (a range constraint builds nothing, the version must be pinned with
+'=='). A name the latest commit does not pin has no target: nothing is built
+of it this run and its historical packs are kept.
 
 The bytes of a pack only depend on the wheel of its version, so the pack of an
 earlier run is kept as it is: the identity of the file is read back
@@ -102,7 +103,7 @@ from alasio.deploy_dev.pack_server.gate import check_run_dir
 from alasio.deploy_dev.pack_server.lookback_wheel import LookbackWheel
 from alasio.deploy_dev.pack_server.pack_check import PackChecksum, kept_pack
 from alasio.deploy_dev.pack_server.parse_dep import normalize_name
-from alasio.deploy_dev.pack_server.parse_entry import ENTRY_FILE, PackRepoEntry
+from alasio.deploy_dev.pack_server.parse_entry import ENTRY_FILE
 from alasio.ext import env
 from alasio.ext.cache import cached_property
 from alasio.ext.path.atomic import (
@@ -128,15 +129,12 @@ class DepVersion(Struct):
     Attributes:
         name (str): PEP 503 normalized distribution name
         version (str): Version the repository pins
-        commit (str): Commit of the repository that asks for the version, the
-            newest one when several commits ask for it
         target (bool): True for the version of the latest commit, the version
             a client updates to
     """
 
     name: str
     version: str
-    commit: str
     target: bool
 
 
@@ -156,11 +154,11 @@ class DepGen:
         """
         Args:
             repo (GitRepo | MockGitRepo): Git repo to sample, every revision
-                of a dependency file is read from it
+                of the mod entry and of a dependency file is read from it
             config (PackRepoModel): Config of the repo, read from a
-                PackRepoConfig: the PythonDeps group holds the files to
-                sample; the pypi mirrors to fetch from are declared by the
-                mod entry of the latest commit
+                PackRepoConfig: the Lookback group is the window to sample;
+                the requirement file, the pack names and the pypi mirrors
+                are declared by the mod entry of the latest commit
             client (httpx2.AsyncClient | AsyncHttpClient, optional): Client
                 the wheel fetches are sent with, e.g. the injected client of a
                 test. Its lifetime belongs to the caller. Defaults to None,
@@ -194,15 +192,17 @@ class DepGen:
         The latest commit is the version a client updates to: its entry is
         the one the updated client reads before it reconciles its
         dependencies, so the declarations the pack server follows are the
-        ones of that commit.
+        ones of that commit. The entry of the commit is parsed once by
+        LookbackWheel and shared with the sample of the window.
 
         Returns:
             PackRepoEntry: The declarations of the entry
 
         Raises:
-            ValueError: If the repo has no branch to pack
+            ValueError: If the repo has no branch to pack, or the entry
+                cannot be parsed (see LookbackWheel)
         """
-        return PackRepoEntry(self.repo, self.wheel.lookback.latest_commit)
+        return self.wheel.repo_entry[self.wheel.lookback.latest_commit]
 
     @cached_property
     def repo_folder(self):
@@ -270,7 +270,7 @@ class DepGen:
                 parser does not support, see PackRepoEntry
         """
         names = self.entry.update_pack_deps
-        commit = self.entry.commit
+        commit = self.wheel.lookback.latest_commit
         if not names:
             logger.info(
                 f'No update_pack_deps declared by {ENTRY_FILE} at {commit}, '
@@ -299,7 +299,7 @@ class DepGen:
                 be read, or its pypi_mirrors is not a valid mirror structure
                 (see PackRepoEntry and Mirrors.from_input)
         """
-        commit = self.entry.commit
+        commit = self.wheel.lookback.latest_commit
         value = self.entry.pypi_mirrors
         try:
             mirrors = Mirrors.from_input(value)
@@ -328,36 +328,32 @@ class DepGen:
                 the target of the name first when the name has one
 
         Raises:
-            ValueError: If the repo has no branch to pack, a dependency file
-                of the window cannot be read (see LookbackWheel), or the mod
-                entry cannot be read (see managed)
+            ValueError: If the repo has no branch to pack, the mod entry
+                cannot be read (see managed), or a dependency file of the
+                window cannot be read (see LookbackWheel)
         """
-        # a config without a dependency file has nothing to sample, the
-        # entry does not need to be read
-        if not self.wheel.files:
-            return {}
-
-        # the window is sampled first: it reads the repo index the entry
-        # lookup needs, see PackRepoLookback
+        # the window is sampled first: it reads the entries and the
+        # dependency files of the commits, the same lookup the entry of the
+        # latest commit comes from
         latest = self.wheel.latest_deps
         lookback = self.wheel.lookback_deps
         managed = self.managed
 
         sample = {}
-        for (name, version), commit in latest.items():
+        for name, pin in latest.items():
             if name in managed:
-                sample.setdefault(name, []).append(
-                    DepVersion(name=name, version=version, commit=commit, target=True))
-        for (name, version), commit in lookback.items():
+                sample.setdefault(name, []).append(DepVersion(
+                    name=name, version=pin.version, target=True))
+        for (name, version), pin in lookback.items():
             if name in managed:
-                sample.setdefault(name, []).append(
-                    DepVersion(name=name, version=version, commit=commit, target=False))
+                sample.setdefault(name, []).append(DepVersion(
+                    name=name, version=version, target=False))
         for name in managed:
             if name not in sample:
                 logger.warning(
                     f'Dependency "{name}" is not pinned to a version in the lookback window, '
                     f'nothing is built of it; a dependency of the mod entry update_pack_deps '
-                    f'must be pinned with "==" in a dependency file of the config')
+                    f'must be pinned with "==" in the dependency file of the repo')
         return sample
 
     def run(self):
@@ -374,9 +370,9 @@ class DepGen:
         Raises:
             RunDirError: If env.PROJECT_ROOT is not a run directory of the
                 pack server, see check_run_dir
-            ValueError: If the repo has no branch to pack, a dependency file
-                of the config cannot be read, the mod entry cannot be read, or
-                a wheel is not a pack target (see PackWheel)
+            ValueError: If the repo has no branch to pack, the mod entry or a
+                dependency file of the repo cannot be read, or a wheel is not
+                a pack target (see PackWheel)
             WheelNotFoundError: If a wheel of a dependency cannot be fetched,
                 the target and the historical versions alike: every update
                 path of the published channel must be complete
@@ -476,13 +472,13 @@ class DepGen:
                 index += 1
                 fetcher = WheelFetcher(
                     self.repo_folder, mirrors, name, dep.version, client=self.client)
+                role = 'target' if dep.target else 'historical'
                 logger.info(
                     f'[{index}/{total}] Fetching wheel of "{name}=={dep.version}", '
-                    f'mirror="{fetcher.mirrors_text}", commit={dep.commit}')
+                    f'mirror="{fetcher.mirrors_text}", role={role}')
                 try:
                     out[(name, dep.version)] = await fetcher.fetch_async()
                 except WheelNotFoundError as e:
-                    role = 'target' if dep.target else 'historical'
                     raise WheelNotFoundError(
                         f'No usable wheel of the {role} dependency "{name}=={dep.version}", '
                         f'the dependency packs cannot be generated: {e}'

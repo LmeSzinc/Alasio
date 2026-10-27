@@ -69,40 +69,36 @@ class LookbackConfig(Struct):
     ]})] = field(default_factory=list)
 
 
-class PythonDepsConfig(Struct):
-    """
-    Build packs of the python dependencies of the repo.
-
-    The dependency files of RequirementFiles are sampled over the lookback
-    window, the wheels of the versions the repo asked for are fetched from
-    the PyPI mirrors the mod entry of the latest commit declares
-    (ModEntryInfo.pypi_mirrors, the default mirrors when it declares none),
-    and the packs of the names the mod entry declares in update_pack_deps are
-    built. An empty group builds nothing, the packs of the project tree are
-    the same as without it.
-    """
-    RequirementFiles: Annotated[List[str], Meta(extra={"help": [
-        "Dependency files to sample, paths relative to the root of the repo",
-        "A file named 'pyproject.toml' is parsed as TOML, any other file as requirements",
-        "Example: ['requirements.txt']",
-    ]})] = field(default_factory=list)
-
-
 class PackRepoModel(Struct):
     """
-    1. Generate full packs to: pack/{Author}_{Repo}_{Branch}/packrepo/{commit}/full.pack
-    only latest commit will have full pack
-    2. Generate update packs to: pack/{Author}_{Repo}_{Branch}/packrepo/{commit}/update_{old}.pack
-    update packs will update from lookback commit to latest commit
-    3. generate latest info to: pack/{Author}_{Repo}_{Branch}/packrepo/latest.pack
-    content is {new} version and the sha1 checksum of latest full pack
-    4. folders that does not match the latest commit will be removed
-    5. PythonDeps is not empty: additionally build the packs of the python
-    dependencies of the repo to pack/{Author}_{Repo}_{Branch}/packdep/{dep}/
+    1. Workspace is always `pack/{Author}_{Repo}_{Branch}`
+    2. Generate full packs and update packs for repo
+      - [2.1] Generate full packs to: {workspace}/packrepo/{commit}/full.pack
+        only latest commit will have full pack
+      - [2.2] Generate update packs to: {workspace}/packrepo/{commit}/update_{old}.pack
+        update packs will update from lookback commit to latest commit
+    3. Download pypi dep index page https://.../{dep_name}/
+      to {workspace}/_wheel_cache/{dep_name}/{dep_version}/index.html
+    4. Download wheels to: {workspace}/_wheel_cache/{dep_name}/{dep_version}/*.whl
+      If wheels already exists, validate sha256 from {dep_name}/{dep_version}/index.html
+      {dep_name}/{dep_version} comes from:
+      - [4.1] deps that declared in `ModEntryInfo.requirements_file` and its name hits `ModEntryInfo.update_pack_deps`
+        from both latest commit and lookback commits
+      - [4.2] deps that declared in `ModEntryInfo.requirements_file` and its source hits
+        `ModEntryInfo.update_provide_pypi_mirrors`
+        from latest commit only
+    5. Sync wheels from [4.2] to {workspace}/wheel/{dep_name}/{dep_version}/*.whl
+    6. Generate full packs and update packs for deps that declared in `ModEntryInfo.update_provide_pypi_mirrors`
+      - [6.1] Generate full packs to: {workspace}/packdep/{dep_name}/{dep_version}/full.pack
+        only the deps defined in latest commit will have full pack
+      - [6.2] Generate update packs to: {workspace}/packdep/{dep_name}/{dep_version}/update_{old}.pack
+        update packs will update from old version to latest version
+    7. Generate latest info to: {workspace}/packrepo/latest.pack
+      content is {new} version and the sha1 checksum of latest full pack
+      Replacing `latest.pack` indicates repo version switch
     """
     Repo: RepoConfig = field(default_factory=RepoConfig)
     Lookback: LookbackConfig = field(default_factory=LookbackConfig)
-    PythonDeps: PythonDepsConfig = field(default_factory=PythonDepsConfig)
 
 
 class PackRepoConfig(YamlConfig):

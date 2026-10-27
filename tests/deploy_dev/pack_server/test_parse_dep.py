@@ -14,7 +14,7 @@ from packaging.utils import canonicalize_name
 from alasio.deploy.simple_pip import parse_req
 from alasio.deploy.simple_pip.parse_req import Requirements
 from alasio.deploy_dev.pack_server import parse_dep
-from alasio.deploy_dev.pack_server.parse_dep import PyprojectParser, RequirementsParser
+from alasio.deploy_dev.pack_server.parse_dep import DepInfo, PyprojectParser, RequirementsParser
 from alasio.logger import logger
 
 
@@ -320,6 +320,26 @@ pytest = "==8.3.4"
         parser = PyprojectParser('[project]\ndependencies = ["httpx==0.28.1"]\n')
         assert parser.dict_deps == {'httpx': '0.28.1'}
         assert parser.dict_deps is parser.dict_deps
+
+    def test_dict_pins(self):
+        """A pyproject.toml annotates no index, every pin of it has an empty source."""
+        parser = PyprojectParser(
+            '[project]\ndependencies = ["httpx==0.28.1", "PyYAML==6.0.3"]\n')
+        assert parser.dict_pins == {
+            'httpx': DepInfo('httpx', '0.28.1', ''),
+            'pyyaml': DepInfo('pyyaml', '6.0.3', ''),
+        }
+        assert parser.dict_pins is parser.dict_pins
+
+    def test_dict_pins_of_poetry(self):
+        """The pins of the poetry tables are read with the same empty source."""
+        parser = PyprojectParser(
+            '[tool.poetry.dependencies]\nhttpx = "==0.28.1"\n')
+        assert parser.dict_pins == {'httpx': DepInfo('httpx', '0.28.1', '')}
+
+    def test_dict_pins_empty(self):
+        """A document without a dependency has no pin."""
+        assert PyprojectParser('').dict_pins == {}
 
     def test_conflicting(self):
         """Two different versions keep the first, the later one is a warning."""

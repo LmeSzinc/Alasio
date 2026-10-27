@@ -89,6 +89,21 @@ def recording_app(static, requests):
     return app
 
 
+def base_path(base):
+    """
+    The path prefix of the index of a base url.
+
+    Args:
+        base (str): Base url of a mirror, e.g. 'http://mirror' or
+            'http://mirror/simple'
+
+    Returns:
+        str: Path prefix of the index, e.g. '' or '/simple'
+    """
+    path = base.partition('://')[2].partition('/')[2].strip('/')
+    return f'/{path}' if path else ''
+
+
 class MockMirror:
     """
     In-memory PyPI simple mirror, served by the static file server of the tests.
@@ -102,6 +117,8 @@ class MockMirror:
 
     Attributes:
         base (str): Base url of the mirror. Defaults to 'http://mirror'
+        bases (dict[str, str]): {base url: path prefix of its index}, the
+            registry is served at every base, see alias()
         files (dict[str, dict[str, tuple[bytes, str]]]): {dist key:
             {filename: (content, sha256)}}
         requests (list[str]): Urls of the requests made by the clients, in
@@ -118,6 +135,9 @@ class MockMirror:
             base (str): Base url of the mirror. Defaults to 'http://mirror'
         """
         self.base = base
+        # {base url: path prefix of its index}, one entry per base the
+        # registry is served at
+        self.bases = {base: base_path(base)}
         # {dist key: {filename: (content, sha256)}}
         self.files = {}
         # urls of the requests made by the clients, for the assertions
@@ -128,6 +148,26 @@ class MockMirror:
         self.static = MockStaticFile()
         self.app = recording_app(self.static, self.requests)
         self.client = httpx2.AsyncClient(transport=httpx2.ASGITransport(app=self.app))
+
+    def alias(self, base):
+        """
+        Serve the index of the mirror at a second base url.
+
+        The registry is the same, only the path of the index page changes: a
+        test that declares a provided index of a mod serves the files it
+        registered here at that base too, and the urls of the requests tell
+        which index the code under test fetched from.
+
+        Args:
+            base (str): Base url to serve the index at, e.g.
+                'http://provided.example/simple'
+
+        Returns:
+            str: The base url
+        """
+        self.bases[base] = base_path(base)
+        self._rebuild()
+        return base
 
     def register(self, name, version, tags='py3-none-any', filename='', content=b'', digest=None):
         """
@@ -171,10 +211,14 @@ class MockMirror:
             for dist in self.files.values()
             for filename, (content, _) in dist.items()
         }
-        files.update({
-            f'{dist_key}/': self._page(dist)
-            for dist_key, dist in self.files.items()
-        })
+        # the index pages of every base of the mirror: a base with a path
+        # serves the same index under that path, e.g. the index a mod
+        # provides, see alias()
+        for prefix in dict.fromkeys(self.bases.values()):
+            files.update({
+                f'{prefix}/{dist_key}/': self._page(dist)
+                for dist_key, dist in self.files.items()
+            })
         self.static.register_files(files)
 
     @staticmethod

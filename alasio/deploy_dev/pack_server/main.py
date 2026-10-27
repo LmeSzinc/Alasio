@@ -11,10 +11,11 @@ The modules below do one step of the work each, this module chains them:
 2. PackRepo clones or fetches the git repo of the config into
    repo/{Author}_{Repo}
 3. DepGen generates the packs of the python dependencies of the repo into
-   pack/{Author}_{Repo}_{Branch}/packdep, the wheel channel of the
-   PythonDeps group of the config; a config without PythonDeps builds
-   nothing there. The run leaves the published dependency snapshots on
-   the DepGen instance. Its cleanup is deferred to commit()
+   pack/{Author}_{Repo}_{Branch}/packdep, the wheel channel the mod entry of
+   the repo declares (its update_pack_deps and requirements_file); a repo
+   whose entry declares neither builds nothing there. The run leaves the
+   published dependency snapshots on the DepGen instance. Its cleanup is
+   deferred to commit()
 4. PackRepoGen generates the packs of the repo into
    pack/{Author}_{Repo}_{Branch}/packrepo, with the DepGen instance: the
    published snapshots are encoded into .pack/packdep.pack when the version

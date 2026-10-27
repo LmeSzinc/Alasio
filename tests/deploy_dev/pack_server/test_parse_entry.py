@@ -16,7 +16,6 @@ from alasio.config.entry.const import (
 )
 from alasio.deploy_dev.pack_server import parse_entry
 from alasio.deploy_dev.pack_server.parse_entry import ENTRY_FILE, PARSED_KEYS, PackRepoEntry, parse_mod_entry
-from alasio.git.mock.mock_repo import MockGitRepo
 
 
 def parse(source):
@@ -386,105 +385,89 @@ entry = DICT_MOD_ENTRY[NAME]
 
 
 class TestPackRepoEntry:
-    """Read the entry from the git blob of a commit."""
-
-    @staticmethod
-    def make_repo(entries):
-        """
-        Build a mock repo with an entry source per commit.
-
-        Args:
-            entries (dict[str, str | None]): {commit: entry source}, a None
-                value leaves the commit without an entry file
-
-        Returns:
-            MockGitRepo: Repo, the head of master is the last commit
-        """
-        repo = MockGitRepo()
-        parent = None
-        for index, (commit, source) in enumerate(entries.items()):
-            if source is not None:
-                repo.register_file(commit, ENTRY_FILE, source.encode('utf-8'))
-            repo.register_commit(
-                commit, parents=[parent] if parent else None,
-                author_name='Author', author_time=index, message=f'commit {commit}')
-            parent = commit
-        repo.register_branch('master', parent)
-        repo.register_head(parent)
-        return repo
+    """Parse the entry of one revision, the source the caller read from a blob."""
 
     def test_missing(self):
-        """A commit without an entry file declares no dependency."""
-        repo = self.make_repo({'c1': None})
-        assert PackRepoEntry(repo, 'c1').update_pack_deps == ()
+        """An empty source declares nothing, the defaults of the model are used."""
+        entry = PackRepoEntry(b'')
+        assert entry.requirements_file == 'requirements.txt'
+        assert entry.update_pack_deps == ()
 
     def test_read(self):
-        """The declaration is read from the entry blob of the commit."""
-        source = "entry = ModEntryInfo(name='m', update_pack_deps=['httpx'])\n"
-        repo = self.make_repo({'c1': source})
-        assert PackRepoEntry(repo, 'c1').update_pack_deps == ('httpx',)
+        """The declaration is read from the source of the revision."""
+        source = b"entry = ModEntryInfo(name='m', update_pack_deps=['httpx'])\n"
+        assert PackRepoEntry(source).update_pack_deps == ('httpx',)
 
     def test_dict_mod_entry(self):
-        """The library default entry is read from the entry blob."""
-        source = """\
+        """The library default entry is read from the source."""
+        source = b"""\
 from alasio.config.entry.const import DICT_MOD_ENTRY
 
 entry = DICT_MOD_ENTRY['alas']
 entry.update_pack_deps = ['httpx']
 """
-        repo = self.make_repo({'c1': source})
-        assert PackRepoEntry(repo, 'c1').update_pack_deps == ('httpx',)
+        assert PackRepoEntry(source).update_pack_deps == ('httpx',)
+
+    def test_requirements_file(self):
+        """The dependency file declaration is read from the same source."""
+        source = b"entry = ModEntryInfo(name='m', requirements_file='deps/requirements.txt')\n"
+        assert PackRepoEntry(source).requirements_file == 'deps/requirements.txt'
+
+    def test_requirements_file_default(self):
+        """An entry without the declaration gives the default of ModEntryInfo."""
+        source = b"entry = ModEntryInfo(name='m', update_pack_deps=('httpx',))\n"
+        assert PackRepoEntry(source).requirements_file == 'requirements.txt'
+
+    def test_requirements_file_attribute(self):
+        """An attribute assignment after the construction declares the file too."""
+        source = b"""\
+entry = ModEntryInfo(name='m')
+entry.requirements_file = 'requirements-deps.txt'
+"""
+        assert PackRepoEntry(source).requirements_file == 'requirements-deps.txt'
 
     def test_pypi_mirrors(self):
-        """The mirror declaration is read from the same entry blob."""
-        source = "entry = ModEntryInfo(name='m', pypi_mirrors='https://a.example/simple')\n"
-        repo = self.make_repo({'c1': source})
-        assert PackRepoEntry(repo, 'c1').pypi_mirrors == 'https://a.example/simple'
+        """The mirror declaration is read from the same source."""
+        source = b"entry = ModEntryInfo(name='m', pypi_mirrors='https://a.example/simple')\n"
+        assert PackRepoEntry(source).pypi_mirrors == 'https://a.example/simple'
 
     def test_pypi_mirrors_default(self):
         """An entry without the declaration gives the library default."""
-        source = "entry = ModEntryInfo(name='m', update_pack_deps=('httpx',))\n"
-        repo = self.make_repo({'c1': source})
-        assert PackRepoEntry(repo, 'c1').pypi_mirrors == DEFAULT_PYPI_MIRRORS
+        source = b"entry = ModEntryInfo(name='m', update_pack_deps=('httpx',))\n"
+        assert PackRepoEntry(source).pypi_mirrors == DEFAULT_PYPI_MIRRORS
 
     def test_pypi_mirrors_missing_entry(self):
-        """A commit without an entry gives the library default too."""
-        repo = self.make_repo({'c1': None})
-        assert PackRepoEntry(repo, 'c1').pypi_mirrors == DEFAULT_PYPI_MIRRORS
+        """An empty source gives the library default too."""
+        assert PackRepoEntry(b'').pypi_mirrors == DEFAULT_PYPI_MIRRORS
 
     def test_pypi_mirrors_default_not_shared(self):
         """The default of a reader is a copy: the library default is never edited."""
-        repo = self.make_repo({'c1': None})
-        value = PackRepoEntry(repo, 'c1').pypi_mirrors
+        value = PackRepoEntry(b'').pypi_mirrors
         value['cn']['tsinghua'] = 'https://edited.example/simple'
         assert DEFAULT_PYPI_MIRRORS['cn']['tsinghua'] != 'https://edited.example/simple'
 
     def test_update_provide_pypi_mirrors(self):
-        """The provided index declaration is read from the entry blob."""
+        """The provided index declaration is read from the source."""
         source = (
-            "entry = ModEntryInfo(name='m', "
-            "update_provide_pypi_mirrors=('https://a.example/simple',))\n")
-        repo = self.make_repo({'c1': source})
-        assert PackRepoEntry(repo, 'c1').update_provide_pypi_mirrors == (
+            b"entry = ModEntryInfo(name='m', "
+            b"update_provide_pypi_mirrors=('https://a.example/simple',))\n")
+        assert PackRepoEntry(source).update_provide_pypi_mirrors == (
             'https://a.example/simple',)
 
     def test_update_provide_pypi_mirrors_default(self):
         """An entry without the declaration provides the library default."""
-        source = "entry = ModEntryInfo(name='m', update_pack_deps=('httpx',))\n"
-        repo = self.make_repo({'c1': source})
-        assert PackRepoEntry(repo, 'c1').update_provide_pypi_mirrors == \
+        source = b"entry = ModEntryInfo(name='m', update_pack_deps=('httpx',))\n"
+        assert PackRepoEntry(source).update_provide_pypi_mirrors == \
             DEFAULT_UPDATE_PROVIDE_PYPI_MIRRORS
 
     def test_update_provide_pypi_mirrors_missing_entry(self):
-        """A commit without an entry provides the library default too."""
-        repo = self.make_repo({'c1': None})
-        assert PackRepoEntry(repo, 'c1').update_provide_pypi_mirrors == \
+        """An empty source provides the library default too."""
+        assert PackRepoEntry(b'').update_provide_pypi_mirrors == \
             DEFAULT_UPDATE_PROVIDE_PYPI_MIRRORS
 
     def test_readers_share_one_parse(self, monkeypatch):
-        """The three readers of the entry share one parse, the mod_entry."""
-        source = "entry = ModEntryInfo(name='m', update_pack_deps=('httpx',))\n"
-        repo = self.make_repo({'c1': source})
+        """Every reader of the entry shares one parse, the mod_entry."""
+        source = b"entry = ModEntryInfo(name='m', update_pack_deps=('httpx',))\n"
         calls = []
         real = parse_entry.parse_mod_entry
 
@@ -493,72 +476,25 @@ entry.update_pack_deps = ['httpx']
             return real(source, source_name=source_name)
 
         monkeypatch.setattr(parse_entry, 'parse_mod_entry', counting)
-        entry = PackRepoEntry(repo, 'c1')
+        entry = PackRepoEntry(source)
+        assert entry.requirements_file == 'requirements.txt'
         assert entry.update_pack_deps == ('httpx',)
         assert entry.pypi_mirrors == DEFAULT_PYPI_MIRRORS
         assert entry.update_provide_pypi_mirrors == DEFAULT_UPDATE_PROVIDE_PYPI_MIRRORS
         assert len(calls) == 1
 
-    def test_mod_entry_is_cached(self, monkeypatch):
+    def test_mod_entry_is_cached(self):
         """The parsed entry is a cached property, the readers reuse it."""
-        source = "entry = ModEntryInfo(name='m', update_pack_deps=('httpx',))\n"
-        repo = self.make_repo({'c1': source})
-        entry = PackRepoEntry(repo, 'c1')
+        source = b"entry = ModEntryInfo(name='m', update_pack_deps=('httpx',))\n"
+        entry = PackRepoEntry(source)
         assert entry.mod_entry is entry.mod_entry
 
-    def test_commit(self):
-        """The entry reads the commit it is bound to, not the head."""
-        first = "entry = ModEntryInfo(name='m', update_pack_deps=('httpx',))\n"
-        second = "entry = ModEntryInfo(name='m', update_pack_deps=('starlette',))\n"
-        repo = self.make_repo({'c1': first, 'c2': second})
-        assert PackRepoEntry(repo, 'c1').update_pack_deps == ('httpx',)
-        assert PackRepoEntry(repo, 'c2').update_pack_deps == ('starlette',)
-
-    def test_error_names_the_commit(self):
-        """A broken entry reports the file and the commit."""
-        source = "entry = ModEntryInfo(name='m', update_pack_deps=get_deps())\n"
-        repo = self.make_repo({'c1': source})
+    def test_error_names_the_source(self):
+        """A broken entry reports the name of the source it was given."""
+        source = b"entry = ModEntryInfo(name='m', update_pack_deps=get_deps())\n"
+        entry = PackRepoEntry(source, source_name=f'{ENTRY_FILE} at commit c1')
         with pytest.raises(ValueError, match='module/config/const.py at commit c1'):
-            PackRepoEntry(repo, 'c1').update_pack_deps
-
-    def test_symlink(self):
-        """An entry path that is a symlink is refused, its blob is a path."""
-
-        class FakeFile:
-            sha1 = 'x'
-            mode = b'120000'
-
-        class FakeRepo:
-            dict_object = {'c1': object()}
-
-            def get_file(self, commit, path):
-                return FakeFile()
-
-            def cat(self, sha1):
-                raise AssertionError('the symlink blob must not be read')
-
-        with pytest.raises(ValueError, match='is a symlink'):
-            PackRepoEntry(FakeRepo(), 'c1').update_pack_deps
-
-    def test_repo_is_read_lazily(self):
-        """A repo that was not read is read before the entry is looked up."""
-
-        class LazyRepo:
-            def __init__(self):
-                self.read = False
-
-            def read_lazy(self):
-                self.read = True
-                self.dict_object = {}
-                return self
-
-            def get_file(self, commit, path):
-                assert self.read
-                return None
-
-        repo = LazyRepo()
-        assert PackRepoEntry(repo, 'c1').update_pack_deps == ()
-        assert repo.read is True
+            entry.update_pack_deps
 
 
 class TestUpdatePackDepsErrors:
@@ -581,8 +517,8 @@ class TestUpdatePackDepsErrors:
             parse("entry = 1\n")
 
     def test_entry_is_a_helper_call(self):
-        """A helper call that does not name update_pack_deps is not read."""
-        with pytest.raises(ValueError, match='does not declare update_pack_deps'):
+        """A helper call that names none of the keys is not read."""
+        with pytest.raises(ValueError, match='does not declare requirements_file'):
             parse('entry = build_entry()\n')
 
     def test_entry_kwargs(self):
@@ -1139,9 +1075,9 @@ class TestParseModEntry:
     """The three step parse: extract the nodes, evaluate them, validate."""
 
     def test_keys(self):
-        """The pack server reads exactly three module level keys."""
+        """The pack server reads exactly the module level keys of the declarations."""
         assert PARSED_KEYS == (
-            'update_pack_deps', 'pypi_mirrors', 'update_provide_pypi_mirrors')
+            'requirements_file', 'update_pack_deps', 'pypi_mirrors', 'update_provide_pypi_mirrors')
 
     def test_one_pass(self):
         """Every declaration of the source is read by one parse."""
@@ -1194,5 +1130,5 @@ entry = ModEntryInfo(
 
     def test_helper_call_needs_a_declaration(self):
         """A helper call that declares none of the keys is refused."""
-        with pytest.raises(ValueError, match='does not declare update_pack_deps'):
+        with pytest.raises(ValueError, match='does not declare requirements_file'):
             parse_mod_entry("entry = make_entry('m')\n")

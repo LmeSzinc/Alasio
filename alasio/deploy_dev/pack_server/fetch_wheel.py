@@ -1,8 +1,8 @@
 """
 Fetch the wheel of a distribution version from a PyPI simple mirror.
 
-A pack config with PythonDeps builds the packs of the dependencies of a repo,
-the wheels are the input of the build: this module downloads the wheel of one
+A pack config builds the packs of the dependencies of a repo, the wheels are
+the input of the build: this module downloads the wheel of one
 (name, version) from the PyPI simple index (PEP 503) of a mirror to the wheel
 folder of a repo of the pack server:
 

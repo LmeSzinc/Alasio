@@ -164,8 +164,8 @@ class PackRepoGen:
         full pack or update pack that was built without it (or with another
         snapshot) is not the pack of this run, even when the pack format and
         the version pair match. A None value means the file must be absent, so
-        removing PythonDeps from the config also removes the file from the
-        kept pack.
+        a run that publishes no dependency channel also removes the file from
+        the kept pack.
 
         Args:
             pack (PackFull): The version being packed, its packdep is encoded

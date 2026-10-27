@@ -11,6 +11,7 @@ the mod entry, the module-level variable `entry` of
 
     entry = ModEntryInfo(
         name='alas',
+        requirements_file='requirements.txt',
         update_pack_deps=('httpx', 'ruamel.yaml'),
         pypi_mirrors='https://mirrors.aliyun.com/pypi/simple',
         update_provide_pypi_mirrors=('https://py38deps.github.io/py38deps/simple/',),
@@ -18,10 +19,11 @@ the mod entry, the module-level variable `entry` of
 
 The pack server reads the source from the git blob of a commit, not from a
 working tree, and it must not execute code of the repo it packs. This module
-provides the reader of the blob and the parser of the declarations:
+provides the parser of the declarations and the reader of one revision:
 
-- PackRepoEntry(repo, commit) reads module/config/const.py from the commit and
-  parses it, its declarations are cached properties;
+- PackRepoEntry(source) parses the source of one revision of the entry, its
+  declarations are cached properties; the caller reads the blob (the blob of
+  a commit, e.g. LookbackWheel);
 - parse_mod_entry(source) parses the source itself, with ast: the source is
   never imported, compiled into a callable or evaluated.
 
@@ -41,6 +43,7 @@ The declarations may be the keyword of the entry construction or an attribute
 assignment after it:
 
     entry = ModEntryInfo(name='alas')
+    entry.requirements_file = 'requirements.txt'
     entry.update_pack_deps = ('httpx',)
     entry.pypi_mirrors = {'cn': {'self': 'https://pypi.example/simple'}}
 
@@ -82,10 +85,12 @@ Usage:
     from alasio.deploy_dev.pack_server.parse_entry import PackRepoEntry, parse_mod_entry
 
     entry = parse_mod_entry(source, source_name='module/config/const.py at c3')
-    entry.update_pack_deps, entry.pypi_mirrors, entry.update_provide_pypi_mirrors
+    entry.requirements_file, entry.update_pack_deps, entry.pypi_mirrors, \
+        entry.update_provide_pypi_mirrors
 
-    entry = PackRepoEntry(repo, commit)
-    entry.update_pack_deps, entry.pypi_mirrors, entry.update_provide_pypi_mirrors
+    entry = PackRepoEntry(source)
+    entry.requirements_file, entry.update_pack_deps, entry.pypi_mirrors, \
+        entry.update_provide_pypi_mirrors
 """
 
 import ast
@@ -113,6 +118,7 @@ _ENTRY_CONST_MODULE = 'alasio.config.entry.const'
 # (step 3), so the model is the single source of truth of the accepted types.
 # A new key is added here and to ModEntryInfo, the parser changes no further.
 PARSED_KEYS = (
+    'requirements_file',
     'update_pack_deps',
     'pypi_mirrors',
     'update_provide_pypi_mirrors',
@@ -203,54 +209,64 @@ def _with_source_name(source_name, message):
 
 class PackRepoEntry:
     """
-    The declarations of the mod entry of one commit.
+    The declarations of the mod entry of one revision.
 
-    The entry file is read from the git blob of the commit, never from a
-    working tree: the pack server clones a repo without a working tree. The
-    parse runs once, on the first read of a declaration, see mod_entry.
+    The source is the content of `module/config/const.py` at one commit, read
+    by the caller from the git blob, never from a working tree: the pack
+    server clones a repo without a working tree. The parse runs once, on the
+    first read of a declaration, see mod_entry.
 
     Usage:
-        entry = PackRepoEntry(repo, commit)
+        entry = PackRepoEntry(source)
+        entry.requirements_file
         entry.update_pack_deps
         entry.pypi_mirrors
         entry.update_provide_pypi_mirrors
     """
 
-    def __init__(self, repo, commit):
+    def __init__(self, source, source_name=''):
         """
         Args:
-            repo (GitRepo | MockGitRepo): Repo to read; its object index is
-                read lazily when the caller did not read it
-            commit (str): Commit sha1 to read the entry from
+            source (str | bytes): Python source of the entry module, e.g. the
+                blob of module/config/const.py at a commit. A bytes source is
+                decoded by ast with the encoding declaration it carries, like
+                Python itself
+            source_name (str): Name of the source used in the error messages,
+                e.g. 'module/config/const.py at commit c3'. Defaults to ''
         """
-        self.repo = repo
-        self.commit = commit
+        self.source = source
+        self.source_name = source_name
 
     @cached_property
     def mod_entry(self):
         """
-        The entry of the commit, parsed and validated.
+        The entry of the revision, parsed and validated.
 
-        A commit without an entry file, and an entry that omits a key, give
-        the defaults of ModEntryInfo: the runtime entry of the mod declares
-        the same values.
+        An entry that omits a key gives the default of ModEntryInfo: the
+        runtime entry of the mod declares the same values.
 
         Returns:
             ModEntryInfo: The parsed entry
 
         Raises:
-            ValueError: If the entry source is not valid Python, its
-                declarations cannot be read, or the entry path is a symlink
+            ValueError: If the entry source is not valid Python, or its
+                declarations cannot be read
         """
-        self._read_repo()
-        file = self.repo.get_file(self.commit, ENTRY_FILE)
-        if file is None:
-            return ModEntryInfo(name='')
-        if file.mode == b'120000':
-            raise ValueError(
-                f'{ENTRY_FILE} at commit {self.commit} is a symlink, not a file')
-        source = self.repo.cat(file.sha1).decoded
-        return parse_mod_entry(source, source_name=f'{ENTRY_FILE} at commit {self.commit}')
+        return parse_mod_entry(self.source, source_name=self.source_name)
+
+    @cached_property
+    def requirements_file(self):
+        """
+        The dependency file of the mod, relative to the root of the repo.
+
+        The file the dependencies of the mod are pinned in, a path with '/',
+        e.g. 'requirements.txt'. An entry that declares none gives the default
+        of ModEntryInfo.
+
+        Returns:
+            str: Path of the dependency file in the repo
+        """
+        return self.mod_entry.requirements_file
 
     @cached_property
     def update_pack_deps(self):
@@ -284,20 +300,6 @@ class PackRepoEntry:
             tuple[str, ...]: The declared index base urls, in source order
         """
         return self.mod_entry.update_provide_pypi_mirrors
-
-    def _read_repo(self):
-        """
-        Read the object index of the repo when the caller did not.
-
-        GitRepo reads its objects with read_lazy(); an unread repo has no
-        object to look up. MockGitRepo keeps its objects in memory and its
-        read_lazy() is a no-op, the check is harmless for it.
-        """
-        if not (
-                getattr(self.repo, 'dict_object', None)
-                or getattr(self.repo, 'dict_object_unread', None)
-        ):
-            self.repo.read_lazy()
 
 
 def _is_dict_fromkeys(node):

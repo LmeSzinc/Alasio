@@ -1,12 +1,12 @@
 """
 Parse a dependency file into the requirements pinned to an exact version.
 
-A pack config with PythonDeps builds the packs of the dependencies of a repo,
-the versions to build are read from the dependency files of the repo. The
-requirements file format is parsed on the client side, by the module that
-ships, see alasio.deploy.simple_pip.parse_req: this module reads the TOML
-forms with the client rules and re-exports the client parser for the release
-modules:
+A pack config builds the packs of the dependencies of a repo, the versions to
+build are read from the dependency file the mod entry of the repo names, see
+lookback_wheel. The requirements file format is parsed on the client side, by
+the module that ships, see alasio.deploy.simple_pip.parse_req: this module
+reads the TOML forms with the client rules and re-exports the client parser
+for the release modules:
 
 - RequirementsParser parses a requirements file, the pip requirement file
   format; the rules are the client parser's, Requirements
@@ -21,6 +21,12 @@ touches the disk -- and provides the pins as dict_deps: a dict of the PEP 503
 normalized distribution name to the version, e.g. {'httpx': '0.28.1'}. The
 pins are parsed from the content on the first read of dict_deps and cached on
 the parser.
+
+dict_pins is the pin view of the same parse, a DepInfo per name: the version
+and the index the pin came from. A requirements file carries the source in its
+'# from' annotations, a pyproject.toml carries no annotation and every pin of
+it has an empty source (the download side probes the mirrors of the mod
+entry).
 
 A declaration that does not pin a version is skipped: a range (>=, <=, ~=,
 !=), a wildcard (==1.2.*), a bare name, a URL, a local path and a pip option
@@ -42,7 +48,7 @@ from packaging.utils import canonicalize_name as normalize_name  # noqa: F401
 
 # The requirement file format rules are shared with the client on purpose:
 # the release side parses the same files the client installs from.
-from alasio.deploy.simple_pip.parse_req import Requirements, parse_requirement
+from alasio.deploy.simple_pip.parse_req import DepInfo, Requirements, parse_requirement  # noqa: F401
 # Re-exported for the release modules that normalize a distribution name,
 # e.g. fetch_wheel and dep_gen. The release side uses packaging; the client
 # keeps its own normalize_name in alasio.deploy.simple_pip.pip_list.
@@ -264,6 +270,24 @@ class PyprojectParser:
         deps = self._parse_pep508()
         deps.extend(self._parse_poetry())
         return build_pins(deps)
+
+    @cached_property
+    def dict_pins(self):
+        """
+        Pins of the document and their sources, parsed on the first read and cached.
+
+        A pyproject.toml carries no '# from' annotation, so every pin of the
+        document has an empty source: the download side probes the mirrors of
+        the mod entry, see DepInfo.
+
+        Returns:
+            dict[str, DepInfo]: PEP 503 normalized name -> pin, the source
+                of every pin ''
+        """
+        return {
+            name: DepInfo(name, version, '')
+            for name, version in self.dict_deps.items()
+        }
 
     def _parse_pep508(self):
         """

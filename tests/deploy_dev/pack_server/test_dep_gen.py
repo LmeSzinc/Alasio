@@ -28,7 +28,7 @@ from alasio.deploy_dev.pack.pack_wheel import PackWheel
 from alasio.deploy_dev.pack_server import dep_gen
 from alasio.deploy_dev.pack_server.dep_gen import DepGen
 from alasio.deploy_dev.pack_server.fetch_wheel import WheelNotFoundError
-from alasio.deploy_dev.pack_server.model import LookbackConfig, PackRepoModel, PythonDepsConfig, RepoConfig
+from alasio.deploy_dev.pack_server.model import LookbackConfig, PackRepoModel, RepoConfig
 from alasio.deploy_dev.pack_server.pack_gen import PackRepoGen
 from alasio.deploy_dev.pack_server.parse_entry import ENTRY_FILE
 from alasio.ext import env
@@ -61,7 +61,7 @@ MIRROR_URL = 'http://mirror'
 DEFAULT_ENTRY = "entry = ModEntryInfo(name='m', pypi_mirrors='http://mirror', update_pack_deps=('httpx',))\n"
 
 
-def entry_source(*names, pypi_mirrors=MIRROR_URL):
+def entry_source(*names, pypi_mirrors=MIRROR_URL, requirements_file=None):
     """
     Build the source of a mod entry declaring update_pack_deps.
 
@@ -71,11 +71,16 @@ def entry_source(*names, pypi_mirrors=MIRROR_URL):
         pypi_mirrors (str | dict): Value of the pypi_mirrors declaration,
             the source of the wheels. Defaults to MIRROR_URL, the mock mirror
             of the tests.
+        requirements_file (str | None): Value of the requirements_file
+            declaration, None for a declaration of the entry that omits the
+            key (the default of ModEntryInfo, 'requirements.txt')
 
     Returns:
         str: Source of the entry module
     """
     declared = f', pypi_mirrors={pypi_mirrors!r}'
+    if requirements_file is not None:
+        declared += f', requirements_file={requirements_file!r}'
     if not names:
         return f"entry = ModEntryInfo(name='m'{declared})\n"
     return f"entry = ModEntryInfo(name='m'{declared}, update_pack_deps={tuple(names)!r})\n"
@@ -187,13 +192,10 @@ def make_repo(requirements, branch='master', entry=DEFAULT_ENTRY):
     return repo
 
 
-def make_config(requirement_files=('requirements.txt',)):
+def make_config():
     """
-    Build a pack config with the PythonDeps group of the tests.
-
-    Args:
-        requirement_files (Iterable[str]): PythonDepsConfig.RequirementFiles.
-            Defaults to ('requirements.txt',)
+    Build a pack config of the tests: the window only, the rest comes from the
+    mod entry of the repo.
 
     Returns:
         PackRepoModel: Config
@@ -206,9 +208,6 @@ def make_config(requirement_files=('requirements.txt',)):
             Branch='master',
         ),
         Lookback=LookbackConfig(MaxCommitDay=0),
-        PythonDeps=PythonDepsConfig(
-            RequirementFiles=list(requirement_files),
-        ),
     )
 
 
@@ -327,10 +326,10 @@ class TestSample:
         sample = gen.sample
         # demo is pinned by the files but not a managed name: no entry
         assert list(sample) == ['httpx']
-        assert [(dep.version, dep.commit, dep.target) for dep in sample['httpx']] == [
-            ('0.28.1', 'c3', True),
-            ('0.27.8', 'c2', False),
-            ('0.27.7', 'c1', False),
+        assert [(dep.version, dep.target) for dep in sample['httpx']] == [
+            ('0.28.1', True),
+            ('0.27.8', False),
+            ('0.27.7', False),
         ]
 
     def test_unmanaged_name(self, fs, run_dir, mirror):
@@ -350,7 +349,7 @@ class TestSample:
             assert gen.sample == {}
         assert capture.concat() == """\
 INFO | Using update_pack_deps of module/config/const.py at c3: requests
-WARNING | Dependency "requests" is not pinned to a version in the lookback window, nothing is built of it; a dependency of the mod entry update_pack_deps must be pinned with "==" in a dependency file of the config
+WARNING | Dependency "requests" is not pinned to a version in the lookback window, nothing is built of it; a dependency of the mod entry update_pack_deps must be pinned with "==" in the dependency file of the repo
 """
 
     def test_name_is_normalized(self, fs, run_dir, mirror):
@@ -396,17 +395,33 @@ INFO | No update_pack_deps declared by module/config/const.py at c3, no dependen
         gen = DepGen(make_repo(REQUIREMENTS, entry=entries), make_config())
         assert list(gen.sample) == ['httpx']
 
-    def test_no_requirement_files(self, fs, run_dir, mirror, monkeypatch):
-        """A config without dependency files does not read the entry."""
+    def test_declared_file_without_pins(self, fs, run_dir, mirror):
+        """A dependency file the entry names that no commit holds pins nothing, and is warned."""
         gen = DepGen(
-            make_repo(REQUIREMENTS),
-            make_config(requirement_files=()))
+            make_repo(REQUIREMENTS, entry=entry_source('httpx', requirements_file='deps.txt')),
+            make_config())
+        with logger.mock_capture_writer() as capture:
+            assert gen.sample == {}
+        # the entry declares a file the repo does not hold, the warning names
+        # it, and the declared name is reported as unpinned
+        assert capture.concat() == """\
+WARNING | LookbackWheel: no such dependency file "deps.txt" at the latest commit c3, declared by module/config/const.py; repo=
+INFO | Using update_pack_deps of module/config/const.py at c3: httpx
+WARNING | Dependency "httpx" is not pinned to a version in the lookback window, nothing is built of it; a dependency of the mod entry update_pack_deps must be pinned with "==" in the dependency file of the repo
+"""
 
-        def fail(commit):
-            raise AssertionError('the entry must not be read')
-
-        monkeypatch.setattr(gen.entry, 'update_pack_deps', fail)
-        assert gen.sample == {}
+    def test_requirements_file_of_the_entry(self, fs, run_dir, mirror):
+        """The dependency file to sample is the one the mod entry names."""
+        repo = make_repo(REQUIREMENTS, entry=entry_source('httpx', requirements_file='deps.txt'))
+        # the file the entry names, not the requirements.txt of the repo
+        for commit, version in (('c1', '0.27.7'), ('c2', '0.27.8'), ('c3', '0.28.1')):
+            repo.register_file(commit, 'deps.txt', f'httpx=={version}\n'.encode('utf-8'))
+        gen = DepGen(repo, make_config())
+        assert [(dep.version, dep.target) for dep in gen.sample['httpx']] == [
+            ('0.28.1', True),
+            ('0.27.8', False),
+            ('0.27.7', False),
+        ]
 
 
 class TestMirror:
@@ -532,11 +547,11 @@ class TestRun:
         assert capture.concat() == f"""\
 INFO | Using update_pack_deps of module/config/const.py at c3: httpx
 INFO | Generating the dependency packs of "Author_Repo_master": 1 dependencies, 3 versions
-INFO | [1/3] Fetching wheel of "httpx==0.28.1", mirror="http://mirror", commit=c3
+INFO | [1/3] Fetching wheel of "httpx==0.28.1", mirror="http://mirror", role=target
 INFO | Download wheel: "http://mirror/packages/httpx-0.28.1-py3-none-any.whl" -> "{run_dir}/pack/Author_Repo_master/wheel/httpx/0.28.1/httpx-0.28.1-py3-none-any.whl"
-INFO | [2/3] Fetching wheel of "httpx==0.27.8", mirror="http://mirror", commit=c2
+INFO | [2/3] Fetching wheel of "httpx==0.27.8", mirror="http://mirror", role=historical
 INFO | Download wheel: "http://mirror/packages/httpx-0.27.8-py3-none-any.whl" -> "{run_dir}/pack/Author_Repo_master/wheel/httpx/0.27.8/httpx-0.27.8-py3-none-any.whl"
-INFO | [3/3] Fetching wheel of "httpx==0.27.7", mirror="http://mirror", commit=c1
+INFO | [3/3] Fetching wheel of "httpx==0.27.7", mirror="http://mirror", role=historical
 INFO | Download wheel: "http://mirror/packages/httpx-0.27.7-py3-none-any.whl" -> "{run_dir}/pack/Author_Repo_master/wheel/httpx/0.27.7/httpx-0.27.7-py3-none-any.whl"
 INFO | [1/1] Building dependency packs of "httpx": 3 versions, target=0.28.1
 INFO | Writing full pack: "{run_dir}/pack/Author_Repo_master/packdep/httpx/0.28.1/full.pack"
@@ -814,11 +829,11 @@ class TestExistingPacks:
         assert capture.concat() == f"""\
 INFO | Using update_pack_deps of module/config/const.py at c3: httpx
 INFO | Generating the dependency packs of "Author_Repo_master": 1 dependencies, 3 versions
-INFO | [1/3] Fetching wheel of "httpx==0.28.1", mirror="http://mirror", commit=c3
+INFO | [1/3] Fetching wheel of "httpx==0.28.1", mirror="http://mirror", role=target
 INFO | Wheel exists, skipped: "{run_dir}/pack/Author_Repo_master/wheel/httpx/0.28.1/httpx-0.28.1-py3-none-any.whl"
-INFO | [2/3] Fetching wheel of "httpx==0.27.8", mirror="http://mirror", commit=c2
+INFO | [2/3] Fetching wheel of "httpx==0.27.8", mirror="http://mirror", role=historical
 INFO | Wheel exists, skipped: "{run_dir}/pack/Author_Repo_master/wheel/httpx/0.27.8/httpx-0.27.8-py3-none-any.whl"
-INFO | [3/3] Fetching wheel of "httpx==0.27.7", mirror="http://mirror", commit=c1
+INFO | [3/3] Fetching wheel of "httpx==0.27.7", mirror="http://mirror", role=historical
 INFO | Wheel exists, skipped: "{run_dir}/pack/Author_Repo_master/wheel/httpx/0.27.7/httpx-0.27.7-py3-none-any.whl"
 INFO | [1/1] Building dependency packs of "httpx": 3 versions, target=0.28.1
 INFO | Full pack exists, skipped: "{run_dir}/pack/Author_Repo_master/packdep/httpx/0.28.1/full.pack"
@@ -847,11 +862,11 @@ INFO | Dependency packs of "Author_Repo_master" generated
         assert capture.concat() == f"""\
 INFO | Using update_pack_deps of module/config/const.py at c3: httpx
 INFO | Generating the dependency packs of "Author_Repo_master": 1 dependencies, 3 versions
-INFO | [1/3] Fetching wheel of "httpx==0.28.1", mirror="http://mirror", commit=c3
+INFO | [1/3] Fetching wheel of "httpx==0.28.1", mirror="http://mirror", role=target
 INFO | Wheel exists, skipped: "{run_dir}/pack/Author_Repo_master/wheel/httpx/0.28.1/httpx-0.28.1-py3-none-any.whl"
-INFO | [2/3] Fetching wheel of "httpx==0.27.8", mirror="http://mirror", commit=c2
+INFO | [2/3] Fetching wheel of "httpx==0.27.8", mirror="http://mirror", role=historical
 INFO | Wheel exists, skipped: "{run_dir}/pack/Author_Repo_master/wheel/httpx/0.27.8/httpx-0.27.8-py3-none-any.whl"
-INFO | [3/3] Fetching wheel of "httpx==0.27.7", mirror="http://mirror", commit=c1
+INFO | [3/3] Fetching wheel of "httpx==0.27.7", mirror="http://mirror", role=historical
 INFO | Wheel exists, skipped: "{run_dir}/pack/Author_Repo_master/wheel/httpx/0.27.7/httpx-0.27.7-py3-none-any.whl"
 INFO | [1/1] Building dependency packs of "httpx": 3 versions, target=0.28.1
 INFO | Full pack exists, skipped: "{run_dir}/pack/Author_Repo_master/packdep/httpx/0.28.1/full.pack"
@@ -889,11 +904,11 @@ class TestCleanup:
         assert capture.concat() == f"""\
 INFO | Using update_pack_deps of module/config/const.py at c3: httpx
 INFO | Generating the dependency packs of "Author_Repo_master": 1 dependencies, 3 versions
-INFO | [1/3] Fetching wheel of "httpx==0.28.1", mirror="http://mirror", commit=c3
+INFO | [1/3] Fetching wheel of "httpx==0.28.1", mirror="http://mirror", role=target
 INFO | Download wheel: "http://mirror/packages/httpx-0.28.1-py3-none-any.whl" -> "{run_dir}/pack/Author_Repo_master/wheel/httpx/0.28.1/httpx-0.28.1-py3-none-any.whl"
-INFO | [2/3] Fetching wheel of "httpx==0.27.8", mirror="http://mirror", commit=c2
+INFO | [2/3] Fetching wheel of "httpx==0.27.8", mirror="http://mirror", role=historical
 INFO | Download wheel: "http://mirror/packages/httpx-0.27.8-py3-none-any.whl" -> "{run_dir}/pack/Author_Repo_master/wheel/httpx/0.27.8/httpx-0.27.8-py3-none-any.whl"
-INFO | [3/3] Fetching wheel of "httpx==0.27.7", mirror="http://mirror", commit=c1
+INFO | [3/3] Fetching wheel of "httpx==0.27.7", mirror="http://mirror", role=historical
 INFO | Download wheel: "http://mirror/packages/httpx-0.27.7-py3-none-any.whl" -> "{run_dir}/pack/Author_Repo_master/wheel/httpx/0.27.7/httpx-0.27.7-py3-none-any.whl"
 INFO | [1/1] Building dependency packs of "httpx": 3 versions, target=0.28.1
 INFO | Writing full pack: "{run_dir}/pack/Author_Repo_master/packdep/httpx/0.28.1/full.pack"
@@ -935,11 +950,11 @@ INFO | Dependency packs of "Author_Repo_master" committed
         assert capture.concat() == f"""\
 INFO | Using update_pack_deps of module/config/const.py at c3: httpx
 INFO | Generating the dependency packs of "Author_Repo_master": 1 dependencies, 3 versions
-INFO | [1/3] Fetching wheel of "httpx==0.28.1", mirror="http://mirror", commit=c3
+INFO | [1/3] Fetching wheel of "httpx==0.28.1", mirror="http://mirror", role=target
 INFO | Download wheel: "http://mirror/packages/httpx-0.28.1-py3-none-any.whl" -> "{run_dir}/pack/Author_Repo_master/wheel/httpx/0.28.1/httpx-0.28.1-py3-none-any.whl"
-INFO | [2/3] Fetching wheel of "httpx==0.27.8", mirror="http://mirror", commit=c2
+INFO | [2/3] Fetching wheel of "httpx==0.27.8", mirror="http://mirror", role=historical
 INFO | Download wheel: "http://mirror/packages/httpx-0.27.8-py3-none-any.whl" -> "{run_dir}/pack/Author_Repo_master/wheel/httpx/0.27.8/httpx-0.27.8-py3-none-any.whl"
-INFO | [3/3] Fetching wheel of "httpx==0.27.7", mirror="http://mirror", commit=c1
+INFO | [3/3] Fetching wheel of "httpx==0.27.7", mirror="http://mirror", role=historical
 INFO | Download wheel: "http://mirror/packages/httpx-0.27.7-py3-none-any.whl" -> "{run_dir}/pack/Author_Repo_master/wheel/httpx/0.27.7/httpx-0.27.7-py3-none-any.whl"
 INFO | [1/1] Building dependency packs of "httpx": 3 versions, target=0.28.1
 INFO | Writing full pack: "{run_dir}/pack/Author_Repo_master/packdep/httpx/0.28.1/full.pack"
@@ -981,11 +996,11 @@ INFO | Dependency packs of "Author_Repo_master" committed
         assert capture.concat() == f"""\
 INFO | Using update_pack_deps of module/config/const.py at c3: httpx
 INFO | Generating the dependency packs of "Author_Repo_master": 1 dependencies, 3 versions
-INFO | [1/3] Fetching wheel of "httpx==0.28.1", mirror="http://mirror", commit=c3
+INFO | [1/3] Fetching wheel of "httpx==0.28.1", mirror="http://mirror", role=target
 INFO | Wheel exists, skipped: "{run_dir}/pack/Author_Repo_master/wheel/httpx/0.28.1/httpx-0.28.1-py3-none-any.whl"
-INFO | [2/3] Fetching wheel of "httpx==0.27.8", mirror="http://mirror", commit=c2
+INFO | [2/3] Fetching wheel of "httpx==0.27.8", mirror="http://mirror", role=historical
 INFO | Wheel exists, skipped: "{run_dir}/pack/Author_Repo_master/wheel/httpx/0.27.8/httpx-0.27.8-py3-none-any.whl"
-INFO | [3/3] Fetching wheel of "httpx==0.27.7", mirror="http://mirror", commit=c1
+INFO | [3/3] Fetching wheel of "httpx==0.27.7", mirror="http://mirror", role=historical
 INFO | Wheel exists, skipped: "{run_dir}/pack/Author_Repo_master/wheel/httpx/0.27.7/httpx-0.27.7-py3-none-any.whl"
 INFO | [1/1] Building dependency packs of "httpx": 3 versions, target=0.28.1
 INFO | Full pack exists, skipped: "{run_dir}/pack/Author_Repo_master/packdep/httpx/0.28.1/full.pack"
@@ -1045,11 +1060,11 @@ INFO | Dependency packs of "Author_Repo_master" committed
         assert capture.concat() == f"""\
 INFO | Using update_pack_deps of module/config/const.py at c3: httpx
 INFO | Generating the dependency packs of "Author_Repo_master": 1 dependencies, 3 versions
-INFO | [1/3] Fetching wheel of "httpx==0.28.1", mirror="http://mirror", commit=c3
+INFO | [1/3] Fetching wheel of "httpx==0.28.1", mirror="http://mirror", role=target
 INFO | Download wheel: "http://mirror/packages/httpx-0.28.1-py3-none-any.whl" -> "{run_dir}/pack/Author_Repo_master/wheel/httpx/0.28.1/httpx-0.28.1-py3-none-any.whl"
-INFO | [2/3] Fetching wheel of "httpx==0.27.8", mirror="http://mirror", commit=c2
+INFO | [2/3] Fetching wheel of "httpx==0.27.8", mirror="http://mirror", role=historical
 INFO | Download wheel: "http://mirror/packages/httpx-0.27.8-py3-none-any.whl" -> "{run_dir}/pack/Author_Repo_master/wheel/httpx/0.27.8/httpx-0.27.8-py3-none-any.whl"
-INFO | [3/3] Fetching wheel of "httpx==0.27.7", mirror="http://mirror", commit=c1
+INFO | [3/3] Fetching wheel of "httpx==0.27.7", mirror="http://mirror", role=historical
 INFO | Download wheel: "http://mirror/packages/httpx-0.27.7-py3-none-any.whl" -> "{run_dir}/pack/Author_Repo_master/wheel/httpx/0.27.7/httpx-0.27.7-py3-none-any.whl"
 INFO | [1/1] Building dependency packs of "httpx": 3 versions, target=0.28.1
 INFO | Writing full pack: "{run_dir}/pack/Author_Repo_master/packdep/httpx/0.28.1/full.pack"

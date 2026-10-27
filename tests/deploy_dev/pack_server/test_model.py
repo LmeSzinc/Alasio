@@ -12,9 +12,7 @@ import pytest
 
 from alasio.deploy_dev.pack_server import model
 from alasio.deploy_dev.pack_server.gate import RunDirError, check_run_dir
-from alasio.deploy_dev.pack_server.model import (
-    LookbackConfig, PackRepoConfig, PackRepoModel, PythonDepsConfig, RepoConfig
-)
+from alasio.deploy_dev.pack_server.model import LookbackConfig, PackRepoConfig, PackRepoModel, RepoConfig
 from alasio.ext import env
 from alasio.ext.file.yamlconfig import build_help_map
 from alasio.ext.file.yamlfile import yaml_loads
@@ -93,23 +91,6 @@ class TestLookbackConfig:
         assert LookbackConfig().AdditionalCommit == []
 
 
-class TestPythonDepsConfig:
-    """The python dependencies to build packs of."""
-
-    def test_default(self):
-        """The default group is empty: no dependency file, no mirror setting."""
-        deps = PythonDepsConfig()
-        assert deps.RequirementFiles == []
-        assert not hasattr(deps, 'PypiMirror')
-        assert not hasattr(deps, 'PackUpdate')
-
-    def test_default_not_shared(self):
-        """The default list is not shared among instances, a filled one stays empty."""
-        first = PythonDepsConfig()
-        first.RequirementFiles.append('requirements.txt')
-        assert PythonDepsConfig().RequirementFiles == []
-
-
 class TestPackRepoModel:
     """The pack config of a repo."""
 
@@ -118,7 +99,10 @@ class TestPackRepoModel:
         model = PackRepoModel()
         assert model.Repo == RepoConfig()
         assert model.Lookback == LookbackConfig()
-        assert model.PythonDeps == PythonDepsConfig()
+
+    def test_no_python_deps_group(self):
+        """The python dependencies are declared by the mod entry, not by the config."""
+        assert not hasattr(PackRepoModel(), 'PythonDeps')
 
 
 class TestPackRepoConfig:
@@ -242,49 +226,8 @@ Lookback:
         assert config.data.Lookback.Parent == 'parent-0'
         assert config.data.Lookback.AdditionalCommit == ['4f3a8b2c1d5e6f708192a3b4c5d6e7f8091a2b3c']
 
-    def test_read_python_deps(self, fs, run_dir):
-        """The PythonDeps group is read: the dependency files."""
-        fs.create_file(config_file(run_dir), contents="""\
-Repo:
-  Remote: https://github.com/LmeSzinc/AzurLaneAutoScript
-  Author: LmeSzinc
-  Repo: AzurLaneAutoScript
-  Branch: master
-PythonDeps:
-  RequirementFiles:
-    - requirements.txt
-    - backend/pyproject.toml
-""")
-        config = PackRepoConfig(FILE)
-        assert config.errors == []
-        deps = config.data.PythonDeps
-        assert deps.RequirementFiles == ['requirements.txt', 'backend/pyproject.toml']
-        assert not hasattr(deps, 'PypiMirror')
-        assert not hasattr(deps, 'PackUpdate')
-
-    def test_stale_pack_update_is_ignored(self, fs, run_dir):
-        """The PackUpdate key of a config of an earlier version is ignored."""
-        fs.create_file(config_file(run_dir), contents="""\
-Repo:
-  Remote: https://github.com/LmeSzinc/AzurLaneAutoScript
-  Author: LmeSzinc
-  Repo: AzurLaneAutoScript
-  Branch: master
-PythonDeps:
-  RequirementFiles:
-    - requirements.txt
-  PackUpdate:
-    - requests
-""")
-        config = PackRepoConfig(FILE)
-        assert config.errors == []
-        deps = config.data.PythonDeps
-        assert deps.RequirementFiles == ['requirements.txt']
-        assert not hasattr(deps, 'PackUpdate')
-
-    def test_read_python_deps_ignores_mirror(self, fs, run_dir):
-        """A PypiMirror key of an earlier version is ignored: the mirrors come
-        from the mod entry."""
+    def test_stale_python_deps_is_ignored(self, fs, run_dir):
+        """A PythonDeps group of a config of an earlier version is ignored, no fallback error."""
         fs.create_file(config_file(run_dir), contents="""\
 Repo:
   Remote: https://github.com/LmeSzinc/AzurLaneAutoScript
@@ -298,9 +241,8 @@ PythonDeps:
 """)
         config = PackRepoConfig(FILE)
         assert config.errors == []
-        deps = config.data.PythonDeps
-        assert deps.RequirementFiles == ['requirements.txt']
-        assert not hasattr(deps, 'PypiMirror')
+        # the dependency file and the mirrors are declared by the mod entry
+        assert not hasattr(config.data, 'PythonDeps')
 
     def test_read_invalid_parent_rule(self, fs, run_dir):
         """A parent rule that is not one of the model values falls back to the default."""
