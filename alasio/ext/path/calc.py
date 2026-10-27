@@ -91,6 +91,11 @@ def uppath(root: str, up: int = 1) -> str:
     """
     Equivalent to os.path.join(self, '../')
 
+    The walk stops where the path model of this module ends: at the empty
+    string for a relative path, at "/" for a rooted path, and at the drive
+    root "C:/" for a path of a drive. A bare drive "C:" is the drive root,
+    the same way normpath() reads it.
+
     Args:
         root: Base path, needs to be normalized first
         up: Directory upward level
@@ -99,11 +104,19 @@ def uppath(root: str, up: int = 1) -> str:
         str:
     """
     if WINDOWS_SEP:
+        if len(root) == 2 and root[0].isalpha() and root[1] == ':':
+            # A bare drive is the drive root, the same way normpath() reads
+            # it: "C:" -> "C:/", and the root is its own parent
+            return root + '/' if up else root
+        # A rooted path stops at "/", a drive path at its drive root, and a
+        # relative path at the empty string. Input is normalized, so the
+        # rooted paths start with "/"
+        rooted = root.startswith('/')
         for _ in range(up):
             root, _, _ = root.rpartition('/')
-            # Relative path can only up to empty string
             if not root:
-                return ''
+                # Absolute path can only up to "/"
+                return '/' if rooted else ''
             # Absolute path can only up to the drive root "C:/"
             elif root[-1] == ':':
                 return root + '/'
@@ -124,15 +137,38 @@ def uppath(root: str, up: int = 1) -> str:
 
 def is_abspath(path: str) -> bool:
     """
-    A simplified os.path.isabs()
+    Check whether a path is absolute, with an answer that does not depend on
+    the python version.
+
+    os.path.isabs() is not used: on Windows a rooted path without a drive
+    ('/assets') counted as absolute up to python 3.12 and became relative in
+    python 3.13, so the same path was accepted or rejected depending on the
+    interpreter that runs it. The rule here is the one normpath() and uppath()
+    work with:
+
+    - POSIX: the path starts at the root, '/'
+    - Windows: a rooted path, which is the root of the current drive ('/a')
+      or a UNC share ('\\\\server\\share'), or a drive with a root after it
+      ('C:/', 'C:/a'). A bare drive ('C:') is the drive root, the same way
+      normpath() reads it, because 'C:' is drive relative in the OS. A drive
+      relative path ('C:a') is not absolute, and a colon that is not a drive
+      letter ('a:b') does not make one.
+
+    Args:
+        path (str): Path to check, normalized or not
+
+    Returns:
+        bool: True when the path is absolute
     """
-    if WINDOWS_SEP:
-        try:
-            return path[1] == ':'
-        except IndexError:
-            return False
-    else:
+    if not WINDOWS_SEP:
         return path.startswith('/')
+    # A drive is tested first, 'C:/folder/file' is the shape of most of the
+    # paths the project checks: 'C:' is the drive root, 'C:/' and 'C:/a' are
+    # absolute, and 'C:a' is drive relative and stays relative.
+    if path[1:2] == ':' and path[0].isalpha():
+        return path[2:3] in ('/', '\\', '')
+    # a rooted path: '/a' of the current drive, or '\\server\share'
+    return path.startswith(('/', '\\'))
 
 
 def abspath(path: str) -> str:

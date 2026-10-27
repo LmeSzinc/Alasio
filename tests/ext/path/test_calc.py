@@ -216,7 +216,7 @@ class TestJoinnormpathWhenPosix:
 
 
 class TestUppathWhenWindows:
-    """uppath() on the Windows branch, the drive root "C:/" is the top."""
+    """uppath() on the Windows branch, a root of the path model is the top."""
 
     @pytest.fixture(autouse=True)
     def windows_sep(self, monkeypatch):
@@ -227,6 +227,7 @@ class TestUppathWhenWindows:
         # up=0 keeps the path
         ('a', 0, 'a'),
         ('C:/a/b', 0, 'C:/a/b'),
+        ('C:', 0, 'C:'),
         # Relative path can only go up to the empty string
         ('a', 1, ''),
         ('a/b', 1, 'a'),
@@ -235,22 +236,27 @@ class TestUppathWhenWindows:
         ('a/b/c/d', 2, 'a/b'),
         ('a/b/c', 5, ''),
         ('', 1, ''),
-        # Absolute path can only go up to the drive root "C:/"
+        # Absolute path of a drive can only go up to the drive root "C:/"
         ('C:/a/b', 1, 'C:/a'),
         ('C:/a/b', 2, 'C:/'),
         ('C:/a/b', 9, 'C:/'),
         ('C:/a', 5, 'C:/'),
         ('C:/', 1, 'C:/'),
-        # Deviation: an unnormalized "C:" is treated as a name
-        ('C:', 1, ''),
-        # Deviation: "/" is not absolute on this branch, it goes up to the empty string
-        ('/', 1, ''),
-        ('/a', 1, ''),
+        # A bare drive is the drive root, the same way normpath() reads it
+        ('C:', 1, 'C:/'),
+        ('C:', 9, 'C:/'),
+        # A rooted path without a drive stops at "/"
+        ('/', 1, '/'),
+        ('/a', 1, '/'),
+        ('/a', 9, '/'),
         ('/a/b', 1, '/a'),
-        ('/a/b', 2, ''),
+        ('/a/b', 2, '/'),
+        # A UNC share walks up to the filesystem root as well
+        ('//server/share/a', 1, '//server/share'),
+        ('//server/share/a', 3, '/'),
     ])
     def test_uppath(self, root, up, expected):
-        """Going up should stop at the empty string or at the drive root."""
+        """Going up stops at the empty string, "/" or the drive root."""
         assert uppath(root, up=up) == expected
 
 
@@ -289,7 +295,7 @@ class TestUppathWhenPosix:
 
 
 class TestIsAbspathWhenWindows:
-    """is_abspath() on the Windows branch, a drive colon decides."""
+    """is_abspath() on the Windows branch, a root is what decides."""
 
     @pytest.fixture(autouse=True)
     def windows_sep(self, monkeypatch):
@@ -299,22 +305,32 @@ class TestIsAbspathWhenWindows:
     @pytest.mark.parametrize("path, expected", [
         ('', False),
         ('a', False),
-        # Too short to have a drive colon
+        # Too short to have a drive
         ('C', False),
         ('C:/a', True),
         ('C:\\a', True),
         ('c:/a', True),
+        ('C:/', True),
+        # A bare drive is the drive root, normpath() reads it the same way
         ('C:', True),
-        # Deviation: any "x:" prefix counts, ntpath.isabs() rejects these
-        ('1:2', True),
-        ('a:b', True),
-        # Deviation: a slash rooted path is not absolute here, ntpath.isabs() accepts it
-        ('/a', False),
-        ('\\a', False),
-        ('//a', False),
+        # A rooted path without a drive: the current drive, or a UNC share
+        ('/a', True),
+        ('\\a', True),
+        ('//a', True),
+        ('//server/share', True),
+        ('\\\\server\\share', True),
+        # The root wins over a colon in the second character
+        ('/:a', True),
+        ('\\:a', True),
+        # A drive relative path is not absolute
+        ('C:a', False),
+        ('C:..', False),
+        # A colon is only a drive when a letter comes before it
+        ('1:2', False),
+        ('a:b', False),
     ])
     def test_is_abspath(self, path, expected):
-        """A path is absolute when the second character is a colon."""
+        """A drive with a root, or a rooted path, is absolute."""
         assert is_abspath(path) == expected
 
 
@@ -341,6 +357,53 @@ class TestIsAbspathWhenPosix:
         assert is_abspath(path) == expected
 
 
+class TestIsAbspathWithNormalization:
+    """
+    is_abspath() reads the same path model normpath() and uppath() build.
+
+    The three functions are used together, so a path that is absolute must
+    stay absolute after normalization and after walking up to its root, and a
+    relative path must stay relative.
+    """
+
+    @pytest.fixture(params=[True, False], ids=['windows', 'posix'])
+    def windows_sep(self, request, monkeypatch):
+        """Run every case on both branches, the answer is the same rule."""
+        monkeypatch.setattr(calc, 'WINDOWS_SEP', request.param)
+        return request.param
+
+    @pytest.mark.parametrize('path', [
+        'C:/a/b',
+        'C:\\a\\b',
+        'C:',
+        'C:/',
+        '/a/b',
+        '//server/share/a',
+        'relative',
+        'relative/a',
+    ])
+    def test_normalization_keeps_the_answer(self, windows_sep, path):
+        """A path and its normalized form are absolute together."""
+        assert is_abspath(normpath(path)) == is_abspath(path)
+
+    def test_the_root_of_an_absolute_path_is_absolute(self, windows_sep):
+        """Walking up from an absolute path never reaches a relative one."""
+        if windows_sep:
+            paths = ['C:/a/b', 'C:/', 'C:', '/a/b', '/', '//server/share/a']
+        else:
+            paths = ['/a/b', '/']
+        for path in paths:
+            current = normpath(path)
+            while True:
+                parent = uppath(current, 1)
+                if not parent or parent == current:
+                    # the root itself: uppath() stops here
+                    assert is_abspath(current)
+                    break
+                assert is_abspath(parent)
+                current = parent
+
+
 class TestAbspathWhenWindows:
     """abspath() on the Windows branch, relative paths are joined with cwd."""
 
@@ -356,13 +419,14 @@ class TestAbspathWhenWindows:
         ('C:/a', 'C:/a'),
         ('C:\\a', 'C:\\a'),
         ('C:', 'C:'),
+        # A rooted path has a root of its own, it is not joined under the cwd
+        ('/a', '/a'),
+        ('\\a', '\\a'),
         # The cwd is normalized as well, the result is fully "/" separated
         ('a', 'C:/fake/cwd/a'),
         ('a/b', 'C:/fake/cwd/a/b'),
         # The cwd itself is returned when the path is empty
         ('', 'C:/fake/cwd'),
-        # Deviation: "/a" is not absolute on the Windows branch, it is joined as well
-        ('/a', 'C:/fake/cwd//a'),
     ])
     def test_abspath(self, path, expected):
         """Absolute paths should be kept, relative paths joined under the cwd."""

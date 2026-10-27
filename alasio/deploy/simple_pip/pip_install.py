@@ -305,10 +305,10 @@ def is_absolute_env_path(path):
 
     The paths of this module are posix style: an environment of Windows keeps
     its drive (``E:/envs/alasio/Lib/site-packages``), an environment of another
-    platform starts at the posix root (``/envs/alasio/lib/python3.8``).
-    os.path.isabs() is not used because a posix path without a drive is not
-    absolute for it on Windows: up to python 3.12 it is accepted as a drive
-    relative path, from python 3.13 on it is rejected.
+    platform starts at the posix root (``/envs/alasio/lib/python3.8``). Both
+    forms are absolute for is_abspath(), which reads a rooted path as the root
+    of the current drive instead of asking os.path.isabs(): the answer of
+    os.path.isabs() for a posix path on Windows changed in python 3.13.
 
     Args:
         path (str): Path to check
@@ -316,7 +316,7 @@ def is_absolute_env_path(path):
     Returns:
         bool: True if the path is absolute
     """
-    return path.startswith('/') or is_abspath(path)
+    return is_abspath(path)
 
 
 class SimplePip:

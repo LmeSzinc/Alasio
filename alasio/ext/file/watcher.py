@@ -6,7 +6,7 @@ from typing import Dict, List, Literal
 
 from msgspec import Struct, field
 
-from alasio.ext.path.calc import normpath, subpath_to
+from alasio.ext.path.calc import is_abspath, normpath, subpath_to
 from alasio.logger import logger
 from alasio.logger.utils import stringify_event
 
@@ -163,12 +163,12 @@ def _normalize_path(filepath):
 
     Raises:
         TypeError: When filepath is not a string
-        ValueError: When filepath is not absolute
+        ValueError: When filepath is not absolute, see is_abspath()
     """
     filepath = os.fspath(filepath)
     if not isinstance(filepath, str):
         raise TypeError(f'Expected a str path, got: {type(filepath).__name__}')
-    if not os.path.isabs(filepath):
+    if not is_abspath(filepath):
         raise ValueError(f'Expected an absolute path, got: {filepath!r}')
     return normpath(filepath)
 

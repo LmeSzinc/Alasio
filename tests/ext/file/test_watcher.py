@@ -49,6 +49,39 @@ def record_shape(records):
     return [(record.path, record.type) for record in records]
 
 
+def count_fs_calls(monkeypatch):
+    """
+    Count the os.stat / os.scandir calls of the code under test.
+
+    The counting probe forwards every call to the real function instead of
+    raising: a probe that raises breaks the reporting of pytest itself, which
+    stats the source file of a traceback while it formats a failure, and a
+    broken report hides every other failure of the session.
+
+    Args:
+        monkeypatch (pytest.MonkeyPatch): Fixture that installs and removes
+            the probes
+
+    Returns:
+        list[tuple]: (function name, path) appended on every call
+    """
+    calls = []
+    real_stat = os.stat
+    real_scandir = os.scandir
+
+    def counting_stat(*args, **kwargs):
+        calls.append(('stat', args[0] if args else None))
+        return real_stat(*args, **kwargs)
+
+    def counting_scandir(*args, **kwargs):
+        calls.append(('scandir', args[0] if args else None))
+        return real_scandir(*args, **kwargs)
+
+    monkeypatch.setattr(os, 'stat', counting_stat)
+    monkeypatch.setattr(os, 'scandir', counting_scandir)
+    return calls
+
+
 class TestContract:
     def test_public_types_are_literals(self):
         event_hints = get_type_hints(WatchEvent)
@@ -77,16 +110,13 @@ class TestContract:
 
     def test_subscribe_and_unsubscribe_do_not_touch_the_filesystem(
             self, monkeypatch):
-        def fail(*args, **kwargs):
-            raise AssertionError('subscription must not scan the filesystem')
-
-        monkeypatch.setattr(os, 'stat', fail)
-        monkeypatch.setattr(os, 'scandir', fail)
+        calls = count_fs_calls(monkeypatch)
         watcher = PathWatcher()
         watcher.subscribe('/watch', recursive=True)
         watcher.subscribe('/watch')
         watcher.unsubscribe('/watch')
         watcher.unsubscribe('/missing')
+        assert calls == []
 
     def test_relative_paths_are_rejected(self):
         watcher = PathWatcher()
@@ -98,13 +128,10 @@ class TestContract:
             watcher.mark_modified('relative')
 
     def test_mark_modified_is_memory_only(self, monkeypatch):
-        def fail(*args, **kwargs):
-            raise AssertionError('mark_modified must not do filesystem IO')
-
-        monkeypatch.setattr(os, 'stat', fail)
-        monkeypatch.setattr(os, 'scandir', fail)
+        calls = count_fs_calls(monkeypatch)
         watcher = PathWatcher()
         watcher.mark_modified('/watch/a.txt')
+        assert calls == []
 
     def test_scanning_has_no_cache_layer(self):
         assert not hasattr(watcher_module, '_ScanCache')
@@ -132,6 +159,83 @@ class TestContract:
         first = {record.path: record for record in watcher.list()}
         second = {record.path: record for record in watcher.list()}
         assert first['/watch/a.txt'] is second['/watch/a.txt']
+
+
+class TestNormalizePathWhenWindows:
+    """
+    Absolute paths on Windows, with an answer that does not depend on the
+    python version.
+    """
+
+    @pytest.fixture(autouse=True)
+    def windows_only(self):
+        if os.name != 'nt':
+            pytest.skip('windows path semantics')
+
+    @pytest.mark.parametrize('path, expected', [
+        # a drive with a root after it
+        ('E:/watch', 'E:/watch'),
+        ('E:\\watch\\a.txt', 'E:/watch/a.txt'),
+        ('E:\\', 'E:/'),
+        # a bare drive is the drive root, normpath() reads it the same way
+        ('E:', 'E:/'),
+        # a rooted path without a drive is rooted at the current drive, it was
+        # absolute up to python 3.12 and relative from 3.13 on, the watcher
+        # keeps the answer it had before 3.13
+        ('/watch', '/watch'),
+        ('\\watch', '/watch'),
+        ('/watch/a.txt', '/watch/a.txt'),
+        # a UNC share
+        ('//server/share/a', '//server/share/a'),
+        ('\\\\server\\share\\a', '//server/share/a'),
+    ])
+    def test_absolute_is_normalized(self, path, expected):
+        """An absolute path is normalized to '/' separators."""
+        assert _normalize_path(path) == expected
+
+    @pytest.mark.parametrize('path', [
+        '',
+        'relative',
+        # a drive relative path is not absolute
+        'C:watch',
+        # a colon does not make a drive
+        'a:b',
+    ])
+    def test_relative_is_rejected(self, path):
+        """A path that is not absolute raises ValueError."""
+        with pytest.raises(ValueError):
+            _normalize_path(path)
+
+
+class TestNormalizePathWhenPosix:
+    """Absolute paths on posix, only a leading '/' counts."""
+
+    @pytest.fixture(autouse=True)
+    def posix_only(self):
+        if os.name == 'nt':
+            pytest.skip('posix path semantics')
+
+    @pytest.mark.parametrize('path, expected', [
+        ('/', '/'),
+        ('/watch', '/watch'),
+        ('/watch/', '/watch'),
+        ('/watch/a.txt', '/watch/a.txt'),
+    ])
+    def test_absolute_is_normalized(self, path, expected):
+        """An absolute path is normalized to '/' separators."""
+        assert _normalize_path(path) == expected
+
+    @pytest.mark.parametrize('path', [
+        '',
+        'relative',
+        # a windows path is not absolute here
+        'C:/watch',
+        '\\watch',
+    ])
+    def test_relative_is_rejected(self, path):
+        """A path that is not absolute raises ValueError."""
+        with pytest.raises(ValueError):
+            _normalize_path(path)
 
 
 class TestDriveRoot:
