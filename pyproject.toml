@@ -35,7 +35,11 @@ dependencies = [
     # python 3.8 support comes from the py38deps backport wheels
     "httpx2>=2",
     # alasio/spider parses and builds urls with yarl
-    "yarl>=1.9",
+    # 1.15.2 is the last version with cp38 wheels, 1.16.0 requires python 3.9
+    # it is also the floor of the behavior the code relies on: the default port
+    # of a scheme is dropped from the string of a url since 1.9.5, and an ipv6
+    # host keeps its brackets when rendered since 1.13.0
+    "yarl>=1.15.2",
     # 5.9.3 is the first version with arm64 macOS wheels
     "psutil>=5.9.3",
     # alasio/log

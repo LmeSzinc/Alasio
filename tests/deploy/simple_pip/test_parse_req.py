@@ -543,6 +543,9 @@ class TestSourceNormalization:
         # a fragment is not part of an index base url
         ('https://example.com/simple/#frag', 'https://example.com/simple'),
         ('http://[::1]:8080/simple/', 'http://[::1]:8080/simple'),
+        # a default port is not a part of the identity of an index, an IPv6
+        # literal keeps its brackets
+        ('https://[::1]:443/simple/', 'https://[::1]/simple'),
     ])
     def test_normalized(self, annotation, expected):
         """The scheme, host, default port and trailing slashes are normalized."""
