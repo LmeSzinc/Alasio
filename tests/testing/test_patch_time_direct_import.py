@@ -61,8 +61,13 @@ class TestDirectImportRestore:
         assert abs(real - time.time()) < 1.0
 
     def test_exit_restores_utcnow(self):
+        # the wall clock before the patch: inside the context both datetime and
+        # time are patched, so only a value taken outside can prove the exit
+        # cleaned up
+        before = datetime.now(tz=timezone.utc).replace(tzinfo=None)
         with PatchTime(1234567890.0):
             assert datetime.utcnow().hour == 23  # 2009-02-13 23:31:30
-        real = datetime.utcnow()
-        import time
-        assert abs((real - datetime(1970, 1, 1)).total_seconds() - time.time()) < 1.0
+        # utcnow() is deprecated since python 3.12: now(tz=utc) returns the same
+        # value, the naive UTC of the moment
+        real = datetime.now(tz=timezone.utc).replace(tzinfo=None)
+        assert abs((real - before).total_seconds()) < 1.0

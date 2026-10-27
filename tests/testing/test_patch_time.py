@@ -136,18 +136,19 @@ class TestEnterExit:
         assert abs(real_now.timestamp() - time.time()) < 1.0
 
     def test_exit_restores_datetime_utcnow(self):
+        # the wall clock before the patch: inside the context both datetime and
+        # time are patched, so only a value taken outside can prove the exit
+        # cleaned up
+        before = datetime.datetime.now(tz=datetime.timezone.utc).replace(tzinfo=None)
         pt = PatchTime(42)
         with pt:
             utcnow = datetime.datetime.utcnow()
             assert utcnow.hour == 0  # 1970-01-01 00:00:42
-        # After exit, should be restored
-        real_utcnow = datetime.datetime.utcnow()
-        # utcnow() returns a naive datetime (no tzinfo).
-        # Use real_utcnow directly (comparison with time.time() in local timezone is unreliable).
-        # Instead verify that the result is close to the expected real time by constructing a timezone-aware UTC
-        # datetime.
-        real_utc = datetime.datetime.now(tz=datetime.timezone.utc)
-        assert abs((real_utcnow - real_utc.replace(tzinfo=None)).total_seconds()) < 1.0
+        # After exit, utcnow() is the real clock again. The call itself is
+        # deprecated since python 3.12, the value it returns (the naive UTC of
+        # the moment) is read with now(tz=utc).
+        real_utcnow = datetime.datetime.now(tz=datetime.timezone.utc).replace(tzinfo=None)
+        assert abs((real_utcnow - before).total_seconds()) < 1.0
 
     def test_exit_restores_time_functions(self):
         pt = PatchTime(42)
