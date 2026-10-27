@@ -5,6 +5,7 @@ from pathlib import Path
 import isort
 import ruff
 
+from alasio.codegen.ruff.stdlist import STD_SET
 from alasio.ext import env
 from alasio.ext.cache import cached_property
 from alasio.ext.concurrent.cmd import parse_result, run_cmd
@@ -212,6 +213,9 @@ class RuffFormatter:
         code = code.decode('utf-8')
         # isort.api.sort_code_string() requires isort>=5.0.0
         # show_diff=False requires requires isort>=5.2.0
+        # known_standard_library overrides the table isort ships, which stops at
+        # python 3.12 and counts the union of 3.6 to 3.12: the code generator
+        # sorts by STD_SET, so isort has to sort by the same names
         new = isort.api.sort_code_string(
             code,
             line_length=self.LINE_LENGTH,
@@ -219,6 +223,7 @@ class RuffFormatter:
             combine_as_imports=True,
             show_diff=False,
             quiet=False,
+            known_standard_library=STD_SET,
         )
         if new == code:
             print('Import sorting all good')

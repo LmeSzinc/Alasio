@@ -234,6 +234,54 @@ y = 2
         assert _read(fs) == b'x = 1\n'
         assert not fs.exists('_temp_config.toml'), 'no temp config file on the fake fs'
 
+    # ---- Standard library table ---------------------------------------------
+
+    def test_private_extension_module_is_stdlib(self, fs, formatter):
+        """`_io` sorts as a standard library module.
+
+        The table isort ships holds only `_ast`, `_dummy_thread` and `_thread`
+        of the private modules, so `_io` would land in the third party block
+        without the shared STD_LIST.
+        """
+        fs.create_file('test.py', contents=b"""\
+import requests
+import _io
+import typing
+
+x = (requests, _io, typing)
+""")
+        formatter.format_code('test.py')
+        assert _read(fs) == b"""\
+import _io
+import typing
+
+import requests
+
+x = (requests, _io, typing)
+"""
+
+    def test_module_of_a_newer_python_is_stdlib(self, fs, formatter):
+        """`annotationlib` (3.14) sorts as a standard library module.
+
+        isort's own table stops at python 3.12, the shared table reaches 3.15.
+        """
+        fs.create_file('test.py', contents=b"""\
+import requests
+import annotationlib
+import os
+
+x = (requests, annotationlib, os)
+""")
+        formatter.format_code('test.py')
+        assert _read(fs) == b"""\
+import annotationlib
+import os
+
+import requests
+
+x = (requests, annotationlib, os)
+"""
+
     # ---- CRLF -> LF conversion ----------------------------------------------
 
     def test_crlf_converted_to_lf(self, fs, formatter):
