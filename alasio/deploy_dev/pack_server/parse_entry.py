@@ -1,33 +1,48 @@
 """
-Parse the update_pack_deps declaration from the source of a mod entry.
+Parse the declarations the pack server reads from the source of a mod entry.
 
 The pack server builds the dependency channels a mod declares for pack
-updates. The declaration lives in the mod entry, the module-level variable
-`entry` of `module/config/const.py`:
+updates, fetches their wheels from the PyPI mirrors the mod declares, and
+publishes the wheels of the indexes the mod provides. The declarations live in
+the mod entry, the module-level variable `entry` of
+`module/config/const.py`:
 
     from alasio.config.entry.const import ModEntryInfo
 
     entry = ModEntryInfo(
         name='alas',
         update_pack_deps=('httpx', 'ruamel.yaml'),
+        pypi_mirrors='https://mirrors.aliyun.com/pypi/simple',
+        update_provide_pypi_mirrors=('https://py38deps.github.io/py38deps/simple/',),
     )
 
 The pack server reads the source from the git blob of a commit, not from a
 working tree, and it must not execute code of the repo it packs. This module
-provides the reader of the blob and the parser of the declaration:
+provides the reader of the blob and the parser of the declarations:
 
-- PackRepoEntry.update_pack_deps(commit) reads module/config/const.py from
-the commit and parses it, caching the result by the blob sha1;
-- parse_update_pack_deps(source) parses the source itself, with ast: the
-source is never imported, compiled into a callable or evaluated. Only the
-`update_pack_deps` field of the entry is read, the other fields and the other
-statements of the module are ignored.
+- PackRepoEntry(repo, commit) reads module/config/const.py from the commit and
+  parses it, its declarations are cached properties;
+- parse_mod_entry(source) parses the source itself, with ast: the source is
+  never imported, compiled into a callable or evaluated.
 
-The declaration may be the keyword of the entry construction or an attribute
+The parse is three steps, so a key is added in one place:
+
+1. extract: the parser keeps the value node of the last declaration of every
+   key of PARSED_KEYS, from the keyword of the entry construction or from an
+   attribute assignment after it;
+2. evaluate: every node is evaluated to a Python value, a static expression
+   only (see below);
+3. validate: the values are put back into an entry dict and handed to
+   msgspec against ModEntryInfo, so the model is the single source of truth
+   of the accepted types and shapes. The keys the entry omits keep the
+   defaults of the model.
+
+The declarations may be the keyword of the entry construction or an attribute
 assignment after it:
 
     entry = ModEntryInfo(name='alas')
     entry.update_pack_deps = ('httpx',)
+    entry.pypi_mirrors = {'cn': {'self': 'https://pypi.example/simple'}}
 
 The entry may also be one of the default entries of the library, looked up by
 key:
@@ -38,41 +53,50 @@ key:
     entry.update_pack_deps = ('httpx',)
 
 The lookup is resolved against the library's own DICT_MOD_ENTRY, never against
-the source of the repo: the source is not imported or executed. The base
-entry's update_pack_deps is the starting value, a later attribute assignment
-replaces it, and a later ModEntryInfo construction resets it.
+the source of the repo: the source is not imported or executed. The values of
+the default entry are the starting values, a later attribute assignment
+replaces one of them, and a later ModEntryInfo construction resets all of
+them to the defaults of the model.
 
-The value must be a static expression, read in the order of the source:
+A value must be a static expression, read in the order of the source:
 
-- a dict literal, only its keys are used;
-- a list, tuple or set literal;
-- dict.fromkeys() over one of the forms above;
-- a module-level name that was assigned one of the forms above.
+- a literal of a str, a bool, an int or None;
+- a list, a tuple or a set literal of static expressions;
+- a dict literal of static expressions (its values are kept, a dict declaring
+  update_pack_deps declares its keys);
+- dict.fromkeys() over one of the forms above, for update_pack_deps;
+- a module-level name that was assigned one of the forms above;
+- DEFAULT_PYPI_MIRRORS, imported from the library entry module (or through an
+  alias of it), the default of ModEntryInfo;
+- deepcopy() or .copy() over one of the forms above.
 
-A later assignment to entry resets the declaration, a later assignment to
-entry.update_pack_deps replaces it. A value of None, an empty dict / list /
-tuple / set or a missing update_pack_deps means no dependency is updated by
-pack. The names are returned as they are written, the caller normalizes them
-with PEP 503, like the other names of the pack files.
-
-Everything else raises ValueError: a dynamic expression, a mutation of
-entry.update_pack_deps after the declaration (e.g. .update() or an item
-assignment), an entry built by a helper call that does not name the keyword, a
-DICT_MOD_ENTRY lookup whose name is not imported from the library module, whose
-key is not a static str of the library dict, or a declaration outside the module
-level. A pack must never silently lose a dependency channel because this parser
-could not read the declaration.
+Everything else raises ValueError: a dynamic expression, a mutation of a
+parsed key after the declaration (e.g. .update() or an item assignment), an
+entry built by a helper call that declares none of the keys, a DICT_MOD_ENTRY
+lookup whose name is not imported from the library module, whose key is not a
+static str of the library dict, or a declaration outside the module level. A
+pack must never silently lose a dependency channel, or fetch from a mirror the
+entry did not declare, because this parser could not read the declaration.
 
 Usage:
-    from alasio.deploy_dev.pack_server.parse_entry import PackRepoEntry, parse_update_pack_deps
+    from alasio.deploy_dev.pack_server.parse_entry import PackRepoEntry, parse_mod_entry
 
-    names = parse_update_pack_deps(source, source_name='module/config/const.py at c3')
-    names = PackRepoEntry(repo).update_pack_deps(commit)
+    entry = parse_mod_entry(source, source_name='module/config/const.py at c3')
+    entry.update_pack_deps, entry.pypi_mirrors, entry.update_provide_pypi_mirrors
+
+    entry = PackRepoEntry(repo, commit)
+    entry.update_pack_deps, entry.pypi_mirrors, entry.update_provide_pypi_mirrors
 """
 
 import ast
+from copy import deepcopy
 
-from alasio.config.entry.const import DICT_MOD_ENTRY as _LIBRARY_MOD_ENTRY
+import msgspec
+
+from alasio.config.entry.const import (
+    DEFAULT_PYPI_MIRRORS as _LIBRARY_DEFAULT_PYPI_MIRRORS, DICT_MOD_ENTRY as _LIBRARY_MOD_ENTRY, ModEntryInfo
+)
+from alasio.ext.cache import cached_property
 
 # Path of the mod entry in a repo, the file ModLoader.self_mod reads. It is
 # kept here so the caller that reads the git blob and the parser agree on the
@@ -82,6 +106,17 @@ ENTRY_FILE = 'module/config/const.py'
 # module of the library default entries, the only module a DICT_MOD_ENTRY
 # lookup is resolved from
 _ENTRY_CONST_MODULE = 'alasio.config.entry.const'
+
+# the declarations the pack server reads from a mod entry: the module level
+# keys of the entry. The parser extracts exactly these (step 1), evaluates
+# their nodes (step 2), and rebuilds an entry for ModEntryInfo to validate
+# (step 3), so the model is the single source of truth of the accepted types.
+# A new key is added here and to ModEntryInfo, the parser changes no further.
+PARSED_KEYS = (
+    'update_pack_deps',
+    'pypi_mirrors',
+    'update_provide_pypi_mirrors',
+)
 
 # Sentinel of a module level name whose value is not a static expression. The
 # name is recorded so a reference to it reports the unsupported value instead
@@ -109,12 +144,15 @@ class _Unsupported(ValueError):
         super().__init__(message)
 
 
-def parse_update_pack_deps(source, source_name=''):
+def parse_mod_entry(source, source_name=''):
     """
-    Parse the update_pack_deps declaration of a mod entry.
+    Parse the declarations of a mod entry and validate them with the model.
 
-    The source is parsed with ast and never executed. See the module
-    docstring for the accepted declarations.
+    The source is parsed with ast and never executed. The parse is three
+    steps: the value node of every key of PARSED_KEYS is extracted, the nodes
+    are evaluated to Python values, and the values are put back into an entry
+    dict handed to msgspec against ModEntryInfo. The keys the entry does not
+    declare keep the defaults of the model.
 
     Args:
         source (str | bytes): Python source of the entry module. A bytes
@@ -125,14 +163,11 @@ def parse_update_pack_deps(source, source_name=''):
             the message only carries the reason
 
     Returns:
-        tuple[str, ...]: The declared distribution names in source order,
-            empty when the module declares no entry or an empty
-            update_pack_deps
+        ModEntryInfo: The parsed declarations, validated
 
     Raises:
-        ValueError: If the source is not valid Python, the entry declaration
-            cannot be read, or update_pack_deps is not a static collection of
-            str
+        ValueError: If the source is not valid Python, a declaration cannot
+            be read, or a value does not fit ModEntryInfo
     """
     try:
         tree = ast.parse(source)
@@ -143,9 +178,11 @@ def parse_update_pack_deps(source, source_name=''):
     parser = _EntryParser()
     try:
         parser.visit(tree)
+        return parser.entry()
     except _Unsupported as e:
         raise ValueError(_with_source_name(source_name, str(e))) from None
-    return parser.update_pack_deps
+    except msgspec.ValidationError as e:
+        raise ValueError(_with_source_name(source_name, f'invalid entry value: {e}')) from None
 
 
 def _with_source_name(source_name, message):
@@ -166,58 +203,87 @@ def _with_source_name(source_name, message):
 
 class PackRepoEntry:
     """
-    Read the update_pack_deps of a mod entry from the commits of a git repo.
+    The declarations of the mod entry of one commit.
 
-    The entry file is read from the git blob of a commit, never from a
+    The entry file is read from the git blob of the commit, never from a
     working tree: the pack server clones a repo without a working tree. The
-    parse result is cached by the blob sha1, so commits that share the entry
-    file parse it once.
+    parse runs once, on the first read of a declaration, see mod_entry.
 
     Usage:
-        entry = PackRepoEntry(repo)
-        names = entry.update_pack_deps(commit)
+        entry = PackRepoEntry(repo, commit)
+        entry.update_pack_deps
+        entry.pypi_mirrors
+        entry.update_provide_pypi_mirrors
     """
 
-    def __init__(self, repo):
+    def __init__(self, repo, commit):
         """
         Args:
             repo (GitRepo | MockGitRepo): Repo to read; its object index is
                 read lazily when the caller did not read it
+            commit (str): Commit sha1 to read the entry from
         """
         self.repo = repo
-        # blob sha1 -> tuple[str, ...]
-        self._cache = {}
+        self.commit = commit
 
-    def update_pack_deps(self, commit):
+    @cached_property
+    def mod_entry(self):
         """
-        Read the update_pack_deps declaration of an entry from a commit.
+        The entry of the commit, parsed and validated.
 
-        Args:
-            commit (str): Commit sha1 to read the entry from
+        A commit without an entry file, and an entry that omits a key, give
+        the defaults of ModEntryInfo: the runtime entry of the mod declares
+        the same values.
 
         Returns:
-            tuple[str, ...]: Declared names in source order, empty when the
-                commit has no entry file or the entry declares no name
+            ModEntryInfo: The parsed entry
 
         Raises:
             ValueError: If the entry source is not valid Python, its
-                declaration cannot be read, or the entry path is a symlink
+                declarations cannot be read, or the entry path is a symlink
         """
         self._read_repo()
-        file = self.repo.get_file(commit, ENTRY_FILE)
+        file = self.repo.get_file(self.commit, ENTRY_FILE)
         if file is None:
-            return ()
+            return ModEntryInfo(name='')
         if file.mode == b'120000':
             raise ValueError(
-                f'{ENTRY_FILE} at commit {commit} is a symlink, not a file')
-        cached = self._cache.get(file.sha1)
-        if cached is not None:
-            return cached
+                f'{ENTRY_FILE} at commit {self.commit} is a symlink, not a file')
         source = self.repo.cat(file.sha1).decoded
-        names = parse_update_pack_deps(
-            source, source_name=f'{ENTRY_FILE} at commit {commit}')
-        self._cache[file.sha1] = names
-        return names
+        return parse_mod_entry(source, source_name=f'{ENTRY_FILE} at commit {self.commit}')
+
+    @cached_property
+    def update_pack_deps(self):
+        """
+        The dependency names the entry updates by pack, in source order.
+
+        Returns:
+            tuple[str, ...]: Declared names, empty when the entry declares
+                no name
+        """
+        return self.mod_entry.update_pack_deps
+
+    @cached_property
+    def pypi_mirrors(self):
+        """
+        The PyPI mirrors the distributions of the mod are fetched from.
+
+        Returns:
+            str | dict: The declared mirror input, see Mirrors.from_input()
+        """
+        # a copy: the caller may edit the structure it gets, the cached entry
+        # is never shared
+        return deepcopy(self.mod_entry.pypi_mirrors)
+
+    @cached_property
+    def update_provide_pypi_mirrors(self):
+        """
+        The PyPI indexes the update packs of the mod provide.
+
+        Returns:
+            tuple[str, ...]: The declared index base urls, in source order
+        """
+        return self.mod_entry.update_provide_pypi_mirrors
 
     def _read_repo(self):
         """
@@ -272,53 +338,59 @@ def _is_mod_entry_info(func):
     return False
 
 
-def _is_update_pack_deps_attr(node):
+def _entry_key_of(node):
     """
-    Check whether an expression is the entry.update_pack_deps attribute.
+    Name the parsed key an expression is the attribute of the entry of.
 
     Args:
         node (ast.AST): Expression to inspect
 
     Returns:
-        bool: True for entry.update_pack_deps
+        str: The key, e.g. 'pypi_mirrors' for entry.pypi_mirrors, '' when the
+            expression is not an attribute of the entry or the attribute is
+            not one of PARSED_KEYS
     """
-    return (
-        isinstance(node, ast.Attribute)
-        and node.attr == 'update_pack_deps'
-        and isinstance(node.value, ast.Name)
-        and node.value.id == 'entry'
-    )
+    if not (
+            isinstance(node, ast.Attribute)
+            and isinstance(node.value, ast.Name)
+            and node.value.id == 'entry'
+    ):
+        return ''
+    return node.attr if node.attr in PARSED_KEYS else ''
 
 
-def _is_update_pack_deps_member(node):
+def _entry_key_root(node):
     """
-    Check whether an expression is a member or an item of update_pack_deps.
+    Name the parsed key an expression is rooted at.
 
-    The forms are entry.update_pack_deps.update, entry.update_pack_deps['x']
-    and an attribute of them, the mutations the parser refuses.
+    The forms are entry.<key>.update, entry.<key>['x'] and any item or
+    attribute chain of them, e.g. entry.pypi_mirrors['cn'].pop: the mutations
+    the parser refuses, because the value would be read without them.
 
     Args:
         node (ast.AST): Expression to inspect
 
     Returns:
-        bool: True when the expression is rooted at entry.update_pack_deps
+        str: The key the expression is rooted at, '' when it is not rooted at
+            one of PARSED_KEYS
     """
-    if isinstance(node, ast.Attribute):
-        return _is_update_pack_deps_attr(node.value)
-    if isinstance(node, ast.Subscript):
-        return _is_update_pack_deps_attr(node.value)
-    return False
+    while isinstance(node, (ast.Attribute, ast.Subscript)):
+        key = _entry_key_of(node)
+        if key:
+            return key
+        node = node.value
+    return ''
 
 
 def _mentions_entry(node):
     """
-    Check whether a statement mentions the entry or update_pack_deps.
+    Check whether a statement mentions the entry or its declarations.
 
     It is used on the statements the parser does not read, e.g. a conditional
     block or an import, so a declaration hidden there fails loudly instead of
-    silently producing an empty list. A plain use of entry, e.g. setting
-    entry.root, does not count: only an assignment to the entry name, an
-    update_pack_deps keyword or attribute, and an import of entry do.
+    silently producing the defaults. A plain use of entry, e.g. setting
+    entry.root, does not count: only an assignment to the entry name, a
+    PARSED_KEYS keyword or attribute, and an import of entry do.
 
     Args:
         node (ast.AST): Statement to inspect
@@ -327,9 +399,9 @@ def _mentions_entry(node):
         bool: True when the statement may declare the entry
     """
     for child in ast.walk(node):
-        if isinstance(child, ast.keyword) and child.arg == 'update_pack_deps':
+        if isinstance(child, ast.keyword) and child.arg in PARSED_KEYS:
             return True
-        if isinstance(child, ast.Attribute) and child.attr == 'update_pack_deps':
+        if isinstance(child, ast.Attribute) and child.attr in PARSED_KEYS:
             return True
         if isinstance(child, ast.alias) and child.name == 'entry':
             return True
@@ -347,60 +419,77 @@ def _mentions_entry(node):
     return False
 
 
-def _coerce_names(value, node=None):
+def _check_provide_mirrors(urls):
     """
-    Convert a static update_pack_deps value into a tuple of names.
+    Check that every provided index is an http(s) base url
+
+    The urls are matched against the sources of a dependency file verbatim
+    (after the normalization of the matcher), a url the pack server cannot
+    request would silently provide nothing.
 
     Args:
-        value: Evaluated value of the declaration
-        node (ast.AST, optional): Node the value came from, for the error
-            message. Defaults to None.
-
-    Returns:
-        tuple[str, ...]: Declared names in their order, deduplicated
+        urls (Iterable[str]): update_provide_pypi_mirrors of the entry
 
     Raises:
-        _Unsupported: If the value is not a collection of str
+        _Unsupported: If a url is not an http(s) url
     """
-    if value is None:
-        return ()
-    if isinstance(value, dict):
-        names = list(value)
-    elif isinstance(value, (list, tuple, set, frozenset)):
-        names = list(value)
-    else:
-        raise _Unsupported(
-            'update_pack_deps must be a dict, list, tuple or set of str, '
-            f'got {type(value).__name__}', node)
-
-    out = {}
-    for name in names:
-        if not isinstance(name, str):
+    for url in urls:
+        scheme, sep, rest = url.partition('://')
+        if not sep or scheme.lower() not in ('http', 'https') or not rest:
             raise _Unsupported(
-                f'update_pack_deps names must be str, got {type(name).__name__}', node)
-        out[name] = None
-    return tuple(out)
+                f'update_provide_pypi_mirrors must be http(s) urls, got {url!r}')
+
+
+def _dedup_names(names):
+    """
+    Drop the repeated names of a declaration, keeping the first occurrence
+
+    Args:
+        names (list | tuple | set | Any): The declared names
+
+    Returns:
+        The names without a repeat, an input that is not a list, a tuple or a
+            set is returned as it is, for the model to refuse it
+    """
+    if not isinstance(names, (list, tuple, set, frozenset)):
+        return names
+    out = []
+    for name in names:
+        if name not in out:
+            out.append(name)
+    return out
 
 
 class _EntryParser:
     """
     Walk the module level statements of an entry module.
 
-    The parser keeps the module level names it can evaluate, the local names
-    of the library entry imports, and the last update_pack_deps declaration it
-    read. Only module level assignments are read, see _mentions_entry for the
-    guard of the other statements.
+    Step 1 of the parse: the parser keeps the module level names it can
+    evaluate, the local names of the library entry imports, and the value node
+    of the last declaration of every key of PARSED_KEYS. Only module level
+    assignments are read, see _mentions_entry for the guard of the other
+    statements.
     """
 
     def __init__(self):
-        # module level names that hold a static value, {name: value}
+        # module level names that hold a static value, {name: value}, the
+        # names projection of the value (the keys of a dict)
         self.constants = {}
+        # module level names that hold a static value, {name: value}, the
+        # value as it is written (the values of a dict)
+        self.values = {}
         # local names bound to the library DICT_MOD_ENTRY by an import
         self.dict_mod_entry_names = set()
+        # local names bound to the library DEFAULT_PYPI_MIRRORS by an import
+        self.default_mirrors_names = set()
         # local names bound to the library entry module by an import
         self.entry_module_names = set()
-        # last declaration read, tuple[str, ...]
-        self.update_pack_deps = ()
+        # the values of the library entry an entry was copied from with a
+        # DICT_MOD_ENTRY lookup, None for a fresh entry
+        self.base = None
+        # key -> value node of the last declaration of the key, PARSED_KEYS
+        # only
+        self.nodes = {}
 
     def visit(self, tree):
         """
@@ -440,18 +529,18 @@ class _EntryParser:
             return
 
         if isinstance(node, ast.AugAssign):
-            if _is_update_pack_deps_attr(node.target):
+            key = _entry_key_of(node.target) or _entry_key_root(node.target)
+            if key:
                 raise _Unsupported(
-                    'augmented assignment to update_pack_deps is not supported', node)
+                    f'augmented assignment to {key} is not supported', node)
             self._check_other(node)
             return
 
         if isinstance(node, ast.Delete):
-            if any(
-                    _is_update_pack_deps_attr(target) or _is_update_pack_deps_member(target)
-                    for target in node.targets
-            ):
-                raise _Unsupported('deleting update_pack_deps is not supported', node)
+            for target in node.targets:
+                key = _entry_key_of(target) or _entry_key_root(target)
+                if key:
+                    raise _Unsupported(f'deleting {key} is not supported', node)
             self._check_other(node)
             return
 
@@ -471,7 +560,7 @@ class _EntryParser:
         """
         if _mentions_entry(node):
             raise _Unsupported(
-                'entry and update_pack_deps must be declared by module level assignments',
+                'entry and its declarations must be declared by module level assignments',
                 node)
 
     def _record_import(self, node):
@@ -490,6 +579,8 @@ class _EntryParser:
                 for alias in node.names:
                     if alias.name == 'DICT_MOD_ENTRY':
                         self.dict_mod_entry_names.add(alias.asname or alias.name)
+                    elif alias.name == 'DEFAULT_PYPI_MIRRORS':
+                        self.default_mirrors_names.add(alias.asname or alias.name)
             return
         for alias in node.names:
             if alias.name == _ENTRY_CONST_MODULE and alias.asname:
@@ -519,6 +610,30 @@ class _EntryParser:
             )
         return False
 
+    def _is_default_mirrors(self, node):
+        """
+        Check whether an expression is the library DEFAULT_PYPI_MIRRORS.
+
+        The accepted forms are the name imported from the library entry
+        module, e.g. DEFAULT_PYPI_MIRRORS or an alias of it, and the attribute
+        of a module imported as an alias, e.g. const.DEFAULT_PYPI_MIRRORS.
+
+        Args:
+            node (ast.AST): Expression to inspect
+
+        Returns:
+            bool: True when the expression is the library DEFAULT_PYPI_MIRRORS
+        """
+        if isinstance(node, ast.Name):
+            return node.id in self.default_mirrors_names
+        if isinstance(node, ast.Attribute):
+            return (
+                node.attr == 'DEFAULT_PYPI_MIRRORS'
+                and isinstance(node.value, ast.Name)
+                and node.value.id in self.entry_module_names
+            )
+        return False
+
     def _eval_subscript_key(self, node):
         """
         Evaluate the key of a subscript, across the ast of python 3.8.
@@ -538,7 +653,7 @@ class _EntryParser:
         index_type = getattr(ast, 'Index', None)
         if index_type is not None and isinstance(node, index_type):
             node = node.value
-        return self._eval(node)
+        return self._eval_value(node)
 
     def _assign_dict_mod_entry(self, value):
         """
@@ -546,8 +661,8 @@ class _EntryParser:
 
         The lookup is resolved by the key in the library dict, never by the
         source of the repo: the entry module is not imported or executed. The
-        key must be a static str, and the base value is the entry's
-        update_pack_deps.
+        key must be a static str, and the values of the library entry are the
+        base of the parsed keys.
 
         Args:
             value (ast.Subscript): The DICT_MOD_ENTRY[key] expression
@@ -567,7 +682,8 @@ class _EntryParser:
             entry = _LIBRARY_MOD_ENTRY[key]
         except KeyError:
             raise _Unsupported(f'unknown DICT_MOD_ENTRY key "{key}"', value) from None
-        self.update_pack_deps = tuple(entry.update_pack_deps)
+        self.base = {name: deepcopy(getattr(entry, name)) for name in PARSED_KEYS}
+        self.nodes = {}
 
     def _assign(self, target, value):
         """
@@ -588,16 +704,20 @@ class _EntryParser:
                 self._record_constant(target.id, value)
             return
 
-        if _is_update_pack_deps_attr(target):
-            self.update_pack_deps = _coerce_names(self._eval(value), value)
+        key = _entry_key_of(target)
+        if key:
+            # step 1: keep the node, step 2 evaluates it once the whole source
+            # is read
+            self.nodes[key] = value
             return
 
-        if _is_update_pack_deps_member(target):
+        key = _entry_key_root(target)
+        if key:
             raise _Unsupported(
-                'assignment to an item of update_pack_deps is not supported', target)
+                f'assignment to an item or an attribute of {key} is not supported', target)
 
         # other attributes and items, e.g. entry.root or a plain dict item,
-        # do not declare the dependency names
+        # do not declare a parsed key
 
     def _assign_entry(self, value):
         """
@@ -620,50 +740,117 @@ class _EntryParser:
             raise _Unsupported('entry must be constructed by a call', value)
         if any(keyword.arg is None for keyword in value.keywords):
             raise _Unsupported('**kwargs in the entry construction is not supported', value)
-
-        keyword = next(
-            (keyword for keyword in value.keywords if keyword.arg == 'update_pack_deps'),
-            None,
-        )
-        if keyword is None:
-            # an entry without the declaration is valid, but only when the
-            # construction is the known ModEntryInfo: a helper may set the
-            # declaration in its own body, where this parser cannot see it
-            if not _is_mod_entry_info(value.func):
-                raise _Unsupported(
-                    'entry is constructed by a call that does not declare update_pack_deps',
-                    value)
-            self.update_pack_deps = ()
-            return
-
-        self.update_pack_deps = _coerce_names(self._eval(keyword.value), keyword.value)
+        keywords = {keyword.arg: keyword.value for keyword in value.keywords}
+        declared = {key: keywords[key] for key in PARSED_KEYS if key in keywords}
+        if not declared and not _is_mod_entry_info(value.func):
+            # a helper may set a declaration in its own body, where this
+            # parser cannot see it
+            raise _Unsupported(
+                'entry is constructed by a call that does not declare '
+                + ', '.join(PARSED_KEYS), value)
+        # a new construction starts from the defaults of the model
+        self.base = None
+        self.nodes = declared
 
     def _record_constant(self, name, value):
         """
         Record a module level name for a later reference.
 
         A value the parser cannot evaluate is recorded as unknown: the name is
-        only an error when update_pack_deps actually references it, so an
-        unrelated dynamic module level value does not fail the parse.
+        only an error when a declaration actually references it, so an
+        unrelated dynamic module level value does not fail the parse. The name
+        is recorded twice, the two projections of a dict: its keys for
+        update_pack_deps, its values for the mirror declarations.
 
         Args:
             name (str): Name of the assignment target
             value (ast.AST): Value of the assignment
         """
         try:
-            self.constants[name] = self._eval(value)
+            self.constants[name] = self._eval_raw(value)
         except _Unsupported:
             self.constants[name] = _UNKNOWN
+        try:
+            self.values[name] = self._eval_value(value)
+        except _Unsupported:
+            self.values[name] = _UNKNOWN
 
-    def _eval(self, node):
+    def entry(self):
         """
-        Evaluate a static expression of the module.
+        Rebuild the entry from the parsed values and validate it.
+
+        Step 2 evaluates the node of every declared key, step 3 puts the
+        values into an entry dict and hands it to msgspec against
+        ModEntryInfo: the types, the shapes of the values and the defaults of
+        the keys the entry omits are the model's business, never the parser's.
+
+        Returns:
+            ModEntryInfo: The parsed entry
+
+        Raises:
+            _Unsupported: If a value is not a static expression, or a provided
+                index is not an http(s) url
+            msgspec.ValidationError: If a value does not fit ModEntryInfo
+        """
+        data = {} if self.base is None else self.base
+        for key, node in self.nodes.items():
+            try:
+                if key == 'update_pack_deps':
+                    # a dict declares its keys, the names are deduplicated in
+                    # the order of the source
+                    data[key] = _dedup_names(self._eval_names(node))
+                elif key == 'update_provide_pypi_mirrors':
+                    # the urls are deduplicated too, a set has no order of its
+                    # own and a repeated index is provided once
+                    data[key] = _dedup_names(self._eval_value(node))
+                else:
+                    data[key] = self._eval_value(node)
+            except _Unsupported as e:
+                raise _Unsupported(f'{key}: {e}') from None
+        # the name is not a parsed key: the entry only has to validate, the
+        # pack server reads the declarations and never the name
+        data.setdefault('name', '')
+        entry = msgspec.convert(data, type=ModEntryInfo, strict=False)
+        _check_provide_mirrors(entry.update_provide_pypi_mirrors)
+        return entry
+
+    def _eval_names(self, node):
+        """
+        Evaluate a declaration to the names it declares.
+
+        A dict declares its keys, the other collections declare their items,
+        dict.fromkeys() projects its first argument: the names projection of a
+        module level name is recorded by _record_constant, so the values of a
+        dict constant are never evaluated. The names are read here, the type
+        (a str) and the shape (a tuple of str) are checked by the model in
+        step 3.
 
         Args:
             node (ast.AST): Expression to evaluate
 
         Returns:
-            The static value of the expression
+            list | tuple | set: The declared names, a declaration of None
+                declares no name
+
+        Raises:
+            _Unsupported: If the expression is not static
+        """
+        value = self._eval_raw(node)
+        if value is None:
+            return []
+        if isinstance(value, dict):
+            return list(value)
+        return value
+
+    def _eval_raw(self, node):
+        """
+        Evaluate a static expression of the module, dicts projected to keys.
+
+        Args:
+            node (ast.AST): Expression to evaluate
+
+        Returns:
+            The static value of the expression, the keys of a dict
 
         Raises:
             _Unsupported: If the expression is not static or not one of the
@@ -686,14 +873,14 @@ class _EntryParser:
             for key in node.keys:
                 if key is None:
                     raise _Unsupported('dict unpacking is not supported', node)
-                keys.append(self._eval(key))
+                keys.append(self._eval_raw(key))
             try:
                 return dict.fromkeys(keys, None)
             except TypeError as e:
                 raise _Unsupported(f'dict key is not hashable: {e}', node) from None
 
         if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
-            return [self._eval(element) for element in node.elts]
+            return [self._eval_raw(element) for element in node.elts]
 
         if isinstance(node, ast.Call):
             if not _is_dict_fromkeys(node.func):
@@ -702,10 +889,92 @@ class _EntryParser:
             if not 1 <= len(node.args) <= 2 or node.keywords:
                 raise _Unsupported(
                     'dict.fromkeys() takes one or two positional arguments', node)
-            items = self._eval(node.args[0])
+            items = self._eval_raw(node.args[0])
             if not isinstance(items, (dict, list, tuple, set, frozenset)):
                 raise _Unsupported(
                     'dict.fromkeys() requires a dict, list, tuple or set of names', node)
             return dict.fromkeys(items, None)
 
         raise _Unsupported(f'unsupported expression: {type(node).__name__}', node)
+
+    def _eval_value(self, node):
+        """
+        Evaluate a static expression of the module, keeping the values.
+
+        The dict literal is read as it is written, nested dicts and their
+        values included, and the copy idioms of a default structure are
+        accepted; the update_pack_deps projection of a dict is _eval_names(),
+        which reads the keys only.
+
+        Args:
+            node (ast.AST): Expression to evaluate
+
+        Returns:
+            The static value of the expression
+
+        Raises:
+            _Unsupported: If the expression is not static or not one of the
+                forms the parser reads
+        """
+        if isinstance(node, ast.Constant):
+            return node.value
+
+        if isinstance(node, ast.Name):
+            if self._is_default_mirrors(node):
+                return deepcopy(_LIBRARY_DEFAULT_PYPI_MIRRORS)
+            try:
+                value = self.values[node.id]
+            except KeyError:
+                raise _Unsupported(f'unknown name "{node.id}"', node) from None
+            if value is _UNKNOWN:
+                raise _Unsupported(f'name "{node.id}" is not a static value', node)
+            return value
+
+        if isinstance(node, ast.Attribute):
+            if self._is_default_mirrors(node):
+                return deepcopy(_LIBRARY_DEFAULT_PYPI_MIRRORS)
+            raise _Unsupported(f'unsupported expression: {type(node).__name__}', node)
+
+        if isinstance(node, ast.Dict):
+            out = {}
+            for key, value in zip(node.keys, node.values):
+                if key is None:
+                    raise _Unsupported('dict unpacking is not supported', node)
+                out[self._eval_value(key)] = self._eval_value(value)
+            return out
+
+        if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+            return [self._eval_value(element) for element in node.elts]
+
+        if isinstance(node, ast.Call):
+            # deepcopy(DEFAULT_PYPI_MIRRORS) and DEFAULT_PYPI_MIRRORS.copy(),
+            # the copy idioms of a default structure
+            if _is_copy_call(node):
+                return deepcopy(self._eval_value(node.args[0] if node.args else node.func.value))
+            raise _Unsupported(
+                'unsupported call, only deepcopy() and .copy() calls are read', node)
+
+        raise _Unsupported(f'unsupported expression: {type(node).__name__}', node)
+
+
+def _is_copy_call(node):
+    """
+    Check whether a call is a copy of its argument or of its attribute owner
+
+    The accepted forms are deepcopy(x), copy.deepcopy(x) with one positional
+    argument and no keyword, and x.copy() with no argument.
+
+    Args:
+        node (ast.Call): Call to inspect
+
+    Returns:
+        bool: True for one of the copy forms
+    """
+    func = node.func
+    if isinstance(func, ast.Name) and func.id == 'deepcopy':
+        return len(node.args) == 1 and not node.keywords
+    if isinstance(func, ast.Attribute) and func.attr == 'deepcopy':
+        return len(node.args) == 1 and not node.keywords and isinstance(func.value, ast.Name)
+    if isinstance(func, ast.Attribute) and func.attr == 'copy':
+        return not node.args and not node.keywords
+    return False

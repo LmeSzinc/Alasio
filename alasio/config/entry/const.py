@@ -28,6 +28,15 @@ DEFAULT_PYPI_MIRRORS = {
     },
 }
 
+# pypi indexes the update pack of a mod provides: the wheels of the
+# dependencies a dependency file annotates with one of these indexes (the
+# '# from <url>' comment uv writes) are published with the update pack, so a
+# client installs them even when the index itself is unreachable. Defaults to
+# the py38deps index of the python3.8 runtime the mods ship with
+DEFAULT_UPDATE_PROVIDE_PYPI_MIRRORS = (
+    'https://py38deps.github.io/py38deps/simple/',
+)
+
 
 class ModEntryInfo(Struct, dict=True):
     """
@@ -59,18 +68,28 @@ class ModEntryInfo(Struct, dict=True):
     # update source of the mod: the mirror structure of its update server,
     # see alasio.deploy.httpclient.probe_mirrors.Mirrors.from_input() for the
     # accepted forms (a single url, name to url, group to mirrors, and the
-    # flat/nested mix). The mods with an empty value declare no update
-    # source and are never checked. Defaults to ''
-    mirrors: Union[str, Dict[str, str], Dict[str, Dict[str, str]]] = ''
+    # flat/nested mix, which is one dict type for msgspec). The mods with an
+    # empty value declare no update source and are never checked. Defaults
+    # to ''
+    mirrors: Union[str, Dict[str, Union[str, Dict[str, str]]]] = ''
     # mirrors of the PyPI simple index (PEP 503) the distributions of the mod
     # are downloaded from, when they do not update by pack: the same input
     # forms as mirrors, see
-    # alasio.deploy.httpclient.probe_mirrors.Mirrors.from_input(). Defaults
+    # alasio.deploy.httpclient.probe_mirrors.Mirrors.from_input() (a single
+    # url, name to url, group to mirrors, and the flat/nested mix). Defaults
     # to DEFAULT_PYPI_MIRRORS; a mod whose distributions come from another
     # source (e.g. a private index) overrides it. The mods that keep the
     # default share one mirror record, see pypi_record_name
-    pypi_mirrors: Union[str, Dict[str, str], Dict[str, Dict[str, str]]] = field(
+    pypi_mirrors: Union[str, Dict[str, Union[str, Dict[str, str]]]] = field(
         default_factory=lambda: deepcopy(DEFAULT_PYPI_MIRRORS))
+    # pypi indexes the update packs of the mod provide: the wheels of the
+    # dependencies whose dependency file annotates them with one of these
+    # indexes (the '# from <url>' comment of uv) are published with the update
+    # pack, see alasio.deploy_dev.pack_server. Defaults to
+    # DEFAULT_UPDATE_PROVIDE_PYPI_MIRRORS; the mods that need no provided
+    # index declare it as () (a tuple of http(s) urls, no trailing slash
+    # required)
+    update_provide_pypi_mirrors: Tuple[str, ...] = DEFAULT_UPDATE_PROVIDE_PYPI_MIRRORS
     # relative path from mod root to the requirements file of the mod: the
     # distributions it runs with, every one pinned to an exact version, see
     # alasio.deploy.simple_pip.install_base. Defaults to 'requirements.txt'

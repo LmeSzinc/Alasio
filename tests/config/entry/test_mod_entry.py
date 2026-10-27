@@ -3,14 +3,15 @@ Tests for the mod entry fields of ModEntryInfo (alasio/config/entry/const.py):
 the update source of a mod (mirrors), in the input forms of
 Mirrors.from_input (see doc/2026-10-05_mod-update-backend-integration.md
 §9), the source of the distributions installed with pip (pypi_mirrors and
-its default), and the dependency fields (requirements_file and
-update_pack_deps).
+its default), the indexes the update packs provide
+(update_provide_pypi_mirrors and its default), and the dependency fields
+(requirements_file and update_pack_deps).
 """
 from copy import deepcopy
 
 import pytest
 
-from alasio.config.entry.const import DEFAULT_PYPI_MIRRORS, ModEntryInfo
+from alasio.config.entry.const import DEFAULT_PYPI_MIRRORS, DEFAULT_UPDATE_PROVIDE_PYPI_MIRRORS, ModEntryInfo
 from alasio.deploy.httpclient.probe_mirrors import Mirrors
 
 
@@ -183,6 +184,38 @@ class TestModEntryInfoPypiMirrors:
 
         assert other.pypi_mirrors == entry.pypi_mirrors
         assert other.pypi_mirrors is not entry.pypi_mirrors
+
+
+class TestModEntryInfoUpdateProvidePypiMirrors:
+    """The update_provide_pypi_mirrors field of a mod entry."""
+
+    def test_default(self):
+        """A mod that declares nothing provides the py38deps index."""
+        assert DEFAULT_UPDATE_PROVIDE_PYPI_MIRRORS == (
+            'https://py38deps.github.io/py38deps/simple/',)
+        assert ModEntryInfo(name='m').update_provide_pypi_mirrors == \
+            DEFAULT_UPDATE_PROVIDE_PYPI_MIRRORS
+
+    def test_declared(self):
+        """A mod keeps the indexes it declares, in the declared order."""
+        entry = ModEntryInfo(
+            name='m',
+            update_provide_pypi_mirrors=('https://a.example/simple', 'https://b.example/simple'),
+        )
+        assert entry.update_provide_pypi_mirrors == (
+            'https://a.example/simple', 'https://b.example/simple')
+
+    def test_empty(self):
+        """A mod that provides no index declares an empty tuple."""
+        assert ModEntryInfo(name='m', update_provide_pypi_mirrors=()).update_provide_pypi_mirrors == ()
+
+    def test_copy_keeps_the_provided_indexes(self):
+        """ModEntryInfo.copy() (deepcopy) keeps the declared indexes."""
+        entry = ModEntryInfo(name='m', update_provide_pypi_mirrors=('https://a.example/simple',))
+
+        other = entry.copy()
+
+        assert other.update_provide_pypi_mirrors == entry.update_provide_pypi_mirrors
 
 
 class TestModEntryInfoDependencies:
