@@ -144,8 +144,11 @@ class TestRgb565ToRgb888:
         b = b.astype(np.uint8)
         return cv2.merge([r, g, b])
 
+    # a class-scoped fixture runs once per class, before any instance exists,
+    # so it takes no self: pytest deprecates the instance method form
+    @staticmethod
     @pytest.fixture(scope="class")
-    def rgb565_image(self):
+    def rgb565_image():
         """
         Fixture to create the RGB565 test image once for all tests in this class.
         This contains all possible RGB565 colors (0-65535) in a 256x256 image.
