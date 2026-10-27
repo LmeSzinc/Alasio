@@ -38,15 +38,9 @@ from alasio.ext.path.iter import iter_files
 from alasio.git.mock.mock_repo import MockGitRepo
 from alasio.logger import logger
 from alasio.testing.filesystem import fs  # noqa: F401
+from tests.deploy.simple_pip.conftest import build_wheel, site_packages
 from tests.deploy_dev.pack.conftest import FakeMirrorTable
 from tests.deploy_dev.pack_server.test_fetch_wheel import MockMirror
-
-# the client of the mirror is a starlette TestClient and the code under test
-# passes the timeout of its own http client: the deprecation warning of
-# starlette about the timeout argument is noise here, see the mock
-pytestmark = pytest.mark.filterwarnings(
-    'ignore::starlette.exceptions.StarletteDeprecationWarning')
-from tests.deploy.simple_pip.conftest import build_wheel, site_packages
 
 # the dependency files of the mock repo: httpx is pinned to a new version on
 # every commit, demo is pinned but not a managed name of the config, so it is
