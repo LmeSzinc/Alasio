@@ -159,48 +159,49 @@ class TestAtomicCopy:
         assert os.listdir('/data') == ['a.bin', 'b.bin']
 
     def test_copy_to_other_folder(self, fs):
-        """The target may live in another folder."""
+        """The target may live in another folder, its parents are created."""
         fs.create_file('/data/src/a.bin', contents=b'data')
-        fs.create_dir('/data/dst')
-        atomic_copy('/data/src/a.bin', '/data/dst/b.bin')
-        assert file_read_bytes('/data/dst/b.bin') == b'data'
+        atomic_copy('/data/src/a.bin', '/data/dst/sub/b.bin')
+        assert file_read_bytes('/data/dst/sub/b.bin') == b'data'
         assert os.listdir('/data/src') == ['a.bin']
-        assert os.listdir('/data/dst') == ['b.bin']
+        assert os.listdir('/data/dst/sub') == ['b.bin']
 
-    def test_copy_uses_tmp_of_source(self, fs, monkeypatch):
-        """The content should be written to a tmp file next to the source first."""
-        fs.create_file('/data/a.bin', contents=b'data')
+    def test_copy_uses_tmp_of_target(self, fs, monkeypatch):
+        """The content should be written to a tmp file next to the target first."""
+        fs.create_file('/data/src/a.bin', contents=b'data')
         seen = []
         original = atomic.file_copy
 
         def checking_copy(source, target, chunk_size=None):
             seen.append((source, target))
-            assert source == '/data/a.bin'
-            assert os.path.dirname(target) == '/data'
+            assert source == '/data/src/a.bin'
+            # the tmp file is next to the target, so the replace stays in one folder
+            assert os.path.dirname(target) == '/data/dst'
             assert is_tmp_file(target) is True
             return original(source, target, chunk_size=chunk_size)
 
         monkeypatch.setattr(atomic, 'file_copy', checking_copy)
-        atomic_copy('/data/a.bin', '/data/b.bin')
+        atomic_copy('/data/src/a.bin', '/data/dst/b.bin')
         assert len(seen) == 1
-        assert file_read_bytes('/data/b.bin') == b'data'
+        assert file_read_bytes('/data/dst/b.bin') == b'data'
 
     def test_copy_failure_cleans_tmp(self, fs, monkeypatch):
         """The tmp file should be removed when the replace fails."""
         monkeypatch.setattr(atomic, 'IS_WINDOWS', False)
-        fs.create_file('/data/a.bin', contents=b'data')
+        fs.create_file('/data/src/a.bin', contents=b'data')
         error = PermissionError(13, 'Permission denied')
         calls = break_function(monkeypatch, os, 'replace', [error])
         with pytest.raises(PermissionError) as e:
-            atomic_copy('/data/a.bin', '/data/b.bin')
+            atomic_copy('/data/src/a.bin', '/data/dst/b.bin')
         assert e.value is error
         assert len(calls) == 1
-        assert os.listdir('/data') == ['a.bin']
-        assert file_read_bytes('/data/a.bin') == b'data'
+        assert os.listdir('/data/src') == ['a.bin']
+        assert os.listdir('/data/dst') == []
+        assert file_read_bytes('/data/src/a.bin') == b'data'
 
     def test_copy_read_error_cleans_tmp(self, fs, monkeypatch):
         """The tmp file should be removed when the source read fails midway."""
-        fs.create_file('/data/a.bin', contents=b'abcdefgh')
+        fs.create_file('/data/src/a.bin', contents=b'abcdefgh')
         real_read = atomic.atomic_read_bytes_into
 
         def broken_read(file, buffer):
@@ -210,9 +211,10 @@ class TestAtomicCopy:
 
         monkeypatch.setattr(atomic, 'atomic_read_bytes_into', broken_read)
         with pytest.raises(RuntimeError, match='source read failed midway'):
-            atomic_copy('/data/a.bin', '/data/b.bin')
-        assert file_read_bytes('/data/a.bin') == b'abcdefgh'
-        assert os.listdir('/data') == ['a.bin']
+            atomic_copy('/data/src/a.bin', '/data/dst/b.bin')
+        assert file_read_bytes('/data/src/a.bin') == b'abcdefgh'
+        assert os.listdir('/data/src') == ['a.bin']
+        assert os.listdir('/data/dst') == []
 
     def test_copy_retries_on_windows(self, fs, monkeypatch):
         """PermissionError should be retried on Windows until it works."""

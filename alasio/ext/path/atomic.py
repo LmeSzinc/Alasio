@@ -769,12 +769,18 @@ def atomic_copy(source, target, chunk_size=CHUNK_SIZE):
     Atomic file write with minimal IO operation and memory usage
     A failed copy leaves the target untouched and no tmp file behind.
 
+    The tmp file lives next to the target, not next to the source: the write
+    creates the missing folder of the target, and os.replace() stays inside
+    the folder of the target, which is the same filesystem by definition.
+    A tmp file next to the source may be on another device, where os.replace()
+    is not atomic and fails with OSError(EXDEV).
+
     Args:
         source (str):
         target (str):
         chunk_size (int):
     """
-    tmp = to_tmp_file(source)
+    tmp = to_tmp_file(target)
     try:
         file_copy(source, tmp, chunk_size=chunk_size)
     except BaseException:
