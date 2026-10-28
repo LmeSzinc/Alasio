@@ -52,6 +52,20 @@ def is_valid_py(file):
     return suffix in PY_SUFFIX
 
 
+def to_toml_list(items):
+    """
+    Format strings as a single line TOML array.
+
+    Args:
+        items (list[str]): Items to format
+
+    Returns:
+        str: TOML array, `["assets", "module"]`
+    """
+    quoted = ', '.join(f'"{item}"' for item in items)
+    return f'[{quoted}]'
+
+
 class RuffFormatter:
     LINE_LENGTH = 120
 
@@ -119,19 +133,15 @@ class RuffFormatter:
     @cached_property
     def known_first_party(self):
         """
+        Project modules, the folders and python files in cwd.
+
         Returns:
-            str: assets,module,...
+            list[str]: ['assets', 'module', ...]
         """
-        modules = []
-        for folder in self.cwd.iter_foldernames():
-            if is_valid_module(folder):
-                modules.append(folder)
-        for file in self.cwd.iter_files('.py'):
-            stem = file.stem
-            if is_valid_module(stem):
-                modules.append(stem)
-        modules = ','.join(modules)
-        print(f'Ruff known-first-party: {modules}')
+        folders = [folder for folder in self.cwd.iter_foldernames() if is_valid_module(folder)]
+        files = [file.stem for file in self.cwd.iter_files('.py') if is_valid_module(file.stem)]
+        modules = folders + files
+        print(f'Ruff known-first-party: {",".join(modules)}')
         return modules
 
     @cached_property
@@ -146,22 +156,13 @@ class RuffFormatter:
         Returns:
             list[str]: Flattened ['--config', 'KEY = VALUE', ...] arguments
         """
-        def to_list(text: str):
-            items = [f'"{item}"' for item in text.split(',')]
-            items = ', '.join(items)
-            return f'[{items}]'
-
         pairs = [
             f'line-length = {self.LINE_LENGTH}',
-            f'lint.select = {to_list(self.rules)}',
+            f'lint.select = {to_toml_list(self.rules.split(","))}',
             'lint.isort.combine-as-imports = true',
-            f'lint.isort.known-first-party = {to_list(self.known_first_party)}',
+            f'lint.isort.known-first-party = {to_toml_list(self.known_first_party)}',
         ]
-        args = []
-        for pair in pairs:
-            args.append('--config')
-            args.append(pair)
-        return args
+        return [item for pair in pairs for item in ('--config', pair)]
 
     def format_code(self, file: str):
         if os.path.isabs(file):
@@ -224,6 +225,9 @@ class RuffFormatter:
             show_diff=False,
             quiet=False,
             known_standard_library=STD_SET,
+            # The same project modules ruff uses, isort does its own detection
+            # otherwise and would treat an installed project package as third-party
+            known_first_party=list(self.known_first_party),
         )
         if new == code:
             print('Import sorting all good')
