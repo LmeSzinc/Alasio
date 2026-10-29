@@ -2,10 +2,11 @@
 Tests of DisplayCard.from_card(), DisplayCard.from_refs() and CardNameBuilder.
 
 A card is a list of items: a group name of the task itself, or a CardItem. A
-CardItem with `info` names the card info and must be the first item, a
-CardItem with `group` references a group of the task itself or of another
-task. The raw info is the explicit info, or the first group that is not a
-Scheduler group, so a card without an info still has a stable name.
+card of a single group may also be written as the group name itself. A CardItem
+with `info` names the card info and must be the first item, a CardItem with
+`group` references a group of the task itself or of another task. The raw info
+is the explicit info, or the first group that is not a Scheduler group, so a
+card without an info still has a stable name.
 
 TaskDefinition has already checked the types and rejected unknown fields, so
 these tests only cover the meaning of the items.
@@ -50,6 +51,24 @@ class TestFromCardGroups:
         card = DisplayCard.from_card('Task', ['Group'])
         assert card.raw_info == 'Group'
         assert card.groups == {'Group': make_ref('Group')}
+
+    def test_a_group_name_is_a_card_of_one_group(self):
+        """
+        A bare group name is the shorthand of a one group card, the name of the
+        group is the name of the card info.
+        """
+        card = DisplayCard.from_card('Task', 'Group')
+        assert card == DisplayCard.from_card('Task', ['Group'])
+        assert card.raw_info == 'Group'
+        assert card.groups == {'Group': make_ref('Group')}
+
+    def test_a_bare_group_name_is_checked(self):
+        with pytest.raises(DefinitionError) as e:
+            DisplayCard.from_card('Task', 'group')
+        assert e.value.msg == 'Group name format invalid: "group"'
+        assert e.value.keys == ['Task', 'displays']
+        # the card is reported as it was written, not as the normalized list
+        assert e.value.value == 'group'
 
     def test_several_groups(self):
         card = DisplayCard.from_card('Task', ['Group1', 'Group2'])

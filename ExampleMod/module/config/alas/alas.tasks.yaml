@@ -3,16 +3,16 @@ Alas:
   groups:
     Game:
   displays:
-    - [ Game ]
-    - [ { task: Device, group: Emulator } ]
-    - [ { task: Device, group: EmulatorInfo } ]
-    - [ { task: Device, group: Error } ]
-    - [ { task: Device, group: Optimization } ]
+    - Game
+    - [{ task: Device, group: Emulator }]
+    - [{ task: Device, group: EmulatorInfo }]
+    - [{ task: Device, group: Error }]
+    - [{ task: Device, group: Optimization }]
 
 RestartDeviceDisplay:
   displays:
-    - [ { info: RestartDevice }, { task: RestartDevice, group: Scheduler } ]
+    - [{ info: RestartDevice }, { task: RestartDevice, group: Scheduler }]
 
 RestartGameDisplay:
   displays:
-    - [ { info: RestartGame }, { task: RestartGame, group: Scheduler } ]
+    - [{ info: RestartGame }, { task: RestartGame, group: Scheduler }]

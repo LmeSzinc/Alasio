@@ -17,7 +17,7 @@ hint a developer reads, not what the parser accepts.
 import pytest
 
 from alasio.config_dev.parse.base import DefinitionError
-from alasio.config_dev.parse.parse_tasks import ParseTasks
+from alasio.config_dev.parse.parse_tasks import DisplayCard, ParseTasks
 from alasio.ext import env
 from alasio.ext.path import PathStr
 from alasio.testing.filesystem import fs  # noqa: F401
@@ -354,9 +354,9 @@ class TestErrorLocation:
             'Expected `str`, got `int` - at `$[...].displays[0][0].info`',
         ),
         (
-            'Task:\n  displays:\n    - Group\n',
+            'Task:\n  displays:\n    - {task: Device, group: Emulator}\n',
             ['...', 'displays', 0],
-            'Expected `array`, got `str` - at `$[...].displays[0]`',
+            'Expected `str | array`, got `object` - at `$[...].displays[0]`',
         ),
         (
             'Task:\n  displays: 0\n',
@@ -415,20 +415,20 @@ Task:
 
 class TestDisplayFormat:
     @pytest.mark.parametrize('card, msg', [
-        ('  - Group\n', 'Expected `array`, got `str` - at `$[...].displays[0]`'),
         (
             '  - {task: Device, group: Emulator}\n',
-            'Expected `array`, got `object` - at `$[...].displays[0]`',
+            'Expected `str | array`, got `object` - at `$[...].displays[0]`',
         ),
         (
             '  - info: Fleet\n    groups: [Group]\n',
-            'Expected `array`, got `object` - at `$[...].displays[0]`',
+            'Expected `str | array`, got `object` - at `$[...].displays[0]`',
         ),
-    ], ids=['group-str', 'group-ref', 'info-with-groups'])
-    def test_a_card_must_be_a_list(self, fs, card, msg):
+        ('  - 1\n', 'Expected `str | array`, got `int` - at `$[...].displays[0]`'),
+    ], ids=['group-ref', 'info-with-groups', 'int'])
+    def test_a_card_is_a_list_or_a_group_name(self, fs, card, msg):
         """
-        The pre-list format is rejected: a card is a list of items, so its
-        first item must be a str or a mapping, not the card itself.
+        A card is a list of items or the name of its only group. The pre-list
+        format is rejected: a mapping is neither.
         """
         parser = make_parser(fs, tasks_yaml=f'Task:\n  displays:\n{card}')
         with pytest.raises(DefinitionError) as e:
@@ -437,6 +437,45 @@ class TestDisplayFormat:
         assert e.value.file == parser.tasks_file
         assert e.value.keys == ['...', 'displays', 0]
         assert 'value=' not in str(e.value)
+
+    def test_a_group_name_is_a_card_of_one_group(self, fs):
+        parser = make_parser(fs, tasks_yaml="""\
+Task:
+  groups:
+    Scheduler:
+    Group:
+  displays:
+    - Group
+""")
+        task = parser.tasks_data['Task']
+        assert list(task.displays) == ['card-Task-Group']
+        card = task.displays['card-Task-Group']
+        assert card.raw_info == 'Group'
+        assert list(card.groups) == ['Group']
+
+    @pytest.mark.parametrize('card', [
+        '  - Group\n',
+        '  - [ Group ]\n',
+    ], ids=['bare', 'list'])
+    def test_a_group_name_equals_a_one_item_list(self, fs, card):
+        parser = make_parser(fs, tasks_yaml=f'Task:\n  groups:\n    Group:\n  displays:\n{card}')
+        card = parser.tasks_data['Task'].displays['card-Task-Group']
+        assert card == DisplayCard.from_card('Task', ['Group'])
+
+    def test_an_invalid_group_name_is_reported(self, fs):
+        parser = make_parser(fs, tasks_yaml="""\
+Task:
+  groups:
+    Group:
+  displays:
+    - group
+""")
+        with pytest.raises(DefinitionError) as e:
+            _ = parser.tasks_data
+        assert e.value.msg == 'Group name format invalid: "group"'
+        assert e.value.file == parser.tasks_file
+        assert e.value.keys == ['Task', 'displays']
+        assert e.value.value == 'group'
 
 
 class TestTasksDataYamlQuirks:

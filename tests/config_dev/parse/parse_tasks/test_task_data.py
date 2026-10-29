@@ -100,10 +100,22 @@ class TestTaskDefinition:
         with pytest.raises(msgspec.ValidationError):
             definition(displays=displays)
 
-    def test_card_must_be_a_list(self):
-        """A card is a list of items, a bare group name is not a card."""
+    def test_a_card_is_a_list_or_a_group_name(self):
+        """A card is a list of items, or the name of its only group."""
+        assert definition(displays=['Group']).displays == ['Group']
+        assert definition(displays=[['Group']]).displays == [['Group']]
+
+    @pytest.mark.parametrize('card', [
+        {'task': 'Device', 'group': 'Emulator'},
+        {'info': 'Fleet', 'groups': ['Group']},
+        1,
+        None,
+        True,
+    ], ids=['group-ref', 'info-with-groups', 'int', 'null', 'bool'])
+    def test_card_types(self, card):
+        """A card is a str or a list, the pre-list mapping format is rejected."""
         with pytest.raises(msgspec.ValidationError):
-            definition(displays=['Group'])
+            definition(displays=[card])
 
     @pytest.mark.parametrize('item', [1, None, ['Group'], True], ids=[
         'int', 'null', 'list', 'bool',
@@ -330,6 +342,27 @@ displays:
         assert list(task.displays['card-Task-Group1'].groups) == ['Group1']
         assert list(task.displays['card-Task-Group2'].groups) == ['Group2', 'Group3']
         assert list(task.displays['card-Task-Fleet'].groups) == ['Group1', 'Group2']
+
+    def test_bare_group_name_card(self):
+        """A card of one group can be written as the group name itself."""
+        bare = make_task("""\
+groups:
+  Group1:
+  Group2:
+displays:
+  - Group1
+  - [Group2]
+""")
+        listed = make_task("""\
+groups:
+  Group1:
+  Group2:
+displays:
+  - [Group1]
+  - [Group2]
+""")
+        assert list(bare.displays) == ['card-Task-Group1', 'card-Task-Group2']
+        assert bare.displays == listed.displays
 
     def test_empty_list(self):
         assert TaskData.from_task_definition('Task', definition(displays=[])).displays == {}

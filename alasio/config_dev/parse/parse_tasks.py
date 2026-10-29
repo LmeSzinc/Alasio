@@ -46,8 +46,9 @@ class CardItem(msgspec.Struct, forbid_unknown_fields=True):
 
 # Items of one card: a group name of the task itself, or a card reference
 CardItemDefinition = Union[str, CardItem]
-# One card of `displays`, an ordered list of group names and references
-CardDefinition = List[CardItemDefinition]
+# One card of `displays`: a group name of the task itself, or an ordered list
+# of group names and references
+CardDefinition = Union[str, List[CardItemDefinition]]
 # `displays` value: a short form string, a null, or a list of cards
 DisplaysDefinition = Optional[Union[str, List[CardDefinition]]]
 
@@ -71,6 +72,8 @@ class TaskDefinition(msgspec.Struct, forbid_unknown_fields=True):
           Fleet3:
             task: Commission
         displays:
+          # a group name is a card of that one group of the task
+          - Fleet1
           - [{info: Fleet}, Fleet1, Fleet2]
           - [{task: Commission, group: Preset}]
         global_bind: false
@@ -116,7 +119,7 @@ class TaskGroup(msgspec.Struct, forbid_unknown_fields=True):
         keys = [task, 'groups', group]
         if value is None:
             return cls(task=task, group=group, model=group)
-        if type(value) is str:
+        if isinstance(value, str):
             if not validate_task_name(value):
                 raise DefinitionError(
                     f'Group model format invalid: "{value}"', keys=keys, value=value)
@@ -167,11 +170,15 @@ class DisplayCard(msgspec.Struct, dict=True, forbid_unknown_fields=True):
     info: str = ''
 
     @classmethod
-    def from_card(cls, task: str, row: "list") -> "DisplayCard":
+    def from_card(cls, task: str, row: "CardDefinition") -> "DisplayCard":
         """
         Build a card from one entry of `displays`.
 
+        A card of a single group may be written as the group name itself, so
+        `Group` and `[Group]` are the same card.
+
         Example input:
+            Group
             [Fleet1]
             [Fleet1, Fleet2]
             [{info: Fleet}, Fleet1, Fleet2]
@@ -180,8 +187,8 @@ class DisplayCard(msgspec.Struct, dict=True, forbid_unknown_fields=True):
 
         Args:
             task (str): Task that owns the card
-            row (list[str | CardItem]): Items of the card, decoded by
-                TaskDefinition
+            row (str | list[str | CardItem]): Items of the card, or the name of
+                its only group, decoded by TaskDefinition
 
         Returns:
             DisplayCard: Card of the task
@@ -192,10 +199,17 @@ class DisplayCard(msgspec.Struct, dict=True, forbid_unknown_fields=True):
                 is displayed twice in the same card
         """
         keys = [task, 'displays']
+        # an error reports the card as it was written
+        source = row
+        items: "list[CardItemDefinition]"
+        if isinstance(row, str):
+            items = [row]
+        else:
+            items = row
         raw_info = ''
         refs: "list[TaskGroup]" = []
-        for index, item in enumerate(row):
-            if type(item) is str:
+        for index, item in enumerate(items):
+            if isinstance(item, str):
                 refs.append(TaskGroup.from_display(task, item))
                 continue
             if item.info:
@@ -214,7 +228,7 @@ class DisplayCard(msgspec.Struct, dict=True, forbid_unknown_fields=True):
                 raise DefinitionError(
                     'Display ref must have "info" or "group"', keys=keys, value=item)
             refs.append(TaskGroup.from_display(task, item.group, item.task))
-        return cls.from_refs(task, raw_info, refs, row, keys)
+        return cls.from_refs(task, raw_info, refs, source, keys)
 
     @classmethod
     def from_refs(cls, task: str, raw_info: str, refs: "list[TaskGroup]", source, keys) -> "DisplayCard":
@@ -361,7 +375,7 @@ class TaskData(msgspec.Struct, dict=True, forbid_unknown_fields=True):
         # display cards
         raw_displays = definition.displays
         cards: "list[DisplayCard]"
-        if type(raw_displays) is list:
+        if isinstance(raw_displays, list):
             cards = [DisplayCard.from_card(task, row) for row in raw_displays]
         else:
             # treat as shorten instruction
