@@ -260,9 +260,14 @@ class Oil(a.DashboardTotal):
     Value: a.T_INT_GE0 = 0
 """
 
-    @pytest.mark.xfail(strict=True, reason='the parent class is emitted after the child, the generated file raises NameError')
-    def test_parent_defined_later_in_file(self, fs):
-        """A parent may be defined after its child in the yaml."""
+    def test_parent_defined_later_is_rejected(self, fs):
+        """
+        A parent defined after its child is rejected while parsing the nav.
+
+        The generated file would define the child class before its base, which
+        raises NameError on import, and importing the model file of another nav
+        is not an option either, see TestModelFileCrossNav.
+        """
         gen = make_generator(fs, yaml="""\
 Child:
   parent: Base
@@ -273,13 +278,42 @@ Base:
   args:
     X: 1
 """)
-        code = model_code(gen)
-        namespace = {}
-        exec(compile(code, 'testnav_model.py', 'exec'), namespace)
-        assert namespace['Child'].X == 1
+        with pytest.raises(DefinitionError) as e:
+            _ = gen.model_gen
+        assert e.value.msg == 'Group parent "Base" must be defined before the group that inherits it'
+        assert e.value.keys == ['Child', 'parent']
+        assert e.value.value == 'Base'
 
 
 class TestModelFileCrossNav:
+    def test_parent_in_another_nav_is_rejected(self, fs):
+        """
+        A nav can not inherit a group of another nav of the same mod.
+
+        The generated model file would have to import the model file of the
+        other nav, which turns into an import cycle as soon as the two navs
+        inherit from each other, so the nav is rejected while parsing.
+        """
+        with pytest.raises(DefinitionError) as e:
+            make_cross(fs, {
+                'nava': """\
+Child:
+  parent: Base
+  args:
+    Z: 3
+""",
+                'navb': """\
+Base:
+  args:
+    X: 1
+""",
+            })
+        assert e.value.msg == (
+            'Group parent "Base" must be defined in the same file, or be a group of alasio'
+        )
+        assert e.value.keys == ['Child', 'parent']
+        assert e.value.value == 'Base'
+
     def test_foreign_group_is_emitted_here(self, fs):
         """A group of another nav whose parent is here is emitted here, last."""
         gen = make_generator(fs, yaml="""\
@@ -342,30 +376,6 @@ B:
 class A(a.GroupBase):
     X: int = 1
 """
-
-    @pytest.mark.xfail(strict=True, reason='a group with parents in two navs is emitted in one file, the other class is undefined there')
-    def test_parents_in_two_navs(self, fs):
-        """Both model files of a cross-nav multiple inheritance can be imported."""
-        gen = make_cross(fs, {
-            'nava': """\
-BaseA:
-  args:
-    X: 1
-
-Child:
-  parent: [BaseA, BaseB]
-  args:
-    Z: 3
-""",
-            'navb': """\
-BaseB:
-  args:
-    Y: 2
-""",
-        })
-        for nav in gen.dict_nav_config.values():
-            code = model_code(nav, filename=f'{nav.nav_name}_model.py')
-            exec(compile(code, f'{nav.nav_name}_model.py', 'exec'), {})
 
 
 class TestLiteralVariable:
