@@ -2,9 +2,9 @@
 Parse the declarations the pack server reads from the source of a mod entry.
 
 The pack server builds the dependency channels a mod declares for pack
-updates, fetches their wheels from the PyPI mirrors the mod declares, and
-publishes the wheels of the indexes the mod provides. The declarations live in
-the mod entry, the module-level variable `entry` of
+updates, fetches their wheels from the index every pin of its dependency file
+annotates, and publishes the wheels of the indexes the mod provides. The
+declarations live in the mod entry, the module-level variable `entry` of
 `module/config/const.py`:
 
     from alasio.config.entry.const import ModEntryInfo
@@ -16,6 +16,11 @@ the mod entry, the module-level variable `entry` of
         pypi_mirrors='https://mirrors.aliyun.com/pypi/simple',
         update_provide_pypi_mirrors=('https://py38deps.github.io/py38deps/simple/',),
     )
+
+The pypi_mirrors of the entry is parsed with the other declarations but the
+pack server does not use it: it is the source a client installs its
+dependencies from, and it may point at the pack server of the repo, so a
+wheel is never fetched from it.
 
 The pack server reads the source from the git blob of a commit, not from a
 working tree, and it must not execute code of the repo it packs. This module

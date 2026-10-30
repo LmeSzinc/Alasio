@@ -5,7 +5,7 @@ The development server of the packs: it serves the whole pack folder of a run
 directory, with the names and the layout the packs have on the disk, so a pack
 can be fetched with curl or opened in a browser without a deployment. It only
 reads the folder, generating the packs is the job of the pack server itself,
-see PackRepoGen.
+see repo.
 
 The url mirrors the path under the run directory: the file
 

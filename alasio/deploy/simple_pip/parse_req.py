@@ -38,7 +38,10 @@ requirements file, the annotation uv and pip-compile write with
 A pin without a '# from' annotation has no source; the official PyPI index
 (https://pypi.org/simple) is no source either, the download side probes the
 mirrors of the mod entry. An annotation that does not name an index (a wheel
-URL, file://, git+...) is a warning and leaves the source undefined.
+URL, file://, git+...) is a warning and leaves the source undefined. The url
+of an index is normalized once, by normalize_index_url(): the release side
+compares the sources of the pins with the indexes a mod provides, so the two
+sides must agree on what one index is.
 
 The format rules are implemented once, in this module: the client is the side
 that ships, the release tooling imports it, never the other way around. The
@@ -121,6 +124,41 @@ def parse_requirement(text):
         # carry it
         return None
     return match.group('name'), version
+
+
+def normalize_index_url(url):
+    """
+    Normalize the base url of a PyPI simple index (PEP 503).
+
+    The rule is shared by the side that reads a dependency file and the side
+    that compares its sources with the indexes a mod provides (e.g. the pack
+    server): the scheme and the host are lowercased, the default port and the
+    trailing slash are dropped, so 'https://PyPI.org:443/simple/' and
+    'https://pypi.org/simple' are one index.
+
+    Args:
+        url (str): Url as written, e.g. 'https://py38deps.github.io/py38deps/simple/'
+
+    Returns:
+        str: Normalized base url, '' when the text is not an http(s) url or
+            carries no host
+    """
+    # local import: yarl is only needed by the parse of a '# from' comment
+    from yarl import URL
+
+    try:
+        parsed = URL(url)
+    except (TypeError, ValueError):
+        return ''
+    if parsed.scheme not in ('http', 'https') or not parsed.host:
+        return ''
+    return str(URL.build(
+        scheme=parsed.scheme,
+        authority=parsed.raw_authority,
+        path=parsed.raw_path.rstrip('/'),
+        query_string=parsed.raw_query_string,
+        encoded=True,
+    ))
 
 
 def build_dep_infos(deps):
@@ -311,34 +349,17 @@ class Requirements:
             if not match:
                 return ''
             text = match.group('text')
-            # local import: yarl is only needed for a cache miss
-            from yarl import URL
-
             error = False
-            try:
-                url = URL(text)
-            except (TypeError, ValueError):
+            source = normalize_index_url(text)
+            if not source:
+                error = True
+            elif source == _OFFICIAL_INDEX:
+                # an empty source lets the download side probe the mirrors of
+                # the mod entry
+                source = ''
+            elif source.partition('?')[0].lower().rstrip('/').endswith(_ARTIFACT_SUFFIXES):
                 source = ''
                 error = True
-            else:
-                if url.scheme not in ('http', 'https') or not url.host:
-                    source = ''
-                    error = True
-                else:
-                    source = str(URL.build(
-                        scheme=url.scheme,
-                        authority=url.raw_authority,
-                        path=url.raw_path.rstrip('/'),
-                        query_string=url.raw_query_string,
-                        encoded=True,
-                    ))
-                    if source == _OFFICIAL_INDEX:
-                        # an empty source lets the download side probe the
-                        # mirrors of the mod entry
-                        source = ''
-                    elif url.path.lower().rstrip('/').endswith(_ARTIFACT_SUFFIXES):
-                        source = ''
-                        error = True
             self._source_cache[comment] = (source, text, error)
         if error:
             logger.warning(

@@ -70,8 +70,9 @@ class PackFull(PackEncodeBase):
                 0~255. Defaults to None, the current version of PackEncodeBase;
                 an already published pack must be rebuilt with the format
                 version it was encoded with, see PackUpdate
-            dep_gen (object, optional): DepGen of the run, it carries the
-                published dependency snapshots in its published attribute. The
+            dep_gen (object, optional): The dependency step of the run
+                (repo_dep.RepoDep), it carries the published dependency
+                snapshots in its published attribute. The
                 snapshot is encoded into .pack/packdep.pack when the extras of
                 the version are built. Defaults to None, no packdep
         """
@@ -572,9 +573,9 @@ class PackFull(PackEncodeBase):
         project has the commit history of the packed version. The content is
         generated here, encoded into records by extra_fileinfo, and read by
         RepoDiff as the patch source of the records: the client holds the same
-        generated file in its local tree. When a DepGen is passed in __init__,
-        its published dependency snapshot is encoded into .pack/packdep.pack
-        and appended after the commit history.
+        generated file in its local tree. When a dependency step is passed in
+        __init__, its published dependency snapshot is encoded into
+        .pack/packdep.pack and appended after the commit history.
 
         Returns:
             dict[str, bytes]: {filepath: content}
@@ -593,11 +594,11 @@ class PackFull(PackEncodeBase):
         """
         Encoded dependency snapshot of this version, when there is one.
 
-        The DepGen object passed in __init__ carries the published snapshots;
+        The dependency step passed in __init__ carries the published snapshots;
         the bytes are encoded on the first use and cached on this instance, so
         the extra content and the kept-pack check share the same payload. A
-        run without published dependencies (or without a DepGen) has no
-        packdep file.
+        run without published dependencies (or without a dependency step) has
+        no packdep file.
 
         Returns:
             bytes: Content of .pack/packdep.pack, None when the version has no

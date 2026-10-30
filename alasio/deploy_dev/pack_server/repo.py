@@ -1,0 +1,175 @@
+"""
+Generate the workspace of one repo of the pack server: the flow of PackRepoModel.
+
+One run generates one workspace, the folder of the repo in the pack folder of
+the run directory. The steps are the ones of PackRepoModel, one module each,
+and this module is the flow itself: it runs the steps in the order their
+results depend on each other, and it publishes the version when everything is
+on the disk.
+
+    1. the workspace, the folder of the repo, is pack/{Author}_{Repo}_{Branch}
+       (see RepoBase)
+    2. the wheels of the pins the repo provides are downloaded to the private
+       cache `_wheel_cache/{name}/{version}/` and synced to the pip index
+       `wheel/{name}/{version}/` (see repo_wheel), the files a client installs
+       when it cannot reach the index the pin came from
+    3. the pip index pages of that folder (see repo_pypi, not written yet)
+    4. the pure python wheel of every version the dependency packs are built of
+       is downloaded to the same cache, and the packs of the dependencies are
+       built to `packdep/{name}/{version}/` (see repo_dep): the latest commit
+       and the lookback commits alike
+    5. the packs of the repo tree are generated to `packrepo/{commit}/` (see
+       repo_pack), the full pack of the latest commit carries the dependency
+       snapshot of the step above
+    6. latest.pack is written (see repo_latest), the version a client reads:
+       the barrier of the run, a client that reads it finds every pack of the
+       version on the disk
+    7. the packs and the wheels the window does not ask for are removed, after
+       the barrier, so a client that still runs the previous version keeps
+       working until its next check
+
+A step that fails fails the run: latest.pack keeps naming the previous version,
+and the client keeps running it. The next run starts over, the atomic writes
+never leave a truncated pack at its final path.
+
+The repo itself is an input of the flow: the caller clones and fetches it
+(see PackRepo) and passes it in, the flow only reads it.
+
+Usage:
+    from alasio.deploy_dev.pack_server.repo import Repo
+
+    repo = PackRepo(config.data).run()
+    gen = Repo(repo, config.data)
+    # generate the workspace
+    gen.run()
+    # publish the version, after every pack of the version is on the disk
+    gen.commit()
+"""
+
+from alasio.deploy_dev.pack_server.gate import check_run_dir
+from alasio.deploy_dev.pack_server.repo_base import RepoBase
+from alasio.deploy_dev.pack_server.repo_dep import RepoDep
+from alasio.deploy_dev.pack_server.repo_latest import RepoLatest
+from alasio.deploy_dev.pack_server.repo_pack import RepoPack
+from alasio.deploy_dev.pack_server.repo_pypi import RepoPypi
+from alasio.deploy_dev.pack_server.repo_wheel import RepoWheel
+from alasio.ext.path.atomic import atomic_failure_cleanup
+from alasio.logger import logger
+
+
+class Repo:
+    """
+    Generate the workspace of one repo, see the module docstring.
+
+    The steps are attributes of the instance, so a caller can read what the run
+    generated: the dependency snapshots of repo_dep, the packs of repo_pack.
+    Build a new instance for every run, the next run must see the new commits
+    of the repo.
+
+    Usage:
+        gen = Repo(repo, config.data)
+        gen.run()
+        gen.commit()
+    """
+
+    def __init__(self, repo, config, client=None):
+        """
+        Args:
+            repo (GitRepo | MockGitRepo): Git repo of the config, cloned and
+                fetched by the caller; the flow only reads it
+            config (PackRepoModel): Config of the repo, read from a
+                PackRepoConfig: the Lookback group is the window, the rest is
+                declared by the mod entry of the repo
+            client (httpx2.AsyncClient | AsyncHttpClient, optional): Client
+                the wheel fetches are sent with, e.g. the injected client of a
+                test. Its lifetime belongs to the caller. Defaults to None,
+                every fetch creates and closes the client of its own
+
+        Raises:
+            ValueError: If the config makes a folder name that is not a single
+                safe path component, see RepoBase.workspace
+        """
+        self.base = RepoBase(repo, config, client)
+        self.wheel = RepoWheel(self.base)
+        self.pypi = RepoPypi(self.base)
+        self.dep = RepoDep(self.base)
+        self.pack = RepoPack(self.base, self.dep)
+        self.latest = RepoLatest(self.base, self.pack)
+        # whether run() completed, the precondition of commit(): a failed run
+        # must not publish a version whose packs are incomplete
+        self._generated = False
+
+    def run(self):
+        """
+        Generate the workspace: the wheels, the pip index, the packs.
+
+        Nothing that a client reads is replaced here: latest.pack still names
+        the previous version until commit() runs, and the packs of a version
+        are identified by the commit they were built of.
+
+        Raises:
+            RunDirError: If env.PROJECT_ROOT is not a run directory of the
+                pack server, see check_run_dir
+            ValueError: If the repo has no branch to pack, the mod entry or a
+                dependency file of the repo cannot be read, or a wheel is not a
+                pack target (see PackWheel)
+            WheelNotFoundError: If a wheel of a dependency cannot be fetched,
+                the target and the historical versions alike: every update
+                path of the published channel must be complete
+            httpx2.HTTPError: If a wheel cannot be fetched
+            OSError: If a wheel or a pack cannot be written
+        """
+        self._generated = False
+        check_run_dir()
+        # the tmp files of an interrupted run are ours to clean up, the real
+        # files of the previous run keep serving the clients
+        atomic_failure_cleanup(self.base.wheel_cache_folder, recursive=True)
+        atomic_failure_cleanup(self.base.packdep_folder, recursive=True)
+        atomic_failure_cleanup(self.base.packrepo_folder, recursive=True)
+
+        # the pins the repo provides, logged before the steps: the set is the
+        # input of the pip index and does not depend on the pack channel
+        provided = [
+            (name, info.latest) for name, info in self.base.deps.items() if info.provide_wheel]
+        if provided:
+            count = len(provided)
+            plural = 's' if count > 1 else ''
+            logger.info(
+                f'Provided {count} pin{plural} of "{self.base.workspace.name}": '
+                + ', '.join(f'{name}=={pin.version}' for name, pin in provided))
+
+        # 1. the wheels of the provided pins and the pip index they are
+        # published into
+        self.wheel.run()
+        # 2. the pages of the pip index (not written yet)
+        self.pypi.run()
+        # 3. the wheels of the dependency packs and the packs themselves, the
+        # snapshots go to the tree pack
+        self.dep.run()
+        # 4. the packs of the repo tree
+        self.pack.run()
+        self._generated = True
+
+    def commit(self):
+        """
+        Publish the version and remove the entries the window does not ask for.
+
+        latest.pack is written first: it is the barrier a client switches the
+        version at. Only after it are the leftover packs and wheels removed, so
+        a client that still runs the previous version keeps working until its
+        next check.
+
+        Raises:
+            RuntimeError: If run() was not called
+            OSError: If latest.pack cannot be written
+        """
+        if not self._generated:
+            raise RuntimeError('Repo.run() must be called before commit()')
+        # the publication barrier
+        self.latest.run()
+        # the leftovers, after the barrier
+        self.latest.commit()
+        self.dep.commit()
+        self.wheel.commit()
+        self._generated = False
+        logger.info(f'Repo "{self.base.workspace.name}" committed')

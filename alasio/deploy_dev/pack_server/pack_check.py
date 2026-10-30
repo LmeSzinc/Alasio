@@ -1,8 +1,8 @@
 """
 Read the identity of a pack file of the pack server.
 
-The pack server keeps the packs of an earlier run, see PackRepoGen and
-DepGen: a pack is only built again when its file is missing, when it was
+The pack server keeps the packs of an earlier run, see RepoPack and
+RepoDep: a pack is only built again when its file is missing, when it was
 encoded with another pack format, when it packs another version pair, or when
 the file cannot be read as a pack at all. Reading the identity of the file is
 what tells these cases apart, and the index pack checksum it carries is what
@@ -217,8 +217,8 @@ def kept_pack(file, pack_version, current_version, old_version, expected=None):
     encoding time. A file of another format, of another version pair, or a
     file that cannot be read as a pack is written again: the packs of a
     version folder must all be the packs of that version, encoded with one
-    format. The pack server flows share the check, see PackRepoGen for the
-    git flow and DepGen for the dependency flow.
+    format. The pack server flows share the check, see RepoPack for the
+    git flow and RepoDep for the dependency flow.
 
     expected is the record check of the generated files of a version (e.g.
     .pack/packdep.pack): a kept pack that does not carry the expected

@@ -1,19 +1,21 @@
 """
-Tests for PackRepoGen: generate the packs of a repo to the run directory.
+Tests for the packs of the repo tree: repo_pack.RepoPack and repo_latest.RepoLatest.
 
-The output layout is fixed by PackRepoModel: run() writes the full pack of
-the latest commit and an update pack from every lookback commit to it,
-commit() writes latest.pack and removes every folder except the latest one.
+The two steps of the flow of PackRepoModel generate the packs of a version and
+publish it: RepoPack writes the full pack of the latest commit and an update
+pack from every lookback commit to it, RepoLatest writes latest.pack and
+removes every folder except the latest one. The tests run the two steps the way
+repo.Repo wires them, see PackFlow.
 
 Every output is verified with the decode side of the library
-(alasio/deploy/pack): the packs are decoded and their checksums validated,
-the update packs are applied to an unpacked old version with UpdateJob and
-the result is compared to the tree of the generated full pack, so the test
-covers the path from the git repo to the client.
+(alasio/deploy/pack): the packs are decoded and their checksums validated, the
+update packs are applied to an unpacked old version with UpdateJob and the
+result is compared to the tree of the generated full pack, so the test covers
+the path from the git repo to the client.
 
-The mock repos are built inside the tests, when the fake filesystem is
-active: MockGitRepo and the pack encoders read the builtin .gitattributes
-of the library (env.ALASIO_ROOT), which the run_dir fixture provides in
+The mock repos are built inside the tests, when the fake filesystem is active:
+MockGitRepo and the pack encoders read the builtin .gitattributes of the
+library (env.ALASIO_ROOT), which the run_dir fixture of the conftest provides in
 the fake filesystem.
 """
 import os
@@ -27,20 +29,20 @@ from alasio.deploy.pack.packdep import PACKDEP_PATH
 from alasio.deploy.pack.server_file import LatestInfo
 from alasio.deploy_dev.pack.encode_packdep import encode_packdep
 from alasio.deploy_dev.pack.pack_full import PackFull
-from alasio.deploy_dev.pack_server import pack_gen
+from alasio.deploy_dev.pack_server import repo_pack
 from alasio.deploy_dev.pack_server.gate import RunDirError, check_run_dir
 from alasio.deploy_dev.pack_server.model import LookbackConfig, PackRepoModel, RepoConfig
-from alasio.deploy_dev.pack_server.pack_gen import PackRepoGen
+from alasio.deploy_dev.pack_server.repo import Repo
+from alasio.deploy_dev.pack_server.repo_base import RepoBase
+from alasio.deploy_dev.pack_server.repo_latest import RepoLatest
+from alasio.deploy_dev.pack_server.repo_pack import RepoPack
 from alasio.ext import env
 from alasio.ext.path import PathStr
 from alasio.ext.path.atomic import atomic_write, file_read_bytes
 from alasio.git.mock.mock_repo import MockGitRepo
 from alasio.logger import logger
 from alasio.testing.filesystem import fs  # noqa: F401
-
-# the builtin .gitattributes of the library, copied into the fake
-# filesystem by the run_dir fixture, see GitAttributes
-BUILTIN_GITATTRIBUTES = env.ALASIO_ROOT.joinpath('.gitattributes').atomic_read_bytes()
+from tests.deploy_dev.pack_server.conftest import join_path
 
 # rules of the mock repos: text files are lf, notes and guides are crlf
 GITATTRIBUTES = (
@@ -93,7 +95,7 @@ CONFIG = PackRepoModel(
 )
 
 # folder of the packs of CONFIG in the run directory, the packrepo folder
-# of the repo folder
+# of the workspace
 PACK_ROOT = 'pack/Author_Repo_master/packrepo'
 
 # generated dependency snapshots of the tests
@@ -104,50 +106,56 @@ PACKDEP_DATA_SECOND = encode_packdep(PACKDEP_ENTRIES_SECOND)
 
 
 class FakeDepGen:
-    """The interface PackFull reads from a DepGen: the published snapshots."""
+    """The interface PackFull reads from the dependency step: the published snapshots."""
 
     def __init__(self, published):
         self.published = published
 
 
-@pytest.fixture
-def run_dir(fs, monkeypatch):
+class PackFlow:
     """
-    A run directory of the pack server in the fake filesystem.
+    The repo tree packs and the publication of their version, for the tests.
 
-    env.ALASIO_ROOT points at a folder of its own with the builtin
-    .gitattributes of the library, so the pack encoders resolve the eol of
-    the files in the fake filesystem.
-
-    Returns:
-        PathStr: Absolute path of the run directory
+    The flow of repo.Repo runs RepoPack and then RepoLatest; the tests of this
+    module run the two steps the same way, with the dependency snapshots they
+    give it, the way a repo without dependencies of the flow does.
     """
-    root = PathStr.new(fs.root_dir.path)
-    library = root.joinpath('alasio')
-    run = root.joinpath('pack_server')
-    fs.create_dir(library)
-    fs.create_dir(run)
-    fs.create_file(library.joinpath('.gitattributes'), contents=BUILTIN_GITATTRIBUTES)
-    monkeypatch.setattr(env, 'ALASIO_ROOT', library)
-    monkeypatch.setattr(env, 'PROJECT_ROOT', run)
-    return run
 
+    def __init__(self, repo, config=CONFIG, dep=None):
+        """
+        Args:
+            repo (MockGitRepo): Git repo to pack
+            config (PackRepoModel): Config of the repo. Defaults to CONFIG
+            dep (object, optional): The dependency step, an object carrying the
+                published snapshots. Defaults to None, no snapshot is packed
+        """
+        self.base = RepoBase(repo, config)
+        self.pack = RepoPack(self.base, dep if dep is not None else FakeDepGen({}))
+        self.latest = RepoLatest(self.base, self.pack)
 
-def join_path(root, *parts):
-    """
-    Join path parts one by one, PathStr.joinpath takes one part only.
+    def run(self):
+        """Generate the packs of the version."""
+        self.pack.run()
 
-    Args:
-        root (str): Root path
-        *parts (str): Parts to join
+    def commit(self):
+        """Publish the version and remove the folders of the replaced one."""
+        self.latest.run()
+        self.latest.commit()
 
-    Returns:
-        PathStr: Joined path
-    """
-    path = PathStr.new(root)
-    for part in parts:
-        path = path.joinpath(part)
-    return path
+    @property
+    def repo_folder(self):
+        """Folder of the workspace."""
+        return self.base.workspace
+
+    @property
+    def pack_folder(self):
+        """Folder of the packs of the repo tree."""
+        return self.base.packrepo_folder
+
+    @property
+    def version_folder(self):
+        """Folder of the packs of the latest version."""
+        return self.pack.version_folder
 
 
 def make_repo(versions, branch='master'):
@@ -267,58 +275,61 @@ def expected_tree(full):
     return tree
 
 
-def generate(repo, config=CONFIG, dep_gen=None):
+def generate(repo, config=CONFIG, dep=None):
     """
-    Run and commit a PackRepoGen, the normal flow of a publication.
+    Run and commit the repo tree step, the normal flow of a publication.
 
     Returns:
-        PackRepoGen: The generator that ran
+        PackFlow: The flow that ran
     """
-    gen = PackRepoGen(repo, config, dep_gen=dep_gen)
+    gen = PackFlow(repo, config, dep=dep)
     gen.run()
     gen.commit()
     return gen
 
 
 class TestConfigAndFolders:
-    """The run directory paths of the generator.
+    """The run directory paths of the step.
 
     The empty Author / Repo / Branch of a config are checked by the config
-    reader, see TestPackRepoConfig in test_model.py, the generator does not
-    check them again.
+    reader, see TestPackRepoConfig in test_model.py, the step does not check
+    them again.
     """
 
     def test_branch_with_path_separator(self, fs, run_dir):
         """A Branch that would nest the pack folder inside another config is refused."""
         config = PackRepoModel(Repo=RepoConfig(Author='Author', Repo='Repo', Branch='feature/x'))
         with pytest.raises(ValueError):
-            PackRepoGen(make_repo(VERSIONS), config)
+            PackFlow(make_repo(VERSIONS), config)
 
     def test_pack_folder(self, fs, run_dir):
         """The folder of the packs and of the latest version are named by the config."""
-        gen = PackRepoGen(make_repo(VERSIONS), CONFIG)
+        gen = PackFlow(make_repo(VERSIONS))
         assert gen.repo_folder == join_path(run_dir, 'pack', 'Author_Repo_master')
         assert gen.pack_folder == join_path(run_dir, 'pack', 'Author_Repo_master', 'packrepo')
         assert gen.version_folder == join_path(
             run_dir, 'pack', 'Author_Repo_master', 'packrepo', 'c3')
 
     def test_run_dir_is_a_mod(self, fs, run_dir, monkeypatch):
-        """The generator refuses to run in a mod, like the config reader."""
+        """The flow refuses to run in a mod, like the config reader."""
+        from alasio.deploy_dev.pack_server import repo as repo_flow
+
         fs.create_file(join_path(run_dir, 'module', 'main.py'), contents='')
         # check_run_dir runs once per process (init_once), the bare check runs
         # the gate for the run directory of this test
-        monkeypatch.setattr(pack_gen, 'check_run_dir', check_run_dir.__wrapped__)
+        monkeypatch.setattr(repo_flow, 'check_run_dir', check_run_dir.__wrapped__)
+        gen = Repo(make_repo(VERSIONS), CONFIG)
         with pytest.raises(RunDirError):
-            PackRepoGen(make_repo(VERSIONS), CONFIG).run()
+            gen.run()
 
 
 class TestPackdep:
     """The generated .pack/packdep.pack of a repo version."""
 
     def test_full_pack_carries_packdep(self, fs, run_dir):
-        """The full pack records the snapshot of the DepGen."""
+        """The full pack records the snapshot of the dependency step."""
         repo = make_repo(VERSIONS)
-        PackRepoGen(repo, CONFIG, dep_gen=FakeDepGen(PACKDEP_ENTRIES)).run()
+        PackFlow(repo, dep=FakeDepGen(PACKDEP_ENTRIES)).run()
 
         full = PackDecodeBase(file_read_bytes(
             join_path(run_dir, PACK_ROOT, 'c3', 'full.pack')))
@@ -333,7 +344,7 @@ class TestPackdep:
     def test_update_pack_carries_packdep(self, fs, run_dir):
         """The new side of an update pack carries the generated file."""
         repo = make_repo(VERSIONS)
-        PackRepoGen(repo, CONFIG, dep_gen=FakeDepGen(PACKDEP_ENTRIES)).run()
+        PackFlow(repo, dep=FakeDepGen(PACKDEP_ENTRIES)).run()
 
         update = PackDecodeBase(file_read_bytes(
             join_path(run_dir, PACK_ROOT, 'c3', 'update_c1.pack')))
@@ -345,8 +356,8 @@ class TestPackdep:
     def test_packdep_is_rebuilt_when_changed(self, fs, run_dir):
         """A kept pack with another packdep snapshot is written again."""
         repo = make_repo(VERSIONS)
-        PackRepoGen(repo, CONFIG, dep_gen=FakeDepGen(PACKDEP_ENTRIES)).run()
-        PackRepoGen(repo, CONFIG, dep_gen=FakeDepGen(PACKDEP_ENTRIES_SECOND)).run()
+        PackFlow(repo, dep=FakeDepGen(PACKDEP_ENTRIES)).run()
+        PackFlow(repo, dep=FakeDepGen(PACKDEP_ENTRIES_SECOND)).run()
 
         full = PackDecodeBase(file_read_bytes(
             join_path(run_dir, PACK_ROOT, 'c3', 'full.pack')))
@@ -356,10 +367,10 @@ class TestPackdep:
         assert bytes(update.catfile(update.fileinfo[PACKDEP_PATH])) == PACKDEP_DATA_SECOND
 
     def test_packdep_is_removed_when_not_given(self, fs, run_dir):
-        """A run without a DepGen removes the file from the kept packs."""
+        """A run without a dependency step removes the file from the kept packs."""
         repo = make_repo(VERSIONS)
-        PackRepoGen(repo, CONFIG, dep_gen=FakeDepGen(PACKDEP_ENTRIES)).run()
-        PackRepoGen(repo, CONFIG).run()
+        PackFlow(repo, dep=FakeDepGen(PACKDEP_ENTRIES)).run()
+        PackFlow(repo).run()
 
         full = PackDecodeBase(file_read_bytes(
             join_path(run_dir, PACK_ROOT, 'c3', 'full.pack')))
@@ -372,7 +383,7 @@ class TestPackdep:
     async def test_full_pack_unpacks_packdep(self, fs, run_dir, monkeypatch):
         """A client that does not read packdep still unpacks it as a normal file."""
         repo = make_repo(VERSIONS)
-        PackRepoGen(repo, CONFIG, dep_gen=FakeDepGen(PACKDEP_ENTRIES)).run()
+        PackFlow(repo, dep=FakeDepGen(PACKDEP_ENTRIES)).run()
         data = file_read_bytes(join_path(run_dir, PACK_ROOT, 'c3', 'full.pack'))
         client = make_client(monkeypatch, fs)
         with logger.mock_capture_writer():
@@ -382,7 +393,7 @@ class TestPackdep:
     def test_packdep_kept_when_unchanged(self, fs, run_dir, monkeypatch):
         """A complete output with the same snapshot is kept as it is."""
         repo = make_repo(VERSIONS)
-        PackRepoGen(repo, CONFIG, dep_gen=FakeDepGen(PACKDEP_ENTRIES)).run()
+        PackFlow(repo, dep=FakeDepGen(PACKDEP_ENTRIES)).run()
         tree = read_tree(join_path(run_dir, PACK_ROOT))
 
         class NoPackUpdate:
@@ -390,10 +401,10 @@ class TestPackdep:
                 raise AssertionError('the pack of the version must not be built again')
 
         written = []
-        monkeypatch.setattr(pack_gen, 'PackUpdate', NoPackUpdate)
+        monkeypatch.setattr(repo_pack, 'PackUpdate', NoPackUpdate)
         monkeypatch.setattr(
-            pack_gen, 'atomic_write_stream', lambda file, data: written.append(str(file)))
-        PackRepoGen(repo, CONFIG, dep_gen=FakeDepGen(PACKDEP_ENTRIES)).run()
+            repo_pack, 'atomic_write_stream', lambda file, data: written.append(str(file)))
+        PackFlow(repo, dep=FakeDepGen(PACKDEP_ENTRIES)).run()
 
         assert written == []
         assert read_tree(join_path(run_dir, PACK_ROOT)) == tree
@@ -405,7 +416,7 @@ class TestRun:
     def test_full_pack(self, fs, run_dir):
         """The full pack of the latest commit is written and decodes to the version."""
         repo = make_repo(VERSIONS)
-        PackRepoGen(repo, CONFIG).run()
+        PackFlow(repo).run()
 
         file = join_path(run_dir, PACK_ROOT, 'c3', 'full.pack')
         assert file.isfile()
@@ -431,7 +442,7 @@ class TestRun:
         """An update pack from every lookback commit to the latest one is written."""
         repo = make_repo(VERSIONS)
         with logger.mock_capture_writer() as capture:
-            PackRepoGen(repo, CONFIG).run()
+            PackFlow(repo).run()
 
         for old in ('c1', 'c2'):
             file = join_path(run_dir, PACK_ROOT, 'c3', f'update_{old}.pack')
@@ -458,7 +469,7 @@ INFO | Packs of "Author_Repo_master" generated, latest=c3
     def test_update_pack_records(self, fs, run_dir):
         """The update pack records the changes from the old version to the latest one."""
         repo = make_repo(VERSIONS)
-        PackRepoGen(repo, CONFIG).run()
+        PackFlow(repo).run()
 
         decoder = PackDecodeBase(file_read_bytes(
             join_path(run_dir, PACK_ROOT, 'c3', 'update_c2.pack')))
@@ -477,9 +488,9 @@ INFO | Packs of "Author_Repo_master" generated, latest=c3
         assert '.pack/index.pack' in decoder.refinfo
 
     def test_latest_pack(self, fs, run_dir):
-        """latest.pack is written by commit, from the full pack of the run."""
+        """latest.pack is written by the publication, from the full pack of the run."""
         repo = make_repo(VERSIONS)
-        gen = PackRepoGen(repo, CONFIG)
+        gen = PackFlow(repo)
         gen.run()
         latest = join_path(run_dir, PACK_ROOT, 'latest.pack')
         assert not latest.exists()
@@ -497,7 +508,7 @@ INFO | Packs of "Author_Repo_master" generated, latest=c3
 
     def test_commit_requires_run(self, fs, run_dir):
         """commit() before run() cannot publish a stale or partial version."""
-        gen = PackRepoGen(make_repo(VERSIONS), CONFIG)
+        gen = PackFlow(make_repo(VERSIONS))
         with pytest.raises(RuntimeError, match='run\\(\\) must be called'):
             gen.commit()
 
@@ -514,7 +525,7 @@ INFO | Packs of "Author_Repo_master" generated, latest=c3
         repo = make_repo(VERSIONS)
         config = PackRepoModel(
             Repo=CONFIG.Repo, Lookback=LookbackConfig(MaxCommitCount=2, MaxCommitDay=0))
-        PackRepoGen(repo, config).run()
+        PackFlow(repo, config).run()
 
         # the latest commit counts into MaxCommitCount, so c2 is the only
         # lookback version and c1 has no update pack
@@ -524,7 +535,7 @@ INFO | Packs of "Author_Repo_master" generated, latest=c3
     def test_stale_folders_removed(self, fs, run_dir):
         """commit() removes the older folders, run() only writes the new packs."""
         repo = make_repo(VERSIONS)
-        gen = PackRepoGen(repo, CONFIG)
+        gen = PackFlow(repo)
         gen.run()
         gen.commit()
         assert join_path(run_dir, PACK_ROOT, 'c3').isdir()
@@ -533,7 +544,7 @@ INFO | Packs of "Author_Repo_master" generated, latest=c3
 
         # a new commit is pushed to the branch
         push_commit(repo, 'c4', VERSIONS['c3'], parents=['c3'], author_time=4)
-        gen = PackRepoGen(repo, CONFIG)
+        gen = PackFlow(repo)
         gen.run()
         assert join_path(run_dir, PACK_ROOT, 'c4', 'full.pack').isfile()
         assert join_path(run_dir, PACK_ROOT, 'c3').isdir()
@@ -560,7 +571,7 @@ INFO | Packs of "Author_Repo_master" generated, latest=c3
         def fail(folder):
             raise PermissionError(f'folder is held: {folder}')
 
-        monkeypatch.setattr(pack_gen, 'atomic_rmtree', fail)
+        monkeypatch.setattr(repo_pack, 'atomic_rmtree', fail)
         with logger.mock_capture_writer() as capture:
             generate(repo)
         assert capture.concat() == f"""\
@@ -596,9 +607,9 @@ INFO | Packs of "Author_Repo_master" committed, latest=c4
         def fail(self, pack):
             raise RuntimeError('pack build failed')
 
-        monkeypatch.setattr(PackRepoGen, '_write_update_packs', fail)
+        monkeypatch.setattr(RepoPack, '_write_update_packs', fail)
         with pytest.raises(RuntimeError):
-            PackRepoGen(repo, CONFIG).run()
+            PackFlow(repo).run()
 
         # latest.pack still points at the old version and its folder is kept,
         # the clients are not switched to the partial version
@@ -623,9 +634,9 @@ class TestExistingPacks:
                 raise AssertionError('the pack of the version must not be built again')
 
         written = []
-        monkeypatch.setattr(pack_gen, 'PackUpdate', NoPackUpdate)
+        monkeypatch.setattr(repo_pack, 'PackUpdate', NoPackUpdate)
         monkeypatch.setattr(
-            pack_gen, 'atomic_write_stream', lambda file, data: written.append(str(file)))
+            repo_pack, 'atomic_write_stream', lambda file, data: written.append(str(file)))
         generate(repo)
 
         assert written == []
@@ -648,14 +659,14 @@ class TestExistingPacks:
     def test_missing_pack_is_built_again(self, fs, run_dir, monkeypatch):
         """Only the pack that is missing is built again."""
         repo = make_repo(VERSIONS)
-        PackRepoGen(repo, CONFIG).run()
+        PackFlow(repo).run()
         target = join_path(run_dir, PACK_ROOT, 'c3', 'update_c1.pack')
         data = file_read_bytes(target)
         os.remove(target)
 
         # the lookback version of every pack that is built, in the order of the run
         built = []
-        real_pack_update = pack_gen.PackUpdate
+        real_pack_update = repo_pack.PackUpdate
 
         class CountingPackUpdate:
             def __init__(self, pack, old):
@@ -665,8 +676,8 @@ class TestExistingPacks:
             def iter_pack_data(self):
                 return self.update.iter_pack_data()
 
-        monkeypatch.setattr(pack_gen, 'PackUpdate', CountingPackUpdate)
-        PackRepoGen(repo, CONFIG).run()
+        monkeypatch.setattr(repo_pack, 'PackUpdate', CountingPackUpdate)
+        PackFlow(repo).run()
 
         assert built == ['c1']
         assert file_read_bytes(target) == data
@@ -697,12 +708,12 @@ class TestExistingPacks:
     def test_pack_that_is_not_a_pack_is_written_again(self, fs, run_dir):
         """A kept file that cannot be read as a pack is overwritten, the run goes on."""
         repo = make_repo(VERSIONS)
-        PackRepoGen(repo, CONFIG).run()
+        PackFlow(repo).run()
         file = join_path(run_dir, PACK_ROOT, 'c3', 'update_c1.pack')
         atomic_write(file, b'NOPE' + b'\x00' * 60)
 
         with logger.mock_capture_writer() as capture:
-            PackRepoGen(repo, CONFIG).run()
+            PackFlow(repo).run()
 
         assert capture.concat() == f"""\
 INFO | Generating packs of "Author_Repo_master": 3 versions, latest=c3
@@ -720,14 +731,14 @@ INFO | Packs of "Author_Repo_master" generated, latest=c3
     def test_pack_of_another_version_is_written_again(self, fs, run_dir):
         """A pack of another version pair is not kept, a version folder mixes no versions."""
         repo = make_repo(VERSIONS)
-        PackRepoGen(repo, CONFIG).run()
+        PackFlow(repo).run()
         # the update pack of c2, put at the path of the update pack of c1
         source = join_path(run_dir, PACK_ROOT, 'c3', 'update_c2.pack')
         file = join_path(run_dir, PACK_ROOT, 'c3', 'update_c1.pack')
         atomic_write(file, file_read_bytes(source))
 
         with logger.mock_capture_writer() as capture:
-            PackRepoGen(repo, CONFIG).run()
+            PackFlow(repo).run()
 
         assert capture.concat() == f"""\
 INFO | Generating packs of "Author_Repo_master": 3 versions, latest=c3
@@ -750,7 +761,7 @@ class TestUpdateApplies:
     async def test_update_applies(self, fs, run_dir, monkeypatch):
         """The update pack upgrades the old tree to the tree of the full pack."""
         repo = make_repo(VERSIONS)
-        PackRepoGen(repo, CONFIG).run()
+        PackFlow(repo).run()
 
         # the tree of the generated full pack, the expected result of the update
         full = PackDecodeBase(file_read_bytes(
@@ -777,7 +788,7 @@ class TestUpdateApplies:
     async def test_update_from_every_lookback(self, fs, run_dir, monkeypatch):
         """Every lookback version can be updated to the latest one."""
         repo = make_repo(VERSIONS)
-        PackRepoGen(repo, CONFIG).run()
+        PackFlow(repo).run()
         full = PackDecodeBase(file_read_bytes(
             join_path(run_dir, PACK_ROOT, 'c3', 'full.pack')))
         expected = expected_tree(full)

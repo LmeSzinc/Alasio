@@ -555,6 +555,43 @@ class TestSourceNormalization:
         }
 
 
+class TestNormalizeIndexUrl:
+    """The url rule the parser and the release side share, see normalize_index_url."""
+
+    @pytest.mark.parametrize('url, expected', [
+        ('https://example.com/simple', 'https://example.com/simple'),
+        ('https://Example.com/simple/', 'https://example.com/simple'),
+        ('HTTPS://Example.COM/simple//', 'https://example.com/simple'),
+        ('https://example.com:443/simple', 'https://example.com/simple'),
+        ('http://example.com:80/simple/', 'http://example.com/simple'),
+        ('https://example.com:8443/simple/', 'https://example.com:8443/simple'),
+        ('https://example.com', 'https://example.com'),
+        ('https://user:pass@Example.COM/simple/', 'https://user:pass@example.com/simple'),
+        ('https://example.com/simple?token=abc', 'https://example.com/simple?token=abc'),
+        # the two spellings of one index normalize to one url
+        ('https://py38deps.github.io/py38deps/simple/', 'https://py38deps.github.io/py38deps/simple'),
+        ('HTTPS://Py38Deps.GitHub.io/py38deps/simple', 'https://py38deps.github.io/py38deps/simple'),
+    ])
+    def test_normalized(self, url, expected):
+        """The scheme and the host are lowercased, the default port and the trailing slash dropped."""
+        assert parse_req.normalize_index_url(url) == expected
+
+    @pytest.mark.parametrize('url', [
+        '',
+        'not a url',
+        # not an http(s) url
+        'ftp://example.com/simple',
+        'file:///wheels/simple',
+        'git+https://example.com/repo',
+        # no scheme or no host
+        'example.com/simple',
+        '//example.com/simple',
+    ])
+    def test_not_an_index(self, url):
+        """A text that is not an http(s) url has no normalized form."""
+        assert parse_req.normalize_index_url(url) == ''
+
+
 class TestOfficialSource:
     @pytest.mark.parametrize('annotation', [
         'https://pypi.org/simple',
