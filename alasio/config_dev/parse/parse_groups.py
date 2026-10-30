@@ -233,23 +233,6 @@ class GroupData(Struct, forbid_unknown_fields=True, dict=True):
 
 
 class ParseGroups(ParseBase):
-    @property
-    def external_groups(self):
-        """
-        Groups outside this file that a parent may inherit from.
-
-        The generated model file inherits a parent class defined before it in
-        the same file, or a class exported by alasio.config.alasio.group_export
-        (the groups of the alasio entry). It can not import the model file of
-        another nav of the same mod: the two model files would import each
-        other in a cycle as soon as their groups inherit from each other, and
-        a nav would have to be imported before it exists.
-
-        Returns:
-            dict[str, GroupData] | None: Allowed parents keyed by name, None
-                when no external group is allowed
-        """
-        return None
 
     @cached_property
     def groups_data(self) -> "dict[str, GroupData]":
@@ -281,43 +264,4 @@ class ParseGroups(ParseBase):
             # Set
             output[group_name] = group
 
-        # A parent class must be defined before its child in the generated
-        # model file, see external_groups()
-        self._validate_parents(output)
         return output
-
-    def _validate_parents(self, groups: "dict[str, GroupData]"):
-        """
-        Check that every parent can be a base class of the model file.
-
-        A parent is either a group defined earlier in this file, or a group of
-        the alasio entry (see external_groups()). A parent defined later
-        would be emitted after the class that inherits it, and a parent of
-        another nav would have to be imported from another model file.
-
-        Args:
-            groups (dict[str, GroupData]): Groups in the definition order
-
-        Raises:
-            DefinitionError: a parent is not defined earlier in the file and
-                is not an external group
-        """
-        external = self.external_groups or ()
-        # index of each group in the definition order
-        positions = {name: index for index, name in enumerate(groups)}
-        for group_name, group in groups.items():
-            for parent_name in group.parent:
-                if parent_name in external:
-                    continue
-                try:
-                    position = positions[parent_name]
-                except KeyError:
-                    raise DefinitionError(
-                        f'Group parent "{parent_name}" must be defined in the same file, '
-                        f'or be a group of alasio',
-                        file=self.file, keys=[group_name, 'parent'], value=parent_name)
-                if position >= positions[group_name]:
-                    raise DefinitionError(
-                        f'Group parent "{parent_name}" must be defined before the group that '
-                        f'inherits it',
-                        file=self.file, keys=[group_name, 'parent'], value=parent_name)

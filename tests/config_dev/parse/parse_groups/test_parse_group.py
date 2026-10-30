@@ -2,11 +2,9 @@
 Tests of ParseGroups groups_data construction.
 
 ParseGroups reads {nav}.args.yaml through ParseBase.read_args_yaml() and builds
-one GroupData per group. The file also validates that a parent can be a base
-class of the generated model file: it is a group defined earlier in the same
-file, or a group declared by external_groups() (the alasio entry). The MRO
-merge and the args merge are not part of this module, they live in the
-gen_cross MRO build.
+one GroupData per group. Cross-group validation (parents exist, MRO, args merge)
+is not part of this module, it lives in the gen_cross MRO build; here only the
+per-file structure is checked.
 """
 
 import pytest
@@ -160,8 +158,6 @@ Variant:
 
     def test_parent_list(self, fs):
         parser = make_parser(fs, 'main', args_yaml="""\
-Base1:
-Base2:
 Variant:
   parent: [Base1, Base2]
 """)
@@ -281,97 +277,6 @@ Group:
         assert e.value.file == parser.file
         assert e.value.keys == ['Group', 'dashboard_color']
         assert e.value.value == 1
-
-
-class TestGroupsDataParentOrder:
-    """
-    A parent must be a base class the generated model file can inherit.
-
-    The model file defines the class of every group of the nav in the yaml
-    order, so a parent has to be defined earlier in the same file; the only
-    other allowed parent is a group of the alasio entry, which is exported by
-    group_export. A parent of another nav of the same mod would have to be
-    imported from another model file, and the two model files would import each
-    other as soon as their groups inherit from each other.
-    """
-
-    def test_parent_defined_earlier(self, fs):
-        parser = make_parser(fs, 'main', args_yaml="""\
-Base:
-  args:
-    A: 1
-Child:
-  parent: Base
-""")
-        assert parser.groups_data['Child'].parent == ('Base',)
-
-    def test_parent_defined_after_child(self, fs):
-        parser = make_parser(fs, 'main', args_yaml="""\
-Child:
-  parent: Base
-Base:
-""")
-        with pytest.raises(DefinitionError) as e:
-            _ = parser.groups_data
-        assert e.value.msg == 'Group parent "Base" must be defined before the group that inherits it'
-        assert e.value.file == parser.file
-        assert e.value.keys == ['Child', 'parent']
-        assert e.value.value == 'Base'
-
-    def test_parent_in_another_file(self, fs):
-        parser = make_parser(fs, 'main', args_yaml="""\
-Child:
-  parent: Base
-""")
-        with pytest.raises(DefinitionError) as e:
-            _ = parser.groups_data
-        assert e.value.msg == 'Group parent "Base" must be defined in the same file, or be a group of alasio'
-        assert e.value.file == parser.file
-        assert e.value.keys == ['Child', 'parent']
-        assert e.value.value == 'Base'
-
-    def test_second_parent_defined_after_child(self, fs):
-        """Every parent is checked, the first accepted one does not stop the check."""
-        parser = make_parser(fs, 'main', args_yaml="""\
-Base1:
-Child:
-  parent: [Base1, Base2]
-Base2:
-""")
-        with pytest.raises(DefinitionError) as e:
-            _ = parser.groups_data
-        assert e.value.msg == 'Group parent "Base2" must be defined before the group that inherits it'
-        assert e.value.keys == ['Child', 'parent']
-        assert e.value.value == 'Base2'
-
-    def test_group_without_parent(self, fs):
-        parser = make_parser(fs, 'main', args_yaml="""\
-Group:
-  args:
-    A: 1
-""")
-        assert parser.groups_data['Group'].parent == ()
-
-    def test_external_group(self, fs):
-        """A parser may declare the groups of another file, e.g. alasio."""
-        file = joinpath(fs.root_dir.path, 'module/config/main/main.args.yaml')
-        fs.create_file(file, contents="""\
-Child:
-  parent: External
-""")
-
-        class ExternalParser(ParseGroups):
-            @property
-            def external_groups(self):
-                return {'External': None}
-
-        parser = ExternalParser(PathStr.new(file))
-        assert parser.groups_data['Child'].parent == ('External',)
-
-    def test_external_names_default_to_none(self, fs):
-        """ParseGroups itself allows no group outside the file."""
-        parser = make_parser(fs, 'main')
-        assert parser.external_groups is None
 
 
 class TestGroupsDataPostprocess:

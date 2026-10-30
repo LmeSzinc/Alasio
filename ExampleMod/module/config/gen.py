@@ -1,11 +1,11 @@
 from copy import deepcopy
 
+from ExampleMod.module.config.const import entry
 from alasio.config_dev.gen_index import IndexGenerator
 from alasio.config_dev.parse.base import args_yaml_postprocess
 from alasio.ext.deep import deep_set
 from alasio.ext.env import set_project_root
 from alasio.logger import logger
-from ExampleMod.module.config.const import entry
 
 CHAPTER_MAP = {
     'chapter1': ['1-1', '1-2', '1-3', '1-4'],
@@ -31,7 +31,10 @@ class Generator(IndexGenerator):
     def main_args_json(cls, data):
         option = deepcopy(CHAPTER_MAP)
         data = deep_set(data, keys='Campaign.args.Name.option', value=option)
-        # GemsCampaign inherits Campaign, it is defined in the same nav
+        return data
+
+    @args_yaml_postprocess('gems')
+    def gems_args_json(cls, data):
         option = deepcopy(CHAPTER_MAP)
         option.pop('chapter1', None)
         data = deep_set(data, keys='GemsCampaign.args.Name.option', value=option)
