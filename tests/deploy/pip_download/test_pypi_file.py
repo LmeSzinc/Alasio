@@ -281,10 +281,10 @@ class TestDownload:
         pypi = make_pypi(index, dest)
         with logger.mock_capture_writer() as capture:
             files = await pypi.download('NumPy', '2.1.0', 'current')
-        assert capture.concat() == """\
+        assert capture.concat() == f"""\
 INFO | Download wheel: "https://a.example/simple/numpy/numpy-2.1.0-cp38-cp38-win_amd64.whl" -> "{dest}/numpy-2.1.0-cp38-cp38-win_amd64.whl"
 INFO | Download wheel: "https://a.example/simple/numpy/numpy-2.1.0-py3-none-any.whl" -> "{dest}/numpy-2.1.0-py3-none-any.whl"
-""".replace('{dest}', str(dest))
+"""
         assert [str(file) for file in files] == [
             str(dest.joinpath('numpy-2.1.0-cp38-cp38-win_amd64.whl')),
             str(dest.joinpath('numpy-2.1.0-py3-none-any.whl')),
@@ -306,9 +306,9 @@ INFO | Download wheel: "https://a.example/simple/numpy/numpy-2.1.0-py3-none-any.
         pypi = make_pypi(index, dest)
         with logger.mock_capture_writer() as capture:
             files = await pypi.download('httpx', '0.28.1', 'py3-any')
-        assert capture.concat() == """\
+        assert capture.concat() == f"""\
 INFO | Download wheel: "https://a.example/simple/httpx/httpx-0.28.1-py3-none-any.whl" -> "{dest}/httpx-0.28.1-py3-none-any.whl"
-""".replace('{dest}', str(dest))
+"""
         assert [file.name for file in files] == ['httpx-0.28.1-py3-none-any.whl']
         assert index.file_requests() == [
             index.file_url('httpx', 'httpx-0.28.1-py3-none-any.whl')]
@@ -322,11 +322,11 @@ INFO | Download wheel: "https://a.example/simple/httpx/httpx-0.28.1-py3-none-any
         pypi = make_pypi(index, dest)
         with logger.mock_capture_writer() as capture:
             files = await pypi.download('numpy', '2.1.0', 'all')
-        assert capture.concat() == """\
+        assert capture.concat() == f"""\
 INFO | Download wheel: "https://a.example/simple/numpy/numpy-2.1.0-cp312-cp312-win_amd64.whl" -> "{dest}/numpy-2.1.0-cp312-cp312-win_amd64.whl"
 INFO | Download wheel: "https://a.example/simple/numpy/numpy-2.1.0-cp38-cp38-win_amd64.whl" -> "{dest}/numpy-2.1.0-cp38-cp38-win_amd64.whl"
 INFO | Download wheel: "https://a.example/simple/numpy/numpy-2.1.0-py3-none-any.whl" -> "{dest}/numpy-2.1.0-py3-none-any.whl"
-""".replace('{dest}', str(dest))
+"""
         assert [file.name for file in files] == [
             'numpy-2.1.0-cp312-cp312-win_amd64.whl',
             'numpy-2.1.0-cp38-cp38-win_amd64.whl',
@@ -341,9 +341,9 @@ INFO | Download wheel: "https://a.example/simple/numpy/numpy-2.1.0-py3-none-any.
         assert not dest.exists()
         with logger.mock_capture_writer() as capture:
             await pypi.download('httpx', '0.28.1', 'py3-any')
-        assert capture.concat() == """\
+        assert capture.concat() == f"""\
 INFO | Download wheel: "https://a.example/simple/httpx/httpx-0.28.1-py3-none-any.whl" -> "{dest}/httpx-0.28.1-py3-none-any.whl"
-""".replace('{dest}', str(dest))
+"""
         assert dest.isdir()
 
     @pytest.mark.trio
@@ -384,9 +384,9 @@ class TestLocalFiles:
         pypi = make_pypi(index, dest)
         with logger.mock_capture_writer() as capture:
             await pypi.download('httpx', '0.28.1', 'py3-any')
-        assert capture.concat() == """\
+        assert capture.concat() == f"""\
 INFO | Download wheel: "https://a.example/simple/httpx/httpx-0.28.1-py3-none-any.whl" -> "{dest}/httpx-0.28.1-py3-none-any.whl"
-""".replace('{dest}', str(dest))
+"""
         assert file.atomic_read_bytes() == content
         assert index.file_requests() == [index.file_url('httpx', 'httpx-0.28.1-py3-none-any.whl')]
 
@@ -401,9 +401,9 @@ INFO | Download wheel: "https://a.example/simple/httpx/httpx-0.28.1-py3-none-any
         pypi = make_pypi(index, dest)
         with logger.mock_capture_writer() as capture:
             await pypi.download('httpx', '0.28.1', 'py3-any')
-        assert capture.concat() == """\
+        assert capture.concat() == f"""\
 INFO | Wheel exists, skipped: "{dest}/httpx-0.28.1-py3-none-any.whl"
-""".replace('{dest}', str(dest))
+"""
         assert file.atomic_read_bytes() == b'local content'
         assert index.file_requests() == []
 
@@ -457,12 +457,12 @@ class TestMirrors:
             client=make_client(first, second), target=PY38_WIN)
         with logger.mock_capture_writer() as capture:
             files = await pypi.download('httpx', '0.28.1', 'py3-any')
-        assert capture.concat() == """\
+        assert capture.concat() == f"""\
 INFO | Probing `pypi` for "/httpx/": a, b
 INFO | Mirror "a" responded in 0ms
 INFO | [Mirror `pypi`] a
 INFO | Download wheel: "https://a.example/simple/httpx/httpx-0.28.1-py3-none-any.whl" -> "{dest}/httpx-0.28.1-py3-none-any.whl"
-""".replace('{dest}', str(dest))
+"""
         assert [file.name for file in files] == ['httpx-0.28.1-py3-none-any.whl']
         assert first.requests == [
             ('HEAD', first.page_url('httpx')),
@@ -516,12 +516,12 @@ WARNING | Request to "https://a.example/simple/httpx/httpx-0.28.1-py3-none-any.w
         pypi = PypiFile(mirrors, dest, client=make_client(first, second), target=PY38_WIN)
         with logger.mock_capture_writer() as capture:
             files = await pypi.download('httpx', '0.28.1', 'py3-any')
-        assert capture.concat() == """\
+        assert capture.concat() == f"""\
 INFO | Probing `pypi` for "/httpx/": a, b
 INFO | Mirror "b" responded in 0ms
 INFO | [Mirror `pypi`] b
 INFO | Download wheel: "https://b.example/simple/httpx/httpx-0.28.1-py3-none-any.whl" -> "{dest}/httpx-0.28.1-py3-none-any.whl"
-""".replace('{dest}', str(dest))
+"""
         assert len(files) == 1
         assert files[0].atomic_read_bytes() == content
         # the recorded mirror is asked once, the file of its page never
@@ -545,7 +545,7 @@ INFO | Download wheel: "https://b.example/simple/httpx/httpx-0.28.1-py3-none-any
         pypi = PypiFile(mirrors, dest, client=make_client(first, second), target=PY38_WIN)
         with logger.mock_capture_writer() as capture:
             files = await pypi.download('httpx', '0.28.1', 'py3-any')
-        assert capture.concat() == """\
+        assert capture.concat() == f"""\
 INFO | Probing `pypi` for "/httpx/": a, b
 INFO | Mirror "a" responded in 0ms
 INFO | [Mirror `pypi`] a
@@ -553,7 +553,7 @@ INFO | Probing `pypi` for "/httpx/": a, b
 INFO | Mirror "b" responded in 0ms
 INFO | [Mirror `pypi`] b
 INFO | Download wheel: "https://b.example/simple/httpx/httpx-0.28.1-py3-none-any.whl" -> "{dest}/httpx-0.28.1-py3-none-any.whl"
-""".replace('{dest}', str(dest))
+"""
         assert len(files) == 1
         assert files[0].atomic_read_bytes() == content
         # a wins the probe of the page (a HEAD), its page has no such version
@@ -583,12 +583,12 @@ INFO | Download wheel: "https://b.example/simple/httpx/httpx-0.28.1-py3-none-any
         pypi = PypiFile(mirrors, dest, client=make_client(first, second), target=PY38_WIN)
         with logger.mock_capture_writer() as capture:
             files = await pypi.download('httpx', '0.28.1', 'py3-any')
-        assert capture.concat() == """\
+        assert capture.concat() == f"""\
 INFO | Probing `pypi` for "/httpx/": a, b
 INFO | Mirror "b" responded in 0ms
 INFO | [Mirror `pypi`] b
 INFO | Download wheel: "https://b.example/simple/httpx/httpx-0.28.1-py3-none-any.whl" -> "{dest}/httpx-0.28.1-py3-none-any.whl"
-""".replace('{dest}', str(dest))
+"""
         assert len(files) == 1
         assert files[0].atomic_read_bytes() == content
         # the recorded mirror serves its page once and has no file to give
@@ -668,9 +668,9 @@ class TestPublicApi:
               f'#sha256={digest}'
         with logger.mock_capture_writer() as capture:
             info = await pypi.get_wheel(url)
-        assert capture.concat() == """\
+        assert capture.concat() == f"""\
 INFO | Download wheel: "https://a.example/simple/httpx/httpx-0.28.1-py3-none-any.whl" -> "{dest}/httpx-0.28.1-py3-none-any.whl"
-""".replace('{dest}', str(dest))
+"""
         assert info.file == dest.joinpath('httpx-0.28.1-py3-none-any.whl')
         assert info.file.atomic_read_bytes() == content
         # the digest is the one computed while the bytes were downloaded
@@ -689,9 +689,9 @@ INFO | Download wheel: "https://a.example/simple/httpx/httpx-0.28.1-py3-none-any
         url = f'{index.file_url("httpx", "httpx-0.28.1-py3-none-any.whl")}#md5={md5}'
         with logger.mock_capture_writer() as capture:
             info = await pypi.get_wheel(url)
-        assert capture.concat() == """\
+        assert capture.concat() == f"""\
 INFO | Download wheel: "https://a.example/simple/httpx/httpx-0.28.1-py3-none-any.whl" -> "{dest}/httpx-0.28.1-py3-none-any.whl"
-""".replace('{dest}', str(dest))
+"""
         # the hash of the link is the check, the sha256 is what a publisher
         # needs: neither costs a second read of the bytes
         assert info.hashes == {
@@ -711,9 +711,9 @@ INFO | Download wheel: "https://a.example/simple/httpx/httpx-0.28.1-py3-none-any
         with logger.mock_capture_writer() as capture:
             link = (await pypi.get_package_index('httpx')).links[0]
             info = await pypi.get_wheel(link.url)
-        assert capture.concat() == """\
+        assert capture.concat() == f"""\
 INFO | Download wheel: "https://files.example/packages/httpx/httpx-0.28.1-py3-none-any.whl" -> "{dest}/httpx-0.28.1-py3-none-any.whl"
-""".replace('{dest}', str(dest))
+"""
         assert link.url.startswith(f'{files.base}/httpx/')
         assert info.file.atomic_read_bytes() == content
         assert mirror.file_requests() == []
