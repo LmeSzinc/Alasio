@@ -34,18 +34,22 @@ pip is MIT and packaging is Apache-2.0 OR BSD-2-Clause, both allow the port
 with the notice kept in the module that carries the code.
 
 Usage:
-    from alasio.deploy.pip_download import PypiFile
+    from alasio.deploy.pip_download import DOWNLOAD_MODE_CURRENT, PypiFile
 
     pypi = PypiFile(pypi_mirrors, dest)
-    files = await pypi.download('msgspec', '0.19.0', 'current')
+    files = await pypi.download('msgspec', '0.19.0', DOWNLOAD_MODE_CURRENT)
     await pypi.aclose()
 """
 
 from alasio.deploy.pip_download.pypi_file import (
-    DOWNLOAD_MODES, DownloadMode, PypiFile, WheelCandidate, WheelHashError, WheelNotFoundError, select_wheels
+    DOWNLOAD_MODE_ALL, DOWNLOAD_MODE_CURRENT, DOWNLOAD_MODE_PY3_ANY, DOWNLOAD_MODES, DownloadMode, PypiFile,
+    WheelCandidate, WheelHashError, WheelNotFoundError, select_wheels
 )
 
 __all__ = [
+    'DOWNLOAD_MODE_ALL',
+    'DOWNLOAD_MODE_CURRENT',
+    'DOWNLOAD_MODE_PY3_ANY',
     'DOWNLOAD_MODES',
     'DownloadMode',
     'PypiFile',

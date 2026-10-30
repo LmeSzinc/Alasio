@@ -13,6 +13,7 @@ import urllib.parse
 import httpx2
 import pytest
 
+from alasio.deploy.httpclient import probe_async
 from alasio.deploy.httpclient.probe_mirrors import Mirrors
 from alasio.deploy.pip_download._target_python import TargetPython
 from alasio.deploy.pip_download.pypi_file import PypiFile, WheelHashError, WheelNotFoundError
@@ -117,7 +118,7 @@ class MockIndex:
         """
         return f'{self.files_base}/{name}/{filename}'
 
-    def _page(self, name):
+    def page(self, name):
         """
         Returns:
             bytes: The index page of a distribution
@@ -167,7 +168,7 @@ class MockIndex:
                 return httpx2.Response(
                     200, content=b'{"files": [',
                     headers={'content-type': 'application/vnd.pypi.simple.v1+json'})
-            return httpx2.Response(200, content=self._page(name))
+            return httpx2.Response(200, content=self.page(name))
         for info in self.dists.get(name, []):
             if info['filename'] == filename:
                 return httpx2.Response(200, content=info['content'])
@@ -250,6 +251,23 @@ def make_pypi(index, dest, mode_target=PY38_WIN):
     return PypiFile(index.base, dest, client=make_client(index), target=mode_target)
 
 
+@pytest.fixture(autouse=True)
+def fake_clock(monkeypatch):
+    """
+    Freeze the clock the probes measure their candidates with.
+
+    A probe logs the measured time of the winning candidate ('Mirror "a"
+    responded in 0ms'): the time of the machine differs on every run and is
+    not assertable, the frozen one is always 0ms. No test of this module
+    depends on a real duration, the probes of the mock indexes answer in
+    memory.
+
+    Args:
+        monkeypatch (MonkeyPatch): The monkeypatch fixture of pytest
+    """
+    monkeypatch.setattr(probe_async, 'perf_counter', lambda: 0.0)
+
+
 class TestDownload:
     """The files of a mode are downloaded to the destination folder."""
 
@@ -261,8 +279,12 @@ class TestDownload:
         index.register('numpy', '2.1.0', tags='cp38-cp38-win_amd64')
         index.register('numpy', '2.1.0', tags='py3-none-any')
         pypi = make_pypi(index, dest)
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             files = await pypi.download('NumPy', '2.1.0', 'current')
+        assert capture.concat() == """\
+INFO | Download wheel: "https://a.example/simple/numpy/numpy-2.1.0-cp38-cp38-win_amd64.whl" -> "{dest}/numpy-2.1.0-cp38-cp38-win_amd64.whl"
+INFO | Download wheel: "https://a.example/simple/numpy/numpy-2.1.0-py3-none-any.whl" -> "{dest}/numpy-2.1.0-py3-none-any.whl"
+""".replace('{dest}', str(dest))
         assert [str(file) for file in files] == [
             str(dest.joinpath('numpy-2.1.0-cp38-cp38-win_amd64.whl')),
             str(dest.joinpath('numpy-2.1.0-py3-none-any.whl')),
@@ -282,8 +304,11 @@ class TestDownload:
         index.register('httpx', '0.28.1', tags='py3-none-any')
         index.register('httpx', '0.28.1', tags='cp38-cp38-win_amd64')
         pypi = make_pypi(index, dest)
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             files = await pypi.download('httpx', '0.28.1', 'py3-any')
+        assert capture.concat() == """\
+INFO | Download wheel: "https://a.example/simple/httpx/httpx-0.28.1-py3-none-any.whl" -> "{dest}/httpx-0.28.1-py3-none-any.whl"
+""".replace('{dest}', str(dest))
         assert [file.name for file in files] == ['httpx-0.28.1-py3-none-any.whl']
         assert index.file_requests() == [
             index.file_url('httpx', 'httpx-0.28.1-py3-none-any.whl')]
@@ -295,8 +320,13 @@ class TestDownload:
         index.register('numpy', '2.1.0', tags='cp38-cp38-win_amd64')
         index.register('numpy', '2.1.0', tags='py3-none-any')
         pypi = make_pypi(index, dest)
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             files = await pypi.download('numpy', '2.1.0', 'all')
+        assert capture.concat() == """\
+INFO | Download wheel: "https://a.example/simple/numpy/numpy-2.1.0-cp312-cp312-win_amd64.whl" -> "{dest}/numpy-2.1.0-cp312-cp312-win_amd64.whl"
+INFO | Download wheel: "https://a.example/simple/numpy/numpy-2.1.0-cp38-cp38-win_amd64.whl" -> "{dest}/numpy-2.1.0-cp38-cp38-win_amd64.whl"
+INFO | Download wheel: "https://a.example/simple/numpy/numpy-2.1.0-py3-none-any.whl" -> "{dest}/numpy-2.1.0-py3-none-any.whl"
+""".replace('{dest}', str(dest))
         assert [file.name for file in files] == [
             'numpy-2.1.0-cp312-cp312-win_amd64.whl',
             'numpy-2.1.0-cp38-cp38-win_amd64.whl',
@@ -309,8 +339,11 @@ class TestDownload:
         index.register('httpx', '0.28.1')
         pypi = make_pypi(index, dest)
         assert not dest.exists()
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             await pypi.download('httpx', '0.28.1', 'py3-any')
+        assert capture.concat() == """\
+INFO | Download wheel: "https://a.example/simple/httpx/httpx-0.28.1-py3-none-any.whl" -> "{dest}/httpx-0.28.1-py3-none-any.whl"
+""".replace('{dest}', str(dest))
         assert dest.isdir()
 
     @pytest.mark.trio
@@ -336,10 +369,10 @@ class TestLocalFiles:
         pypi = make_pypi(index, dest)
         with logger.mock_capture_writer() as capture:
             files = await pypi.download('httpx', '0.28.1', 'py3-any')
-        assert [file.name for file in files] == ['httpx-0.28.1-py3-none-any.whl']
-        assert index.file_requests() == []
         assert capture.concat() == (
             f'INFO | Wheel exists, skipped: "{dest.joinpath("httpx-0.28.1-py3-none-any.whl")}"\n')
+        assert [file.name for file in files] == ['httpx-0.28.1-py3-none-any.whl']
+        assert index.file_requests() == []
 
     @pytest.mark.trio
     async def test_wrong_file_downloaded(self, index, dest):
@@ -349,8 +382,11 @@ class TestLocalFiles:
         file = dest.joinpath('httpx-0.28.1-py3-none-any.whl')
         file.atomic_write(b'old content')
         pypi = make_pypi(index, dest)
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             await pypi.download('httpx', '0.28.1', 'py3-any')
+        assert capture.concat() == """\
+INFO | Download wheel: "https://a.example/simple/httpx/httpx-0.28.1-py3-none-any.whl" -> "{dest}/httpx-0.28.1-py3-none-any.whl"
+""".replace('{dest}', str(dest))
         assert file.atomic_read_bytes() == content
         assert index.file_requests() == [index.file_url('httpx', 'httpx-0.28.1-py3-none-any.whl')]
 
@@ -363,8 +399,11 @@ class TestLocalFiles:
         file = dest.joinpath('httpx-0.28.1-py3-none-any.whl')
         file.atomic_write(b'local content')
         pypi = make_pypi(index, dest)
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             await pypi.download('httpx', '0.28.1', 'py3-any')
+        assert capture.concat() == """\
+INFO | Wheel exists, skipped: "{dest}/httpx-0.28.1-py3-none-any.whl"
+""".replace('{dest}', str(dest))
         assert file.atomic_read_bytes() == b'local content'
         assert index.file_requests() == []
 
@@ -377,9 +416,13 @@ class TestHashCheck:
         """A file that does not match the hash is not written."""
         index.register('httpx', '0.28.1', digest='b' * 64)
         pypi = make_pypi(index, dest)
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             with pytest.raises(WheelHashError) as e:
                 await pypi.download('httpx', '0.28.1', 'py3-any')
+        assert capture.concat() == f"""\
+INFO | Download wheel: "https://a.example/simple/httpx/httpx-0.28.1-py3-none-any.whl" -> "{dest}/httpx-0.28.1-py3-none-any.whl"
+WARNING | Request to "https://a.example/simple/httpx/httpx-0.28.1-py3-none-any.whl" failed (attempt 1/3): WheelHashError: Hash of "https://a.example/simple/httpx/httpx-0.28.1-py3-none-any.whl" does not match the index: {hashlib.sha256(b'httpx-0.28.1-py3-none-any.whl content').hexdigest()} != {'b' * 64}
+"""
         assert str(e.value) == (
             f'Hash of "{index.file_url("httpx", "httpx-0.28.1-py3-none-any.whl")}" '
             f'does not match the index: '
@@ -412,8 +455,14 @@ class TestMirrors:
         pypi = PypiFile(
             {'cn': {'a': first.base, 'b': second.base}}, dest,
             client=make_client(first, second), target=PY38_WIN)
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             files = await pypi.download('httpx', '0.28.1', 'py3-any')
+        assert capture.concat() == """\
+INFO | Probing `pypi` for "/httpx/": a, b
+INFO | Mirror "a" responded in 0ms
+INFO | [Mirror `pypi`] a
+INFO | Download wheel: "https://a.example/simple/httpx/httpx-0.28.1-py3-none-any.whl" -> "{dest}/httpx-0.28.1-py3-none-any.whl"
+""".replace('{dest}', str(dest))
         assert [file.name for file in files] == ['httpx-0.28.1-py3-none-any.whl']
         assert first.requests == [
             ('HEAD', first.page_url('httpx')),
@@ -433,9 +482,16 @@ class TestMirrors:
         pypi = PypiFile(
             {'cn': {'a': first.base, 'b': second.base}}, dest,
             client=make_client(first, second), target=PY38_WIN)
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             with pytest.raises(WheelHashError):
                 await pypi.download('httpx', '0.28.1', 'py3-any')
+        assert capture.concat() == f"""\
+INFO | Probing `pypi` for "/httpx/": a, b
+INFO | Mirror "a" responded in 0ms
+INFO | [Mirror `pypi`] a
+INFO | Download wheel: "https://a.example/simple/httpx/httpx-0.28.1-py3-none-any.whl" -> "{dest}/httpx-0.28.1-py3-none-any.whl"
+WARNING | Request to "https://a.example/simple/httpx/httpx-0.28.1-py3-none-any.whl" failed (attempt 1/3): WheelHashError: Hash of "https://a.example/simple/httpx/httpx-0.28.1-py3-none-any.whl" does not match the index: {hashlib.sha256(b'corrupted').hexdigest()} != {'c' * 64}
+"""
         assert not dest.joinpath('httpx-0.28.1-py3-none-any.whl').exists()
         assert first.file_requests() == [
             first.file_url('httpx', 'httpx-0.28.1-py3-none-any.whl')]
@@ -458,8 +514,14 @@ class TestMirrors:
         record_table.seed(
             scene=PypiFile.SCENE, name='', digest=Mirrors.from_input(mirrors).digest, result='a')
         pypi = PypiFile(mirrors, dest, client=make_client(first, second), target=PY38_WIN)
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             files = await pypi.download('httpx', '0.28.1', 'py3-any')
+        assert capture.concat() == """\
+INFO | Probing `pypi` for "/httpx/": a, b
+INFO | Mirror "b" responded in 0ms
+INFO | [Mirror `pypi`] b
+INFO | Download wheel: "https://b.example/simple/httpx/httpx-0.28.1-py3-none-any.whl" -> "{dest}/httpx-0.28.1-py3-none-any.whl"
+""".replace('{dest}', str(dest))
         assert len(files) == 1
         assert files[0].atomic_read_bytes() == content
         # the recorded mirror is asked once, the file of its page never
@@ -481,8 +543,17 @@ class TestMirrors:
         content = second.register('httpx', '0.28.1')
         mirrors = {'cn': {'a': first.base, 'b': second.base}}
         pypi = PypiFile(mirrors, dest, client=make_client(first, second), target=PY38_WIN)
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             files = await pypi.download('httpx', '0.28.1', 'py3-any')
+        assert capture.concat() == """\
+INFO | Probing `pypi` for "/httpx/": a, b
+INFO | Mirror "a" responded in 0ms
+INFO | [Mirror `pypi`] a
+INFO | Probing `pypi` for "/httpx/": a, b
+INFO | Mirror "b" responded in 0ms
+INFO | [Mirror `pypi`] b
+INFO | Download wheel: "https://b.example/simple/httpx/httpx-0.28.1-py3-none-any.whl" -> "{dest}/httpx-0.28.1-py3-none-any.whl"
+""".replace('{dest}', str(dest))
         assert len(files) == 1
         assert files[0].atomic_read_bytes() == content
         # a wins the probe of the page (a HEAD), its page has no such version
@@ -510,8 +581,14 @@ class TestMirrors:
         record_table.seed(
             scene=PypiFile.SCENE, name='', digest=Mirrors.from_input(mirrors).digest, result='a')
         pypi = PypiFile(mirrors, dest, client=make_client(first, second), target=PY38_WIN)
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             files = await pypi.download('httpx', '0.28.1', 'py3-any')
+        assert capture.concat() == """\
+INFO | Probing `pypi` for "/httpx/": a, b
+INFO | Mirror "b" responded in 0ms
+INFO | [Mirror `pypi`] b
+INFO | Download wheel: "https://b.example/simple/httpx/httpx-0.28.1-py3-none-any.whl" -> "{dest}/httpx-0.28.1-py3-none-any.whl"
+""".replace('{dest}', str(dest))
         assert len(files) == 1
         assert files[0].atomic_read_bytes() == content
         # the recorded mirror serves its page once and has no file to give
@@ -537,9 +614,14 @@ class TestMirrors:
         record_table.seed(
             scene=PypiFile.SCENE, name='', digest=Mirrors.from_input(mirrors).digest, result='a')
         pypi = PypiFile(mirrors, dest, client=make_client(first, second), target=PY38_WIN)
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             with pytest.raises(WheelNotFoundError) as e:
                 await pypi.download('httpx', '0.28.1', 'py3-any')
+        assert capture.concat() == """\
+INFO | Probing `pypi` for "/httpx/": a, b
+INFO | Mirror "b" responded in 0ms
+INFO | [Mirror `pypi`] b
+"""
         assert str(e.value) == 'No wheel of "httpx==0.28.1" in the index'
         assert first.file_requests() == []
         assert second.file_requests() == []
@@ -556,35 +638,66 @@ class TestPublicApi:
 
     @pytest.mark.trio
     async def test_get_package_index(self, index, dest):
-        """The page is requested once and returned as its links."""
+        """The page is requested once and returned with its links and its body."""
         index.register('httpx', '0.28.0')
         index.register('httpx', '0.28.1', requires_python='>=3.8')
         pypi = make_pypi(index, dest)
-        with logger.mock_capture_writer():
-            links = await pypi.get_package_index('HTTPX')
-        assert [link.filename for link in links] == [
+        with logger.mock_capture_writer() as capture:
+            page = await pypi.get_package_index('HTTPX')
+        assert capture.concat() == ''
+        assert [link.filename for link in page.links] == [
             'httpx-0.28.0-py3-none-any.whl',
             'httpx-0.28.1-py3-none-any.whl',
         ]
-        assert links[1].requires_python == '>=3.8'
+        assert page.links[1].requires_python == '>=3.8'
+        # the body is the one the mirror served, the url is the base of the
+        # relative links of the page: the caller that snapshots the page
+        # does not request it again
+        assert page.body == index.page('httpx')
+        assert page.url == index.page_url('httpx')
         assert index.page_requests() == [index.page_url('httpx')]
 
     @pytest.mark.trio
     async def test_get_wheel(self, index, dest):
         """A wheel is downloaded by the url of its link, the hash of the
-        fragment is the check."""
+        fragment is the check, and the digests of the bytes are returned."""
         content = index.register('httpx', '0.28.1')
         pypi = make_pypi(index, dest)
+        digest = hashlib.sha256(content).hexdigest()
         url = f'{index.file_url("httpx", "httpx-0.28.1-py3-none-any.whl")}' \
-              f'#sha256={hashlib.sha256(content).hexdigest()}'
-        with logger.mock_capture_writer():
-            file = await pypi.get_wheel(url)
-        assert file == dest.joinpath('httpx-0.28.1-py3-none-any.whl')
-        assert file.atomic_read_bytes() == content
+              f'#sha256={digest}'
+        with logger.mock_capture_writer() as capture:
+            info = await pypi.get_wheel(url)
+        assert capture.concat() == """\
+INFO | Download wheel: "https://a.example/simple/httpx/httpx-0.28.1-py3-none-any.whl" -> "{dest}/httpx-0.28.1-py3-none-any.whl"
+""".replace('{dest}', str(dest))
+        assert info.file == dest.joinpath('httpx-0.28.1-py3-none-any.whl')
+        assert info.file.atomic_read_bytes() == content
+        # the digest is the one computed while the bytes were downloaded
+        assert info.hashes == {'sha256': digest}
         # the fragment is not part of the request, and the transfer is not
         # probed: the file is served by the host of its url, not by a mirror
         assert index.requests == [
             ('GET', index.file_url('httpx', 'httpx-0.28.1-py3-none-any.whl'))]
+
+    @pytest.mark.trio
+    async def test_hashes_of_a_link_with_another_hash(self, index, dest):
+        """A link that carries no sha256: both digests come from the one read."""
+        content = index.register('httpx', '0.28.1')
+        pypi = make_pypi(index, dest)
+        md5 = hashlib.md5(content).hexdigest()
+        url = f'{index.file_url("httpx", "httpx-0.28.1-py3-none-any.whl")}#md5={md5}'
+        with logger.mock_capture_writer() as capture:
+            info = await pypi.get_wheel(url)
+        assert capture.concat() == """\
+INFO | Download wheel: "https://a.example/simple/httpx/httpx-0.28.1-py3-none-any.whl" -> "{dest}/httpx-0.28.1-py3-none-any.whl"
+""".replace('{dest}', str(dest))
+        # the hash of the link is the check, the sha256 is what a publisher
+        # needs: neither costs a second read of the bytes
+        assert info.hashes == {
+            'sha256': hashlib.sha256(content).hexdigest(),
+            'md5': md5,
+        }
 
     @pytest.mark.trio
     async def test_get_wheel_of_a_files_host(self, dest):
@@ -595,11 +708,14 @@ class TestPublicApi:
         mirror = MockIndex('https://mirror.example/simple', files_base=files.base)
         mirror.register('httpx', '0.28.1')
         pypi = PypiFile(mirror.base, dest, client=make_client(mirror, files), target=PY38_WIN)
-        with logger.mock_capture_writer():
-            link = (await pypi.get_package_index('httpx'))[0]
-            file = await pypi.get_wheel(link.url)
+        with logger.mock_capture_writer() as capture:
+            link = (await pypi.get_package_index('httpx')).links[0]
+            info = await pypi.get_wheel(link.url)
+        assert capture.concat() == """\
+INFO | Download wheel: "https://files.example/packages/httpx/httpx-0.28.1-py3-none-any.whl" -> "{dest}/httpx-0.28.1-py3-none-any.whl"
+""".replace('{dest}', str(dest))
         assert link.url.startswith(f'{files.base}/httpx/')
-        assert file.atomic_read_bytes() == content
+        assert info.file.atomic_read_bytes() == content
         assert mirror.file_requests() == []
         assert files.file_requests() == [
             files.file_url('httpx', 'httpx-0.28.1-py3-none-any.whl')]
@@ -609,13 +725,17 @@ class TestPublicApi:
         """A wheel that is already there is not requested again."""
         content = index.register('httpx', '0.28.1')
         pypi = make_pypi(index, dest)
+        digest = hashlib.sha256(content).hexdigest()
         url = f'{index.file_url("httpx", "httpx-0.28.1-py3-none-any.whl")}' \
-              f'#sha256={hashlib.sha256(content).hexdigest()}'
+              f'#sha256={digest}'
         dest.makedirs()
         file = dest.joinpath('httpx-0.28.1-py3-none-any.whl')
         file.atomic_write(content)
         with logger.mock_capture_writer() as capture:
-            assert await pypi.get_wheel(url) == file
+            info = await pypi.get_wheel(url)
+        assert info.file == file
+        # the digest of the local file is computed by the check it passed
+        assert info.hashes == {'sha256': digest}
         assert index.requests == []
         assert capture.concat() == f'INFO | Wheel exists, skipped: "{file}"\n'
 
@@ -628,9 +748,10 @@ class TestIndexErrors:
         """A page without the version fails with the mode in the message."""
         index.register('httpx', '0.28.0')
         pypi = make_pypi(index, dest)
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             with pytest.raises(WheelNotFoundError) as e:
                 await pypi.download('httpx', '0.28.1', 'py3-any')
+        assert capture.concat() == ''
         assert str(e.value) == 'No wheel of "httpx==0.28.1" in the index'
 
     @pytest.mark.trio
@@ -638,9 +759,10 @@ class TestIndexErrors:
         """A version without a wheel of the mode fails with the files it has."""
         index.register('httpx', '0.28.1', tags='cp38-cp38-win_amd64')
         pypi = make_pypi(index, dest)
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             with pytest.raises(WheelNotFoundError) as e:
                 await pypi.download('httpx', '0.28.1', 'py3-any')
+        assert capture.concat() == ''
         assert str(e.value) == (
             'No wheel of "httpx==0.28.1" matches "py3-any", the version has: '
             'httpx-0.28.1-cp38-cp38-win_amd64.whl')
@@ -649,6 +771,9 @@ class TestIndexErrors:
     async def test_missing_index(self, index, dest):
         """A 404 of the index page is the answer of the mirror."""
         pypi = make_pypi(index, dest)
-        with logger.mock_capture_writer():
+        with logger.mock_capture_writer() as capture:
             with pytest.raises(httpx2.HTTPStatusError):
                 await pypi.download('httpx', '0.28.1', 'py3-any')
+        assert capture.concat() == """\
+WARNING | Request to "https://a.example/simple/httpx/" failed (attempt 1/3): HTTPStatusError: Client error '404 Not Found' for url 'https://a.example/simple/httpx/'
+"""

@@ -6,11 +6,12 @@ The fetcher is the client side counterpart of
 downloads the wheels that match `mode` into the folder the caller gave, with
 the index parsed by the ported pip helpers (`_link`, `_wheel`, `_utils`):
 
-- `current`: every wheel compatible with the target interpreter (the running
-  one by default), ordered by the tag preference of PEP 425;
-- `py3-any`: every pure python wheel of python 3 (`none-any` ABI and
-  platform), the semantics of the release side wheel fetch;
-- `all`: every wheel of the version, whatever its tags.
+- `DOWNLOAD_MODE_CURRENT` (`current`): every wheel compatible with the target
+  interpreter (the running one by default), ordered by the tag preference of
+  PEP 425;
+- `DOWNLOAD_MODE_PY3_ANY` (`py3-any`): every pure python wheel of python 3
+  (`none-any` ABI and platform), the semantics of the release side wheel fetch;
+- `DOWNLOAD_MODE_ALL` (`all`): every wheel of the version, whatever its tags.
 
 The index page is probe-driven, like the pack server: `get_package_index()`
 and `download()` serve the page path through `AsyncProbe.fetch()` and pass the
@@ -20,16 +21,22 @@ declares (`WheelNotFoundError`) makes the engine probe the path again without
 the failed mirror and retry it once:
 
 - `get_package_index(name)` requests `{mirror}/{dist-key}/` and returns the
-  links of the page. The probe of the path is the default HEAD of the probe
+  page: the links parsed from it, the body as the mirror served it and the url
+  it was served at. The probe of the path is the default HEAD of the probe
   layer: the page of a big distribution is large (the page of numpy is a few
   MB), a probe must not transfer it. The page is fetched once by the work of
-  the flow, on the selected mirror;
+  the flow, on the selected mirror. The body answers the caller that keeps a
+  snapshot of the page instead of only its links (the pack server caches the
+  page of a version, see fetch_wheel); the optional `select` step answers the
+  flow that asks a question about the page, and it runs inside the probe, so a
+  page without the answer is a failure of the mirror like a page that does not
+  parse (see download());
 - `get_wheel(url)` downloads one wheel of a page by the absolute url of its
-  link. A page may point at a files host of its own
-  (files.pythonhosted.org), so the url is used as it is and the transfer goes
-  through the http client alone: the file is not served by the mirror, and
-  there is no path of the mirror to probe. The mirror is the one
-  `get_package_index()` selected.
+  link, and returns the wheel with the digests of its bytes. A page may point
+  at a files host of its own (files.pythonhosted.org), so the url is used as it
+  is and the transfer goes through the http client alone: the file is not
+  served by the mirror, and there is no path of the mirror to probe. The mirror
+  is the one `get_package_index()` selected.
 
 `download(name, version, mode)` is the two steps: the page of the distribution
 is fetched and filtered by `select_wheels()`, then every selected wheel is
@@ -46,16 +53,17 @@ decides what happens to them (install, keep, delete), the fetcher only writes
 them and returns their paths.
 
 Usage:
-    from alasio.deploy.pip_download.pypi_file import PypiFile
+    from alasio.deploy.pip_download.pypi_file import DOWNLOAD_MODE_CURRENT, PypiFile
 
     pypi = PypiFile(mirrors, dest)
-    files = await pypi.download('numpy', '2.1.0', 'current')
+    files = await pypi.download('numpy', '2.1.0', DOWNLOAD_MODE_CURRENT)
     await pypi.aclose()
 """
 
 import hashlib
-from typing import Literal
+from typing import Dict, List, Literal
 
+import msgspec
 import trio
 
 from alasio.deploy.httpclient.probe_async import AsyncHttpProbe
@@ -70,18 +78,31 @@ from alasio.ext.path.atomic import atomic_read_bytes_stream
 from alasio.logger import logger
 
 __all__ = [
+    'DOWNLOAD_MODE_ALL',
+    'DOWNLOAD_MODE_CURRENT',
+    'DOWNLOAD_MODE_PY3_ANY',
     'DOWNLOAD_MODES',
     'DownloadMode',
+    'PackageIndex',
     'PypiFile',
     'WheelCandidate',
     'WheelHashError',
+    'WheelInfo',
     'WheelNotFoundError',
     'select_wheels',
 ]
 
 # The wheels a download asks for, see select_wheels()
 DownloadMode = Literal['current', 'py3-any', 'all']
-DOWNLOAD_MODES = ('current', 'py3-any', 'all')
+
+# every wheel compatible with the target interpreter
+DOWNLOAD_MODE_CURRENT = 'current'
+# every pure python wheel of python 3 (`none-any` abi and platform)
+DOWNLOAD_MODE_PY3_ANY = 'py3-any'
+# every wheel of the version, whatever its tags
+DOWNLOAD_MODE_ALL = 'all'
+
+DOWNLOAD_MODES = (DOWNLOAD_MODE_CURRENT, DOWNLOAD_MODE_PY3_ANY, DOWNLOAD_MODE_ALL)
 
 # The hashes a link may carry, the strongest one the fetcher knows comes first
 _HASH_PREFERENCE = ('sha256', 'sha512', 'sha384', 'sha224', 'sha1', 'md5')
@@ -139,6 +160,43 @@ class WheelCandidate:
         return f'<WheelCandidate {self.filename}>'
 
 
+class PackageIndex(msgspec.Struct):
+    """
+    One index page of a distribution: the body, the url and the parsed links.
+
+    The body is kept as the mirror served it, byte for byte, for the caller that
+    snapshots the page instead of only reading its links (the pack server caches
+    the page of a version, see fetch_wheel).
+
+    Attributes:
+        url (str): Url the page was served at, the base of its relative links
+        body (bytes): Body of the page, as the index served it
+        links (List[Link]): The links of the page, in the order of the page
+    """
+
+    url: str
+    body: bytes
+    links: List[Link]
+
+
+class WheelInfo(msgspec.Struct):
+    """
+    One wheel on the disk and the digests of its bytes.
+
+    The digests are computed while the bytes are read or downloaded (see
+    PypiFile.get_wheel()), so a caller that publishes the file or records it
+    never reads it again.
+
+    Attributes:
+        file (PathStr): Path of the wheel in the destination folder
+        hashes (Dict[str, str]): Lowercase hex digests of the file, hash name
+            to value. 'sha256' is always there
+    """
+
+    file: PathStr
+    hashes: Dict[str, str]
+
+
 def _is_pure_python3(wheel):
     """
     Whether the wheel is a pure python wheel of python 3.
@@ -178,8 +236,7 @@ def _requires_python_ok(link, target):
         return check_requires_python(link.requires_python, target.py_version_info)
     except InvalidSpecifier as e:
         logger.debug(
-            f'Ignoring invalid Requires-Python of "{link.show_url}": '
-            f'{link.requires_python!r}, {e}')
+            f'Ignoring invalid Requires-Python of "{link.show_url}": {link.requires_python!r}, {e}')
         return True
 
 
@@ -238,24 +295,24 @@ def select_wheels(links, name, version, mode: DownloadMode, target=None):
         candidates.append(WheelCandidate(link, wheel))
 
     # 2. the wheels the mode asks for
-    if mode == 'current':
+    if mode == DOWNLOAD_MODE_CURRENT:
         supported = target.get_unsorted_tags()
         eligible = [
             candidate for candidate in candidates
             if candidate.wheel.supported(supported) and _requires_python_ok(candidate.link, target)
         ]
-    elif mode == 'py3-any':
+    elif mode == DOWNLOAD_MODE_PY3_ANY:
         eligible = [
             candidate for candidate in candidates
             if _is_pure_python3(candidate.wheel)
         ]
     else:
-        # 'all': every wheel of the version
+        # DOWNLOAD_MODE_ALL: every wheel of the version
         eligible = list(candidates)
 
     # 3. the yanked files, PEP 592: a pinned version may only have yanked
     # wheels left, and pip accepts them then too
-    if mode == 'all':
+    if mode == DOWNLOAD_MODE_ALL:
         yanked = [candidate.filename for candidate in eligible if candidate.link.is_yanked]
         if yanked:
             logger.info(f'Yanked wheels of "{name}=={version}" are kept: {", ".join(yanked)}')
@@ -277,33 +334,34 @@ def select_wheels(links, name, version, mode: DownloadMode, target=None):
         raise WheelNotFoundError(f'No wheel of "{name}=={version}" in the index')
 
     # 4. the order of the answer
-    if mode == 'current':
+    if mode == DOWNLOAD_MODE_CURRENT:
         tags = target.get_sorted_tags()
-        eligible.sort(key=lambda candidate: (candidate.wheel.support_index_min(tags),
-                                             candidate.filename))
+        eligible.sort(key=lambda candidate: (candidate.wheel.support_index_min(tags), candidate.filename))
     else:
         eligible.sort(key=lambda candidate: candidate.filename)
     return eligible
 
 
-def _hash_file(file, name):
+def _file_digests(file, names):
     """
-    The digest of a file, streamed in chunks.
+    The digests of a local file, every name in one read of it.
 
     Args:
-        file (str): Path of the file
-        name (str): Name of the hash, e.g. 'sha256'
+        file (PathStr): Path of the file
+        names (tuple[str, ...]): Names of the hashes, e.g. ('sha256', 'md5')
 
     Returns:
-        str: Lowercase hex digest
-
-    Raises:
-        FileNotFoundError: If the file does not exist
+        dict[str, str] | None: Hash name to lowercase hex digest, None when the
+            file does not exist
     """
-    digest = hashlib.new(name)
-    for chunk in atomic_read_bytes_stream(file):
-        digest.update(chunk)
-    return digest.hexdigest()
+    digests = {name: hashlib.new(name) for name in names}
+    try:
+        for chunk in atomic_read_bytes_stream(file):
+            for digest in digests.values():
+                digest.update(chunk)
+    except FileNotFoundError:
+        return None
+    return {name: digest.hexdigest() for name, digest in digests.items()}
 
 
 def _expected_hash(link):
@@ -417,8 +475,8 @@ class PypiFile(AsyncHttpProbe):
             name (str): Distribution name, e.g. 'numpy', any case and
                 separator style
             version (str): Exact version, e.g. '2.1.0'
-            mode (DownloadMode): 'current', 'py3-any' or 'all', see
-                select_wheels()
+            mode (DownloadMode): DOWNLOAD_MODE_CURRENT, DOWNLOAD_MODE_PY3_ANY
+                or DOWNLOAD_MODE_ALL, see select_wheels()
 
         Returns:
             list[PathStr]: Paths of the wheels, the order of select_wheels()
@@ -434,36 +492,38 @@ class PypiFile(AsyncHttpProbe):
         """
         if mode not in DOWNLOAD_MODES:
             raise ValueError(f'Invalid download mode: {mode!r}, expected one of {DOWNLOAD_MODES}')
-        path = f'/{canonicalize_name(name)}/'
-
-        async def work(mirror_name, url):
-            links = await self._get_index(url, path)
-            return select_wheels(links, name, version, mode, self.target)
-
-        candidates = await self.fetch(path, work)
-        return [await self.get_wheel(candidate.link.url) for candidate in candidates]
+        candidates = await self.get_package_index(
+            name, lambda index: select_wheels(index.links, name, version, mode, self.target))
+        return [(await self.get_wheel(candidate.link.url)).file for candidate in candidates]
 
     # ------------------------------------------------------------------
     # The index page of a distribution
     # ------------------------------------------------------------------
 
-    async def get_package_index(self, name):
+    async def get_package_index(self, name, select=None):
         """
-        Get the links of the index page of a distribution from
-        {mirror}/{dist-key}/.
+        Get the index page of a distribution from {mirror}/{dist-key}/.
 
         The page is the probed path, and the probe is the default HEAD of the
         probe layer: the page of a big distribution is large (the page of
         numpy is a few MB), so the probe must not transfer it. The page itself
-        is fetched once by the work below, on the selected mirror. The links
-        carry the filenames, the hashes and the `data-*` attributes of the
-        page, whatever the version (see select_wheels() for the filter).
+        is fetched once by the work below, on the selected mirror, and the
+        redirects of the mirror are followed: a mirror may send `/{dist}` to
+        `/{dist}/`, or serve its index below another host. The links carry the
+        filenames, the hashes and the `data-*` attributes of the page, whatever
+        the version (see select_wheels() for the filter).
 
         Args:
             name (str): Distribution name, any case and separator style
+            select (Callable, optional): The step of a flow that asks a
+                question about the page, `select(index)`, run inside the probe:
+                its answer is the answer of this call, and a failure of it is a
+                failure of the mirror, so the flow moves to another one and
+                retries once (download() selects the wheels of a version this
+                way). Defaults to None, the page itself
 
         Returns:
-            list[Link]: The links of the page, in the order of the page
+            PackageIndex | Any: The page, or the answer of select()
 
         Raises:
             WheelNotFoundError: If the served page does not parse (the mirror
@@ -475,41 +535,20 @@ class PypiFile(AsyncHttpProbe):
         path = f'/{canonicalize_name(name)}/'
 
         async def work(mirror_name, url):
-            return await self._get_index(url, path)
+            page_url = f'{url}{path}'
+            response = await self._http.get(page_url, follow_redirects=True)
+            body = response.content
+            try:
+                links = parse_links(body, page_url, response.headers.get('content-type', ''))
+            except ValueError as e:
+                # a page that does not parse (a broken JSON page, a response
+                # that is not a page at all) is a page this mirror cannot serve
+                raise WheelNotFoundError(
+                    f'The index page of "{page_url}" does not parse: {e}') from e
+            index = PackageIndex(page_url, body, links)
+            return index if select is None else select(index)
 
         return await self.fetch(path, work)
-
-    async def _get_index(self, url, path):
-        """
-        Request and parse the index page of one mirror.
-
-        The page is requested with the default timeout of the client, and the
-        redirects of the mirror are followed: a mirror may send `/{dist}` to
-        `/{dist}/`, or serve its index below another host.
-
-        Args:
-            url (str): Base url of the mirror
-            path (str): Path of the index page
-
-        Returns:
-            list[Link]: The links of the page, in the order of the page
-
-        Raises:
-            WheelNotFoundError: If the page does not parse: a page this mirror
-                cannot serve is a failure of the mirror, so the probe layer
-                retries the path on another one once
-            httpx2.HTTPError: If the request fails
-        """
-        page_url = f'{url}{path}'
-        response = await self._http.get(page_url, follow_redirects=True)
-        content_type = response.headers.get('content-type', '')
-        try:
-            return parse_links(response.content, page_url, content_type)
-        except ValueError as e:
-            # a page that does not parse (a broken JSON page, a response that
-            # is not a page at all) is a page this mirror cannot serve
-            raise WheelNotFoundError(
-                f'The index page of "{page_url}" does not parse: {e}') from e
 
     # ------------------------------------------------------------------
     # One wheel of a page
@@ -517,7 +556,7 @@ class PypiFile(AsyncHttpProbe):
 
     async def get_wheel(self, url):
         """
-        Download one wheel to the destination folder and return its path.
+        Download one wheel to the destination folder, with the digests of its bytes.
 
         The url is the one of the link of an index page, its fragment included
         (`#sha256=...`): the file is requested at the url without the fragment,
@@ -544,7 +583,11 @@ class PypiFile(AsyncHttpProbe):
                 included
 
         Returns:
-            PathStr: Path of the wheel, {dest}/{filename}
+            WheelInfo: The wheel at {dest}/{filename} and the digests of its
+                bytes. The sha256 is always computed, the pip index the pack
+                server publishes links every wheel with its `#sha256=`; the
+                digest of the hash of the link is computed in the same read or
+                download, so no caller reads the file again
 
         Raises:
             WheelHashError: If the downloaded bytes do not match the hash of
@@ -554,9 +597,11 @@ class PypiFile(AsyncHttpProbe):
         link = Link(url)
         file = self.dest.joinpath(link.filename)
         sha_name, sha_value = _expected_hash(link)
-        if await trio.to_thread.run_sync(_wheel_is_valid, file, sha_name, sha_value):
+        names = ('sha256',) if sha_name in ('', 'sha256') else ('sha256', sha_name)
+        hashes = await trio.to_thread.run_sync(_file_digests, file, names)
+        if hashes is not None and (not sha_name or hashes[sha_name] == sha_value):
             logger.info(f'Wheel exists, skipped: "{file}"')
-            return file
+            return WheelInfo(file, hashes)
 
         source = link.url_without_fragment
         logger.info(f'Download wheel: "{source}" -> "{file}"')
@@ -564,50 +609,31 @@ class PypiFile(AsyncHttpProbe):
         # wheel of the dependencies of this project is a few MB, and the write
         # of a file must not block the event loop
         collected = []
+        computed = {}
 
         async def consume(response):
-            digest = hashlib.new(sha_name) if sha_name else None
+            # every digest is fed in the same pass of the bytes: a second read
+            # of the file for another hash would cost another transfer
+            digests = {name: hashlib.new(name) for name in names}
             chunks = []
             async for chunk in response.aiter_bytes():
                 chunks.append(chunk)
-                if digest is not None:
+                for digest in digests.values():
                     digest.update(chunk)
-            if digest is not None and digest.hexdigest() != sha_value:
+            values = {name: digest.hexdigest() for name, digest in digests.items()}
+            if sha_name and values[sha_name] != sha_value:
                 raise WheelHashError(
                     f'Hash of "{source}" does not match the index: '
-                    f'{digest.hexdigest()} != {sha_value}')
+                    f'{values[sha_name]} != {sha_value}')
             # the buffer is local until the transfer completes: a failed
             # attempt leaves nothing behind for the retry
             collected.clear()
             collected.extend(chunks)
+            computed.update(values)
 
         # a transport error of the transfer is retried as a whole by the http
         # client, the chunks of a failed attempt are dropped with it; the
         # redirects of the files host (a CDN, another host) are followed
         await self._http.stream(source, consume, follow_redirects=True)
         await trio.to_thread.run_sync(file.atomic_write, b''.join(collected))
-        return file
-
-
-def _wheel_is_valid(file, sha_name, sha_value):
-    """
-    Whether the local file is the wheel its index link describes.
-
-    A file that does not exist is not valid, it is downloaded. A link without
-    a hash has nothing to check against, the local file is trusted: the first
-    download is the authority (TOFU).
-
-    Args:
-        file (PathStr): Path of the wheel in the destination folder
-        sha_name (str): Name of the expected hash, '' for no check
-        sha_value (str): Expected digest, '' for no check
-
-    Returns:
-        bool: True when the file is usable as it is, no download needed
-    """
-    if not sha_name:
-        return file.exists()
-    try:
-        return _hash_file(file, sha_name) == sha_value
-    except FileNotFoundError:
-        return False
+        return WheelInfo(file, computed)
