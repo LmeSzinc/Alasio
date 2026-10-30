@@ -536,6 +536,7 @@ class PypiFile(AsyncHttpProbe):
 
         async def work(mirror_name, url):
             page_url = f'{url}{path}'
+            logger.info(f'Download index page: "{page_url}"')
             response = await self._http.get(page_url, follow_redirects=True)
             body = response.content
             try:
