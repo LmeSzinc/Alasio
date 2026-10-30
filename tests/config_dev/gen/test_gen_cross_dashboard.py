@@ -18,7 +18,7 @@ from alasio.config_dev.parse.parse_groups import GroupData
 
 def make_group(name, data=None):
     """
-    Build a GroupData as ParseGroups does, including override_args.
+    Build a GroupData as ParseGroups does.
 
     Args:
         name (str): Group name
@@ -27,9 +27,7 @@ def make_group(name, data=None):
     Returns:
         GroupData: Parsed group
     """
-    group = GroupData.from_group_data(name, data or {})
-    group.override_args = group.args.copy()
-    return group
+    return GroupData.from_group_data(name, data or {})
 
 
 def build_groups(*groups):

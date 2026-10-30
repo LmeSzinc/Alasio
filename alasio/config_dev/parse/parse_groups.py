@@ -35,6 +35,7 @@ class GroupData(Struct, forbid_unknown_fields=True, dict=True):
     # Args defined in the yaml of this group, copied before MRO merge
     # - for a variant group: the override args
     # - for a base group: all args, kept so variants can resolve their i18ngroup
+    # Filled by from_group_data(), a hand built group carries it too
     override_args: Dict[str, ArgData] = msgspec.field(default_factory=dict)
     # override i18n of this group
     # - if True and this group has a parent, generate its own _info in i18n
@@ -132,6 +133,13 @@ class GroupData(Struct, forbid_unknown_fields=True, dict=True):
         except msgspec.ValidationError as e:
             e = DefinitionError(e, keys=[group], value=data)
             raise e
+        # Keep the args exactly as written in this yaml: the MRO merge in
+        # CrossNavGenerator.build_group_mro() overwrites `args` with the whole
+        # inheritance chain, while `override_args` is the set of the args a
+        # variant overrides, and the model and i18n generation read it directly.
+        # Filled here, so a group built by hand has the same data as a parsed
+        # one, without the caller having to populate it.
+        obj.override_args = obj.args.copy()
         return obj
 
     def populate_dashboard(self):
@@ -255,11 +263,5 @@ class ParseGroups(ParseBase):
                 raise
             # Set
             output[group_name] = group
-
-        # validate group variants
-        for group_name, group in output.items():
-            # note that args here are just override args
-            # arg override and variant base will be validated in MRO build
-            group.override_args = group.args.copy()
 
         return output

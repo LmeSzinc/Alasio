@@ -130,7 +130,7 @@ def make_alasio_generator(fs, nav='device', yaml=''):
 
 def make_group(name, data=None):
     """
-    Build a GroupData like ParseGroups does, including override_args.
+    Build a GroupData like ParseGroups does.
 
     Args:
         name (str): Group name
@@ -139,9 +139,7 @@ def make_group(name, data=None):
     Returns:
         GroupData:
     """
-    group = GroupData.from_group_data(name, data or {})
-    group.override_args = group.args.copy()
-    return group
+    return GroupData.from_group_data(name, data or {})
 
 
 def make_cross(fs, navs):

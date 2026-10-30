@@ -73,9 +73,6 @@ def build_dashboard_mro(groups):
     Returns:
         dict[str, GroupData]: The same groups after build_group_mro()
     """
-    for group in groups.values():
-        group.override_args = group.args.copy()
-
     generator = object.__new__(CrossNavGenerator)
     generator.groups_data = groups
     generator.dict_group_mro = build_mro({name: group.parent for name, group in groups.items()})

@@ -68,7 +68,8 @@ args:
         group.parser = object()
         assert msgspec.json.encode(group) == (
             b'{"name":"Group","args":{"Enable":{"dt":"checkbox","value":true}},'
-            b'"parent":["Base"],"dashboard_color":"","mro":[],"override_args":{},'
+            b'"parent":["Base"],"dashboard_color":"","mro":[],'
+            b'"override_args":{"Enable":{"dt":"checkbox","value":true}},'
             b'"override_i18n":false,"dashboard":""}'
         )
 
@@ -149,13 +150,38 @@ class TestGroupDataFromGroupData:
     def test_internal_fields_are_ignored(self):
         """mro / override_args / dashboard are output fields, not input."""
         group = GroupData.from_group_data('Group', {
+            'args': {'A': 1},
             'mro': ['X'],
-            'override_args': {'A': 1},
+            'override_args': {'A': 1, 'B': 2},
             'dashboard': 'value',
         })
         assert group.mro == ()
-        assert group.override_args == {}
+        # override_args is rebuilt from args, the input set is dropped
+        assert list(group.override_args) == ['A']
         assert group.dashboard == ''
+
+    def test_override_args_is_a_copy_of_the_args(self):
+        """
+        The args are copied at construction, before the MRO merge overwrites them.
+
+        A group built by hand therefore has the same data as a parsed one, the
+        model and i18n generation read override_args directly.
+        """
+        group = make_group('Group', """\
+args:
+  A: 1
+  B:
+    value: normal
+    option: [normal, hard]
+""")
+        assert list(group.override_args) == ['A', 'B']
+        assert group.override_args == group.args
+        assert group.override_args is not group.args
+
+    def test_override_args_of_empty_group(self):
+        group = GroupData.from_group_data('Info', {})
+        assert group.args == {}
+        assert group.override_args == {}
 
     def test_deprecated_dashboard_input_is_ignored(self):
         """

@@ -287,8 +287,11 @@ Base:
   args:
     X: 1
 """)
-        gen.foreign_model_group_data['Child'] = make_group(
-            'Child', {'parent': 'Base', 'args': {'Y': 2}})
+        group = make_group('Child', {'parent': 'Base', 'args': {'Y': 2}})
+        # the fields of a foreign group come from override_args, which
+        # GroupData.from_group_data() fills without a parser
+        assert list(group.override_args) == ['Y']
+        gen.foreign_model_group_data['Child'] = group
         assert definitions(model_code(gen)) == """\
 class Base(a.GroupBase):
     X: int = 1
