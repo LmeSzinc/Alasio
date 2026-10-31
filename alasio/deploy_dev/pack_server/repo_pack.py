@@ -48,7 +48,7 @@ from alasio.deploy_dev.pack.pack_full import PackFull
 from alasio.deploy_dev.pack.pack_update import PackUpdate
 from alasio.deploy_dev.pack_server.pack_check import kept_pack
 from alasio.ext.cache import cached_property
-from alasio.ext.path.atomic import atomic_rmtree, atomic_write_stream
+from alasio.ext.path.atomic import atomic_write_stream
 from alasio.logger import logger
 
 
@@ -77,7 +77,6 @@ class RepoPack:
         self.pack = None
         self.kept_checksum = None
         # whether run() completed, the precondition of commit()
-        self._generated = False
 
     @cached_property
     def version_folder(self):
@@ -119,7 +118,6 @@ class RepoPack:
         """
         self.pack = None
         self.kept_checksum = None
-        self._generated = False
         latest = self.base.latest_commit
         # the lookback commits are computed before the packs are built: it
         # also reads the repo index the pack encoder looks the objects up in,
@@ -142,34 +140,7 @@ class RepoPack:
         # steps above completed
         self.pack = pack
         self.kept_checksum = kept_checksum
-        self._generated = True
         logger.info(f'Packs of "{self.base.workspace.name}" generated, latest={latest}')
-
-    def commit(self):
-        """
-        Remove the folders of the versions that are not the latest one.
-
-        Called only after latest.pack is written: the folder of the version
-        that was the latest one in an earlier run is the leftover of the run,
-        no latest.pack links its packs anymore. A removal that fails is logged
-        and retried by the next run.
-
-        Raises:
-            RuntimeError: If run() was not called
-        """
-        if not self._generated:
-            raise RuntimeError('RepoPack.run() must be called before commit()')
-        latest = self.base.latest_commit
-        folder = self.base.packrepo_folder
-        for name in folder.iter_foldernames():
-            if name == latest:
-                continue
-            version_folder = folder.joinpath(name)
-            logger.info(f'Removing stale pack folder: "{version_folder}"')
-            try:
-                atomic_rmtree(version_folder)
-            except OSError as e:
-                logger.warning(f'Failed to remove stale pack folder "{version_folder}": {e}')
 
     def _expected_packdep(self, pack):
         """
@@ -213,6 +184,7 @@ class RepoPack:
                 cached on the encoder then, see PackEncodeBase.latest_pack
         """
         file = self.full_pack_file
+        self.base.touch(file)
         kept = kept_pack(
             file, pack.pack_version, pack.current_version, '',
             expected=self._expected_packdep(pack))
@@ -240,6 +212,7 @@ class RepoPack:
         total = len(commit_list)
         for index, old in enumerate(commit_list, start=1):
             file = self.version_folder.joinpath(f'update_{old}.pack')
+            self.base.touch(file)
             kept = kept_pack(
                 file, pack.pack_version, pack.current_version, old,
                 expected=self._expected_packdep(pack))

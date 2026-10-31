@@ -12,14 +12,12 @@ a new latest.pack finds the complete packs of the version it switches to. A
 failed run never writes it, so the previous version keeps serving the clients
 until a run completes.
 
-The folders of the versions that are not the latest one are removed after the
+The files of the versions that are not the latest one are removed after the
 barrier: the folder of the version that was the latest one in an earlier run is
 the leftover of the run, no latest.pack links its packs anymore, and the folder
-would pile up on the disk for every version of the repo.
-
-The dependency channels are published the same way: repo_dep removes the packs
-of the versions out of the window, and repo_wheel the wheels the provided pins
-do not ask for. Those removals also run after this barrier, see repo.
+would pile up on the disk for every version of the repo. The removal is the one
+of the workspace (RepoBase.cleanup()), it runs right after this file is
+written, see repo.
 
 Usage:
     from alasio.deploy_dev.pack_server.repo_base import RepoBase
@@ -44,7 +42,6 @@ class RepoLatest:
     Usage:
         latest = RepoLatest(base, pack)
         latest.run()
-        latest.commit()
     """
 
     def __init__(self, base, pack):
@@ -56,9 +53,6 @@ class RepoLatest:
         """
         self.base = base
         self.pack = pack
-        # whether run() completed, the precondition of commit(): a failed
-        # publication must not remove the version the clients still run
-        self._generated = False
 
     def run(self):
         """
@@ -75,21 +69,7 @@ class RepoLatest:
         pack = self.pack.pack
         if pack is None:
             raise RuntimeError('RepoPack.run() must be called before RepoLatest.run()')
-        self._generated = False
         file = self.base.packrepo_folder.joinpath('latest.pack')
+        self.base.touch(file)
         logger.info(f'Writing latest info: version={pack.current_version}, "{file}"')
         atomic_write(file, pack.latest_pack(self.pack.kept_checksum))
-        self._generated = True
-
-    def commit(self):
-        """
-        Remove the folders of the versions the publication replaced.
-
-        Raises:
-            RuntimeError: If run() was not called
-        """
-        if not self._generated:
-            raise RuntimeError('RepoLatest.run() must be called before commit()')
-        self.pack.commit()
-        logger.info(f'Packs of "{self.base.workspace.name}" committed, '
-                    f'latest={self.pack.pack.current_version}')

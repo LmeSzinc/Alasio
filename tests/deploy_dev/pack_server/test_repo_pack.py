@@ -29,7 +29,7 @@ from alasio.deploy.pack.packdep import PACKDEP_PATH
 from alasio.deploy.pack.server_file import LatestInfo
 from alasio.deploy_dev.pack.encode_packdep import encode_packdep
 from alasio.deploy_dev.pack.pack_full import PackFull
-from alasio.deploy_dev.pack_server import repo_pack
+from alasio.deploy_dev.pack_server import repo_base, repo_pack
 from alasio.deploy_dev.pack_server.gate import RunDirError, check_run_dir
 from alasio.deploy_dev.pack_server.model import LookbackConfig, PackRepoModel, RepoConfig
 from alasio.deploy_dev.pack_server.repo import Repo
@@ -138,9 +138,9 @@ class PackFlow:
         self.pack.run()
 
     def commit(self):
-        """Publish the version and remove the folders of the replaced one."""
+        """Publish the version and clean the workspace up."""
         self.latest.run()
-        self.latest.commit()
+        self.base.cleanup()
 
     @property
     def repo_folder(self):
@@ -567,31 +567,18 @@ INFO | Packs of "Author_Repo_master" generated, latest=c3
         repo = make_repo(VERSIONS)
         generate(repo)
         push_commit(repo, 'c4', VERSIONS['c3'], parents=['c3'], author_time=4)
+        stale = join_path(run_dir, PACK_ROOT, 'c3')
 
         def fail(folder):
-            raise PermissionError(f'folder is held: {folder}')
+            return False
 
-        monkeypatch.setattr(repo_pack, 'atomic_rmtree', fail)
+        monkeypatch.setattr(repo_base, 'folder_rmtree_empty', fail)
         with logger.mock_capture_writer() as capture:
             generate(repo)
-        assert capture.concat() == f"""\
-INFO | Generating packs of "Author_Repo_master": 4 versions, latest=c4
-INFO | Writing full pack: "{run_dir}/pack/Author_Repo_master/packrepo/c4/full.pack"
-INFO | [1/3] Packing update pack from c3
-INFO | Writing update pack: c3 -> c4, "{run_dir}/pack/Author_Repo_master/packrepo/c4/update_c3.pack"
-INFO | [2/3] Packing update pack from c2
-INFO | Writing update pack: c2 -> c4, "{run_dir}/pack/Author_Repo_master/packrepo/c4/update_c2.pack"
-INFO | [3/3] Packing update pack from c1
-INFO | Writing update pack: c1 -> c4, "{run_dir}/pack/Author_Repo_master/packrepo/c4/update_c1.pack"
-INFO | Packs of "Author_Repo_master" generated, latest=c4
-INFO | Writing latest info: version=c4, "{run_dir}/pack/Author_Repo_master/packrepo/latest.pack"
-INFO | Removing stale pack folder: "{run_dir}/pack/Author_Repo_master/packrepo/c3"
-WARNING | Failed to remove stale pack folder "{run_dir}/pack/Author_Repo_master/packrepo/c3": folder is held: {run_dir}/pack/Author_Repo_master/packrepo/c3
-INFO | Packs of "Author_Repo_master" committed, latest=c4
-"""
+        assert f'WARNING | Failed to remove stale folder "{stale}"\n' in capture.concat()
         # the new version is published, the stale folder is left to the next run
         assert join_path(run_dir, PACK_ROOT, 'c4', 'full.pack').isfile()
-        assert join_path(run_dir, PACK_ROOT, 'c3').isdir()
+        assert stale.isdir()
         info = LatestInfo.parse(file_read_bytes(join_path(run_dir, PACK_ROOT, 'latest.pack')))
         assert info.version == 'c4'
 

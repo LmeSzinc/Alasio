@@ -98,9 +98,7 @@ async def prepare_generated(fs, project, omit_update=False):
     base = RepoBase(repo, CONFIG)
     pack = RepoPack(base, None)
     pack.run()
-    latest = RepoLatest(base, pack)
-    latest.run()
-    latest.commit()
+    RepoLatest(base, pack).run()
     if omit_update:
         project.root.joinpath(CHANNEL_FOLDER).joinpath(V2).joinpath(
             f'update_{V1}.pack').file_remove()

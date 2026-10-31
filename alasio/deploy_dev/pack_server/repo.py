@@ -24,9 +24,9 @@ on the disk.
     6. latest.pack is written (see repo_latest), the version a client reads:
        the barrier of the run, a client that reads it finds every pack of the
        version on the disk
-    7. the packs and the wheels the window does not ask for are removed, after
-       the barrier, so a client that still runs the previous version keeps
-       working until its next check
+    7. every file of the workspace the run did not touch is removed
+       (RepoBase.cleanup()), after the barrier, so a client that still runs the
+       previous version keeps working until its next check
 
 A step that fails fails the run: latest.pack keeps naming the previous version,
 and the client keeps running it. The next run starts over, the atomic writes
@@ -42,7 +42,8 @@ Usage:
     gen = Repo(repo, config.data)
     # generate the workspace
     gen.run()
-    # publish the version, after every pack of the version is on the disk
+    # publish the version and clean the workspace, after every pack of the
+    # version is on the disk
     gen.commit()
 """
 
@@ -165,11 +166,9 @@ class Repo:
         """
         if not self._generated:
             raise RuntimeError('Repo.run() must be called before commit()')
-        # the publication barrier
+        # the publication barrier, then the cleanup of everything the run did
+        # not touch: a client that reads the new latest.pack finds its packs
         self.latest.run()
-        # the leftovers, after the barrier
-        self.latest.commit()
-        self.dep.commit()
-        self.wheel.commit()
+        self.base.cleanup()
         self._generated = False
         logger.info(f'Repo "{self.base.workspace.name}" committed')

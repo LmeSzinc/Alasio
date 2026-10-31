@@ -20,7 +20,7 @@ from alasio.deploy.pack.job_unpack import UnpackJob
 from alasio.deploy.pack.packdep import PACKDEP_PATH, decode_packdep
 from alasio.deploy_dev.pack import pack_wheel
 from alasio.deploy_dev.pack._pack_cache import PackCache
-from alasio.deploy_dev.pack_server import repo_dep
+from alasio.deploy_dev.pack_server import repo_base, repo_dep
 from alasio.deploy_dev.pack_server.fetch_wheel import WheelNotFoundError
 from alasio.deploy_dev.pack_server.model import LookbackConfig, PackRepoModel, RepoConfig
 from alasio.deploy_dev.pack_server.parse_entry import ENTRY_FILE
@@ -708,147 +708,103 @@ class TestExistingPacks:
 
 
 class TestCleanup:
-    """The folders the lookback window does not ask for are removed."""
+    """The files the run did not touch are removed, the ones it used are kept."""
 
-    def test_stale_cache_removed(self, fs, run_dir, mirror):
-        """The cache folders of versions and names out of the window are removed."""
+    def test_stale_files_removed(self, fs, run_dir, mirror):
+        """Every file of the workspace the run did not touch goes, the used ones stay."""
         register_wheels(mirror)
-        # a version that slid out of the window, a name of the window the
-        # entry does not declare, and a name of another config
-        fs.create_file(join_path(
-            run_dir, WORKSPACE, '_wheel_cache', 'httpx', '0.26.0', 'httpx-0.26.0-py3-none-any.whl'),
-            contents=b'stale')
-        fs.create_file(join_path(
-            run_dir, WORKSPACE, '_wheel_cache', 'demo', '1.0', 'demo-1.0-py3-none-any.whl'),
-            contents=b'stale')
-        fs.create_file(join_path(
-            run_dir, WORKSPACE, '_wheel_cache', 'other', '1.0', 'other-1.0-py3-none-any.whl'),
-            contents=b'stale')
+        # the files of earlier runs: a version out of the window in both
+        # folders, a name the entry does not declare, the packs of a replaced
+        # version, and a file of another tool
+        stale = [
+            join_path(run_dir, WORKSPACE, '_wheel_cache', 'httpx', '0.26.0', 'index.html'),
+            join_path(run_dir, WORKSPACE, '_wheel_cache', 'demo', '1.0',
+                      'demo-1.0-py3-none-any.whl'),
+            pack_file(run_dir, '0.26.0', 'full.pack'),
+            join_path(run_dir, DEP_FOLDER, '0.28.1', 'update_0.26.0.pack'),
+            repo_file(run_dir, 'c2', 'full.pack'),
+            join_path(run_dir, WORKSPACE, 'notes.txt'),
+        ]
+        for file in stale:
+            fs.create_file(file, contents=b'stale')
 
         with logger.mock_capture_writer() as capture:
             run_commit(make_repo(), make_config(), mirror.client)
 
-        assert capture.concat() == f"""\
-INFO | Using update_pack_deps of module/config/const.py at c3: httpx
-INFO | [1/3] Fetching wheel of "httpx==0.28.1", index="http://mirror", role=target
-INFO | Download index page: "http://mirror/httpx/"
-INFO | Download wheel: "http://mirror/packages/httpx-0.28.1-py3-none-any.whl" -> "{run_dir}/pack/Author_Repo_master/_wheel_cache/httpx/0.28.1/httpx-0.28.1-py3-none-any.whl"
-INFO | [2/3] Fetching wheel of "httpx==0.27.8", index="http://mirror", role=historical
-INFO | Download index page: "http://mirror/httpx/"
-INFO | Download wheel: "http://mirror/packages/httpx-0.27.8-py3-none-any.whl" -> "{run_dir}/pack/Author_Repo_master/_wheel_cache/httpx/0.27.8/httpx-0.27.8-py3-none-any.whl"
-INFO | [3/3] Fetching wheel of "httpx==0.27.7", index="http://mirror", role=historical
-INFO | Download index page: "http://mirror/httpx/"
-INFO | Download wheel: "http://mirror/packages/httpx-0.27.7-py3-none-any.whl" -> "{run_dir}/pack/Author_Repo_master/_wheel_cache/httpx/0.27.7/httpx-0.27.7-py3-none-any.whl"
-INFO | Generating the dependency packs of "Author_Repo_master": 1 dependencies, 3 versions
-INFO | [1/1] Building dependency packs of "httpx": 3 versions, target=0.28.1
-INFO | Writing full pack: "{run_dir}/pack/Author_Repo_master/packdep/httpx/0.28.1/full.pack"
-INFO | Writing update pack: 0.27.8 -> 0.28.1, "{run_dir}/pack/Author_Repo_master/packdep/httpx/0.28.1/update_0.27.8.pack"
-INFO | Writing update pack: 0.27.7 -> 0.28.1, "{run_dir}/pack/Author_Repo_master/packdep/httpx/0.28.1/update_0.27.7.pack"
-INFO | Dependency packs of "Author_Repo_master" generated
-INFO | Generating packs of "Author_Repo_master": 3 versions, latest=c3
-INFO | Writing full pack: "{run_dir}/pack/Author_Repo_master/packrepo/c3/full.pack"
-INFO | [1/2] Packing update pack from c2
-INFO | Writing update pack: c2 -> c3, "{run_dir}/pack/Author_Repo_master/packrepo/c3/update_c2.pack"
-INFO | [2/2] Packing update pack from c1
-INFO | Writing update pack: c1 -> c3, "{run_dir}/pack/Author_Repo_master/packrepo/c3/update_c1.pack"
-INFO | Packs of "Author_Repo_master" generated, latest=c3
-INFO | Writing latest info: version=c3, "{run_dir}/pack/Author_Repo_master/packrepo/latest.pack"
-INFO | Packs of "Author_Repo_master" committed, latest=c3
-INFO | Dependency packs of "Author_Repo_master" committed
-INFO | Removing stale wheel cache: "{run_dir}/pack/Author_Repo_master/_wheel_cache/httpx/0.26.0"
-INFO | Removing stale wheel cache: "{run_dir}/pack/Author_Repo_master/_wheel_cache/demo/1.0"
-INFO | Removing stale wheel cache: "{run_dir}/pack/Author_Repo_master/_wheel_cache/other/1.0"
-INFO | Repo "Author_Repo_master" committed
-"""
-        assert not join_path(run_dir, WORKSPACE, '_wheel_cache', 'httpx', '0.26.0').exists()
-        assert not join_path(run_dir, WORKSPACE, '_wheel_cache', 'demo').exists()
-        assert not join_path(run_dir, WORKSPACE, '_wheel_cache', 'other').exists()
-        # the wheels of the window are kept
+        log = capture.concat()
+        # a folder with no file of the run is removed as a whole, the files of
+        # a version that slid out of the window are not walked one by one
+        folders = (
+            join_path(run_dir, WORKSPACE, '_wheel_cache', 'httpx', '0.26.0'),
+            join_path(run_dir, WORKSPACE, '_wheel_cache', 'demo'),
+            join_path(run_dir, DEP_FOLDER, '0.26.0'),
+            repo_file(run_dir, 'c2'),
+        )
+        for folder in folders:
+            assert f'INFO | Removing stale folder: "{folder}"\n' in log
+        assert (f'INFO | Removing stale file: '
+                f'"{join_path(run_dir, DEP_FOLDER, "0.28.1", "update_0.26.0.pack")}"\n' in log)
+        assert stale[-1].name == 'notes.txt'
+        assert f'INFO | Removing stale file: "{stale[-1]}"\n' in log
+        for file in stale:
+            assert not file.exists()
+        # the files of the run are the manifest
         for version in ('0.27.7', '0.27.8', '0.28.1'):
             assert cache_file(run_dir, version).isfile()
-
-    def test_stale_packdep_removed(self, fs, run_dir, mirror):
-        """The dependency folders and the pack folders out of the window are removed."""
-        register_wheels(mirror)
-        # a version that slid out of the window, and a dependency of another
-        # config (or of a name removed from update_pack_deps)
-        fs.create_file(pack_file(run_dir, '0.26.0', 'full.pack'), contents=b'stale')
-        fs.create_file(pack_file(run_dir, '0.27.8', 'full.pack'), contents=b'stale')
-        fs.create_file(join_path(run_dir, DEP_FOLDER.rsplit('/', 1)[0], 'other', 'latest.pack'),
-                       contents=b'stale')
-
-        gen = Repo(make_repo(), make_config(), client=mirror.client)
-        gen.run()
-        # run() only generates: the old packs stay until commit()
-        assert pack_file(run_dir, '0.26.0', 'full.pack').isfile()
-        gen.commit()
-
-        assert not pack_file(run_dir, '0.26.0').exists()
-        assert not pack_file(run_dir, '0.27.8').exists()
-        assert not join_path(run_dir, WORKSPACE, 'packdep', 'other').exists()
-        # the channel of the dependency is kept: the full pack of the target
-        # and its update packs
+        assert cache_file(run_dir, '0.28.1').joinpath('..').joinpath('index.html').isfile()
         assert pack_file(run_dir, '0.28.1', 'full.pack').isfile()
         assert pack_file(run_dir, '0.28.1', 'update_0.27.7.pack').isfile()
-        assert pack_file(run_dir, '0.28.1', 'update_0.27.8.pack').isfile()
+        assert repo_file(run_dir, 'c3', 'full.pack').isfile()
+        assert repo_file(run_dir, 'latest.pack').isfile()
+        # the folders the removal left empty are gone
+        assert not join_path(run_dir, WORKSPACE, '_wheel_cache', 'demo').exists()
+        assert not join_path(run_dir, WORKSPACE, 'packdep', 'httpx', '0.26.0').exists()
+        assert f'INFO | Cleaned up "Author_Repo_master":' in log
 
-    def test_stale_wheel_index_removed(self, fs, run_dir, mirror):
-        """A published version the latest commit does not ask for is removed."""
-        mirror.alias(PROVIDED_URL)
+    def test_stale_file_in_the_cache_folder_removed(self, fs, run_dir, mirror):
+        """A file an earlier run left in a cache folder goes, the files of the run stay."""
         register_wheels(mirror)
-        mirror.register('msgspec', '0.22.0', tags='cp38-cp38-win_amd64')
-        requirements = {
-            'c1': f'httpx==0.28.1\n    # from {PROVIDED_URL}/\n',
-        }
-        entry = entry_source('httpx', provide=(PROVIDED_URL,))
-        repo = make_repo(requirements, entry=entry)
-        run_commit(repo, make_config(), mirror.client)
-        assert wheel_file(run_dir, '0.28.1').isfile()
-
-        # a wheel of a version the pin left behind
-        fs.create_file(
-            join_path(run_dir, WORKSPACE, 'wheel', 'httpx', '0.27.7', 'httpx-0.27.7-py3-none-any.whl'),
-            contents=b'stale')
-        with logger.mock_capture_writer() as capture:
-            run_commit(repo, make_config(), mirror.client)
-        assert 'Removing stale wheel' in capture.concat()
-        assert not join_path(run_dir, WORKSPACE, 'wheel', 'httpx', '0.27.7').exists()
-        assert wheel_file(run_dir, '0.28.1').isfile()
-
-    def test_wheels_removed_when_nothing_is_provided(self, fs, run_dir, mirror):
-        """A repo that provides no pin removes the wheels an earlier run published."""
-        register_wheels(mirror)
-        # the index of an entry that provided a pin in an earlier run
-        fs.create_file(
-            join_path(run_dir, WORKSPACE, 'wheel', 'demo', '1.0', 'demo-1.0-py3-none-any.whl'),
-            contents=b'stale')
+        # a wheel of the same version that the run does not download: the folder
+        # is used by this run, the file is not
+        stale = join_path(
+            run_dir, WORKSPACE, '_wheel_cache', 'httpx', '0.28.1',
+            'httpx-0.28.1-cp38-cp38-win_amd64.whl')
+        fs.create_file(stale, contents=b'stale')
 
         run_commit(make_repo(), make_config(), mirror.client)
 
-        folder = join_path(run_dir, WORKSPACE, 'wheel')
-        assert folder.isdir()
-        assert list(folder.iter_foldernames()) == []
+        assert not stale.exists()
+        assert cache_file(run_dir, '0.28.1').isfile()
+        assert join_path(
+            run_dir, WORKSPACE, '_wheel_cache', 'httpx', '0.28.1', 'index.html').isfile()
 
-    def test_stale_packrepo_removed(self, fs, run_dir, mirror):
-        """The packs of the version that was the latest one in an earlier run are removed."""
+    def test_nothing_provided_leaves_no_wheel(self, fs, run_dir, mirror):
+        """A repo that provides no pin keeps no file of the pip index."""
         register_wheels(mirror)
-        repo = make_repo()
-        run_commit(repo, make_config(), mirror.client)
-        assert repo_file(run_dir, 'c3').isdir()
+        stale = join_path(run_dir, WORKSPACE, 'wheel', 'demo', '1.0', 'demo-1.0-py3-none-any.whl')
+        fs.create_file(stale, contents=b'stale')
 
-        # a new commit moves the latest version
-        register_wheel(mirror, '0.28.2', CORE_V2 + b'NEWER = True\n')
-        requirements = requirement('httpx==0.28.2') + requirement('demo==1.0')
-        repo.register_file('c4', 'requirements.txt', requirements.encode('utf-8'))
-        repo.register_file('c4', ENTRY_FILE, DEFAULT_ENTRY.encode('utf-8'))
-        repo.register_commit(
-            'c4', parents=['c3'], author_name='Author', author_time=4, message='commit c4')
-        repo.register_branch('master', 'c4')
+        run_commit(make_repo(), make_config(), mirror.client)
+
+        assert not stale.exists()
+        assert not join_path(run_dir, WORKSPACE, 'wheel', 'demo').exists()
+
+    def test_removal_is_best_effort(self, fs, run_dir, mirror, monkeypatch):
+        """A file that cannot be removed does not fail the flow, the next run retries."""
+        register_wheels(mirror)
+        stale = pack_file(run_dir, '0.26.0', 'full.pack')
+        fs.create_file(stale, contents=b'stale')
+
+        def fail(file):
+            return False
+
+        monkeypatch.setattr(repo_base, 'file_remove', fail)
         with logger.mock_capture_writer() as capture:
-            run_commit(repo, make_config(), mirror.client)
-        assert 'Removing stale pack folder' in capture.concat()
-        assert not repo_file(run_dir, 'c3').exists()
-        assert repo_file(run_dir, 'c4', 'full.pack').isfile()
+            run_commit(make_repo(), make_config(), mirror.client)
+
+        assert f'WARNING | Failed to remove stale file "{stale}"\n' in capture.concat()
+        assert stale.isfile()
+        assert repo_file(run_dir, 'latest.pack').isfile()
 
 
 class TestWheelCache:

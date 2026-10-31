@@ -47,7 +47,7 @@ import trio
 from alasio.deploy.pip_download.pypi_file import DOWNLOAD_MODE_ALL
 from alasio.deploy_dev.pack_server.fetch_wheel import WheelFetcher, WheelNotFoundError
 from alasio.deploy_dev.pack_server.repo_base import DEFAULT_INDEX
-from alasio.ext.path.atomic import atomic_copy, atomic_read_bytes_stream, atomic_rmtree, folder_rmtree_empty
+from alasio.ext.path.atomic import atomic_copy, atomic_read_bytes_stream
 from alasio.logger import logger
 
 
@@ -69,9 +69,6 @@ class RepoWheel:
         # {(name, version): [WheelInfo]} of the provided pins fetched by
         # run(), the files the pip index publishes, see repo_pypi
         self.publish_files = {}
-        # whether run() completed, the precondition of commit(): a failed run
-        # must not remove the wheels the previous run published
-        self._generated = False
 
     def run(self):
         """
@@ -87,30 +84,8 @@ class RepoWheel:
             OSError: If a wheel cannot be written
         """
         self.publish_files = {}
-        self._generated = False
         trio.run(self._fetch)
         self._sync()
-        self._generated = True
-
-    def commit(self):
-        """
-        Remove the cached and published wheels the window does not ask for.
-
-        Called after the repo version is published: a pin that left the
-        provided set, a version the latest commit does not pin anymore, and a
-        cache folder neither step asked for are the leftovers of an earlier
-        run. The cache folder is shared with repo_dep, which fetches the pure
-        python wheels of the pack channels, so its cleanup lives here as well:
-        the version of a pack channel is needed whichever step fetched it. A
-        removal that fails is logged and retried by the next run.
-
-        Raises:
-            RuntimeError: If run() was not called
-        """
-        if not self._generated:
-            raise RuntimeError('RepoWheel.run() must be called before commit()')
-        self._remove_stale_cache()
-        self._remove_stale_wheels()
 
     async def _fetch(self):
         """
@@ -136,8 +111,13 @@ class RepoWheel:
                 try:
                     # every wheel of the version: the client installs the one
                     # of its platform, see DOWNLOAD_MODE_ALL
-                    self.publish_files[(name, pin.version)] = await fetcher.fetch_async(
-                        DOWNLOAD_MODE_ALL)
+                    wheels = await fetcher.fetch_async(DOWNLOAD_MODE_ALL)
+                    self.publish_files[(name, pin.version)] = wheels
+                    # the files of the run only: a wheel an earlier run left in
+                    # the cache folder is a leftover, the cleanup removes it
+                    for wheel in wheels:
+                        self.base.touch(wheel.file)
+                    self.base.touch(fetcher.index_file)
                 except WheelNotFoundError as e:
                     raise WheelNotFoundError(
                         f'No usable wheel of the provided dependency "{name}=={pin.version}", '
@@ -161,6 +141,7 @@ class RepoWheel:
             logger.info(f'[{index}/{total}] Publishing wheels of "{name}=={version}"')
             for wheel in wheels:
                 file = folder.joinpath(wheel.file.name)
+                self.base.touch(file)
                 if _is_synced(wheel.file, file, wheel.hashes['sha256']):
                     logger.info(f'Wheel exists, skipped: "{file}"')
                     continue
@@ -168,65 +149,6 @@ class RepoWheel:
                 # the write is atomic and creates the folder of the version:
                 # a client never reads a half copied wheel
                 atomic_copy(wheel.file, file)
-
-    def _remove_stale_cache(self):
-        """
-        Remove the cache folders the window does not ask for.
-
-        The needed versions are the ones of both steps: the pack channels of
-        repo_dep (the latest version and the lookbacks) and the provided pin of
-        repo_wheel. The folder of a name is left empty when every version of
-        the dependency was removed.
-        """
-        needed = set()
-        for info in self.base.deps.values():
-            if info.pack_dep:
-                needed.update((info.name, pin.version) for pin in info.versions)
-            if info.provide_wheel:
-                needed.add((info.name, info.latest.version))
-        folder = self.base.wheel_cache_folder
-        for name in folder.iter_foldernames():
-            name_folder = folder.joinpath(name)
-            for version in name_folder.iter_foldernames():
-                if (name, version) in needed:
-                    continue
-                version_folder = name_folder.joinpath(version)
-                logger.info(f'Removing stale wheel cache: "{version_folder}"')
-                try:
-                    atomic_rmtree(version_folder)
-                except OSError as e:
-                    logger.warning(f'Failed to remove stale wheel cache "{version_folder}": {e}')
-            folder_rmtree_empty(name_folder)
-
-    def _remove_stale_wheels(self):
-        """
-        Remove the published wheels and the name folders the run does not publish.
-
-        A name that leaves the provided set goes with its folder: it holds
-        nothing a client may install after this run.
-        """
-        needed = set(self.publish_files)
-        needed_names = {name for name, _ in needed}
-        folder = self.base.wheel_folder
-        for name in folder.iter_foldernames():
-            name_folder = folder.joinpath(name)
-            for version in name_folder.iter_foldernames():
-                if (name, version) in needed:
-                    continue
-                version_folder = name_folder.joinpath(version)
-                logger.info(f'Removing stale wheel: "{version_folder}"')
-                try:
-                    atomic_rmtree(version_folder)
-                except OSError as e:
-                    logger.warning(f'Failed to remove stale wheel "{version_folder}": {e}')
-            if name in needed_names:
-                continue
-            logger.info(f'Removing stale wheel: "{name_folder}"')
-            try:
-                atomic_rmtree(name_folder)
-            except OSError as e:
-                logger.warning(f'Failed to remove stale wheel "{name_folder}": {e}')
-
 
 def _is_synced(source, target, sha256):
     """

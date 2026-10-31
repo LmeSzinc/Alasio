@@ -53,7 +53,7 @@ from alasio.deploy_dev.pack.pack_wheel_update import PackWheelUpdate
 from alasio.deploy_dev.pack_server.fetch_wheel import WheelFetcher, WheelNotFoundError
 from alasio.deploy_dev.pack_server.pack_check import PackChecksum, kept_pack
 from alasio.deploy_dev.pack_server.repo_base import DEFAULT_INDEX
-from alasio.ext.path.atomic import atomic_remove, atomic_rmtree, atomic_write_stream
+from alasio.ext.path.atomic import atomic_write_stream
 from alasio.ext.path.validate import validate_filename
 from alasio.logger import logger
 
@@ -80,9 +80,6 @@ class RepoDep:
         # run(), filled while the target full packs are written/kept. It is
         # read from the full packs, never from a per dependency latest.pack.
         self.published = {}
-        # whether run() completed, the precondition of commit(): a failed run
-        # must not clean a channel
-        self._generated = False
 
     def run(self):
         """
@@ -101,10 +98,8 @@ class RepoDep:
             OSError: If a pack cannot be written
         """
         self.published = {}
-        self._generated = False
         deps = [info for info in self.base.deps.values() if info.pack_dep]
         if not deps:
-            self._generated = True
             logger.info(f'No dependency to build of "{self.base.workspace.name}", skipped')
             return
 
@@ -125,7 +120,6 @@ class RepoDep:
 
         # commit() may clean the channel only after every pack of the run is
         # on the disk
-        self._generated = True
         logger.info(f'Dependency packs of "{self.base.workspace.name}" generated')
 
     async def _fetch(self, deps):
@@ -169,26 +163,13 @@ class RepoDep:
                         f'"{name}=={pin.version}", the dependency packs cannot be '
                         f'generated: {e}') from e
                 wheel_files[(name, pin.version)] = files[0].file
+                # the files of the run only: a file an earlier run left in the
+                # cache folder is a leftover, the cleanup removes it
+                self.base.touch(files[0].file)
+                self.base.touch(fetcher.index_file)
             finally:
                 await fetcher.aclose()
         return wheel_files
-
-    def commit(self):
-        """
-        Remove the dependency folders and pack files the window does not ask for.
-
-        Called only after the repo latest.pack is written: the dependency
-        channel of the previous repo version keeps its packs until the new repo
-        tree is visible to the clients. A failed run or a failed repo
-        publication leaves every old pack in place.
-
-        Raises:
-            RuntimeError: If run() was not called
-        """
-        if not self._generated:
-            raise RuntimeError('RepoDep.run() must be called before commit()')
-        self._remove_stale_packs(self.base.deps)
-        logger.info(f'Dependency packs of "{self.base.workspace.name}" committed')
 
     def _write_dep_packs(self, info, wheel_files):
         """
@@ -216,6 +197,7 @@ class RepoDep:
         # afterwards, the versions of the window do not need one
         file = dep_folder.joinpath(target.version).joinpath(FULL_PACK_FILE)
         identity = kept_pack(file, PackWheel.PACK_VERSION, target.version, '')
+        self.base.touch(file)
         if identity is not None:
             logger.info(f'Full pack exists, skipped: "{file}"')
             target_pack = None
@@ -252,6 +234,7 @@ class RepoDep:
         for version, pin in info.lookbacks.items():
             file = dep_folder.joinpath(target.version).joinpath(f'update_{version}.pack')
             identity = kept_pack(file, PackWheel.PACK_VERSION, target.version, version)
+            self.base.touch(file)
             if identity is not None:
                 logger.info(f'Update pack exists, skipped: "{file}"')
                 continue
@@ -260,63 +243,6 @@ class RepoDep:
             old_pack = PackWheel(wheel_files[(name, version)])
             logger.info(f'Writing update pack: {version} -> {target.version}, "{file}"')
             atomic_write_stream(file, PackWheelUpdate(new_pack, old_pack).iter_pack_data())
-
-    def _remove_stale_packs(self, deps):
-        """
-        Remove the dependency folders, pack folders and pack files the window does not ask for.
-
-        A dependency without a pack channel has no folder anymore, its folder
-        (latest.pack included) is removed. The channel of a dependency is the
-        folder of its latest version: it holds the full pack of the latest
-        version and one update pack per other version of the window, so another
-        version folder is the leftover of an earlier run and is removed (its
-        full pack was the layout of an earlier run). An update pack of a
-        version out of the window is removed too. Only the folders and the
-        update_ files are recognized: a file of another tool in the folder is
-        left alone. A removal that fails is logged and retried by the next run.
-
-        Args:
-            deps (dict[str, DepBuildInfo]): Dependencies of the window, the
-                ones without a pack channel included
-        """
-        folder = self.base.packdep_folder
-        for name in folder.iter_foldernames():
-            dep_folder = folder.joinpath(name)
-            info = deps.get(name)
-            if info is None or not info.pack_dep:
-                logger.info(f'Removing stale dependency folder: "{dep_folder}"')
-                try:
-                    atomic_rmtree(dep_folder)
-                except OSError as e:
-                    logger.warning(
-                        f'Failed to remove stale dependency folder "{dep_folder}": {e}')
-                continue
-            # the update packs the folder of the latest version must hold: one
-            # for every other version of the window
-            latest = info.latest.version
-            updated = set(info.lookbacks)
-            for version in dep_folder.iter_foldernames():
-                version_folder = dep_folder.joinpath(version)
-                if version != latest:
-                    logger.info(f'Removing stale pack folder: "{version_folder}"')
-                    try:
-                        atomic_rmtree(version_folder)
-                    except OSError as e:
-                        logger.warning(f'Failed to remove stale pack folder "{version_folder}": {e}')
-                    continue
-                for filename in version_folder.iter_filenames(ext='.pack'):
-                    if not filename.startswith('update_'):
-                        continue
-                    old = filename[len('update_'):-len('.pack')]
-                    if old in updated:
-                        continue
-                    file = version_folder.joinpath(filename)
-                    logger.info(f'Removing stale update pack: "{file}"')
-                    try:
-                        atomic_remove(file)
-                    except OSError as e:
-                        logger.warning(f'Failed to remove stale update pack "{file}": {e}')
-
 
 def _role_of(info, pin):
     """

@@ -86,14 +86,9 @@ class WheelFlow:
         """Fetch the wheels of the provided pins and sync them to the index."""
         self.wheel.run()
 
-    def commit(self):
-        """Remove the wheels the window does not ask for."""
-        self.wheel.commit()
-
     def generate(self):
-        """Run then commit, the normal flow of a publication."""
+        """Run the step, the whole work of the step."""
         self.run()
-        self.commit()
         return self
 
 
@@ -235,8 +230,6 @@ INFO | Copy wheel: "{cache}/msgspec-0.22.0-cp38-cp38-win_amd64.whl" -> "{publish
             'No index of "msgspec" in "http://provided.example/simple"')
         assert gen.wheel.publish_files == {}
         assert not join_path(run_dir, WHEEL_ROOT).exists()
-        with pytest.raises(RuntimeError, match='run\\(\\) must be called'):
-            gen.commit()
 
     def test_hash_mismatch(self, fs, run_dir, mirror):
         """A wheel that does not match the hash of its link is refused, nothing is published."""
@@ -357,115 +350,3 @@ INFO | Wheel exists, skipped: "{published_folder(run_dir, 'msgspec', '0.22.0')}/
         assert file.atomic_read_bytes() == content
 
 
-class TestCleanup:
-    """The wheels the window does not ask for are removed."""
-
-    def test_run_keeps_the_previous_index(self, fs, run_dir, mirror):
-        """run() only writes: a stale version goes with commit()."""
-        register_msgspec_wheels(mirror)
-        stale = published_folder(run_dir, 'msgspec', '0.21.0')
-        fs.create_file(join_path(stale, 'msgspec-0.21.0-py3-none-any.whl'), contents=b'stale')
-        gen = WheelFlow(make_provided_repo(), client=mirror.client)
-
-        gen.run()
-        assert stale.isdir()
-
-        gen.commit()
-        assert not stale.exists()
-        assert published_folder(run_dir, 'msgspec', '0.22.0').isdir()
-
-    def test_commit_requires_run(self, fs, run_dir, mirror):
-        """commit() before run() cannot remove the wheels of a failed run."""
-        gen = WheelFlow(make_provided_repo(), client=mirror.client)
-        with pytest.raises(RuntimeError, match='run\\(\\) must be called'):
-            gen.commit()
-
-    def test_stale_published_version_removed(self, fs, run_dir, mirror):
-        """A version the latest commit does not pin anymore is removed."""
-        register_msgspec_wheels(mirror)
-        fs.create_file(join_path(published_folder(run_dir, 'msgspec', '0.21.0'), 'index.html'),
-                       contents=b'stale')
-
-        with logger.mock_capture_writer() as capture:
-            WheelFlow(make_provided_repo(), client=mirror.client).generate()
-
-        folder = published_folder(run_dir, 'msgspec', '0.21.0')
-        assert f'INFO | Removing stale wheel: "{folder}"\n' in capture.concat()
-        assert not folder.exists()
-        assert list(join_path(run_dir, WHEEL_ROOT, 'msgspec').iter_foldernames()) == ['0.22.0']
-
-    def test_name_left_the_provided_set_removed(self, fs, run_dir, mirror):
-        """A name that is not provided anymore goes with its folder, the pages included."""
-        register_msgspec_wheels(mirror)
-        folder = join_path(run_dir, WHEEL_ROOT, 'demo')
-        fs.create_file(join_path(folder, '1.0', 'demo-1.0-py3-none-any.whl'), contents=b'stale')
-        fs.create_file(join_path(folder, 'index.html'), contents=b'<html></html>')
-
-        with logger.mock_capture_writer() as capture:
-            WheelFlow(make_provided_repo(), client=mirror.client).generate()
-
-        assert f'INFO | Removing stale wheel: "{folder}"\n' in capture.concat()
-        assert not folder.exists()
-
-    def test_stale_cache_version_removed(self, fs, run_dir, mirror):
-        """The cache keeps the versions the two steps need, the others are removed."""
-        register_wheels(mirror)
-        register_msgspec_wheels(mirror)
-        requirements = {
-            'c1': requirement('httpx==0.27.7'),
-            'c2': requirement('httpx==0.27.8'),
-            'c3': (
-                requirement('httpx==0.28.1', f'{PROVIDED_URL}/')
-                + requirement('msgspec==0.22.0', f'{PROVIDED_URL}/')
-            ),
-        }
-        entry = entry_source('httpx', provide=(PROVIDED_URL,))
-        # the lookback versions of the pack channel, and a version out of the window
-        for version in ('0.27.7', '0.27.8'):
-            fs.create_file(
-                join_path(cache_folder(run_dir, 'httpx', version), 'index.html'),
-                contents=b'stale')
-        fs.create_file(join_path(cache_folder(run_dir, 'httpx', '0.26.0'), 'index.html'),
-                       contents=b'stale')
-        fs.create_file(join_path(cache_folder(run_dir, 'other', '1.0'), 'index.html'),
-                       contents=b'stale')
-
-        gen = WheelFlow(make_repo(requirements, entry=entry), client=mirror.client)
-        gen.run()
-        # run() fetched the wheels of the window, the stale folders are still there
-        assert cache_folder(run_dir, 'httpx', '0.26.0').isdir()
-        gen.commit()
-
-        assert not cache_folder(run_dir, 'httpx', '0.26.0').exists()
-        assert not join_path(run_dir, CACHE_ROOT, 'other').exists()
-        # the versions of both steps are kept: the pack channel of httpx (the
-        # lookbacks included) and the provided pin
-        for name, version in (
-                ('httpx', '0.27.7'), ('httpx', '0.27.8'), ('httpx', '0.28.1'),
-                ('msgspec', '0.22.0')):
-            assert cache_folder(run_dir, name, version).isdir()
-
-    def test_removal_is_best_effort(self, fs, run_dir, mirror, monkeypatch):
-        """A folder that cannot be removed does not fail the flow, the next run retries."""
-        register_msgspec_wheels(mirror)
-        fs.create_file(join_path(cache_folder(run_dir, 'other', '1.0'), 'index.html'),
-                       contents=b'stale')
-        fs.create_file(join_path(published_folder(run_dir, 'demo', '1.0'), 'demo-1.0.whl'),
-                       contents=b'stale')
-
-        def fail(folder):
-            raise PermissionError(f'folder is held: {folder}')
-
-        monkeypatch.setattr(repo_wheel, 'atomic_rmtree', fail)
-        with logger.mock_capture_writer() as capture:
-            WheelFlow(make_provided_repo(), client=mirror.client).generate()
-
-        log = capture.concat()
-        cache = cache_folder(run_dir, 'other', '1.0')
-        demo = join_path(run_dir, WHEEL_ROOT, 'demo')
-        assert f'WARNING | Failed to remove stale wheel cache "{cache}": ' \
-               f'folder is held: {cache}\n' in log
-        assert f'WARNING | Failed to remove stale wheel "{demo}": ' \
-               f'folder is held: {demo}\n' in log
-        assert cache.isdir()
-        assert demo.isdir()

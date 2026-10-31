@@ -82,14 +82,9 @@ class DepFlow:
         """Fetch the wheels and write the packs of the channels."""
         self.dep.run()
 
-    def commit(self):
-        """Remove the packs the window does not ask for."""
-        self.dep.commit()
-
     def generate(self):
-        """Run then commit, the normal flow of a publication."""
+        """Run the step, the whole work of the step."""
         self.run()
-        self.commit()
         return self
 
 
@@ -250,8 +245,6 @@ INFO | Dependency packs of "Author_Repo_master" generated
         # the channel is on the disk
         assert not channel_folder(run_dir, 'httpx').exists()
         assert gen.dep.published == {}
-        with pytest.raises(RuntimeError, match='run\\(\\) must be called'):
-            gen.commit()
 
     def test_missing_historical_wheel(self, fs, run_dir, mirror):
         """A lookback version without a usable wheel fails the complete build."""
@@ -281,8 +274,6 @@ INFO | No dependency to build of "Author_Repo_master", skipped
 """
         assert mirror.requests == []
         assert gen.dep.published == {}
-        # the step completed: commit() may clean the folder of a name that left
-        gen.commit()
 
 
 class TestPacks:
@@ -549,111 +540,6 @@ INFO | Dependency packs of "Author_Repo_master" generated
         decoder.validate()
         assert decoder.old_version == ''
 
-
-class TestCleanup:
-    """The channels the window does not ask for are removed."""
-
-    def test_run_keeps_the_previous_channel(self, fs, run_dir, mirror):
-        """run() only writes: a stale folder goes with commit(), after the repo tree."""
-        register_wheels(mirror)
-        fs.create_file(pack_file(run_dir, '0.26.0', 'full.pack'), contents=b'stale')
-        gen = DepFlow(make_repo(), client=mirror.client)
-
-        gen.run()
-        assert channel_folder(run_dir, 'httpx').joinpath('0.26.0').isdir()
-
-        gen.commit()
-        assert not channel_folder(run_dir, 'httpx').joinpath('0.26.0').exists()
-        assert pack_file(run_dir, '0.28.1', 'full.pack').isfile()
-
-    def test_commit_requires_run(self, fs, run_dir, mirror):
-        """commit() before run() cannot clean a channel of a failed run."""
-        gen = DepFlow(make_repo(), client=mirror.client)
-        with pytest.raises(RuntimeError, match='run\\(\\) must be called'):
-            gen.commit()
-
-    def test_stale_dependency_folder_removed(self, fs, run_dir, mirror):
-        """The folder of a name without a pack channel is removed."""
-        register_wheels(mirror)
-        fs.create_file(join_path(run_dir, CHANNEL_ROOT, 'demo', 'latest.pack'), contents=b'stale')
-
-        with logger.mock_capture_writer() as capture:
-            DepFlow(make_repo(), client=mirror.client).generate()
-
-        folder = join_path(run_dir, CHANNEL_ROOT, 'demo')
-        assert f'INFO | Removing stale dependency folder: "{folder}"\n' in capture.concat()
-        assert not folder.exists()
-
-    def test_stale_version_folder_removed(self, fs, run_dir, mirror):
-        """A version folder that is not the target folder is removed."""
-        register_wheels(mirror)
-        fs.create_file(pack_file(run_dir, '0.27.8', 'full.pack'), contents=b'stale')
-
-        DepFlow(make_repo(), client=mirror.client).generate()
-
-        assert not channel_folder(run_dir, 'httpx').joinpath('0.27.8').exists()
-        assert list(channel_folder(run_dir, 'httpx').iter_foldernames()) == ['0.28.1']
-
-    def test_stale_update_pack_removed(self, fs, run_dir, mirror):
-        """An update pack of a version out of the window is removed, the others stay."""
-        register_wheels(mirror)
-        fs.create_file(pack_file(run_dir, '0.28.1', 'update_0.26.0.pack'), contents=b'stale')
-
-        with logger.mock_capture_writer() as capture:
-            DepFlow(make_repo(), client=mirror.client).generate()
-
-        file = pack_file(run_dir, '0.28.1', 'update_0.26.0.pack')
-        assert f'INFO | Removing stale update pack: "{file}"\n' in capture.concat()
-        assert not file.exists()
-        assert pack_file(run_dir, '0.28.1', 'update_0.27.7.pack').isfile()
-        assert pack_file(run_dir, '0.28.1', 'update_0.27.8.pack').isfile()
-        assert pack_file(run_dir, '0.28.1', 'full.pack').isfile()
-
-    def test_file_of_another_tool_kept(self, fs, run_dir, mirror):
-        """Only the update packs are recognized, a file of another tool is left alone."""
-        register_wheels(mirror)
-        note = pack_file(run_dir, '0.28.1', 'notes.txt')
-        fs.create_file(note, contents=b'not a pack')
-
-        DepFlow(make_repo(), client=mirror.client).generate()
-
-        assert note.isfile()
-
-    def test_removal_is_best_effort(self, fs, run_dir, mirror, monkeypatch):
-        """A folder that cannot be removed does not fail the flow, the next run retries."""
-        register_wheels(mirror)
-        fs.create_file(join_path(run_dir, CHANNEL_ROOT, 'demo', 'latest.pack'), contents=b'stale')
-
-        def fail(folder):
-            raise PermissionError(f'folder is held: {folder}')
-
-        monkeypatch.setattr(repo_dep, 'atomic_rmtree', fail)
-        with logger.mock_capture_writer() as capture:
-            DepFlow(make_repo(), client=mirror.client).generate()
-
-        folder = join_path(run_dir, CHANNEL_ROOT, 'demo')
-        assert capture.concat() == f"""\
-INFO | Using update_pack_deps of module/config/const.py at c3: httpx
-INFO | [1/3] Fetching wheel of "httpx==0.28.1", index="http://mirror", role=target
-INFO | Download index page: "http://mirror/httpx/"
-INFO | Download wheel: "http://mirror/packages/httpx-0.28.1-py3-none-any.whl" -> "{cache_folder(run_dir, 'httpx', '0.28.1')}/httpx-0.28.1-py3-none-any.whl"
-INFO | [2/3] Fetching wheel of "httpx==0.27.8", index="http://mirror", role=historical
-INFO | Download index page: "http://mirror/httpx/"
-INFO | Download wheel: "http://mirror/packages/httpx-0.27.8-py3-none-any.whl" -> "{cache_folder(run_dir, 'httpx', '0.27.8')}/httpx-0.27.8-py3-none-any.whl"
-INFO | [3/3] Fetching wheel of "httpx==0.27.7", index="http://mirror", role=historical
-INFO | Download index page: "http://mirror/httpx/"
-INFO | Download wheel: "http://mirror/packages/httpx-0.27.7-py3-none-any.whl" -> "{cache_folder(run_dir, 'httpx', '0.27.7')}/httpx-0.27.7-py3-none-any.whl"
-INFO | Generating the dependency packs of "Author_Repo_master": 1 dependencies, 3 versions
-INFO | [1/1] Building dependency packs of "httpx": 3 versions, target=0.28.1
-INFO | Writing full pack: "{channel_folder(run_dir, 'httpx')}/0.28.1/full.pack"
-INFO | Writing update pack: 0.27.8 -> 0.28.1, "{channel_folder(run_dir, 'httpx')}/0.28.1/update_0.27.8.pack"
-INFO | Writing update pack: 0.27.7 -> 0.28.1, "{channel_folder(run_dir, 'httpx')}/0.28.1/update_0.27.7.pack"
-INFO | Dependency packs of "Author_Repo_master" generated
-INFO | Removing stale dependency folder: "{folder}"
-WARNING | Failed to remove stale dependency folder "{folder}": folder is held: {folder}
-INFO | Dependency packs of "Author_Repo_master" committed
-"""
-        assert folder.isdir()
 
 
 class TestGuards:

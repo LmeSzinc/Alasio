@@ -22,6 +22,10 @@ The generation is the flow of PackRepoModel, one module per step:
 - repo_latest: step 7, `packrepo/latest.pack`, the version a client reads;
 - repo: the flow itself, the steps in the order they depend on each other.
 
+The steps tell the base which files they use (touch), and the
+base removes every other file of the workspace after the version is published
+(cleanup): a step does not carry a cleanup of its own.
+
 The steps do not clone the repo and do not open it: the git repo of the
 config is an input, opened by the caller (PackRepo clones and fetches it),
 like the git flow of the packs. Nothing here writes to the repo and nothing
@@ -49,16 +53,21 @@ Usage:
     base.deps
 """
 
+import os
 from typing import Dict
 
 import msgspec
 
+from alasio.deploy.simple_pip.cleanup_folder import CleanupByPreserved
 from alasio.deploy.simple_pip.parse_req import DepInfo, normalize_index_url
 from alasio.deploy_dev.pack_server.lookback_wheel import LookbackWheel
 from alasio.deploy_dev.pack_server.parse_dep import normalize_name
 from alasio.deploy_dev.pack_server.parse_entry import ENTRY_FILE
 from alasio.ext import env
 from alasio.ext.cache import cached_property
+from alasio.ext.path.atomic import file_remove, folder_rmtree_empty
+from alasio.ext.path.calc import subpath_to, to_posix
+from alasio.ext.path.iter import iter_entry
 from alasio.ext.path.validate import validate_filename
 from alasio.logger import logger
 
@@ -187,6 +196,9 @@ class RepoBase:
         # the pins of the dependency files over the lookback window, the
         # latest commit first, see LookbackWheel
         self.wheel = LookbackWheel(repo, config)
+        # the files this run uses, relative to the workspace: the steps touch
+        # what they read or write, see cleanup()
+        self._manifest = set()
         # the folder name is checked before anything is written, see workspace
         _ = self.workspace
 
@@ -270,6 +282,85 @@ class RepoBase:
             PathStr: {workspace}/_wheel_cache/{name}/{version}
         """
         return self.wheel_cache_folder.joinpath(name).joinpath(version)
+
+    # ------------------------------------------------------------------
+    # The files of the run
+    # ------------------------------------------------------------------
+
+    def touch(self, file):
+        """
+        Record a file this run uses, so the cleanup keeps it.
+
+        Every step of the flow touches what it reads or writes: a pack it
+        built or kept, a wheel of the cache, an index page, latest.pack. The
+        cleanup removes every file of the workspace that was not touched, so a
+        step that forgets a file loses it on the next publication.
+
+        Args:
+            file (str): Absolute path of the file, below the workspace or
+                below a folder it names, e.g. the cache folder of a version
+        """
+        # the paths of the flow are normalized ('/'), subpath_to() answers the
+        # part below the workspace and None for a path that is not below it
+        path = to_posix(str(file))
+        relative = subpath_to(path, to_posix(str(self.workspace)))
+        if relative is None:
+            # a file outside the workspace is not one this run may keep: the
+            # record would never match a file of the tree, the cleanup would
+            # remove the file the step meant to keep
+            logger.warning(
+                f'Touched a file outside the workspace of "{self.workspace.name}": "{path}"')
+            relative = path
+        self._manifest.add(relative)
+
+    def cleanup(self):
+        """
+        Remove every file and folder of the workspace this run did not touch.
+
+        The manifest is the whole truth of a run: a version that slid out of
+        the lookback window, a wheel of a pin that left the provided set, the
+        folder of a pack renamed away, the page of a version no step reads
+        anymore. A folder that holds no file of the manifest is removed as a
+        whole, without walking it, see CleanupByPreserved: the parts of the
+        cache and of the published folders the run did not use cost one
+        removal and no per file IO.
+
+        The removal runs once, after the version is published, so a failed run
+        never deletes a file a client still needs. The workspace is the only
+        tree of the run the flow writes: the log folder lives in the run
+        directory, next to the config, and is never part of it. A removal that
+        fails is logged and retried by the next run.
+
+        Returns:
+            int: Number of files and folders removed
+        """
+        cleaner = CleanupByPreserved()
+        # the tree first, then what the run preserves, see CleanupByPreserved:
+        # a preserved path drops the registered entries of its own name
+        files, folders = _read_tree(self.workspace)
+        cleaner.register_file(files)
+        cleaner.register_folder(folders)
+        cleaner.register_preserved(
+            {self.workspace.joinpath(path) for path in self._manifest})
+        removed = 0
+        # the answer is the deepest first, a file before its folder: the
+        # removal runs in its order, a folder that still holds a file is kept
+        for path, is_dir in cleaner.get_cleanup_entries():
+            if is_dir:
+                logger.info(f'Removing stale folder: "{path}"')
+                if not folder_rmtree_empty(path):
+                    logger.warning(f'Failed to remove stale folder "{path}"')
+                    continue
+            else:
+                logger.info(f'Removing stale file: "{path}"')
+                if not file_remove(path):
+                    logger.warning(f'Failed to remove stale file "{path}"')
+                    continue
+            removed += 1
+        logger.info(
+            f'Cleaned up "{self.workspace.name}": '
+            f'{len(self._manifest)} files kept, {removed} removed')
+        return removed
 
     @cached_property
     def latest_commit(self):
@@ -436,3 +527,34 @@ class RepoBase:
                     f'nothing is built of it; a dependency of the mod entry update_pack_deps '
                     f'must be pinned with "==" in the dependency file of the repo')
         return deps
+
+
+def _read_tree(root):
+    """
+    Read the paths of the files and of the folders of a tree, in one walk.
+
+    The paths are absolute and '/'-separated, the form CleanupByPreserved
+    registers and answers. The walk is iter_entry(), one os.scandir per folder
+    with the DirEntry objects it already carries, so the kind of an entry costs
+    no call of its own.
+
+    Args:
+        root (str): Root folder of the tree
+
+    Returns:
+        tuple[list[str], list[str]]: Absolute paths of the files and of the
+            folders
+    """
+    files = []
+    folders = []
+    for entry in iter_entry(root, recursive=True):
+        path = entry.path.replace(os.sep, '/')
+        try:
+            is_dir = entry.is_dir(follow_symlinks=False)
+        except OSError:
+            continue
+        if is_dir:
+            folders.append(path)
+        else:
+            files.append(path)
+    return files, folders
