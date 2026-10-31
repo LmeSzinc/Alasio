@@ -234,6 +234,28 @@ class TestGet:
         assert dict(cache._lock) == {}
 
 
+class TestPeek:
+    def test_peek_does_not_load(self):
+        """A peek of a file never loaded is a miss and loads nothing."""
+        cache = RecordingCache()
+        assert cache.peek('a') is None
+        assert cache.calls == {}
+
+    def test_peek_returns_the_loaded_resource(self):
+        """A peek of a loaded file is the hit get() would return."""
+        cache = RecordingCache()
+        value = cache.get('a')
+        assert cache.peek('a') is value
+        assert cache.calls == {'a': 1}
+
+    def test_peek_of_a_released_resource_is_a_miss(self):
+        """gc() releases the entries, a peek then misses like get() does."""
+        cache = RecordingCache()
+        cache.get('a')
+        cache.gc()
+        assert cache.peek('a') is None
+
+
 class TestResourceCacheTTLGet:
     def test_get_records_and_refreshes_last_use(self, clock):
         """

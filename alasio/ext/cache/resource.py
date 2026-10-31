@@ -129,6 +129,20 @@ class ResourceCache(Generic[T]):
         """
         raise NotImplementedError
 
+    def peek(self, file: str):
+        """
+        Get a resource from the cache without loading it
+
+        Args:
+            file (str): Cache key
+
+        Returns:
+            T | None: The cached resource, None when it was never loaded
+                (a resource that is None itself is indistinguishable from a
+                miss, so cache None only when that does not matter)
+        """
+        return self._cache.get(file)
+
     def get(self, file: str, **kwargs) -> T:
         """
         Get resource from cache

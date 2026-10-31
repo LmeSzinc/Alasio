@@ -5,12 +5,13 @@ from alasio.ext.cache.resource import ResourceCache
 from alasio.ext.path.calc import get_stem
 
 
-def loadpy(file):
+def loadpy(file, inject=None):
     """
     Dynamically load a python file.
     Note that you should use this function very carefully, remember:
         1. Target python file cannot have relative import syntax like "from . import xxx"
-            because it has no parent package.
+            because it has no parent package. Use `inject` to provide the names
+            such a file imports from its siblings, the import then never runs.
         2. You should always use the module in the minimum scope.
             If you do:
                 obj.data = module.data
@@ -20,6 +21,8 @@ def loadpy(file):
 
     Args:
         file (str): Absolute filepath to python file
+        inject (dict[str, Any]): Names put into the module namespace before the
+            file runs, they win over the imports guarded by "not in globals()"
 
     Returns:
         a python module object
@@ -46,6 +49,10 @@ def loadpy(file):
     # create module object
     # may raise ImportError('loaders that define exec_module() must also define create_module()')
     module = importlib.util.module_from_spec(spec)
+    if inject:
+        # the names of the sibling model files, so the guarded import of the
+        # file sees them in globals() and skips the relative import
+        module.__dict__.update(inject)
 
     # import
     try:
@@ -75,8 +82,8 @@ def loadpy(file):
 
 
 class LoadpyCache(ResourceCache[types.ModuleType]):
-    def load_resource(self, file: str, **kwargs):
-        return loadpy(file)
+    def load_resource(self, file: str, inject=None, **kwargs):
+        return loadpy(file, inject=inject)
 
 
 LOADPY_CACHE = LoadpyCache()

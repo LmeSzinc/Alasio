@@ -258,7 +258,7 @@ class BaseTopic(AsyncReactiveCallback, BaseMixin, metaclass=SingletonNamed):
                     # drop them (and the drain task) so they can never be
                     # emitted after the full event of the new source.
                     self._drop_outbox()
-                source = await self.get_source()
+                source = await self._resolve_source()
                 if self._closed:
                     # unsubscribed while resolving: abort without registering
                     break
@@ -367,6 +367,40 @@ class BaseTopic(AsyncReactiveCallback, BaseMixin, metaclass=SingletonNamed):
             self._nursery = trio.lowlevel.current_task().parent_nursery
         await self._resubscribe
 
+    async def _resolve_source(self):
+        """
+        [Trio] Resolve the source of this round, once the mod is warm.
+
+        Every read of a mod funnels through get_source (the config, queue,
+        scan and worker topics all read MOD_LOADER there), so this is the one
+        place the gate of the mod warmup belongs: a request that arrives while
+        the models or the json of its mod are still loading waits here, in the
+        loop, instead of redoing that work in its own thread.
+
+        Returns:
+            BaseSource | None: See get_source
+        """
+        await self._wait_mod_ready()
+        return await self.get_source()
+
+    async def _wait_mod_ready(self):
+        """
+        [Trio] Wait for the warmup of the mod this connection is looking at
+
+        The wait is bounded by the warmup of one mod and ends on failure too
+        (see ModPreload). A connection that has not selected a config yet has
+        no mod, and one that selected a mod this process does not warm up (a
+        worker imports the game script, which imports the models itself) does
+        not wait either.
+        """
+        # local imports: the topic layer imports this module, and the config
+        # entry layer must stay out of the import graph of a worker
+        from alasio.backend.topic.state import ConnState
+        from alasio.config.entry.preload import MOD_PRELOAD
+
+        state = ConnState(self.conn_id, self.server)
+        await MOD_PRELOAD.wait(await state.mod_name)
+
     async def get_source(self):
         """
         Resolve the source this topic should bind to.
@@ -434,6 +468,9 @@ class BaseTopic(AsyncReactiveCallback, BaseMixin, metaclass=SingletonNamed):
         try:
             if method.require_electron or self.REQUIRE_ELECTRON:
                 self._check_electron()
+            # an rpc validates with the model of its mod: wait for the warmup
+            # of the mod before the call runs
+            await self._wait_mod_ready()
             await method.call_async(self, value)
         except (ValidationError, DecodeError, UnicodeDecodeError, AccessDenied, RpcValueError) as e:
             # input errors

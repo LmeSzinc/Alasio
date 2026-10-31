@@ -211,6 +211,20 @@ async def lifespan(app):
         # the background, the 5s startup window of the supervisor must not be
         # spent on the whole tree (requests prepare their file on demand)
         nursery.start_soon(SITE.warm_up)
+        # the models and the json of every mod: two threads per mod in the
+        # background, and a request that arrives before its mod is warm waits
+        # for it (see BaseTopic._wait_mod_ready) instead of paying the same
+        # work a second time in its own thread. The loader is imported here
+        # for the reason given above build_app: it is bound to the project
+        # root resolved by create_config.
+        from alasio.config.entry.loader import MOD_LOADER
+        from alasio.config.entry.preload import MOD_PRELOAD
+
+        # building the mod list reads the entry file of the project: keep it
+        # off the loop. The warmup reads that cached dict to build its jobs,
+        # so a request never scans the project in the loop thread either.
+        _ = await trio.to_thread.run_sync(lambda: MOD_LOADER.dict_mod)
+        nursery.start_soon(MOD_PRELOAD.run)
         # daily maintenance (Deploy.Update.AutoRestartTime): the bookkeeping owns
         # the schedule task, a no-op when the config disables it or the backend
         # runs without a supervisor. The task only decides WHEN the daily action
