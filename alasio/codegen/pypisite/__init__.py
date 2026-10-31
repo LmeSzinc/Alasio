@@ -27,7 +27,9 @@ Usage:
 
 from .gen import PypiSite, find_links_page, simple_page
 from .obj_pypi import PypiHeader, Wheel
-from .wheel import WheelLink, is_name, normalize_name, prepare_links, split_by_name, split_by_version, version_key
+from .wheel import (
+    WheelLink, is_name, normalize_name, prepare_links, split_by_name, split_by_version, unique_links, version_key
+)
 
 __all__ = [
     'PypiHeader',
@@ -41,5 +43,6 @@ __all__ = [
     'simple_page',
     'split_by_name',
     'split_by_version',
+    'unique_links',
     'version_key',
 ]

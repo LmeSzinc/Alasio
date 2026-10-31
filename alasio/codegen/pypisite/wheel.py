@@ -41,6 +41,7 @@ __all__ = [
     'prepare_links',
     'split_by_name',
     'split_by_version',
+    'unique_links',
     'version_key',
 ]
 
@@ -268,6 +269,40 @@ def split_by_version(links):
     return _group(links, 'version')
 
 
+def unique_links(links):
+    """
+    Check and deduplicate the wheels, keeping the order of the input.
+
+    A page is written from the places a run read, and the same wheel can be
+    read twice: the answer holds it once. The order is the one the caller gave:
+    sorting is a step of a page (prepare_links), not of the data.
+
+    Args:
+        links (Iterable[WheelLink]): The wheels
+
+    Returns:
+        list[WheelLink]: The wheels, unique, in the order of the input
+
+    Raises:
+        TypeError: If a link is not a WheelLink
+        ValueError: If two links carry one file name with different digests
+    """
+    unique = {}
+    for link in links:
+        if not isinstance(link, WheelLink):
+            raise TypeError(
+                f'A wheel of a pip page is not a WheelLink: {type(link).__name__}')
+        key = (link.key, link.version, link.filename)
+        current = unique.get(key)
+        if current is None:
+            unique[key] = link
+        elif current.sha256 != link.sha256:
+            raise ValueError(
+                f'The wheel "{link.filename}" of "{link.name}=={link.version}" is linked with '
+                f'two digests: {current.sha256!r} and {link.sha256!r}')
+    return list(unique.values())
+
+
 def prepare_links(links, with_name=False, project=''):
     """
     Check, deduplicate and sort the wheels of a page.
@@ -297,20 +332,7 @@ def prepare_links(links, with_name=False, project=''):
         ValueError: If two links carry one file name with different digests, or
             a page of one distribution gets the wheel of another
     """
-    unique = {}
-    for link in links:
-        if not isinstance(link, WheelLink):
-            raise TypeError(
-                f'A wheel of a pip page is not a WheelLink: {type(link).__name__}')
-        key = (link.key, link.version, link.filename)
-        current = unique.get(key)
-        if current is None:
-            unique[key] = link
-        elif current.sha256 != link.sha256:
-            raise ValueError(
-                f'The wheel "{link.filename}" of "{link.name}=={link.version}" is linked with '
-                f'two digests: {current.sha256!r} and {link.sha256!r}')
-    out = list(unique.values())
+    out = unique_links(links)
 
     if not with_name:
         # the page of a distribution sits in the folder of it: a wheel of another

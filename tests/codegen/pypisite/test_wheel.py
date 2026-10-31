@@ -4,7 +4,7 @@ Tests for the data of a pip index page: the wheel link and the list of them.
 import pytest
 
 from alasio.codegen.pypisite import (
-    WheelLink, is_name, normalize_name, prepare_links, split_by_name, split_by_version, version_key
+    WheelLink, is_name, normalize_name, prepare_links, split_by_name, split_by_version, unique_links, version_key
 )
 
 # the digest of a wheel, the shape the fetcher of the pack server records
@@ -156,6 +156,33 @@ class TestWheelLink:
 
     def test_repr(self):
         assert repr(WheelLink('httpx2', '2.13.1', FILE)) == f'<WheelLink httpx2==2.13.1 {FILE}>'
+
+
+class TestUniqueLinks:
+    def test_empty(self):
+        assert unique_links([]) == []
+
+    def test_order_kept(self):
+        """A check of the data is not a page: the order of the caller stays."""
+        new = WheelLink('httpx2', '2.13.1', FILE, DIGEST_A)
+        old = WheelLink('httpx2', '2.9.0', 'httpx2-2.9.0-py3-none-any.whl', DIGEST_A)
+        assert unique_links([new, old]) == [new, old]
+        assert unique_links([old, new]) == [old, new]
+
+    def test_duplicate_dropped(self):
+        link = WheelLink('httpx2', '2.13.1', FILE, DIGEST_A)
+        assert unique_links([link, link]) == [link]
+
+    def test_duplicate_of_another_digest(self):
+        with pytest.raises(ValueError, match='two digests'):
+            unique_links([
+                WheelLink('httpx2', '2.13.1', FILE, DIGEST_A),
+                WheelLink('httpx2', '2.13.1', FILE, DIGEST_B),
+            ])
+
+    def test_type(self):
+        with pytest.raises(TypeError, match='is not a WheelLink'):
+            unique_links([('httpx2', '2.13.1', FILE)])
 
 
 class TestPrepareLinks:

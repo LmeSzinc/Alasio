@@ -1,0 +1,225 @@
+# The files of https://pypi.org/simple/anyio/ on 2026-11-01.
+# A comment line starts a project or a version, a file line is a wheel or
+# a source distribution of the version above it.
+#
+#   # project <name>
+#   # version <version>
+#   <filename> <sha256>
+#
+# project anyio
+# version 1.0.0a1
+anyio-1.0.0a1-py3-none-any.whl ff9972164eb84d62ed3e56267c873918ebfed7da26f4ed739355017ea05ef7da
+anyio-1.0.0a1.tar.gz 6afd26907514e46cc57727adee4555008617402525dd6c7b83b994ff1bd7bdea
+# version 1.0.0a2
+anyio-1.0.0a2-py3-none-any.whl 65d7b8f977d78d6042d70dfb73a38015456b557cf8f3d97314f932e15b317d0c
+anyio-1.0.0a2.tar.gz b070af68ef5f2497541d664f93e4bc0c67898090b368ae5fa897b1ea01d51ba6
+# version 1.0.0b1
+anyio-1.0.0b1-py3-none-any.whl 9bd4a9ec060d6fe275d26a686a661fde2aa1306d2a7142a012c2cf2bb73a7eed
+anyio-1.0.0b1.tar.gz 82f179093163e6004fd3a7a41c0ac68d325a323fd58989764f979553ef30e913
+# version 1.0.0b2
+anyio-1.0.0b2-py3-none-any.whl 7f94a6f023765ace95afca9c728dbc3443a2c2a77a9b0824341365d0472bf7ea
+anyio-1.0.0b2.tar.gz a749204790705e7ef74d880068b07a11d094e1994d3f59febd2d232066af2d03
+# version 1.0.0rc1
+anyio-1.0.0rc1-py3-none-any.whl 292d3f47a45c7d7fc2c3f128eecccc065f0ac44db2c73e06c0c5c711d15f7904
+anyio-1.0.0rc1.tar.gz 5d0cc20ed4e84b8d9c355eef368cfd62a8daf7f14e2b22f02abb1b7628df28ce
+# version 1.0.0rc2
+anyio-1.0.0rc2-py3-none-any.whl 6690f484674c0fdcce9a30a12107b9d6e41f8e5b7ce9c97b0e747af5f57ba22b
+anyio-1.0.0rc2.tar.gz 435598c7fe71598168d4769772207485eaa600231a71228b30c1194430cfed76
+# version 1.0.0
+anyio-1.0.0-py3-none-any.whl 49059434c06dbfa472d972edb366497e2400ada668643c3ae89e450ce114334e
+anyio-1.0.0.tar.gz 0f47b5ea774cc9d403935c617ff27c7673f87cda0688cd1aab3137ac86283a68
+# version 1.1.0
+anyio-1.1.0-py3-none-any.whl 9e05952f7a7b90307bf3dae17b1ce2ccb437f5924dca1303fb68892050d7b582
+anyio-1.1.0.tar.gz 7caccdb35163650e495fdecd5f29810cafb8e05caa1e2c4234abbcf5ab0b8e31
+# version 1.2.0
+anyio-1.2.0-py3-none-any.whl 5ed13f4668d219a30b5ca1f0cde5efaa94af272c02dd04f6429aaab35906f637
+anyio-1.2.0.tar.gz 0fba37b3f835ba6ebeb10e9754aff13e6fbc322f10ab1f2ab9e6c8534492930d
+# version 1.2.1
+anyio-1.2.1-py3-none-any.whl 28add54869a3a89ac9c3244e57c666811b44e750c3741b6c42905179d98df047
+anyio-1.2.1.tar.gz 6d9113ed0a18c3995318378787142b37c625095d3e14dfbe6212b346bfd5fc20
+# version 1.2.2
+anyio-1.2.2-py3-none-any.whl c2d831de74bbaa39c89f91db2d931a6ae8119547b73a133337a95f8dbfe93656
+anyio-1.2.2.tar.gz b42410c903530d4f62ce0a3cab1bbc8a34ab9f0d8d17e9ed25e8f473fe592114
+# version 1.2.3
+anyio-1.2.3-py3-none-any.whl 2b758634cf1adc3589937d91f6736b3696d091c1485a10c9cc3f1bd5e6d96813
+anyio-1.2.3.tar.gz 78db97333af17381cadd2cc0dbd3d4e0258e4932368eab8895cb65a269db054e
+# version 1.3.0
+anyio-1.3.0-py3-none-any.whl db2c3d21576870b95d4fd0b8f4a0f9c64057f777c578f3a8127179a17c8c067e
+anyio-1.3.0.tar.gz 7deae0315dd10aa41c21528b83352e4b52f44e6153a21081a3d1cd8c03728e46
+# version 1.3.1
+anyio-1.3.1-py3-none-any.whl f21b4fafeec1b7db81e09a907e44e374a1e39718d782a488fdfcdcf949c8950c
+anyio-1.3.1.tar.gz a46bb2b7743455434afd9adea848a3c4e0b7321aee3e9d08844b11d348d3b5a0
+# version 1.4.0
+anyio-1.4.0-py3-none-any.whl 9ee67e8131853f42957e214d4531cee6f2b66dda164a298d9686a768b7161a4f
+anyio-1.4.0.tar.gz 95f60964fc4583f3f226f8dc275dfb02aefe7b39b85a999c6d14f4ec5323c1d8
+# version 2.0.0b1
+anyio-2.0.0b1-py3-none-any.whl 215983bbc5e5d80a4bc1ab4d35906372c69479d4d97f2c661cd5c872f129498e
+anyio-2.0.0b1.tar.gz a208c12fa4474c407cfd92fae2c0c23fe3e587acfdf470e2f9e8098be2ce995a
+# version 2.0.0b2
+anyio-2.0.0b2-py3-none-any.whl a2ad4f2206054aea56b245ddd2029bb5507fa345f351012fb6bfd54402791fa1
+anyio-2.0.0b2.tar.gz 32cb7e7f67347b02a9387d4413bd84f2288b0dbf31c2c175c01916dc4951a21e
+# version 2.0.0rc1
+anyio-2.0.0rc1-py3-none-any.whl 9a51512ff1eb8a0ec3a54213bc92cfd65d383ec4be6efe516b14ee568db0a1a6
+anyio-2.0.0rc1.tar.gz 9afe8232d4671ee86aa7c61833e9b87fa00ff921ebc35745c044ccb987548130
+# version 2.0.0rc2
+anyio-2.0.0rc2-py3-none-any.whl a191fe393baa08d582e3dfda4fef927ffede028e574af9c7c8a41c2e5396d9f7
+anyio-2.0.0rc2.tar.gz 4792d0647f2556784b6a161d9de9b935f0bc5285887158d35cea0cd601d32dfa
+# version 2.0.0
+anyio-2.0.0-py3-none-any.whl 0b8375c8fc665236cb4d143ea13e849eb9e074d727b1b5c27d88aba44ca8c547
+anyio-2.0.0.tar.gz ceca4669ffa3f02bf20ef3d6c2a0c323b16cdc71d1ce0b0bc03c6f1f36054826
+# version 2.0.1
+anyio-2.0.1-py3-none-any.whl c428e51779aca531105431b96e08a2c49819b311681e0afef8b8307af551af40
+anyio-2.0.1.tar.gz ff5b9b20a1172414107117cfc3ebf5b433fd4875c04dff4576bcced90cced7b4
+# version 2.0.2
+anyio-2.0.2-py3-none-any.whl 01cce0087b8fd8b6b7e629dc11505dcde02f916ce903332892cb2ae9817b597d
+anyio-2.0.2.tar.gz 35075abd32cf20fd7e0be2fee3614e80b92d5392eba257c8d2f33de3df7ca237
+# version 2.1.0
+anyio-2.1.0-py3-none-any.whl c286818ccd5dcbd5d385b223f16a055393474527b1d5650da489828a9887d559
+anyio-2.1.0.tar.gz 8a56e08623dc55955a06719d4ad62de6009bb3f1dd04936e60b2104dd58da484
+# version 2.2.0
+anyio-2.2.0-py3-none-any.whl aa3da546ed17f097ca876c78024dea380a3b7fa80759abfdda59f12176a3dac8
+anyio-2.2.0.tar.gz 4a41c5b3a65ed92e469d51b6fba3779301850ea2e352afcf9e36c46f21ee14a9
+# version 3.0.0rc1
+anyio-3.0.0rc1-py3-none-any.whl 19fbcb8bcb05b47dbd2af39da6744e02495e18d35e8624cfca56a319de5867a0
+anyio-3.0.0rc1.tar.gz 233dd959ad418931cc9cd2cd99c4cbf0adcb32fcc01088a19f3044ed19db31c3
+# version 3.0.0rc2
+anyio-3.0.0rc2-py3-none-any.whl cb2d00ce26f844c1689fd048b710570e2db9534586aabc2b985da3d73a40e9a2
+anyio-3.0.0rc2.tar.gz a512bdcd7a3e7b0e6716f984eade88119d5570741b3a93b6df10dc3ca64b14f7
+# version 3.0.0rc3
+anyio-3.0.0rc3-py3-none-any.whl 6a770e34353d5a95341d46fb1c3254b0265462605b46f36ea69f0459fc282524
+anyio-3.0.0rc3.tar.gz 20f783c51086bc9b5af2fceaee3a24f58a4f0ad7efcb41048b7845179d22bb11
+# version 3.0.0rc4
+anyio-3.0.0rc4-py3-none-any.whl 0cf45acfcfee23b92443e2e9d8938023e9de01cc70943a107201b522e06c9e30
+anyio-3.0.0rc4.tar.gz 8af955ebf754b245d51d9d96652bb87475f0ad1e32d3d691e6872c1e7c3c5188
+# version 3.0.0
+anyio-3.0.0-py3-none-any.whl e71c3d9d72291d12056c0265d07c6bbedf92332f78573e278aeb116f24f30395
+anyio-3.0.0.tar.gz b553598332c050af19f7d41f73a7790142f5bc3d5eb8bd82f5e515ec22019bd9
+# version 3.0.1
+anyio-3.0.1-py3-none-any.whl ed71f7542ef39875b65def219794d9dcb0a48c571317b13612c12b1f292701b5
+anyio-3.0.1.tar.gz 1ef7622396ab55829d4236a6f75e2199df6d26a4ba79bea0cb942a5fd2f79a23
+# version 3.1.0
+anyio-3.1.0-py3-none-any.whl 5e335cef65fbd1a422bbfbb4722e8e9a9fadbd8c06d5afe9cd614d12023f6e5a
+anyio-3.1.0.tar.gz 43e20711a9d003d858d694c12356dc44ab82c03ccc5290313c3392fa349dad0e
+# version 3.2.0
+anyio-3.2.0-py3-none-any.whl 89e19b1498c8a6f12277e0bd2949597e445aa1b14361fbab2c36943639ef5190
+anyio-3.2.0.tar.gz 41c4be842c284222b197a625d76a7ab85adf9d52788f563172fe180c2744b6c1
+# version 3.2.1
+anyio-3.2.1-py3-none-any.whl 442678a3c7e1cdcdbc37dcfe4527aa851b1b0c9162653b516e9f509821691d50
+anyio-3.2.1.tar.gz 07968db9fa7c1ca5435a133dc62f988d84ef78e1d9b22814a59d1c62618afbc5
+# version 3.3.0
+anyio-3.3.0-py3-none-any.whl 929a6852074397afe1d989002aa96d457e3e1e5441357c60d03e7eea0e65e1b0
+anyio-3.3.0.tar.gz ae57a67583e5ff8b4af47666ff5651c3732d45fd26c929253748e796af860374
+# version 3.3.1
+anyio-3.3.1-py3-none-any.whl d7c604dd491eca70e19c78664d685d5e4337612d574419d503e76f5d7d1590bd
+anyio-3.3.1.tar.gz 85913b4e2fec030e8c72a8f9f98092eeb9e25847a6e00d567751b77e34f856fe
+# version 3.3.2
+anyio-3.3.2-py3-none-any.whl c32da314c510b34a862f5afeaf8a446ffed2c2fde21583e654bd71ecfb5b744b
+anyio-3.3.2.tar.gz 0b993a2ef6c1dc456815c2b5ca2819f382f20af98087cc2090a4afed3a501436
+# version 3.3.3
+anyio-3.3.3-py3-none-any.whl 56ceaeed2877723578b1341f4f68c29081db189cfb40a97d1922b9513f6d7db6
+anyio-3.3.3.tar.gz 8eccec339cb4a856c94a75d50fc1d451faf32a05ef406be462e2efc59c9838b0
+# version 3.3.4
+anyio-3.3.4-py3-none-any.whl 4fd09a25ab7fa01d34512b7249e366cd10358cdafc95022c7ff8c8f8a5026d66
+anyio-3.3.4.tar.gz 67da67b5b21f96b9d3d65daa6ea99f5d5282cb09f50eb4456f8fb51dffefc3ff
+# version 3.4.0
+anyio-3.4.0-py3-none-any.whl 2855a9423524abcdd652d942f8932fda1735210f77a6b392eafd9ff34d3fe020
+anyio-3.4.0.tar.gz 24adc69309fb5779bc1e06158e143e0b6d2c56b302a3ac3de3083c705a6ed39d
+# version 3.5.0
+anyio-3.5.0-py3-none-any.whl b5fa16c5ff93fa1046f2eeb5bbff2dad4d3514d6cda61d02816dba34fa8c3c2e
+anyio-3.5.0.tar.gz a0aeffe2fb1fdf374a8e4b471444f0f3ac4fb9f5a5b542b48824475e0042a5a6
+# version 3.6.0
+anyio-3.6.0-py3-none-any.whl 5bd42d66c9c382e657c9acba60f9459d747c192513e76dcae8b1c611e55174ef
+anyio-3.6.0.tar.gz 056bd22787f4bc59cb6d9a6873929618c2233d64903eed64177070fd072bd9ca
+# version 3.6.1
+anyio-3.6.1-py3-none-any.whl cb29b9c70620506a9a8f87a309591713446953302d7d995344d0d7c6c0c9a7be
+anyio-3.6.1.tar.gz 413adf95f93886e442aea925f3ee43baa5a765a64a0f52c6081894f9992fdd0b
+# version 3.6.2
+anyio-3.6.2-py3-none-any.whl fbbe32bd270d2a2ef3ed1c5d45041250284e31fc0a4df4a5a6071842051a51e3
+anyio-3.6.2.tar.gz 25ea0d673ae30af41a0c442f81cf3b38c7e79fdc7b60335a4c14e05eb0947421
+# version 3.7.0rc1
+anyio-3.7.0rc1-py3-none-any.whl 691adfc3c36c0d922c69a8d4105e73cf4cf697f7e66a1baf04347bf5f1a0d6a9
+anyio-3.7.0rc1.tar.gz 8ffa2a3572d4a9852481fb6f8b7fd3c678b27860e07b8789da4ddb06675aa219
+# version 3.7.0
+anyio-3.7.0-py3-none-any.whl eddca883c4175f14df8aedce21054bfca3adb70ffe76a9f607aef9d7fa2ea7f0
+anyio-3.7.0.tar.gz 275d9973793619a5374e1c89a4f4ad3f4b0a5510a2b5b939444bee8f4c4d37ce
+# version 3.7.1
+anyio-3.7.1-py3-none-any.whl 91dee416e570e92c64041bd18b900d1d6fa78dff7048769ce5ac5ddad004fbb5
+anyio-3.7.1.tar.gz 44a3c9aba0f5defa43261a8b3efb97891f2bd7d804e0e1f56419befa1adfc780
+# version 4.0.0rc1
+anyio-4.0.0rc1-py3-none-any.whl 596b09c520820e7eed961ddc889540972f92d5e8fcb081117fc054c409df34ae
+anyio-4.0.0rc1.tar.gz 48d53f0b141f5757c38d648309e6fe254857fae092d67f938fa248d7c0f36804
+# version 4.0.0
+anyio-4.0.0-py3-none-any.whl cfdb2b588b9fc25ede96d8db56ed50848b0b649dca3dd1df0b11f683bb9e0b5f
+anyio-4.0.0.tar.gz f7ed51751b2c2add651e5747c891b47e26d2a21be5d32d9311dfe9692f3e5d7a
+# version 4.1.0
+anyio-4.1.0-py3-none-any.whl 56a415fbc462291813a94528a779597226619c8e78af7de0507333f700011e5f
+anyio-4.1.0.tar.gz 5a0bec7085176715be77df87fc66d6c9d70626bd752fcc85f57cdbee5b3760da
+# version 4.2.0
+anyio-4.2.0-py3-none-any.whl 745843b39e829e108e518c489b31dc757de7d2131d53fac32bd8df268227bfee
+anyio-4.2.0.tar.gz e1875bb4b4e2de1669f4bc7869b6d3f54231cdced71605e6e64c9be77e3be50f
+# version 4.3.0
+anyio-4.3.0-py3-none-any.whl 048e05d0f6caeed70d731f3db756d35dcc1f35747c8c403364a8332c630441b8
+anyio-4.3.0.tar.gz f75253795a87df48568485fd18cdd2a3fa5c4f7c5be8e5e36637733fce06fed6
+# version 4.4.0
+anyio-4.4.0-py3-none-any.whl c1b2d8f46a8a812513012e1107cb0e68c17159a7a594208005a57dc776e1bdc7
+anyio-4.4.0.tar.gz 5aadc6a1bbb7cdb0bede386cac5e2940f5e2ff3aa20277e991cf028e0585ce94
+# version 4.5.0
+anyio-4.5.0-py3-none-any.whl fdeb095b7cc5a5563175eedd926ec4ae55413bb4be5770c424af0ba46ccb4a78
+anyio-4.5.0.tar.gz c5a275fe5ca0afd788001f58fca1e69e29ce706d746e317d660e21f70c530ef9
+# version 4.5.1
+anyio-4.5.1-py3-none-any.whl 474fa88d0cc1cdcbb357b1e366a74b9d762c3fb5a0acb9d4292cc42db6f884ef
+anyio-4.5.1.tar.gz d0a54cc24769e2755d34f40bcdf5b3ca64b545319bc629c6e3398397e655bc91
+# version 4.5.2
+anyio-4.5.2-py3-none-any.whl c011ee36bc1e8ba40e5a81cb9df91925c218fe9b778554e0b56a21e1b5d4716f
+anyio-4.5.2.tar.gz 23009af4ed04ce05991845451e11ef02fc7c5ed29179ac9a420e5ad0ac7ddc5b
+# version 4.6.0
+anyio-4.6.0-py3-none-any.whl c7d2e9d63e31599eeb636c8c5c03a7e108d73b345f064f1c19fdc87b79036a9a
+anyio-4.6.0.tar.gz 137b4559cbb034c477165047febb6ff83f390fc3b20bf181c1fc0a728cb8beeb
+# version 4.6.1
+anyio-4.6.1-py3-none-any.whl 0632863c9044798a494a05cab0b159dfad6a3f064094863a45878320eb4e8ed2
+anyio-4.6.1.tar.gz 936e6613a08e8f71a300cfffca1c1c0806335607247696ac45f9b32c63bfb9aa
+# version 4.6.2
+anyio-4.6.2-py3-none-any.whl 6caec6b1391f6f6d7b2ef2258d2902d36753149f67478f7df4be8e54d03a8f54
+anyio-4.6.2.tar.gz f72a7bb3dd0752b3bd8b17a844a019d7fbf6ae218c588f4f9ba1b2f600b12347
+# version 4.6.2.post1
+anyio-4.6.2.post1-py3-none-any.whl 6d170c36fba3bdd840c73d3868c1e777e33676a69c3a72cf0a0d5d6d8009b61d
+anyio-4.6.2.post1.tar.gz 4c8bc31ccdb51c7f7bd251f51c609e038d63e34219b44aa86e47576389880b4c
+# version 4.7.0
+anyio-4.7.0-py3-none-any.whl ea60c3723ab42ba6fff7e8ccb0488c898ec538ff4df1f1d5e642c3601d07e352
+anyio-4.7.0.tar.gz 2f834749c602966b7d456a7567cafcb309f96482b5081d14ac93ccd457f9dd48
+# version 4.8.0
+anyio-4.8.0-py3-none-any.whl b5011f270ab5eb0abf13385f851315585cc37ef330dd88e27ec3d34d651fd47a
+anyio-4.8.0.tar.gz 1d9fe889df5212298c0c0723fa20479d1b94883a2df44bd3897aa91083316f7a
+# version 4.9.0
+anyio-4.9.0-py3-none-any.whl 9f76d541cad6e36af7beb62e978876f3b41e3e04f2c1fbf0884604c0a9c4d93c
+anyio-4.9.0.tar.gz 673c0c244e15788651a4ff38710fea9675823028a6f08a5eda409e0c9840a028
+# version 4.10.0
+anyio-4.10.0-py3-none-any.whl 60e474ac86736bbfd6f210f7a61218939c318f43f9972497381f1c5e930ed3d1
+anyio-4.10.0.tar.gz 3f3fae35c96039744587aa5b8371e7e8e603c0702999535961dd336026973ba6
+# version 4.11.0
+anyio-4.11.0-py3-none-any.whl 0287e96f4d26d4149305414d4e3bc32f0dcd0862365a4bddea19d7a1ec38c4fc
+anyio-4.11.0.tar.gz 82a8d0b81e318cc5ce71a5f1f8b5c4e63619620b63141ef8c995fa0db95a57c4
+# version 4.12.0
+anyio-4.12.0-py3-none-any.whl dad2376a628f98eeca4881fc56cd06affd18f659b17a747d3ff0307ced94b1bb
+anyio-4.12.0.tar.gz 73c693b567b0c55130c104d0b43a9baf3aa6a31fc6110116509f27bf75e21ec0
+# version 4.12.1
+anyio-4.12.1-py3-none-any.whl d405828884fc140aa80a3c667b8beed277f1dfedec42ba031bd6ac3db606ab6c
+anyio-4.12.1.tar.gz 41cfcc3a4c85d3f05c932da7c26d0201ac36f72abd4435ba90d0464a3ffed703
+# version 4.13.0
+anyio-4.13.0-py3-none-any.whl 08b310f9e24a9594186fd75b4f73f4a4152069e3853f1ed8bfbf58369f4ad708
+anyio-4.13.0.tar.gz 334b70e641fd2221c1505b3890c69882fe4a2df910cba14d97019b90b24439dc
+# version 4.14.0
+anyio-4.14.0-py3-none-any.whl dd9b7a2a9799ed6552fde617b2c5df02b7fdd7d88392fc48101e51bae46164d9
+anyio-4.14.0.tar.gz b47c1f9ccf73e67021df785332508f99379c68fa7d0684e8e3492cb1d4b23f89
+# version 4.14.1
+anyio-4.14.1-py3-none-any.whl 4e5533c5b8ff0a24f5d7a176cbe6877129cd183893f66b537f8f227d10527d72
+anyio-4.14.1.tar.gz 8d648a3544c1a700e3ff78615cd679e4c5c3f149904287e73687b2596963629e
+# version 4.14.2
+anyio-4.14.2-py3-none-any.whl 9f505dda5ac9f0c8309b5e8bd445a8c2bf7246f3ce950121e45ea15bc41d1494
+anyio-4.14.2.tar.gz cfa139f3ed1a23ee8f88a145ddb5ac7605b8bbfd8592baacd7ce3d8bb4313c7f
+# version 4.15.0
+anyio-4.15.0-py3-none-any.whl 7ecd9937369ffce8bba0b5ccb9b3a9507b101b0ed50256aecfbab27e6c2acb99
+anyio-4.15.0.tar.gz b5c620ed540725e2579c31b17bb995b3bf02c9281c9cace04c7d186380bab85e
+# version 4.15.1
+anyio-4.15.1-py3-none-any.whl 6152fdbbf9a77fdec97731721bebf7c4c44f7c29b424b0065826173efc7ed101
+anyio-4.15.1.tar.gz 9f28306018cbd6d329e64a36d58256edff76dd996fe423bc957326e578b82a94
