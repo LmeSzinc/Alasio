@@ -551,6 +551,7 @@ class TestRun:
             assert gen.run() is None
         assert capture.concat() == """\
 INFO | No update_pack_deps declared by module/config/const.py at c3, no dependency pack is built
+INFO | No provided dependency of "Author_Repo_master", no pip index page is written
 INFO | No dependency to build of "Author_Repo_master", skipped
 INFO | Generating packs of "Author_Repo_master": 3 versions, latest=c3
 INFO | Writing full pack: "{run_dir}/pack/Author_Repo_master/packrepo/c3/full.pack"

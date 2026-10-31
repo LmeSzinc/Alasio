@@ -16,8 +16,7 @@ The golden page does not change on its own. When a change of the page is
 intended, delete the file, run the test to write it again, read the diff and
 commit it.
 """
-from alasio.codegen.html import Element, Raw
-from alasio.codegen.pypisite.flat import FLAT_STYLE, PypiSiteFlat
+from alasio.codegen.pypisite.flat import flat_page
 from tests.codegen.pypisite import fixture
 
 # the folder the fixture and the golden page of this test live in
@@ -72,57 +71,20 @@ def build_page():
     """
     Build the page of the folder from the wheels of the fixture.
 
-    A project whose every version is a wheel of pure python draws the table of
-    its versions; a project of compiled extensions draws a section a version,
-    and the wheels of pure python of a version are the last row of its matrix.
-    The versions come newest first, which is the order of the fixture.
+    Every project is the wheels of it, any versions: flat_page groups them, a
+    section a compiled version and the table of the versions of pure python, so
+    the page of the site is the page of the module and nothing of the layout of
+    it lives in this test.
 
     Returns:
         str: The page, the shape a reader of the folder opens
     """
-    gen = PypiSiteFlat()
-    head = [Element(gen, 'style', Raw(gen, FLAT_STYLE, indent=False))]
-    with gen.Doc(TITLE, head=head, body=[], lang='en') as page:
-        with page.body():
-            with gen.Header():
-                gen.H1(TITLE)
-                # one line each: a <pre> keeps the whitespace of the source, so
-                # the block form of a line break would show inside the box
-                gen.P(
-                    'Backported wheels, one section per dependency and version. '
-                    'Anchors are stable: ',
-                    Element(gen, 'code', '#name'),
-                    ', ',
-                    Element(gen, 'code', '#name-version'),
-                    '.',
-                    class_='lede',
-                ).wrap('inline')
-                gen.Pre(Element(gen, 'code', COMMAND)).wrap('inline')
-            gen.inject_index()
-            with gen.Main():
-                for name, versions in group_by_project(fixture.read_entries(DATA)).items():
-                    with gen.WheelName(name):
-                        for entry in versions:
-                            if entry.pure:
-                                continue
-                            with gen.WheelVersion(entry.version, origin=entry.origin):
-                                gen.WheelTableCompiled(entry.links)
-                        pure = [entry for entry in versions if entry.pure]
-                        if pure:
-                            gen.WheelTablePurePython(
-                                [link for entry in pure for link in entry.links],
-                                # the site publishes every version from a release,
-                                # the pure rows name the release the same way a
-                                # version section does
-                                origins={entry.version: entry.origin for entry in pure},
-                            )
-            with gen.Footer():
-                gen.P(
-                    'Every wheel link is relative to this page and carries ',
-                    Element(gen, 'code', '#sha256'),
-                    '; no binary is copied or proxied.',
-                ).wrap('inline')
-    return gen.generate_str()
+    projects = {}
+    origins = {}
+    for name, entries in group_by_project(fixture.read_entries(DATA)).items():
+        projects[name] = [link for entry in entries for link in entry.links]
+        origins[name] = {entry.version: entry.origin for entry in entries}
+    return flat_page(projects, TITLE, command=COMMAND, origins=origins)
 
 
 def read_golden():
@@ -256,20 +218,19 @@ class TestPage:
             '<a href="#starlette-1.7.0">1.7.0</a> · <a href="#starlette-1.6.0">1.6.0</a></span>') in page
 
     def test_header_of_the_page(self):
-        """The command sits in a box of one line: a <pre> keeps the whitespace of the source."""
+        """The title, the line under it, and the command in a box of one line."""
         page = build_page()
         assert (
             '      <pre><code>pip install --no-index --find-links '
             f'https://py38deps.github.io/py38deps/flat/ &lt;package&gt;</code></pre>\n') in page
         assert (
-            '      <p class="lede">Backported wheels, one section per dependency and version. '
-            'Anchors are stable: <code>#name</code>, <code>#name-version</code>.</p>\n') in page
+            '      <p class="lede">Every wheel this index provides, one section per distribution. '
+            'Anchors are stable: #name, #name-version.</p>\n') in page
 
     def test_footer_of_the_page(self):
         page = build_page()
         assert (
-            '      <p>Every wheel link is relative to this page and carries <code>#sha256</code>; '
-            'no binary is copied or proxied.</p>\n') in page
+            '      <p>Every link carries the sha256 of the file it points at.</p>\n') in page
 
     def test_style_of_the_page(self):
         page = build_page()

@@ -34,14 +34,35 @@ Usage:
             with gen.WheelName('anyio'):
                 gen.WheelTablePurePython(anyio_links)
     gen.write('wheel/overview.html')
+
+The whole page of a folder of wheels is one call, flat_page: it writes the
+skeleton, the index and the sections of every project from the wheels alone.
+
+Usage:
+    from alasio.codegen.pypisite.flat import flat_page
+
+    flat_page({'httpx2': links}, 'Wheels of Author_Repo_master')
 """
 
+from alasio.codegen.html import Element, Raw
+
 from ..gen import PypiSite
+from ..wheel import normalize_name, split_by_version
 from .obj_flat import FlatIndex, FlatProject, FlatRegistry, FlatTableCompiled, FlatTablePure, FlatVersion
+from .style import FLAT_STYLE
+from .tags import is_pure, parse_tags
 
 __all__ = [
     'PypiSiteFlat',
+    'flat_page',
 ]
+
+# The line under the heading of a flat page, written by flat_page
+LEDE = ('Every wheel this index provides, one section per distribution. '
+        'Anchors are stable: #name, #name-version.')
+
+# The line of the footer of a flat page, written by flat_page
+FOOTER = 'Every link carries the sha256 of the file it points at.'
 
 
 class PypiSiteFlat(PypiSite):
@@ -181,3 +202,93 @@ class PypiSiteFlat(PypiSite):
         item = FlatIndex(self, title=title)
         self._add_item(item)
         return item
+
+
+def _project(gen, name, links, origins):
+    """
+    Write the section of one project: a section a compiled version, a table of
+    the versions of pure python.
+
+    A version whose every wheel is of pure python has no platform to spread, so
+    it is a row of the table of the project rather than a section of its own; a
+    version that ships both kinds of wheel is a section, and the wheels of pure
+    python of it are the last row of its matrix.
+
+    Args:
+        gen (PypiSiteFlat): Generator of the page
+        name (str): Distribution name, any case and separator style
+        links (Iterable[WheelLink]): The wheels of the project, any versions
+        origins (dict): {version: (text, url)} of where the wheels come from
+
+    Raises:
+        ValueError: If a link is not a WheelLink, or an origin names a version
+            the project does not have
+    """
+    by_version = split_by_version(links)
+    unknown = sorted(str(version) for version in origins if version not in by_version)
+    if unknown:
+        raise ValueError(
+            f'The origins of "{normalize_name(name)}" hold {", ".join(repr(version) for version in unknown)} '
+            f'of no version of it: the project shows {sorted(by_version)}')
+    with gen.WheelName(name):
+        pure = []
+        pure_origins = {}
+        for version, group in by_version.items():
+            if all(is_pure(parse_tags(link.filename)) for link in group):
+                pure.extend(group)
+                if version in origins:
+                    pure_origins[version] = origins[version]
+                continue
+            with gen.WheelVersion(version, origin=origins.get(version)):
+                gen.WheelTableCompiled(group)
+        if pure:
+            gen.WheelTablePurePython(pure, origins=pure_origins)
+
+
+def flat_page(projects, title, command=None, lang='en', origins=None):
+    """
+    Render a whole flat page of a folder of wheels as a text.
+
+    The page is the one a reader opens: a heading, the index of the projects, a
+    section a project, and the footer. The tables of the page are the ones the
+    methods above write, so the page of this function and the page a caller
+    composes with them are the same page.
+
+    Args:
+        projects (dict[str, Iterable[WheelLink]]): {name: the wheels of it}. The
+            wheels of a project may be of several versions; the mapping and the
+            versions in it are in the order the page shows them
+        title (str): Title and heading of the page, escaped
+        command (str, optional): Command a reader copies, e.g. the pip install
+            line of the folder. None writes no box. Defaults to None
+        lang (str): Language of the page. Defaults to 'en'
+        origins (dict, optional): {name: {version: (text, url)}} of where the
+            wheels of a version come from, see WheelVersion. Defaults to None,
+            no version names a source
+
+    Returns:
+        str: The page
+
+    Raises:
+        ValueError: If a link is not a WheelLink, if a name is not a
+            distribution name, or if an origin names a version a project does
+            not have
+    """
+    origins = {normalize_name(name): value for name, value in (origins or {}).items()}
+    gen = PypiSiteFlat()
+    head = [Element(gen, 'style', Raw(gen, FLAT_STYLE, indent=False))]
+    with gen.Doc(title, head=head, lang=lang) as page:
+        with page.body():
+            with gen.Header():
+                gen.H1(title)
+                gen.P(LEDE, class_='lede').wrap('inline')
+                if command is not None:
+                    # one line: a <pre> keeps the whitespace of the source
+                    gen.Pre(Element(gen, 'code', command)).wrap('inline')
+            gen.inject_index()
+            with gen.Main():
+                for name, links in projects.items():
+                    _project(gen, name, links, origins.get(normalize_name(name)) or {})
+            with gen.Footer():
+                gen.P(FOOTER).wrap('inline')
+    return gen.generate_str()

@@ -65,7 +65,7 @@ footer { margin-top:3rem; padding-top:1rem; border-top:1px solid var(--line); co
   <body>
     <header>
       <h1>py38deps wheels</h1>
-      <p class="lede">Backported wheels, one section per dependency and version. Anchors are stable: <code>#name</code>, <code>#name-version</code>.</p>
+      <p class="lede">Every wheel this index provides, one section per distribution. Anchors are stable: #name, #name-version.</p>
       <pre><code>pip install --no-index --find-links https://py38deps.github.io/py38deps/flat/ &lt;package&gt;</code></pre>
     </header>
     <nav id="contents" aria-label="Contents">
@@ -807,7 +807,7 @@ footer { margin-top:3rem; padding-top:1rem; border-top:1px solid var(--line); co
       </section>
     </main>
     <footer>
-      <p>Every wheel link is relative to this page and carries <code>#sha256</code>; no binary is copied or proxied.</p>
+      <p>Every link carries the sha256 of the file it points at.</p>
     </footer>
   </body>
 </html>

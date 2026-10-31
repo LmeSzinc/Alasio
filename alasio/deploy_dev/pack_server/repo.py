@@ -13,7 +13,9 @@ on the disk.
        cache `_wheel_cache/{name}/{version}/` and synced to the pip index
        `wheel/{name}/{version}/` (see repo_wheel), the files a client installs
        when it cannot reach the index the pin came from
-    3. the pip index pages of that folder (see repo_pypi, not written yet)
+    3. the pages of the pip index of that folder are written (see repo_pypi):
+       the simple page of every name, the find-links page of the folder, and
+       the flat page a person reads
     4. the pure python wheel of every version the dependency packs are built of
        is downloaded to the same cache, and the packs of the dependencies are
        built to `packdep/{name}/{version}/` (see repo_dep): the latest commit
@@ -73,7 +75,7 @@ class Repo:
         gen.commit()
     """
 
-    def __init__(self, repo, config, client=None):
+    def __init__(self, repo, config, client=None, find_links_url=None):
         """
         Args:
             repo (GitRepo | MockGitRepo): Git repo of the config, cloned and
@@ -85,6 +87,10 @@ class Repo:
                 the wheel fetches are sent with, e.g. the injected client of a
                 test. Its lifetime belongs to the caller. Defaults to None,
                 every fetch creates and closes the client of its own
+            find_links_url (str, optional): Url the folder of the wheels is
+                served at, written into the command of the flat page, e.g.
+                'https://packs.example/pack/Author_Repo_master/wheel'. Defaults
+                to None, the page then writes no command
 
         Raises:
             ValueError: If the config makes a folder name that is not a single
@@ -92,7 +98,7 @@ class Repo:
         """
         self.base = RepoBase(repo, config, client)
         self.wheel = RepoWheel(self.base)
-        self.pypi = RepoPypi(self.base)
+        self.pypi = RepoPypi(self.base, self.wheel, find_links_url=find_links_url)
         self.dep = RepoDep(self.base)
         self.pack = RepoPack(self.base, self.dep)
         self.latest = RepoLatest(self.base, self.pack)
@@ -142,7 +148,7 @@ class Repo:
         # 1. the wheels of the provided pins and the pip index they are
         # published into
         self.wheel.run()
-        # 2. the pages of the pip index (not written yet)
+        # 2. the pages of the pip index of the folder
         self.pypi.run()
         # 3. the wheels of the dependency packs and the packs themselves, the
         # snapshots go to the tree pack
