@@ -142,8 +142,11 @@ class LoadAlasI18n(metaclass=Singleton):
             # Update options if they exist
             if options:
                 for option in options:
-                    value = i18n_data.get(option, None)
+                    # The option of {nav}.args.yaml may be a number, while the key
+                    # of the old json is always a str
+                    key = str(option)
+                    value = i18n_data.get(key, None)
                     if value:
-                        old = deep_set(old, keys=[lang, 'option_i18n', option], value=value)
+                        old = deep_set(old, keys=[lang, 'option_i18n', key], value=value)
 
         return old

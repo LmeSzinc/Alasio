@@ -471,9 +471,12 @@ Group:
             'hard': 'HARD',
         }
 
-    @pytest.mark.xfail(strict=True, reason='the old json keys are str while the yaml options are int, the translation is not found')
     def test_numeric_option_translation_is_loaded(self, fs):
-        """The old translation of a numeric option is migrated."""
+        """The old translation of a numeric option is migrated.
+
+        The key of the old json is always a str, while the option of the yaml
+        may be a number, so the lookup converts the option to a str.
+        """
         self.make_loader(fs, {'Group': {'Level': {'1': 'One', '2': 'Two'}}})
         gen = make_generator(fs, yaml="""\
 Group:
@@ -482,11 +485,32 @@ Group:
       value: 2
       option: [1, 2, 3]
 """, languages=('zh-CN',))
-        assert gen.i18n_data['Group']['Level']['zh-CN']['option_i18n'] == {
+        option_i18n = gen.i18n_data['Group']['Level']['zh-CN']['option_i18n']
+        assert type(option_i18n) is not NoIndent
+        assert option_i18n == {
             '1': 'One',
             '2': 'Two',
             '3': '3',
         }
+        assert i18n_text(gen.i18n_data) == """\
+{
+  "Group": {
+    "_info": {
+      "zh-CN": {"name": "Group", "help": ""}
+    },
+    "Level": {
+      "zh-CN": {
+        "name": "Group.Level",
+        "help": "",
+        "option_i18n": {
+          "1": "One",
+          "2": "Two",
+          "3": "3"
+        }
+      }
+    }
+  }
+}"""
 
     def test_name_and_help_are_loaded(self, fs):
         """The old name and help are migrated."""
