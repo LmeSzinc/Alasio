@@ -87,6 +87,12 @@ def mod_entry(mod_name, config_name, child_conn, project_root='', mod_root='', p
     # if project_root, mod_root, path_main all provided, consider as real mod
     if project_root and mod_root and path_main:
         try:
+            # This process runs the game script of one mod, so the models are
+            # loaded as packages of the mod (see env.PROCESS_ROLE). The worker
+            # is spawned, so the default already holds; set it anyway, the
+            # role must not depend on the start method of multiprocessing.
+            env.PROCESS_ROLE = 'worker'
+
             # set mod root path
             os.chdir(mod_root)
             sys.path[0] = mod_root

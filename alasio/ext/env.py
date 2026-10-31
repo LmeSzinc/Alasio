@@ -37,6 +37,12 @@ def set_project_root(root, up=0):
 
 
 # Environ
+# Role of the current process: 'worker' runs the game script of one mod,
+# 'backend' serves the GUI and validates the config of every mod.
+# Default to 'worker' so a plain `python -m module.main`, a script or a test
+# behaves like a real worker without setting anything; only the backend
+# process declares itself.
+PROCESS_ROLE = 'worker'
 # Set to "1" by the supervisor when started with --electron; silences structlog stdout
 ELECTRON = os.environ.get("ELECTRON", "")
 CHINAC_CLOUDPHONE = os.environ.get("cloudphone", "") == "cloudphone"
