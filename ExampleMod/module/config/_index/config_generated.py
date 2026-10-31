@@ -80,12 +80,12 @@ class ConfigGenerated(AlasioConfigBase):
     """
     # ----- GemsFarming -----
     # Scheduler: "alasio.Scheduler"
-    # Campaign: "main.GemsCampaign"
+    # Campaign: "gems.GemsCampaign"
     GemsFarming: "gems.GemsFarming"
-    # StopCondition: "main.GemsStopCondition"
+    # StopCondition: "gems.GemsStopCondition"
     # Fleet1: "main.Fleet"
-    # Submarine: "main.GemsSubmarine"
-    # Emotion1: "main.GemsEmotionRecord"
+    # Submarine: "gems.GemsSubmarine"
+    # Emotion1: "gems.GemsEmotionRecord"
     EquipmentCode: "gems.EquipmentCode"
 
     """
