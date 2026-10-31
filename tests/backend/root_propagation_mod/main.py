@@ -2,7 +2,7 @@
 Throwaway worker mod of the root propagation test.
 
 tests/backend/root_propagation.py spawns this file as the scheduler of a REAL
-mod worker (bridge.mod_entry real-mod branch: chdir to mod_root,
+mod worker (worker.entry.mod_entry real-mod branch: chdir to mod_root,
 set_project_root(project_root), import path_main): mod_root is the folder this
 file lives in and path_main is 'main.py' -- the shape of a real mod entry,
 which is resolved relative to its mod root.

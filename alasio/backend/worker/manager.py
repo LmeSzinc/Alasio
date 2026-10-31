@@ -9,7 +9,7 @@ import msgspec
 from msgspec.msgpack import encode
 
 from alasio.backend.app.restart.restart_manager import RESTART_MANAGER
-from alasio.backend.worker.bridge import mod_entry
+from alasio.backend.worker.entry import mod_entry
 from alasio.backend.worker.event import DECODER_CACHE, CommandEvent, ConfigEvent
 from alasio.ext.singleton import Singleton
 from alasio.logger import logger

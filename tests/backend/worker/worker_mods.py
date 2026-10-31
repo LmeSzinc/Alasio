@@ -23,10 +23,10 @@ def mute_test_worker_logging():
     """
     Keep a test worker process from opening a log file in the log directory
 
-    Called by bridge.mod_entry for every "WorkerTest*" mod BEFORE the bridge
-    starts: the worker process would otherwise open log/{date}_{config}.txt in
-    the project log directory, one leftover file per test worker (many per
-    full run).
+    Called by worker.entry.mod_entry for every "WorkerTest*" mod BEFORE the
+    bridge starts: the worker process would otherwise open
+    log/{date}_{config}.txt in the project log directory, one leftover file per
+    test worker (many per full run).
 
     The call runs before BackendBridge.init() on purpose: the bridge recv
     thread logs the command handling, and the parent can send a command as

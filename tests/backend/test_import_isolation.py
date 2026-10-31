@@ -8,8 +8,9 @@ the other layers at startup:
 - supervisor: no backend web stack (starlette / hypercorn / trio), no worker
   content (msgspec), no logger
 - backend: no supervisor-only modules (supervisor.py / backend.py /
-  token_supervisor) -- the spawn target and the backend entry callable live
-  in alasio.backend.entry, a stdlib-only module
+  token_supervisor) and no worker runtime (worker.bridge) -- the backend
+  spawn target and entry callable live in alasio.backend.entry, the worker
+  spawn target in alasio.backend.worker.entry, both stdlib-only modules
 - worker: no backend web stack, no supervisor-only modules
 
 Each test runs in an isolated spawn subprocess (HeavyImportTest) so the
@@ -34,15 +35,18 @@ GUI_PATH = str(env.ALASIO_ROOT.joinpath('gui.py'))
 # supervisor blacklist. msgspec is worker's event codec (shared with
 # backend), so it appears in the supervisor blacklist only.
 
-# What the backend process must not import: supervisor-only modules. The
-# spawn target and the entry callable live in alasio.backend.entry (stdlib
-# only), so supervisor.py / backend.py never enter the backend process.
-# The backend does import the worker skeleton (bridge / manager / event)
-# on purpose: WorkerManager is how the backend spawns and manages workers.
+# What the backend process must not import: supervisor-only modules and the
+# worker runtime. The spawn target and the entry callable live in
+# alasio.backend.entry (stdlib only), so supervisor.py / backend.py never enter
+# the backend process. The worker spawn target lives in a stdlib-only module
+# too (alasio.backend.worker.entry), which is why spawning a worker does not
+# load the worker runtime (worker.bridge) either: the backend only imports
+# that when it loads a mod at runtime.
 BACKEND_BLACKLIST = {
     'alasio.backend.supervisor',
     'alasio.backend.backend',
     'alasio.backend.mpipe.token_supervisor',
+    'alasio.backend.worker.bridge',
 }
 
 # What the supervisor process must not import: the backend web stack,
@@ -113,6 +117,8 @@ def import_backend_startup():
     from alasio.backend.entry import backend_process_entry  # noqa: F401
     # entry body: token seed
     from alasio.backend.mpipe.token_backend import token_table  # noqa: F401
+    # worker spawn target held by worker.manager (a stdlib-only module)
+    from alasio.backend.worker.entry import mod_entry  # noqa: F401
     # lifespan cleanup chain (BACKEND_WORKER_MANAGER)
     from alasio.backend.worker.manager import WorkerManager  # noqa: F401
 
@@ -120,13 +126,16 @@ def import_backend_startup():
 def import_worker_startup():
     """
     Simulate worker process startup imports: spawn main-script re-import,
-    pickle target (bridge), mod_entry body (env / logger / msgpack) and the
-    mod runtime config chain.
+    pickle target (worker.entry), mod_entry body (bridge / env / logger /
+    msgpack) and the mod runtime config chain.
     """
     _load_gui_module_level()
     from msgspec.msgpack import Encoder  # noqa: F401
 
+    # mod_entry body: the worker runtime the target starts
     import alasio.backend.worker.bridge  # noqa: F401
+    # pickle target deserialization (the target is a stdlib-only module)
+    import alasio.backend.worker.entry  # noqa: F401
     # mod runtime config chain
     import alasio.config.base.config_access  # noqa: F401
     import alasio.config.entry.mod  # noqa: F401
@@ -155,8 +164,8 @@ class TestProcessImportIsolation:
 
     def test_backend_no_supervisor_imports(self):
         """
-        Backend startup must not import supervisor-only modules: the spawn
-        target and the entry callable live in alasio.backend.entry.
+        Backend startup must not import supervisor-only modules or the worker
+        runtime: the spawn targets live in stdlib-only entry modules.
         """
         run = HeavyImportTest(
             BACKEND_BLACKLIST,

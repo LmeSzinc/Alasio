@@ -1,16 +1,16 @@
 # =============================================================================
 # PROCESS BOUNDARY -- module-level imports must stay LIGHT.
 #
-# This module is imported by BOTH the backend process (worker.manager holds
-# the spawn target here) and the worker process (pickle target
-# deserialization). Module-level imports must stay light: no web framework
-# (starlette / trio / hypercorn) and no backend business modules. Test-only
-# imports (tests.backend.worker.worker_mods) must stay local.
+# This module is the worker runtime: the worker process imports it through the
+# mod runtime chain (config / scheduler code references BackendBridge), and the
+# backend imports it at runtime for the same reason, once it loads a mod. The
+# worker spawn target lives in alasio.backend.worker.entry, a stdlib-only
+# module, so spawning a worker does not load this one at all.
+# Module-level imports must stay light: no web framework (starlette / trio /
+# hypercorn) and no backend business modules.
 # =============================================================================
 
-import importlib
 import os
-import sys
 import time
 from threading import Event, Lock, Thread, get_ident, main_thread
 from typing import Literal
@@ -19,9 +19,7 @@ from msgspec.msgpack import Decoder, Encoder
 
 from alasio.backend.worker.event import CommandEvent, ConfigEvent
 from alasio.backport.threading_ext import PreemptiveEvent
-from alasio.ext import env
 from alasio.ext.cache import cached_property
-from alasio.ext.path.calc import to_python_import
 from alasio.ext.singleton import Singleton
 from alasio.logger import logger
 
@@ -47,76 +45,6 @@ def _exit_process(code):
         code (int): Process exit code
     """
     os._exit(code)
-
-
-def mod_entry(mod_name, config_name, child_conn, project_root='', mod_root='', path_main=''):
-    """
-    Run mod scheduler infinitely
-
-    Args:
-        mod_name:
-        config_name:
-        child_conn:
-        project_root:
-        mod_root:
-        path_main:
-    """
-    # Test mods are defined in tests/backend/worker/worker_mods.py to keep
-    # test code out of runtime, import lazily on demand.
-    # A test worker is silenced BEFORE the bridge starts: the bridge recv
-    # thread logs the command handling, and the parent can send a command as
-    # soon as the worker reported "running" (the end of init), so a mute after
-    # init would race with the first log line and leave a log file behind.
-    is_test_mod = mod_name.startswith('WorkerTest')
-    if is_test_mod:
-        from tests.backend.worker.worker_mods import WORKER_TEST_MODS, mute_test_worker_logging
-
-        # a test worker must not open a log file in the real log directory
-        mute_test_worker_logging()
-
-    BackendBridge().init(mod_name, config_name, child_conn)
-
-    if is_test_mod:
-        try:
-            worker = WORKER_TEST_MODS[mod_name]
-        except KeyError:
-            raise KeyError(f'No such mod to run {mod_name}') from None
-        worker()
-        return
-
-    # if project_root, mod_root, path_main all provided, consider as real mod
-    if project_root and mod_root and path_main:
-        try:
-            # This process runs the game script of one mod, so the models are
-            # loaded as packages of the mod (see env.PROCESS_ROLE). The worker
-            # is spawned, so the default already holds; set it anyway, the
-            # role must not depend on the start method of multiprocessing.
-            env.PROCESS_ROLE = 'worker'
-
-            # set mod root path
-            os.chdir(mod_root)
-            sys.path[0] = mod_root
-
-            # set project root path
-            env.set_project_root(project_root)
-
-            # import Scheduler
-            entry = to_python_import(path_main)
-            module = importlib.import_module(entry)
-            try:
-                cls = module.Scheduler
-            except AttributeError:
-                raise AttributeError('Module entry file did not define class Scheduler')
-
-            # run mod scheduler
-            scheduler = cls(config_name)
-            scheduler.run()
-
-        except KeyboardInterrupt:
-            pass
-
-    else:
-        raise KeyError(f'No such mod to run {mod_name}')
 
 
 def _async_raise(tid):

@@ -18,7 +18,7 @@ import multiprocessing
 import os
 
 from alasio.backend.supervisor import Supervisor
-from alasio.backend.worker.bridge import mod_entry
+from alasio.backend.worker.entry import mod_entry
 from alasio.logger import logger
 
 # Mod the worker runs: the fixed fixture folder next to this script with its
