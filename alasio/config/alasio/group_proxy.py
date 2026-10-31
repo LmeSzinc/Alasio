@@ -20,6 +20,27 @@ class GroupProxy(Struct):
     _task: str
     _group: str
 
+    @property
+    def __class__(self):  # pyright: ignore[reportIncompatibleMethodOverride]
+        """
+        The class of the proxied model, for isinstance() and issubclass().
+
+        The proxy is a different object from the config group of the game
+        script, so a check like `isinstance(config.Campaign, Campaign)` would
+        fail on `type()`. CPython falls back to `obj.__class__` when the type
+        does not match, so this makes the proxy pass the check while
+        `type(proxy)` stays GroupProxy (see config_access.py) and every set
+        still goes through __setattr__ below.
+
+        It has to be a property of this class, not of a subclass: the callers
+        check `type(obj) is GroupProxy`, and assigning `self.__class__` is not
+        possible on a msgspec Struct.
+
+        Returns:
+            type: Class of the proxied object
+        """
+        return type(self._obj)
+
     def __getattr__(self, item):
         # proxy attribute access
         obj = self._obj
