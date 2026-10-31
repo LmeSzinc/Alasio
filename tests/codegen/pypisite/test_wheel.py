@@ -1,0 +1,213 @@
+"""
+Tests for the data of a pip index page: the wheel link and the list of them.
+"""
+import pytest
+
+from alasio.codegen.pypisite import WheelLink, is_name, natural_key, normalize_name, prepare_links
+
+# the digest of a wheel, the shape the fetcher of the pack server records
+DIGEST_A = 'a' * 64
+DIGEST_B = 'b' * 64
+
+# the file of a wheel of the tests
+FILE = 'httpx2-2.13.1-py3-none-any.whl'
+
+
+class TestNormalizeName:
+    @pytest.mark.parametrize('name, expected', [
+        ('httpx2', 'httpx2'),
+        ('HTTPX2', 'httpx2'),
+        ('ruamel.yaml', 'ruamel-yaml'),
+        ('zope__interface', 'zope-interface'),
+        ('a.-_b', 'a-b'),
+        ('a..b__c--d', 'a-b-c-d'),
+    ])
+    def test_normalize(self, name, expected):
+        """PEP 503: lowercase, runs of '-', '_' and '.' as one '-'."""
+        assert normalize_name(name) == expected
+
+    @pytest.mark.parametrize('name, expected', [
+        ('httpx2', True),
+        ('typing-extensions', True),
+        ('a-b-c', True),
+        ('', False),
+        ('-a', False),
+        ('a-', False),
+        ('a--b', False),
+        ('a_b', False),
+        ('a.b', False),
+        ('A', False),
+    ])
+    def test_is_name(self, name, expected):
+        assert is_name(name) is expected
+
+
+class TestNaturalKey:
+    @pytest.mark.parametrize('versions', [
+        ('2.9.0', '2.13.1'),
+        ('2.13.1', '2.13.10'),
+        ('1.0', '1.0.1'),
+        ('0.9', '1.0'),
+    ])
+    def test_order(self, versions):
+        """The digit runs compare as numbers, the text order would be wrong."""
+        small, big = versions
+        assert natural_key(small) < natural_key(big)
+
+    def test_equal(self):
+        assert natural_key('2.13.1') == natural_key('2.13.1')
+
+    def test_same_prefix(self):
+        """A version that is the prefix of another sorts before it."""
+        assert natural_key('1.0') < natural_key('1.0a')
+
+
+class TestWheelLink:
+    def test_default_digest(self):
+        assert WheelLink('httpx2', '2.13.1', FILE).sha256 == ''
+
+    def test_key(self):
+        assert WheelLink('HTTPX2', '2.13.1', FILE).key == 'httpx2'
+
+    def test_href(self):
+        """The page of a distribution links from the version folder below it."""
+        assert WheelLink('httpx2', '2.13.1', FILE, DIGEST_A).href() == (
+            f'2.13.1/{FILE}#sha256={DIGEST_A}')
+
+    def test_href_with_name(self):
+        """The find-links page of a folder links from the folder of the name."""
+        assert WheelLink('httpx2', '2.13.1', FILE, DIGEST_A).href(with_name=True) == (
+            f'httpx2/2.13.1/{FILE}#sha256={DIGEST_A}')
+
+    def test_href_name_normalized(self):
+        assert WheelLink('HTTPX2', '2.13.1', FILE, DIGEST_A).href(with_name=True) == (
+            f'httpx2/2.13.1/{FILE}#sha256={DIGEST_A}')
+
+    def test_href_without_digest(self):
+        """A link without a digest carries no fragment at all."""
+        assert WheelLink('httpx2', '2.13.1', FILE).href() == f'2.13.1/{FILE}'
+        assert WheelLink('httpx2', '2.13.1', FILE).href(with_name=True) == f'httpx2/2.13.1/{FILE}'
+
+    @pytest.mark.parametrize('name', [
+        '', '   ', '../httpx2', 'httpx2/2', 'a b', '-httpx2', 'httpx2-', 'a+b',
+    ])
+    def test_invalid_name(self, name):
+        with pytest.raises(ValueError, match='not a distribution name'):
+            WheelLink(name, '2.13.1', FILE)
+
+    def test_name_with_separators(self):
+        """A name written with separators is a name, it normalizes to one."""
+        assert WheelLink('a__b', '2.13.1', FILE).key == 'a-b'
+
+    @pytest.mark.parametrize('version', ['', '2.13.1/2', '../2.13.1', '2.13.1#x', '2.13.1?x', '2.13.1\\2'])
+    def test_invalid_version(self, version):
+        with pytest.raises(ValueError, match='is empty|is not a single url path segment'):
+            WheelLink('httpx2', version, FILE)
+
+    @pytest.mark.parametrize('filename', ['', '../x.whl', 'a/x.whl', 'a#x.whl', 'a?x.whl', 'a\\x.whl'])
+    def test_invalid_filename(self, filename):
+        with pytest.raises(ValueError, match='is empty|is not a single url path segment'):
+            WheelLink('httpx2', '2.13.1', filename)
+
+    @pytest.mark.parametrize('digest', ['xyz', 'A' * 64, 'a' * 63, 'a' * 65, 'g' * 64, 'sha256:' + 'a' * 64])
+    def test_invalid_digest(self, digest):
+        with pytest.raises(ValueError, match='not a lowercase hex digest'):
+            WheelLink('httpx2', '2.13.1', FILE, digest)
+
+    def test_frozen(self):
+        link = WheelLink('httpx2', '2.13.1', FILE)
+        with pytest.raises(AttributeError):
+            link.version = '2.13.2'
+
+    def test_repr(self):
+        assert repr(WheelLink('httpx2', '2.13.1', FILE)) == f'<WheelLink httpx2==2.13.1 {FILE}>'
+
+
+class TestPrepareLinks:
+    def test_empty(self):
+        assert prepare_links([]) == []
+
+    def test_type(self):
+        with pytest.raises(TypeError, match='is not a WheelLink'):
+            prepare_links([('httpx2', '2.13.1', FILE)])
+
+    def test_duplicate_dropped(self):
+        """A run that read the same wheel twice writes it once."""
+        link = WheelLink('httpx2', '2.13.1', FILE, DIGEST_A)
+        assert prepare_links([link, link]) == [link]
+
+    def test_duplicate_of_another_case(self):
+        """The name normalizes, so two spellings are one wheel."""
+        one = WheelLink('httpx2', '2.13.1', FILE, DIGEST_A)
+        other = WheelLink('HTTPX2', '2.13.1', FILE, DIGEST_A)
+        assert prepare_links([one, other]) == [one]
+
+    def test_duplicate_of_another_digest(self):
+        """One file name of two digests means the source replaced the file."""
+        with pytest.raises(ValueError, match='linked with two digests'):
+            prepare_links([
+                WheelLink('httpx2', '2.13.1', FILE, DIGEST_A),
+                WheelLink('httpx2', '2.13.1', FILE, DIGEST_B),
+            ])
+
+    def test_sort_by_version(self):
+        links = [
+            WheelLink('httpx2', '2.13.10', 'httpx2-2.13.10-py3-none-any.whl'),
+            WheelLink('httpx2', '2.9.0', 'httpx2-2.9.0-py3-none-any.whl'),
+            WheelLink('httpx2', '2.13.1', FILE),
+        ]
+        assert [link.version for link in prepare_links(links)] == ['2.9.0', '2.13.1', '2.13.10']
+
+    def test_sort_by_filename_within_version(self):
+        links = [
+            WheelLink('httpx2', '2.13.1', 'httpx2-2.13.1-py3-none-any.whl', DIGEST_A),
+            WheelLink('httpx2', '2.13.1', 'httpx2-2.13.1-cp38-cp38-win_amd64.whl', DIGEST_B),
+        ]
+        assert [link.filename for link in prepare_links(links)] == [
+            'httpx2-2.13.1-cp38-cp38-win_amd64.whl',
+            'httpx2-2.13.1-py3-none-any.whl',
+        ]
+
+    def test_sort_by_name(self):
+        links = [
+            WheelLink('msgspec', '0.22.0', 'msgspec-0.22.0-py3-none-any.whl', DIGEST_A),
+            WheelLink('httpx2', '2.13.1', FILE, DIGEST_B),
+        ]
+        assert [link.key for link in prepare_links(links, with_name=True)] == ['httpx2', 'msgspec']
+
+    def test_sort_by_name_then_version(self):
+        links = [
+            WheelLink('httpx2', '2.13.1', FILE, DIGEST_A),
+            WheelLink('httpx2', '2.9.0', 'httpx2-2.9.0-py3-none-any.whl', DIGEST_A),
+        ]
+        assert [link.version for link in prepare_links(links, with_name=True)] == ['2.9.0', '2.13.1']
+
+    def test_project_mixed(self):
+        """The page of a distribution sits in its folder, a foreign wheel is a link out."""
+        links = [
+            WheelLink('httpx2', '2.13.1', FILE, DIGEST_A),
+            WheelLink('msgspec', '0.22.0', 'msgspec-0.22.0-py3-none-any.whl', DIGEST_A),
+        ]
+        with pytest.raises(ValueError, match='cannot link the wheel of another distribution'):
+            prepare_links(links, project='httpx2')
+
+    def test_project_check_without_project(self):
+        """Without a declared project, the links only have to agree with each other."""
+        links = [
+            WheelLink('httpx2', '2.13.1', FILE, DIGEST_A),
+            WheelLink('msgspec', '0.22.0', 'msgspec-0.22.0-py3-none-any.whl', DIGEST_A),
+        ]
+        with pytest.raises(ValueError, match='cannot link the wheel of another distribution'):
+            prepare_links(links)
+
+    def test_with_name_skips_project_check(self):
+        """The find-links page of a folder holds every distribution."""
+        links = [
+            WheelLink('httpx2', '2.13.1', FILE, DIGEST_A),
+            WheelLink('msgspec', '0.22.0', 'msgspec-0.22.0-py3-none-any.whl', DIGEST_A),
+        ]
+        assert len(prepare_links(links, with_name=True, project='httpx2')) == 2
+
+    def test_project_case_insensitive(self):
+        links = [WheelLink('HTTPX2', '2.13.1', FILE, DIGEST_A)]
+        assert len(prepare_links(links, project='httpx2')) == 1
