@@ -25,9 +25,19 @@ Usage:
     gen.write('wheel/httpx2/index.html')
 """
 
-from .gen import PypiSite as PypiSite, find_links_page as find_links_page, simple_page as simple_page
-from .obj_pypi import PypiHeader as PypiHeader, Wheel as Wheel
-from .wheel import (
-    WheelLink as WheelLink, is_name as is_name, natural_key as natural_key, normalize_name as normalize_name,
-    prepare_links as prepare_links
-)
+from .gen import PypiSite, find_links_page, simple_page
+from .obj_pypi import PypiHeader, Wheel
+from .wheel import WheelLink, is_name, normalize_name, prepare_links, version_key
+
+__all__ = [
+    'PypiHeader',
+    'PypiSite',
+    'Wheel',
+    'WheelLink',
+    'find_links_page',
+    'is_name',
+    'normalize_name',
+    'prepare_links',
+    'simple_page',
+    'version_key',
+]
