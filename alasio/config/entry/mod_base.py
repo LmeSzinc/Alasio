@@ -1,6 +1,5 @@
 import importlib
 import os
-import sys
 
 from alasio.config.entry.const import ModEntryInfo
 from alasio.config.entry.model import DECODER_CACHE, MOD_JSON_CACHE, MODEL_CONFIG_INDEX, MODEL_TASK_INDEX
@@ -115,43 +114,25 @@ class ModBase:
         return MOD_JSON_CACHE.get(file, decoder=decoder)
 
     @cached_property
-    def package_dir(self):
+    def package_name(self):
         """
-        Package name and folder of this mod in this process.
+        Package this mod is imported as, in a worker process.
 
-        A worker imports the game script as a package (``module.main``), so a
-        model file must be imported through the same package: an injected load
-        would execute the file a second time, and the classes of the config
-        would not be the classes the game script imports.
-
-        The package name is read from sys.modules instead of assumed, because
-        the example mod uses ``ExampleMod.module...`` while a real mod uses
-        ``module...``. The shortest module of this mod gives both the package
-        name and, by stripping its own path parts, the folder of that package.
+        A worker puts the mod root on sys.path and imports the entry file of
+        the game script (``path_main``), so the first part of that name is the
+        package the code of the mod lives in. A model file must be imported
+        through the same package: an injected load would execute the file a
+        second time, and the classes of the config would not be the classes
+        the game script imports.
 
         Returns:
-            tuple[str, str] | None:
-                Package name and its folder, None when this mod is not imported
-                as a package in this process (the backend never does)
+            str: Package name, empty when the entry file is not in a package
         """
-        root = os.path.normcase(os.path.abspath(self.root)) + os.sep
-        best = None
-        for name, module in list(sys.modules.items()):
-            file = getattr(module, '__file__', None)
-            if not file:
-                continue
-            file = os.path.normcase(os.path.abspath(file))
-            if not file.startswith(root):
-                continue
-            if best is None or len(name) < len(best[0]):
-                best = (name, file)
-        if best is None:
-            return None
-        # strip the path parts of the package name, the rest is the package folder
-        folder = best[1]
-        for _ in best[0].split('.'):
-            folder = os.path.dirname(folder)
-        return best[0].partition('.')[0], folder
+        path = self.entry.path_main.replace('\\', '/')
+        first, sep, _ = path.partition('/')
+        if not sep:
+            return ''
+        return first.partition('.')[0]
 
     def import_model_module(self, file):
         """
@@ -168,17 +149,25 @@ class ModBase:
             ModuleType | None: None when the file is not part of a package
                 imported in this process, the caller falls back to loadpy()
         """
-        package = self.package_dir
-        if package is None:
+        name = self.package_name
+        if not name:
             return None
-        name, folder = package
-        relative = os.path.relpath(str(file), folder)
+        # the path of the model file from the mod root, e.g.
+        # module/config/main/main_model.py, is already the dotted name of the
+        # package the worker imports the game script with
+        relative = os.path.relpath(str(file), str(self.root))
         if relative.startswith(os.pardir):
             return None
         relative = relative.replace(os.sep, '/')
         if not relative.endswith('.py'):
             return None
-        module_name = '.'.join([name, *relative[:-3].split('/')])
+        parts = relative[:-3].split('/')
+        if parts[0] != name:
+            # the mod root and path_main disagree on the package layout
+            logger.warning(
+                f'DataInconsistent: model file "{file}" is not in the package "{name}"')
+            return None
+        module_name = '.'.join(parts)
         try:
             module = importlib.import_module(module_name)
         except ImportError as e:
