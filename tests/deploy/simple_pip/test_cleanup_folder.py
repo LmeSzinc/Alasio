@@ -1,7 +1,9 @@
+import os
+
 import pytest
 
 from alasio.deploy.simple_pip import cleanup_folder
-from alasio.deploy.simple_pip.cleanup_folder import CleanupFolder
+from alasio.deploy.simple_pip.cleanup_folder import CleanupByPreserved, CleanupFolder
 
 
 def folder_chain(depth):
@@ -506,3 +508,274 @@ class TestWalkStopsEarly:
         # the first file walks its folder, the parent folder and the
         # root, the others stop at the folder
         assert len(calls) == 12
+
+
+def entries(files, folders, preserved=(), preserved_folders=()):
+    """
+    Register a tree and get its cleanup entries, the pure way.
+
+    The tree is registered first, then what the run preserves, the order of
+    CleanupByPreserved.
+
+    Args:
+        files (Iterable[str]): Absolute paths of the files that exist
+        folders (Iterable[str]): Absolute paths of the folders that exist
+        preserved (Iterable[str]): Paths of the files that stay
+        preserved_folders (Iterable[str]): Paths of the folders that stay whole
+
+    Returns:
+        list[tuple[str, bool]]: The entries of the cleaner, in its order
+    """
+    cleaner = CleanupByPreserved()
+    cleaner.register_file(files)
+    cleaner.register_folder(folders)
+    if preserved:
+        cleaner.register_preserved(preserved)
+    if preserved_folders:
+        cleaner.register_preserved_folder(preserved_folders)
+    return cleaner.get_cleanup_entries()
+
+
+class TestCleanupByPreservedEntries:
+    """The entries a preserved tree keeps and the ones it yields.
+
+    The paths are the ones of a real run: a workspace of a repo under the pack
+    folder of the run directory. Every expected entry is written out, so the
+    test reads as the answer of the cleaner.
+    """
+
+    def test_nothing_preserved(self):
+        """Without a preserved entry every entry of the tree is yielded."""
+        assert entries(
+            [
+                'E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/a/b.py',
+                'E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/a/c/d.py',
+                'E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/e.txt',
+            ],
+            [
+                'E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/a',
+                'E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/a/c',
+            ],
+        ) == [
+            ('E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/a/c/d.py', False),
+            ('E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/a/b.py', False),
+            ('E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/a/c', True),
+            ('E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/a', True),
+            ('E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/e.txt', False),
+        ]
+
+    def test_file_preserved(self):
+        """A preserved file keeps its folder and the parents, the others go."""
+        assert entries(
+            [
+                'E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/a/keep.py',
+                'E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/a/gone.py',
+                'E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/a/sub/gone.py',
+                'E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/b/gone.py',
+            ],
+            [
+                'E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/a',
+                'E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/a/sub',
+                'E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/b',
+            ],
+            ['E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/a/keep.py'],
+        ) == [
+            ('E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/a/sub/gone.py', False),
+            ('E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/a/gone.py', False),
+            ('E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/a/sub', True),
+            ('E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/b/gone.py', False),
+            ('E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/b', True),
+        ]
+
+    def test_subtree_of_preserved_file_kept(self):
+        """The folders of the preserved file itself are not yielded."""
+        assert entries(
+            ['E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/a/b/c/keep.py'],
+            [
+                'E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/a',
+                'E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/a/b',
+                'E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/a/b/c',
+            ],
+            ['E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/a/b/c/keep.py'],
+        ) == []
+
+    def test_folder_preserved_whole(self):
+        """A preserved folder is not entered: every file below it is kept."""
+        assert entries(
+            [
+                'E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/log/run.log',
+                'E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/log/old/app.log',
+                'E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/pack/full.pack',
+            ],
+            [
+                'E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/log',
+                'E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/log/old',
+                'E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/pack',
+            ],
+            preserved_folders=['E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/log'],
+        ) == [
+            ('E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/pack/full.pack', False),
+            ('E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/pack', True),
+        ]
+
+    def test_folder_without_preserved_entry(self):
+        """A folder with nothing preserved below it goes with its files."""
+        assert entries(
+            [
+                'E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/a/file0.py',
+                'E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/a/file1.py',
+            ],
+            ['E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/a'],
+        ) == [
+            ('E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/a/file0.py', False),
+            ('E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/a/file1.py', False),
+            ('E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/a', True),
+        ]
+
+    def test_file_removed_with_its_folder(self):
+        """A registered file that is not preserved empties its folder, both go."""
+        assert entries(
+            ['E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/folder/xxx.txt'],
+            ['E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/folder'],
+        ) == [
+            ('E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/folder/xxx.txt', False),
+            ('E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/folder', True),
+        ]
+
+    def test_deepest_first(self):
+        """The answer is the deepest first, a file before its folder."""
+        result = entries(
+            [
+                'E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/a/b/c.txt',
+                'E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/a/d.txt',
+            ],
+            [
+                'E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/a',
+                'E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/a/b',
+            ],
+        )
+        # the depth decides first, the path breaks the ties: a file is always
+        # removed before its own folder, the folders of one depth in name order
+        assert result == [
+            ('E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/a/b/c.txt', False),
+            ('E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/a/b', True),
+            ('E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/a/d.txt', False),
+            ('E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/a', True),
+        ]
+
+    def test_many_paths(self):
+        """A registration accepts a str, a set, a dict, a list or a tuple."""
+        files = [
+            'E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/a/one.py',
+            'E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/b/two.py',
+            'E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/c/three.py',
+            'E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/d/gone.py',
+        ]
+        folders = [
+            'E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/a',
+            'E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/b',
+            'E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/c',
+            'E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/d',
+        ]
+        assert entries(files, folders, {
+            'E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/a/one.py',
+            'E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/b/two.py',
+        }) == [
+            ('E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/c/three.py', False),
+            ('E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/d/gone.py', False),
+            ('E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/c', True),
+            ('E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/d', True),
+        ]
+        assert entries(files, folders, {
+            'E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/c/three.py': None,
+        }) == [
+            ('E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/a/one.py', False),
+            ('E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/b/two.py', False),
+            ('E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/d/gone.py', False),
+            ('E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/a', True),
+            ('E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/b', True),
+            ('E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/d', True),
+        ]
+        assert entries(files, folders, [
+            'E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/a/one.py',
+            'E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/c/three.py',
+        ]) == [
+            ('E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/b/two.py', False),
+            ('E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/d/gone.py', False),
+            ('E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/b', True),
+            ('E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/d', True),
+        ]
+        assert entries(files, folders, (
+            'E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/a/one.py',
+        )) == [
+            ('E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/b/two.py', False),
+            ('E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/c/three.py', False),
+            ('E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/d/gone.py', False),
+            ('E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/b', True),
+            ('E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/c', True),
+            ('E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/d', True),
+        ]
+
+    def test_type_error(self):
+        """A path that is not a str nor a supported container is refused."""
+        for path in (None, 123, b'a/b.py'):
+            cleaner = CleanupByPreserved()
+            for register in (cleaner.register_file, cleaner.register_folder,
+                             cleaner.register_preserved, cleaner.register_preserved_folder):
+                with pytest.raises(TypeError):
+                    register(path)
+
+    def test_empty_collections(self):
+        """A registration with an empty container changes nothing."""
+        assert entries(
+            ['E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/a/b.py'],
+            ['E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/a'],
+            preserved=set(), preserved_folders=[],
+        ) == [
+            ('E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/a/b.py', False),
+            ('E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/a', True),
+        ]
+
+    def test_empty_tree(self):
+        """A tree without an entry has nothing to clean up."""
+        assert entries([], []) == []
+
+    def test_entries_stay_inside_the_tree(self):
+        """No entry escapes the workspace: the parents of the run directory are
+        never entries, only the ancestors of a preserved file are remembered."""
+        assert entries(
+            [
+                'E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/packrepo/latest.pack',
+                'E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/packrepo/c2/full.pack',
+            ],
+            [
+                'E:/ProgramData/Pycharm/Alas2026/pack',
+                'E:/ProgramData/Pycharm/Alas2026',
+                'E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master',
+                'E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/packrepo',
+                'E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/packrepo/c2',
+            ],
+            ['E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/packrepo/latest.pack'],
+        ) == [
+            ('E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/packrepo/c2/full.pack',
+             False),
+            ('E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/packrepo/c2', True),
+        ]
+
+    def test_no_io(self, monkeypatch):
+        """The cleaner computes on the registration, it never touches the disk."""
+        def fail(*args, **kwargs):
+            raise AssertionError('the cleaner must not do IO')
+
+        for name in ('scandir', 'listdir', 'walk', 'stat', 'remove', 'unlink', 'rmdir'):
+            monkeypatch.setattr(os, name, fail)
+        assert entries(
+            [
+                'E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/a/keep.py',
+                'E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/a/gone.py',
+            ],
+            ['E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/a'],
+            ['E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/a/keep.py'],
+        ) == [
+            ('E:/ProgramData/Pycharm/Alas2026/pack/Author_Repo_master/a/gone.py', False),
+        ]
