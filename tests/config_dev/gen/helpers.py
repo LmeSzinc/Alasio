@@ -127,21 +127,28 @@ def make_alasio_generator(fs, nav='device', yaml=''):
     return gen
 
 
-def make_cross(fs, navs):
+def make_cross(fs, navs, tasks=None, generator_class=None):
     """
-    Build a CrossNavGenerator over several navs of the mod, with the MRO built.
+    Build a cross-nav generator over several navs of the mod, with the MRO built.
 
     Args:
         fs (FakeFilesystem): The in-memory filesystem fixture
         navs (dict[str, str]): key: nav name, value: content of {nav}.args.yaml
+        tasks (dict[str, str], optional): key: nav name, value: content of {nav}.tasks.yaml
+        generator_class (type, optional): Class to instantiate, default to
+            CrossNavGenerator
 
     Returns:
         CrossNavGenerator: Generator with the MRO built and validated
     """
+    if generator_class is None:
+        generator_class = CrossNavGenerator
     entry = make_entry(fs)
     for nav, yaml in navs.items():
         fs.create_file(joinpath(nav_dir(fs, nav), f'{nav}.args.yaml'), contents=yaml)
-    gen = CrossNavGenerator(entry)
+    for nav, yaml in (tasks or {}).items():
+        fs.create_file(joinpath(nav_dir(fs, nav), f'{nav}.tasks.yaml'), contents=yaml)
+    gen = generator_class(entry)
     gen.build_group_mro()
     gen.validate_nav_model_parents()
     return gen
