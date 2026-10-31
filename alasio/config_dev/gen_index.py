@@ -69,6 +69,10 @@ class IndexGenerator(
         for nav in self.dict_nav_config.values():
             nav.generate(gitadd=gitadd)
 
+        # model.index.json, written after the model files of the navs exist,
+        # and before the task check below: a mod without task still has models
+        self.generate_model_index(gitadd=gitadd)
+
         # model.index.json
         _ = self.model_data
         if not self.model_data:

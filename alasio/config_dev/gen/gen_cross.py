@@ -346,6 +346,98 @@ class CrossNavGenerator:
     """
 
     @cached_property
+    def model_index_file(self):
+        return self.path_config.joinpath('_index/model.index.json')
+
+    @cached_property
+    def model_index_data(self):
+        """
+        The loading plan of the model files: what each file needs injected.
+
+        A model file inheriting a base class of another nav imports it with a
+        guarded relative import, so a loader can inject the class and skip the
+        import. This file is the plan: every model file of the mod, with the
+        classes to inject into it and the file they come from.
+
+        The order is a dependency order: a file always comes after the files it
+        imports from, so a loader may also follow the key order.
+
+        Returns:
+            dict[str, dict[str, list[str]]]:
+                key: model file, relative to path_config
+                value: {model file to inject from: [class name]}, empty for a
+                    file inheriting nothing of this mod
+
+        Raises:
+            DefinitionError: A model file is outside path_config, or the navs
+                inherit from each other in a cycle
+        """
+        # model files on disk, the yaml of a nav without a model makes no file
+        dict_file = {}
+        for nav_name, config in self.dict_nav_config.items():
+            if not config.model_file.exists():
+                continue
+            file = config.model_file.subpath_to(self.path_config)
+            if file is None:
+                raise DefinitionError(
+                    f'model_file is not a subpath of root, model_file={config.model_file}, '
+                    f'root={self.path_config}', file=config.file)
+            dict_file[nav_name] = to_posix(file)
+
+        out = {}
+
+        def visit(nav_name, stack):
+            if nav_name in out:
+                return
+            if nav_name in stack:
+                start = stack.index(nav_name)
+                raise DefinitionError(
+                    f'Circular model inheritance between navs: '
+                    f'{" -> ".join(stack[start:] + [nav_name])}',
+                    file=self.dict_nav_config[nav_name].file)
+            stack.append(nav_name)
+            row = {}
+            # {parent nav: [class name]}, sorted by the parent nav name
+            for parent_nav, names in self.dict_nav_config[nav_name].parent_imports.items():
+                if parent_nav not in dict_file:
+                    # the parent nav has no model file, this shouldn't happen
+                    raise DefinitionError(
+                        f'Model of nav "{parent_nav}" does not exist, '
+                        f'which is inherited by nav "{nav_name}"',
+                        file=self.dict_nav_config[nav_name].file)
+                visit(parent_nav, stack)
+                # one line per imported file, the names are short
+                row[dict_file[parent_nav]] = NoIndent(list(names))
+            stack.pop()
+            out[dict_file[nav_name]] = row
+
+        for nav_name in dict_file:
+            visit(nav_name, [])
+        return out
+
+    def generate_model_index(self, gitadd=None):
+        """
+        Write model.index.json, or remove it when there is no model file.
+        """
+        data = self.model_index_data
+        file = self.model_index_file
+        if data:
+            op = write_json_custom_indent(file, data, skip_same=True)
+            if op:
+                logger.info(f'Write file {file}')
+                if gitadd:
+                    gitadd.stage_add(file)
+        else:
+            if file.atomic_remove():
+                logger.info(f'Delete file {file}')
+                if gitadd:
+                    gitadd.stage_add(file)
+
+    """
+    Generate task.index.json
+    """
+
+    @cached_property
     def dict_group_ref(self):
         """
         convert group name to where the msgspec model class is defined
