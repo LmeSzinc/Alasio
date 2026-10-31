@@ -279,6 +279,103 @@ Group:
         assert e.value.value == 1
 
 
+class TestGroupsDataParentOrder:
+    """A parent declared in this file must come before the group inheriting it."""
+
+    def test_parent_before_group(self, fs):
+        """The usual order is accepted."""
+        parser = make_parser(fs, 'main', args_yaml="""\
+Base:
+  args:
+    A: 1
+Middle:
+  parent: Base
+  args:
+    B: 2
+Child:
+  parent: Middle
+  args:
+    C: 3
+""")
+        assert list(parser.groups_data) == ['Base', 'Middle', 'Child']
+
+    def test_parent_after_group(self, fs):
+        """A parent declared later in the same file is reported."""
+        parser = make_parser(fs, 'main', args_yaml="""\
+Child:
+  parent: Base
+  args:
+    C: 3
+Base:
+  args:
+    A: 1
+""")
+        with pytest.raises(DefinitionError) as e:
+            _ = parser.groups_data
+        assert e.value.msg == 'Group parent must be defined before the group: "Base"'
+        assert e.value.file == parser.file
+        assert e.value.keys == ['Child', 'parent']
+        assert e.value.value == 'Base'
+
+    def test_second_parent_after_group(self, fs):
+        """Every parent of the list is checked, the later one is reported."""
+        parser = make_parser(fs, 'main', args_yaml="""\
+Base1:
+  args:
+    A: 1
+Child:
+  parent: [Base1, Base2]
+  args:
+    C: 3
+Base2:
+  args:
+    B: 2
+""")
+        with pytest.raises(DefinitionError) as e:
+            _ = parser.groups_data
+        assert e.value.msg == 'Group parent must be defined before the group: "Base2"'
+        assert e.value.keys == ['Child', 'parent']
+
+    def test_parent_of_another_file(self, fs):
+        """A parent not declared here is imported or exported, not checked."""
+        parser = make_parser(fs, 'main', args_yaml="""\
+Oil:
+  parent: DashboardTotal
+  args:
+    Value: 0
+Campaign:
+  parent: CampaignBase
+  args:
+    Name: main
+""")
+        assert list(parser.groups_data) == ['Oil', 'Campaign']
+
+    def test_variant_before_base_is_reported_in_every_file(self, fs):
+        """The check is per file, a valid first nav does not hide a broken second."""
+        make_parser(fs, 'main', args_yaml="""\
+Base:
+  args:
+    A: 1
+Variant:
+  parent: Base
+  args:
+    A: 2
+""").groups_data
+        parser = make_parser(fs, 'gems', args_yaml="""\
+Variant:
+  parent: Base
+  args:
+    A: 2
+Base:
+  args:
+    A: 1
+""")
+        with pytest.raises(DefinitionError) as e:
+            _ = parser.groups_data
+        assert e.value.msg == 'Group parent must be defined before the group: "Base"'
+        assert e.value.file == parser.file
+
+
 class TestGroupsDataPostprocess:
     def test_postprocess_injected_group(self, fs, monkeypatch):
         monkeypatch.setattr(ParseBase, 'dict_args_yaml_postprocess', {})

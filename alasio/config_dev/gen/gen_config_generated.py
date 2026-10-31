@@ -4,6 +4,7 @@ from collections import defaultdict
 
 from alasio.codegen.python import CodeGen
 from alasio.config_dev.gen.gen_nav_index import GenNavIndex
+from alasio.config_dev.parse.base import DefinitionError
 from alasio.logger import logger
 
 
@@ -107,8 +108,15 @@ class GenConfigGenerated(GenNavIndex):
                         if not group.args:
                             continue
                         cls_name = group.name
-                        ancestor_config = self.dict_group_to_ancestor_nav[group.name]
-                        model_nav = ancestor_config.nav_name
+                        # the class of a group is generated in the model file
+                        # of the nav declaring the group
+                        parser = group.parser
+                        if parser is None:
+                            # this shouldn't happen, groups are parsed from a nav
+                            raise DefinitionError(
+                                f'Group "{group_name}" does not have a parser',
+                                file=config.tasks_file, keys=[task_name, 'groups'], value=group_name)
+                        model_nav = parser.nav_name
                         anno = f'{model_nav}.{cls_name}'
                         # special match that convert any Scheduler child group to Scheduler
                         # because we maintain the consistency between them

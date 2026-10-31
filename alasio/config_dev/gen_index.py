@@ -61,8 +61,9 @@ class IndexGenerator(
 
         self.build_group_mro()
 
-        # setup cross-nav variant model data before nav generation
-        self._setup_cross_nav_model_data()
+        # the model class of a group is generated in its own nav, so the model
+        # files of the navs must not import each other in a cycle
+        self.validate_nav_model_parents()
 
         # update nav configs
         for nav in self.dict_nav_config.values():

@@ -264,4 +264,21 @@ class ParseGroups(ParseBase):
             # Set
             output[group_name] = group
 
+        # A parent declared in this file must be defined before the group
+        # inheriting it: the model classes are generated in this order, so a
+        # later class would reference a name that is not defined yet. A parent
+        # of another nav or a dashboard group is not in this file, it is
+        # imported or exported instead.
+        order = {name: index for index, name in enumerate(output)}
+        for index, (group_name, group) in enumerate(output.items()):
+            for parent_name in group.parent:
+                try:
+                    parent_index = order[parent_name]
+                except KeyError:
+                    continue
+                if parent_index > index:
+                    raise DefinitionError(
+                        f'Group parent must be defined before the group: "{parent_name}"',
+                        file=self.file, keys=[group_name, 'parent'], value=parent_name)
+
         return output

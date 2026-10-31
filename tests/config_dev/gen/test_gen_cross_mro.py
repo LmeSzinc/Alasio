@@ -11,6 +11,7 @@ from alasio.config_dev.gen.gen_cross import CrossNavGenerator
 from alasio.config_dev.parse.base import DefinitionError
 from alasio.config_dev.parse.parse_groups import GroupData
 from alasio.testing.filesystem import fs  # noqa: F401
+from tests.config_dev.gen.helpers import make_cross
 from tests.config_dev.parse.parse_groups.helpers import make_parser
 
 
@@ -34,19 +35,27 @@ class TestDictGroupMro:
         assert e.value.value == 'Missing'
 
     def test_cycle_is_reported_with_file_and_group(self, fs):
-        generator, parser = make_generator(fs, """\
+        """Two groups of two navs inheriting each other are reported."""
+        with pytest.raises(DefinitionError) as e:
+            make_cross(fs, {
+                'nava': """\
 A:
   parent: B
+  args:
+    X: 1
+""",
+                'navb': """\
 B:
   parent: A
-""")
-        with pytest.raises(DefinitionError) as e:
-            _ = generator.dict_group_mro
+  args:
+    Y: 2
+""",
+            })
         assert e.value.msg == (
             'Invalid group inheritance: '
             'Cycle detected in inheritance hierarchy: A -> B -> A'
         )
-        assert e.value.file == parser.file
+        assert e.value.file.endswith('nava/nava.args.yaml')
         assert e.value.keys == ['A', 'parent']
         assert e.value.value == ('B',)
 

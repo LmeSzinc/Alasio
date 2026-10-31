@@ -24,7 +24,7 @@ from alasio.config_dev.parse import parse_groups
 from alasio.config_dev.parse.base import DefinitionError
 from alasio.logger import logger
 from alasio.testing.filesystem import fs  # noqa: F401
-from tests.config_dev.gen.helpers import GitAddSpy, make_alasio_generator, make_cross, make_generator, make_group
+from tests.config_dev.gen.helpers import GitAddSpy, make_alasio_generator, make_cross, make_generator
 
 HEADER_MOD = """\
 import typing as t
@@ -260,10 +260,11 @@ class Oil(a.DashboardTotal):
     Value: a.T_INT_GE0 = 0
 """
 
-    @pytest.mark.xfail(strict=True, reason='the parent class is emitted after the child, the generated file raises NameError')
     def test_parent_defined_later_in_file(self, fs):
-        """A parent may be defined after its child in the yaml."""
-        gen = make_generator(fs, yaml="""\
+        """A parent declared after the group inheriting it is rejected."""
+        with pytest.raises(DefinitionError) as e:
+            make_cross(fs, {
+                'testnav': """\
 Child:
   parent: Base
   args:
@@ -272,100 +273,424 @@ Child:
 Base:
   args:
     X: 1
-""")
-        code = model_code(gen)
-        namespace = {}
-        exec(compile(code, 'testnav_model.py', 'exec'), namespace)
-        assert namespace['Child'].X == 1
+""",
+            })
+        assert e.value.msg == 'Group parent must be defined before the group: "Base"'
+        assert e.value.keys == ['Child', 'parent']
+        assert e.value.value == 'Base'
 
-
-class TestModelFileCrossNav:
-    def test_foreign_group_is_emitted_here(self, fs):
-        """A group of another nav whose parent is here is emitted here, last."""
-        gen = make_generator(fs, yaml="""\
+    def test_yaml_order_is_kept(self, fs):
+        """The models are generated in the order the yaml declares them."""
+        gen = make_cross(fs, {
+            'testnav': """\
 Base:
   args:
     X: 1
-""")
-        group = make_group('Child', {'parent': 'Base', 'args': {'Y': 2}})
-        # the fields of a foreign group come from override_args, which
-        # GroupData.from_group_data() fills without a parser
-        assert list(group.override_args) == ['Y']
-        gen.foreign_model_group_data['Child'] = group
-        assert definitions(model_code(gen)) == """\
-class Base(a.GroupBase):
-    X: int = 1
+
+Zeta:
+  args:
+    A: 1
+
+Middle:
+  parent: Base
+  args:
+    C: 3
+""",
+        })
+        code = model_code(gen.dict_nav_config['testnav'])
+        assert code.index('class Base(') < code.index('class Zeta(') < code.index('class Middle(')
 
 
-class Child(Base):
-    Y: int = 2
+class TestModelFileCrossNav:
+    def test_parent_in_other_nav_is_imported(self, fs):
+        """The class stays in its own nav, the base of another nav is imported."""
+        gen = make_cross(fs, {
+            'main': """\
+Campaign:
+  args:
+    Name: main
+""",
+            'gems': """\
+GemsCampaign:
+  parent: Campaign
+  args:
+    Name: gems
+""",
+        })
+        assert definitions(model_code(gen.dict_nav_config['gems'], filename='gems_model.py')) == """\
+if t.TYPE_CHECKING or 'Campaign' not in globals():
+    from ..main.main_model import Campaign
+
+
+class GemsCampaign(Campaign):
+    Name: str = 'gems'
 """
 
-    def test_foreign_group_reuses_literal_of_this_file(self, fs):
-        """A foreign group shares the literal variable of an identical arg here."""
+    def test_bases_of_one_nav_are_one_import(self, fs):
+        """Every base of the same nav is imported with one statement."""
+        gen = make_cross(fs, {
+            'main': """\
+Campaign:
+  args:
+    Name: main
+
+StopCondition:
+  args:
+    Count: 1
+""",
+            'gems': """\
+GemsCampaign:
+  parent: Campaign
+  args:
+    Name: gems
+
+GemsStopCondition:
+  parent: StopCondition
+  args:
+    Count: 3
+""",
+        })
+        assert definitions(model_code(gen.dict_nav_config['gems'], filename='gems_model.py')) == """\
+if t.TYPE_CHECKING or 'Campaign' not in globals():
+    from ..main.main_model import Campaign, StopCondition
+
+
+class GemsCampaign(Campaign):
+    Name: str = 'gems'
+
+
+class GemsStopCondition(StopCondition):
+    Count: int = 3
+"""
+
+    def test_parents_in_two_navs(self, fs):
+        """A nav gets one guarded import per model file it inherits from."""
+        gen = make_cross(fs, {
+            'main': """\
+Campaign:
+  args:
+    Name: main
+""",
+            'other': """\
+Fleet:
+  args:
+    Fleet: 1
+""",
+            'gems': """\
+GemsCampaign:
+  parent: [Campaign, Fleet]
+  args:
+    Name: gems
+""",
+        })
+        assert definitions(model_code(gen.dict_nav_config['gems'], filename='gems_model.py')) == """\
+if t.TYPE_CHECKING or 'Campaign' not in globals():
+    from ..main.main_model import Campaign
+
+
+if t.TYPE_CHECKING or 'Fleet' not in globals():
+    from ..other.other_model import Fleet
+
+
+class GemsCampaign(Campaign, Fleet):
+    Name: str = 'gems'
+"""
+
+    def test_model_module_relative_path(self, fs):
+        """The import module points from the model file of one nav to another."""
+        gen = make_cross(fs, {
+            'main': """\
+Campaign:
+  args:
+    Name: main
+""",
+            'gems': """\
+GemsCampaign:
+  parent: Campaign
+  args:
+    Name: gems
+""",
+        })
+        assert gen.dict_nav_config['gems'].model_module('main') == '..main.main_model'
+        assert gen.dict_nav_config['main'].model_module('gems') == '..gems.gems_model'
+
+    def test_parent_imports_is_grouped_and_sorted(self, fs):
+        """The bases are grouped by declaring nav, the navs are sorted."""
+        gen = make_cross(fs, {
+            'zeta': """\
+Zeta:
+  args:
+    Z: 1
+""",
+            'main': """\
+Campaign:
+  args:
+    Name: main
+
+StopCondition:
+  args:
+    Count: 1
+""",
+            'gems': """\
+GemsCampaign:
+  parent: [Campaign, Zeta]
+  args:
+    Name: gems
+
+GemsStopCondition:
+  parent: StopCondition
+  args:
+    Count: 3
+""",
+        })
+        assert gen.dict_nav_config['gems'].parent_imports == {
+            'main': ['Campaign', 'StopCondition'],
+            'zeta': ['Zeta'],
+        }
+        # a parent of the same nav is not an import
+        assert gen.dict_nav_config['main'].parent_imports == {}
+
+    def test_injected_base_is_not_imported(self, fs):
+        """A loader injecting the base skips the import and shares the class."""
+        gen = make_cross(fs, {
+            'main': """\
+Campaign:
+  args:
+    Name: main
+""",
+            'gems': """\
+GemsCampaign:
+  parent: Campaign
+  args:
+    Name: gems
+""",
+        })
+        namespace_main = {}
+        code_main = model_code(gen.dict_nav_config['main'], filename='main_model.py')
+        exec(compile(code_main, 'main_model.py', 'exec'), namespace_main)
+
+        # the base class injected by the loader, the import must not run
+        namespace = {'Campaign': namespace_main['Campaign']}
+        code_gems = model_code(gen.dict_nav_config['gems'], filename='gems_model.py')
+        exec(compile(code_gems, 'gems_model.py', 'exec'), namespace)
+
+        assert namespace['GemsCampaign'].__mro__[1] is namespace_main['Campaign']
+        assert namespace['GemsCampaign']().Name == 'gems'
+
+    def test_import_runs_without_the_injected_base(self, fs):
+        """A plain import takes the guarded branch and imports the base."""
+        gen = make_cross(fs, {
+            'main': """\
+Campaign:
+  args:
+    Name: main
+""",
+            'gems': """\
+GemsCampaign:
+  parent: Campaign
+  args:
+    Name: gems
+""",
+        })
+        code = model_code(gen.dict_nav_config['gems'], filename='gems_model.py')
+        # the module is not executed as a package member, so the relative
+        # import is attempted and fails, which proves the branch was taken
+        with pytest.raises(ImportError):
+            exec(compile(code, 'gems_model.py', 'exec'), {'__name__': 'gems_model'})
+
+    def test_inherited_empty_group_gets_a_class(self, fs):
+        """A parent without args has no field, but its child needs the class."""
         gen = make_generator(fs, yaml="""\
 Base:
+
+Child:
+  parent: Base
   args:
-    Mode:
-      value: a
-      option: [a, b]
+    X: 1
 """)
-        gen.foreign_model_group_data['Child'] = make_group(
-            'Child', {'parent': 'Base', 'args': {
-                'Mode': {'value': 'b', 'option': ['a', 'b']},
-            }})
         assert definitions(model_code(gen)) == """\
-LITERAL_Base_Mode = t.Literal['a', 'b']
-
-
 class Base(a.GroupBase):
-    Mode: LITERAL_Base_Mode = 'a'
+    pass
 
 
 class Child(Base):
-    Mode: LITERAL_Base_Mode = 'b'
+    X: int = 1
 """
 
-    def test_skipped_group_is_not_emitted(self, fs):
-        """A group whose model is generated by another nav is skipped here."""
-        gen = make_generator(fs, yaml="""\
+    def test_model_index_points_to_the_declaring_nav(self, fs):
+        """The loader reads a class from the nav declaring the group."""
+        gen = make_cross(fs, {
+            'main': """\
+Campaign:
+  args:
+    Name: main
+""",
+            'gems': """\
+GemsCampaign:
+  parent: Campaign
+  args:
+    Name: gems
+""",
+        })
+        assert gen.dict_group_ref['Campaign'] == {'file': 'main/main_model.py', 'cls': 'Campaign'}
+        assert gen.dict_group_ref['GemsCampaign'] == {'file': 'gems/gems_model.py', 'cls': 'GemsCampaign'}
+
+
+class TestNavModelCycle:
+    def test_cycle_between_two_navs(self, fs):
+        """Two navs importing the model of each other are rejected."""
+        with pytest.raises(DefinitionError) as e:
+            make_cross(fs, {
+                'nava': """\
 A:
   args:
     X: 1
 
-B:
+NA:
+  parent: B
   args:
     Y: 2
-""")
-        gen.skip_model_group_names.add('B')
-        assert definitions(model_code(gen)) == """\
-class A(a.GroupBase):
-    X: int = 1
-"""
+""",
+                'navb': """\
+B:
+  args:
+    X: 1
 
-    @pytest.mark.xfail(strict=True, reason='a group with parents in two navs is emitted in one file, the other class is undefined there')
-    def test_parents_in_two_navs(self, fs):
-        """Both model files of a cross-nav multiple inheritance can be imported."""
+NB:
+  parent: A
+  args:
+    Z: 3
+""",
+            })
+        assert e.value.msg == 'Circular model inheritance between navs: nava -> navb -> nava'
+        assert e.value.keys == ['NB', 'parent']
+        assert e.value.value == 'nava'
+        assert e.value.file.endswith('navb/navb.args.yaml')
+
+    def test_cycle_between_three_navs(self, fs):
+        """The whole path of a longer cycle is reported."""
+        with pytest.raises(DefinitionError) as e:
+            make_cross(fs, {
+                'nava': """\
+A:
+  args:
+    X: 1
+
+NA:
+  parent: B
+  args:
+    Y: 2
+""",
+                'navb': """\
+B:
+  args:
+    X: 1
+
+NB:
+  parent: C
+  args:
+    Y: 2
+""",
+                'navc': """\
+C:
+  args:
+    X: 1
+
+NC:
+  parent: A
+  args:
+    Y: 2
+""",
+            })
+        assert e.value.msg == (
+            'Circular model inheritance between navs: nava -> navb -> navc -> nava'
+        )
+
+    def test_same_nav_parent_is_not_a_cycle(self, fs):
+        """A parent of the same nav is not an edge between navs."""
         gen = make_cross(fs, {
             'nava': """\
-BaseA:
+Base:
   args:
     X: 1
 
 Child:
-  parent: [BaseA, BaseB]
-  args:
-    Z: 3
-""",
-            'navb': """\
-BaseB:
+  parent: Base
   args:
     Y: 2
 """,
         })
-        for nav in gen.dict_nav_config.values():
-            code = model_code(nav, filename=f'{nav.nav_name}_model.py')
-            exec(compile(code, f'{nav.nav_name}_model.py', 'exec'), {})
+        assert gen.dict_nav_model_parents == {}
+
+    def test_diamond_is_not_a_cycle(self, fs):
+        """Two navs inheriting the same nav is allowed."""
+        gen = make_cross(fs, {
+            'nava': """\
+A:
+  args:
+    X: 1
+
+NA:
+  parent: [B, C]
+  args:
+    Y: 2
+""",
+            'navb': """\
+B:
+  parent: D
+  args:
+    X: 1
+""",
+            'navc': """\
+C:
+  parent: D
+  args:
+    X: 1
+""",
+            'navd': """\
+D:
+  args:
+    X: 1
+""",
+        })
+        assert gen.dict_nav_config['nava'].parent_imports == {'navb': ['B'], 'navc': ['C']}
+
+    def test_cycle_behind_a_clean_nav(self, fs):
+        """A cycle is reported even when the walk starts outside of it."""
+        with pytest.raises(DefinitionError) as e:
+            make_cross(fs, {
+                'nava': """\
+A:
+  args:
+    X: 1
+
+NA:
+  parent: B
+  args:
+    Y: 2
+""",
+                'navb': """\
+B:
+  args:
+    X: 1
+
+NB:
+  parent: C
+  args:
+    Y: 2
+""",
+                'navc': """\
+C:
+  args:
+    X: 1
+
+NC:
+  parent: B
+  args:
+    Y: 2
+""",
+            })
+        assert e.value.msg == 'Circular model inheritance between navs: navb -> navc -> navb'
 
 
 class TestLiteralVariable:

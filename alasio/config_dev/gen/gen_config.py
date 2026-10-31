@@ -1,3 +1,5 @@
+from typing import TYPE_CHECKING, Optional
+
 from alasio.codegen.python import CodeGen
 from alasio.config.entry.const import ModEntryInfo  # noqa: F401
 from alasio.config_dev.format.extract_method import extract_method
@@ -7,13 +9,17 @@ from alasio.config_dev.parse.base import DefinitionError
 from alasio.config_dev.parse.cache_alasio import CacheAlasio
 from alasio.config_dev.parse.load_alas_i18n import LoadAlasI18n
 from alasio.config_dev.parse.parse_args import TYPE_ARG_LITERAL, TYPE_ARG_TUPLE, ArgData
-from alasio.config_dev.parse.parse_groups import GroupData, ParseGroups
+from alasio.config_dev.parse.parse_groups import ParseGroups
 from alasio.config_dev.parse.parse_tasks import ParseTasks
 from alasio.ext.cache import cached_property
 from alasio.ext.deep import deep_get, deep_set
 from alasio.ext.file.jsonfile import NoIndent, write_json_custom_indent
 from alasio.ext.file.yamlfile import format_yaml
+from alasio.ext.path.calc import to_posix
 from alasio.logger import logger
+
+if TYPE_CHECKING:
+    from alasio.config_dev.gen.gen_cross import CrossNavGenerator
 
 
 class ConfigGenerator(ParseGroups, ParseTasks):
@@ -78,12 +84,10 @@ class ConfigGenerator(ParseGroups, ParseTasks):
         #         which is arg path appended with ArgData
         self.config_data: "dict[str, dict[str, dict]]" = {}
         self.alasio = CacheAlasio().get(entry)
-        # Cross-nav variant model data
-        # groups from other navs whose model should be generated in this nav's model file
-        self.foreign_model_group_data: "dict[str, GroupData]" = {}
-        # groups in this nav that should NOT have their model generated here
-        # (because it will be generated in the parent nav instead)
-        self.skip_model_group_names: "set[str]" = set()
+        # Cross nav registry, set by CrossNavGenerator.dict_nav_config()
+        # A nav generated on its own has no registry, so it can not inherit a
+        # group declared in another nav.
+        self.cross: "Optional[CrossNavGenerator]" = None
 
     """
     Generate model
@@ -91,11 +95,13 @@ class ConfigGenerator(ParseGroups, ParseTasks):
 
     def get_inherit_name(self, parent):
         """
+        Get the class reference of a parent in the generated code.
+
         Args:
-            parent (str):
+            parent (str): Group name of the parent
 
         Returns:
-            str:
+            str: Class reference, like "a.DashboardTotal" or "Campaign"
         """
         # a dashboard group
         if parent.startswith('Dashboard'):
@@ -104,6 +110,69 @@ class ConfigGenerator(ParseGroups, ParseTasks):
         if self.alasio and parent in self.alasio.groups_data:
             return f'a.{parent}'
         return parent
+
+    @cached_property
+    def parent_imports(self):
+        """
+        Base classes this model file imports from another nav.
+
+        The class of a group is generated in the model file of the nav that
+        declares the group, so a group inheriting a base of another nav imports
+        the class from there. Grouped by the declaring nav and sorted by the nav
+        name, so the generated imports are stable whatever order the yaml has.
+
+        Returns:
+            dict[str, list[str]]:
+                key: nav name declaring the base classes
+                value: list of parent group name, in declaration order
+        """
+        out = {}
+        if not self.cross:
+            return out
+        for group in self.groups_data.values():
+            for parent in group.parent:
+                # a dashboard or alasio group is exported by the group module
+                if self.get_inherit_name(parent) != parent:
+                    continue
+                parent_group = self.cross.groups_data.get(parent, None)
+                parser = parent_group.parser if parent_group is not None else None
+                if parser is None or parser.nav_name == self.nav_name:
+                    continue
+                names = out.setdefault(parser.nav_name, [])
+                if parent not in names:
+                    names.append(parent)
+        return dict(sorted(out.items()))
+
+    def model_module(self, nav):
+        """
+        Relative import module from this model file to the model file of a nav.
+
+        Args:
+            nav (str): Nav declaring the base classes
+
+        Returns:
+            str: Module of that model file, like "..main.main_model"
+
+        Raises:
+            DefinitionError: This nav has no cross nav registry
+        """
+        cross = self.cross
+        if cross is None:
+            raise DefinitionError(
+                f'Cannot import the model of nav "{nav}", this nav is generated without a cross nav registry',
+                file=self.file)
+        current_parts = to_posix(self.model_file).rpartition('/')[0].split('/')
+        file = cross.dict_nav_config[nav].model_file
+        folder, _, name = to_posix(file).rpartition('/')
+        parts = folder.split('/')
+        common = 0
+        for current_part, part in zip(current_parts, parts):
+            if current_part != part:
+                break
+            common += 1
+        # one more level to leave the package of this module
+        prefix = '.' * (len(current_parts) - common + 1)
+        return prefix + '.'.join(parts[common:] + [name[:-3]])
 
     @cached_property
     def model_methods(self):
@@ -145,18 +214,28 @@ class ConfigGenerator(ParseGroups, ParseTasks):
             gen.Import('alasio.config.alasio.group_base').as_('a')
             gen.CommentCodeGen('alasio.config_dev.gen_alasio')
 
-        def iter_groups():
-            """Yield (name, g) from own groups (skipping cross-nav variants)
-            then foreign model groups."""
-            for name, g in self.groups_data.items():
-                if name in self.skip_model_group_names:
-                    continue
-                yield name, g
-            yield from self.foreign_model_group_data.items()
-
-        # Empty group has no class, so it does not reserve a name either
-        groups = [(name, g) for name, g in iter_groups() if g.args]
+        # Empty group has no class, so it does not reserve a name either,
+        # unless another group inherits it: the class of the child refers to it
+        # by name, whether the child is in this file or in another nav
+        parents = {parent for group in self.groups_data.values() for parent in group.parent}
+        for names in self.parent_imports.values():
+            parents.update(names)
+        groups = [
+            (name, g) for name, g in self.groups_data.items()
+            if g.args or name in parents
+        ]
         used_names = {name for name, _ in groups}
+
+        # A base class declared in another nav is imported from the model file
+        # of the nav declaring it. The import is guarded, so a loader that
+        # injects the class skips it and keeps that module out of sys.modules.
+        # The first class of a block is the name such a loader injects.
+        for nav, names in self.parent_imports.items():
+            with gen.If(f't.TYPE_CHECKING or {names[0]!r} not in globals()'):
+                imp = gen.FromImport(self.model_module(nav))
+                for name in names:
+                    imp.Import(name)
+            gen.Empty(2)
 
         # Literal variable name of each literal content of this file
         literal_names: "dict[tuple, str]" = {}

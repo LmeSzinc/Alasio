@@ -11,7 +11,6 @@ import json
 from alasio.config.entry.const import ModEntryInfo
 from alasio.config_dev.gen.gen_config import ConfigGenerator
 from alasio.config_dev.gen.gen_cross import CrossNavGenerator
-from alasio.config_dev.parse.parse_groups import GroupData
 from alasio.ext.path import PathStr
 from alasio.ext.path.calc import joinpath
 
@@ -128,20 +127,6 @@ def make_alasio_generator(fs, nav='device', yaml=''):
     return gen
 
 
-def make_group(name, data=None):
-    """
-    Build a GroupData like ParseGroups does.
-
-    Args:
-        name (str): Group name
-        data (dict, optional): Group body, same as the yaml body of the group
-
-    Returns:
-        GroupData:
-    """
-    return GroupData.from_group_data(name, data or {})
-
-
 def make_cross(fs, navs):
     """
     Build a CrossNavGenerator over several navs of the mod, with the MRO built.
@@ -151,12 +136,12 @@ def make_cross(fs, navs):
         navs (dict[str, str]): key: nav name, value: content of {nav}.args.yaml
 
     Returns:
-        CrossNavGenerator: Generator with the cross-nav model data set up
+        CrossNavGenerator: Generator with the MRO built and validated
     """
     entry = make_entry(fs)
     for nav, yaml in navs.items():
         fs.create_file(joinpath(nav_dir(fs, nav), f'{nav}.args.yaml'), contents=yaml)
     gen = CrossNavGenerator(entry)
     gen.build_group_mro()
-    gen._setup_cross_nav_model_data()
+    gen.validate_nav_model_parents()
     return gen

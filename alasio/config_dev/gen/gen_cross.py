@@ -6,7 +6,7 @@ from alasio.config_dev.gen.gen_config import ConfigGenerator
 from alasio.config_dev.parse.base import DefinitionError
 from alasio.config_dev.parse.build_mro import MroError, build_mro
 from alasio.config_dev.parse.cache_alasio import CacheAlasio
-from alasio.config_dev.parse.parse_groups import GroupData, ParseGroups
+from alasio.config_dev.parse.parse_groups import GroupData
 from alasio.config_dev.parse.parse_store import ParseStore
 from alasio.ext.cache import cached_property
 from alasio.ext.deep import deep_exist, deep_iter_depth2, deep_set
@@ -52,6 +52,7 @@ class CrossNavGenerator:
                 if not self.alasio and parser.nav_name == 'store':
                     parser = ParseStore(self.entry, file)
                 parser.folder = folder.name
+                parser.cross = self
                 # nav
                 nav = parser.nav_name
                 if self.alasio and nav in self.alasio.dict_nav_config:
@@ -237,72 +238,108 @@ class CrossNavGenerator:
     """
 
     @cached_property
-    def dict_group_to_ancestor_nav(self) -> "dict[str, ParseGroups]":
+    def dict_nav_model_parents(self):
         """
-        Maps each group name to the ConfigGenerator of the nav where its
-        msgspec model class should be generated.
+        Base classes of a model file that are declared in another nav.
 
-        Uses the already-resolved MRO on each group. For each group, the MRO
-        is traversed in reverse (root ancestor first) to find the first
-        non-alasio ancestor. That ancestor's parser is the ConfigGenerator
-        that should host this group's model class.
-
-        Groups with no parent or whose entire parent chain ends in an alaiso
-        nav map to their own parser.
+        The class of a group is generated in the model file of the nav that
+        declares the group, so inheriting it makes the model file of the child
+        nav depend on the model file of the parent nav.
 
         Returns:
-            dict[str, ConfigGenerator]:
-                key: group_name
-                value: ConfigGenerator of the nav that should host the model
+            dict[str, list[tuple[str, str, str]]]:
+                key: nav name
+                value: list of (group name, parent group name, parent nav name)
         """
         out = {}
-
-        for group_name, group in self.groups_data.items():
-            # Default: model stays in own nav
-            ancestor = group.parser
-            # Traverse MRO in reverse (root ancestor first) to find the
-            # first non-alasio ancestor
-            for ancestor_name in reversed(group.mro):
-                if ancestor_name == group.name:
-                    continue  # skip self
-                ancestor_group = self.groups_data.get(ancestor_name)
-                if ancestor_group is None:
-                    continue
-                # Skip alasio framework groups
-                if self.alasio and ancestor_group.parser.nav_name in self.alasio.dict_nav_config:
-                    continue
-                # First non-alasio ancestor found — its nav hosts this group's model
-                ancestor = ancestor_group.parser
-                break
-            out[group_name] = ancestor
-
+        for config in self.dict_nav_config.values():
+            for group_name, group in config.groups_data.items():
+                for parent in group.parent:
+                    # a dashboard or alasio group is exported by the group module
+                    if config.get_inherit_name(parent) != parent:
+                        continue
+                    parent_group = self.groups_data.get(parent, None)
+                    if parent_group is None or parent_group.parser is None:
+                        # unknown parent, reported by dict_group_mro
+                        continue
+                    parent_nav = parent_group.parser.nav_name
+                    if parent_nav == config.nav_name:
+                        continue
+                    out.setdefault(config.nav_name, []).append((group_name, parent, parent_nav))
         return out
 
-    def _setup_cross_nav_model_data(self):
+    def _raise_nav_model_cycle(self, cycle):
         """
-        Setup foreign model group data for cross-nav variant groups.
+        Report a cycle between the model files of the navs.
 
-        For each nav's ConfigGenerator, this sets:
-        - foreign_model_group_data: groups from other navs whose model should be
-          generated in this nav's model file (because their parent is in this nav)
-        - skip_model_group_names: groups that should NOT have their model generated
-          in their own nav (because it will be generated in the parent nav instead)
+        Args:
+            cycle (list[str]): Nav names of the cycle, the first one repeated at the end
+
+        Raises:
+            DefinitionError: Always
         """
-        # Clear
-        for nav in self.dict_nav_config.values():
-            nav.foreign_model_group_data.clear()
-            nav.skip_model_group_names.clear()
+        # the nav folders are iterated in the filesystem order, report the
+        # cycle from the same nav whatever nav the search started from
+        body = cycle[:-1]
+        start = body.index(min(body))
+        body = body[start:] + body[:start]
+        cycle = body + [body[0]]
+        nav = cycle[0]
+        child = cycle[-2]
+        group_name = ''
+        for name, _, parent_nav in self.dict_nav_model_parents[child]:
+            if parent_nav == nav:
+                group_name = name
+                break
+        raise DefinitionError(
+            f'Circular model inheritance between navs: {" -> ".join(cycle)}',
+            file=self.dict_nav_config[child].file,
+            keys=[group_name, 'parent'], value=nav)
 
-        # Find cross-nav variants using the ancestor nav mapping
-        for group_name, group in self.groups_data.items():
-            ancestor_config = self.dict_group_to_ancestor_nav[group_name]
-            if ancestor_config is group.parser:
+    def validate_nav_model_parents(self):
+        """
+        Reject a cycle between the model files of the navs.
+
+        The groups of a nav can not inherit in a cycle, the MRO check rejects
+        that, but the navs can: nav1.Gems inherits nav2.Campaign while
+        nav2.Other inherits nav1.Gems. The two model files would import each
+        other, so neither could be imported with a plain import.
+
+        Raises:
+            DefinitionError: The model files of the navs form a cycle
+        """
+        graph = {
+            nav: [parent_nav for _, _, parent_nav in refs]
+            for nav, refs in self.dict_nav_model_parents.items()
+        }
+        # navs whose every parent has been visited
+        visited = set()
+        for start in graph:
+            if start in visited:
                 continue
-            # Cross-nav variant: model follows parent chain to ancestor_config's nav
-            # ancestor_config is guaranteed to be a mod nav (alasio case is
-            # already handled in dict_group_to_ancestor_nav)
-            ancestor_config.foreign_model_group_data[group_name] = group
-            group.parser.skip_model_group_names.add(group_name)
+            # the navs being visited, from the start to the current one
+            path = [start]
+            # index of each nav of the path
+            index = {start: 0}
+            while path:
+                nav = path[-1]
+                # parents of the current nav not visited yet, a parent already on
+                # the path is a cycle
+                pending = [
+                    parent_nav for parent_nav in graph.get(nav, ())
+                    if parent_nav not in visited
+                ]
+                for parent_nav in pending:
+                    if parent_nav in index:
+                        self._raise_nav_model_cycle(path[index[parent_nav]:] + [parent_nav])
+                if not pending:
+                    # every parent is visited, so is this nav
+                    visited.add(path.pop())
+                    del index[nav]
+                    continue
+                # go deeper into the first parent not visited yet
+                index[pending[0]] = len(path)
+                path.append(pending[0])
 
     """
     Generate model.index.json
@@ -313,6 +350,9 @@ class CrossNavGenerator:
         """
         convert group name to where the msgspec model class is defined
 
+        The class of a group is generated in the model file of the nav that
+        declares the group, a nav inheriting a base of another nav imports it.
+
         Returns:
             dict[str, dict[str, str]]:
                 key: {group_name}
@@ -322,18 +362,15 @@ class CrossNavGenerator:
         if self.alasio:
             out = self.alasio.dict_group_ref
         for config in self.dict_nav_config.values():
-            # iter group models
-            for group_name, group in config.groups_data.items():
-                ancestor_config = self.dict_group_to_ancestor_nav[group_name]
-                file = ancestor_config.model_file.subpath_to(self.path_config)
-                if file is None:
-                    raise DefinitionError(
-                        f'model_file is not a subpath of root, model_file={ancestor_config.model_file}, '
-                        f'root={self.path_config}')
-                file = to_posix(file)
-                # build model reference
-                ref = {'file': file, 'cls': group_name}
-                out[group_name] = ref
+            file = config.model_file.subpath_to(self.path_config)
+            if file is None:
+                raise DefinitionError(
+                    f'model_file is not a subpath of root, model_file={config.model_file}, '
+                    f'root={self.path_config}')
+            file = to_posix(file)
+            # build model reference
+            for group_name in config.groups_data:
+                out[group_name] = {'file': file, 'cls': group_name}
 
         return out
 
