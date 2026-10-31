@@ -3,7 +3,9 @@ Tests for the data of a pip index page: the wheel link and the list of them.
 """
 import pytest
 
-from alasio.codegen.pypisite import WheelLink, is_name, normalize_name, prepare_links, version_key
+from alasio.codegen.pypisite import (
+    WheelLink, is_name, normalize_name, prepare_links, split_by_name, split_by_version, version_key
+)
 
 # the digest of a wheel, the shape the fetcher of the pack server records
 DIGEST_A = 'a' * 64
@@ -244,3 +246,103 @@ class TestPrepareLinks:
     def test_project_case_insensitive(self):
         links = [WheelLink('HTTPX2', '2.13.1', FILE, DIGEST_A)]
         assert len(prepare_links(links, project='httpx2')) == 1
+
+
+class TestSplitByName:
+    def test_empty(self):
+        assert split_by_name([]) == {}
+
+    def test_one_wheel(self):
+        link = WheelLink('httpx2', '2.13.1', FILE, DIGEST_A)
+        assert split_by_name([link]) == {'httpx2': [link]}
+
+    def test_two_names(self):
+        """Each group is the page of one distribution."""
+        one = WheelLink('httpx2', '2.13.1', FILE, DIGEST_A)
+        other = WheelLink('msgspec', '0.22.0', 'msgspec-0.22.0-py3-none-any.whl', DIGEST_B)
+        assert split_by_name([one, other]) == {'httpx2': [one], 'msgspec': [other]}
+
+    def test_name_normalized(self):
+        """The key is the folder of the page, so two spellings are one group."""
+        one = WheelLink('ruamel.yaml', '0.18.6', 'ruamel.yaml-0.18.6-py3-none-any.whl', DIGEST_A)
+        other = WheelLink('ruamel_yaml', '0.18.6', 'ruamel.yaml-0.18.6-py3-none-any.whl', DIGEST_B)
+        assert split_by_name([one, other]) == {'ruamel-yaml': [one, other]}
+
+    def test_versions_grouped(self):
+        """Every version of a distribution belongs to its one group."""
+        old = WheelLink('httpx2', '2.9.0', 'httpx2-2.9.0-py3-none-any.whl', DIGEST_A)
+        new = WheelLink('httpx2', '2.13.1', FILE, DIGEST_B)
+        assert split_by_name([new, old]) == {'httpx2': [new, old]}
+
+    def test_order_kept(self):
+        """A grouping is not a page: the links keep the order they were given in."""
+        new = WheelLink('httpx2', '2.13.1', FILE, DIGEST_A)
+        old = WheelLink('httpx2', '2.9.0', 'httpx2-2.9.0-py3-none-any.whl', DIGEST_A)
+        assert split_by_name([new, old])['httpx2'] == [new, old]
+
+    def test_key_order(self):
+        """The keys keep the order the names first appear in."""
+        one = WheelLink('msgspec', '0.22.0', 'msgspec-0.22.0-py3-none-any.whl', DIGEST_A)
+        other = WheelLink('httpx2', '2.13.1', FILE, DIGEST_A)
+        assert list(split_by_name([one, other])) == ['msgspec', 'httpx2']
+
+    def test_duplicates_kept(self):
+        """Deduplicating is the step of a page, not of a grouping."""
+        link = WheelLink('httpx2', '2.13.1', FILE, DIGEST_A)
+        assert split_by_name([link, link]) == {'httpx2': [link, link]}
+
+    def test_iterable(self):
+        """The input is any iterable, not only a list."""
+        link = WheelLink('httpx2', '2.13.1', FILE, DIGEST_A)
+        assert split_by_name(iter([link])) == {'httpx2': [link]}
+
+    def test_type(self):
+        with pytest.raises(TypeError, match='is not a WheelLink'):
+            split_by_name([('httpx2', '2.13.1', FILE)])
+
+
+class TestSplitByVersion:
+    def test_empty(self):
+        assert split_by_version([]) == {}
+
+    def test_one_version(self):
+        link = WheelLink('httpx2', '2.13.1', FILE, DIGEST_A)
+        assert split_by_version([link]) == {'2.13.1': [link]}
+
+    def test_wheels_of_one_version(self):
+        """A release built for several platforms is one version, one table."""
+        win = WheelLink('httpx2', '2.13.1', 'httpx2-2.13.1-cp38-cp38-win_amd64.whl', DIGEST_A)
+        pure = WheelLink('httpx2', '2.13.1', FILE, DIGEST_B)
+        assert split_by_version([win, pure]) == {'2.13.1': [win, pure]}
+
+    def test_two_versions(self):
+        old = WheelLink('httpx2', '2.9.0', 'httpx2-2.9.0-py3-none-any.whl', DIGEST_A)
+        new = WheelLink('httpx2', '2.13.1', FILE, DIGEST_B)
+        assert split_by_version([old, new]) == {'2.9.0': [old], '2.13.1': [new]}
+
+    def test_key_is_the_exact_version(self):
+        """'1.0' and '1.0.0' are two folders, so they are two groups."""
+        one = WheelLink('httpx2', '1.0', 'httpx2-1.0-py3-none-any.whl', DIGEST_A)
+        other = WheelLink('httpx2', '1.0.0', 'httpx2-1.0.0-py3-none-any.whl', DIGEST_B)
+        assert split_by_version([one, other]) == {'1.0': [one], '1.0.0': [other]}
+
+    def test_order_kept(self):
+        """A grouping is not a page: the links keep the order they were given in."""
+        old = WheelLink('httpx2', '2.9.0', 'httpx2-2.9.0-py3-none-any.whl', DIGEST_A)
+        new = WheelLink('httpx2', '2.13.1', FILE, DIGEST_A)
+        assert split_by_version([new, old])['2.13.1'] == [new]
+        assert list(split_by_version([new, old])) == ['2.13.1', '2.9.0']
+
+    def test_duplicates_kept(self):
+        """Deduplicating is the step of a page, not of a grouping."""
+        link = WheelLink('httpx2', '2.13.1', FILE, DIGEST_A)
+        assert split_by_version([link, link]) == {'2.13.1': [link, link]}
+
+    def test_iterable(self):
+        """The input is any iterable, not only a list."""
+        link = WheelLink('httpx2', '2.13.1', FILE, DIGEST_A)
+        assert split_by_version(iter([link])) == {'2.13.1': [link]}
+
+    def test_type(self):
+        with pytest.raises(TypeError, match='is not a WheelLink'):
+            split_by_version([('httpx2', '2.13.1', FILE)])

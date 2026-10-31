@@ -39,6 +39,8 @@ __all__ = [
     'is_name',
     'normalize_name',
     'prepare_links',
+    'split_by_name',
+    'split_by_version',
     'version_key',
 ]
 
@@ -189,6 +191,81 @@ class WheelLink(Struct, frozen=True):
 
     def __repr__(self):
         return f'<WheelLink {self.key}=={self.version} {self.filename}>'
+
+
+def _group(links, field):
+    """
+    Group the wheels by a field of the link, in the order of the input.
+
+    The groups keep the links as they were given, duplicates included: this is a
+    grouping of the data, not a page, and the step that deduplicates and sorts
+    a page is prepare_links.
+
+    Args:
+        links (Iterable[WheelLink]): The wheels to group
+        field (str): Name of the attribute the key is taken from, 'key' or
+            'version'
+
+    Returns:
+        dict[str, list[WheelLink]]: The wheels of each key, the keys in the
+            order they first appear
+
+    Raises:
+        TypeError: If a link is not a WheelLink
+    """
+    groups = {}
+    for link in links:
+        if not isinstance(link, WheelLink):
+            raise TypeError(
+                f'A wheel of a pip page is not a WheelLink: {type(link).__name__}')
+        groups.setdefault(getattr(link, field), []).append(link)
+    return groups
+
+
+def split_by_name(links):
+    """
+    Group the wheels by the distribution they belong to.
+
+    The key is the name as PEP 503 normalizes it, which is the folder the page
+    of the distribution sits in, so two spellings of one name are one group.
+
+    Args:
+        links (Iterable[WheelLink]): The wheels to group, of any distributions
+
+    Returns:
+        dict[str, list[WheelLink]]: The wheels of each normalized name, the
+            names in the order they first appear
+
+    Raises:
+        TypeError: If a link is not a WheelLink
+    """
+    return _group(links, 'key')
+
+
+def split_by_version(links):
+    """
+    Group the wheels by the version they carry.
+
+    The key is the exact version as the page spells it, which is the folder the
+    file sits in: the wheels of one version (a release built for several
+    platforms) are one group, while two versions that only PEP 440 reads as
+    equal ('1.0' and '1.0.0') stay apart because they are two folders.
+
+    A flat page groups the versions of one distribution, so the input is the
+    wheels of one project. Links of several projects still group by the text of
+    the version, they are just not a page that is written.
+
+    Args:
+        links (Iterable[WheelLink]): The wheels of one distribution
+
+    Returns:
+        dict[str, list[WheelLink]]: The wheels of each version, the versions in
+            the order they first appear
+
+    Raises:
+        TypeError: If a link is not a WheelLink
+    """
+    return _group(links, 'version')
 
 
 def prepare_links(links, with_name=False, project=''):
