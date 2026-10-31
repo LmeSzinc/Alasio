@@ -23,7 +23,7 @@ import pytest
 
 from alasio.ext.path import calc
 from alasio.ext.path.calc import (
-    abspath, get_multisuffix, get_name, get_rootstem, get_stem, get_suffix, is_abspath, joinnormpath, joinpath,
+    abspath, get_multisuffix, get_name, get_rootstem, get_stem, get_suffix, is_abspath, is_root, joinnormpath, joinpath,
     normpath, subpath, subpath_to, to_posix, to_python_import, uppath, with_multisuffix, with_name, with_rootstem,
     with_stem, with_suffix
 )
@@ -292,6 +292,57 @@ class TestUppathWhenPosix:
     def test_uppath(self, root, up, expected):
         """Going up should stop at the empty string, or at "/" for absolute paths."""
         assert uppath(root, up=up) == expected
+
+
+class TestIsRoot:
+    """
+    is_root() reads the path model of uppath(), whatever platform runs it.
+
+    The pack paths carry their own model, a "C:/env" read on Linux is still a
+    path of a drive: the walk of its parent folders has to stop at "C:/" there
+    too, so the answer does not depend on WINDOWS_SEP.
+    """
+
+    @pytest.mark.parametrize("path, expected", [
+        # The filesystem root
+        ('/', True),
+        ('//', False),
+        # A drive root, the way normpath() writes it
+        ('C:/', True),
+        ('c:/', True),
+        # Too short to be a path, 'D:' is a bare drive
+        ('', False),
+        ('C', False),
+        ('D:', True),
+        # A colon is only a drive when a letter comes before it
+        ('1:', False),
+        ('::', False),
+        (':/', False),
+        # A folder of a path, not a root
+        ('/a', False),
+        ('C:/a', False),
+        ('C:/env/module/core.py', False),
+        ('a', False),
+        ('a/b', False),
+        # A folder that starts like a root
+        ('/ab', False),
+        ('C:/ab', False),
+        # The Windows separator is not the model of this function
+        ('C:\\', False),
+        ('\\', False),
+    ])
+    def test_is_root(self, path, expected):
+        """A path is a root when it is "/", a drive root or a bare drive."""
+        assert is_root(path) == expected
+
+    @pytest.mark.parametrize("windows_sep", [True, False])
+    def test_platform_independent(self, monkeypatch, windows_sep):
+        """The answer of a pack path is the same on every platform."""
+        monkeypatch.setattr(calc, 'WINDOWS_SEP', windows_sep)
+        assert is_root('C:/') is True
+        assert is_root('C:') is True
+        assert is_root('/') is True
+        assert is_root('C:/env') is False
 
 
 class TestIsAbspathWhenWindows:

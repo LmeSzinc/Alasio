@@ -135,6 +135,37 @@ def uppath(root: str, up: int = 1) -> str:
         return root
 
 
+def is_root(path: str) -> bool:
+    """
+    Check whether a path is a root, the folder a walk up must stop at.
+
+    The roots are the ones uppath() stops at: "/" for a rooted path, the drive
+    root "C:/" and the bare drive "C:" for a path of a drive. The answer does
+    not depend on the platform that runs it: the paths of a pack carry their
+    own model, a "C:/env" read on Linux is still a path of a drive, so the
+    walk of its parent folders has to stop at "C:/" there too.
+
+    Args:
+        path (str): Path to check, normalized or not
+
+    Returns:
+        bool: True when the path is the filesystem root or a drive root
+    """
+    # A root is 1 to 3 characters, so the length settles most of the paths of
+    # a tree with one comparison: they are folders, not roots. The length is
+    # known below, an index is safe on the strings that get that far
+    length = len(path)
+    if length > 3:
+        return False
+    # A drive: "C:" is the drive root, "C:/" is the same root with its
+    # separator, and "C:/a" is a folder of it. A colon is only a drive when a
+    # letter comes before it
+    if length >= 2 and path[1] == ':' and path[0].isalpha():
+        return length == 2 or path[2] == '/'
+    # "/" is the root, "/a" is a folder of it, and an empty path is no root
+    return path == '/'
+
+
 def is_abspath(path: str) -> bool:
     """
     Check whether a path is absolute, with an answer that does not depend on
