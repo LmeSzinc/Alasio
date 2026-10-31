@@ -2,8 +2,9 @@
 Tests of env.PROCESS_ROLE, the switch that tells a model loader how to load.
 
 The role defaults to 'worker' so a plain `python -m module.main`, a script or a
-test behaves like a real worker without setting anything. Only the backend
-process declares itself, from its own entry point.
+test behaves like a real worker without setting anything. The backend marks
+itself from its ASGI lifespan, so any server that runs the app -- the process
+entry used by the supervisor or a manual one -- gets the right role.
 """
 
 from alasio.ext import env
@@ -14,17 +15,35 @@ def test_default_is_worker():
     assert env.PROCESS_ROLE == 'worker'
 
 
-def test_backend_entry_marks_the_process(monkeypatch):
-    """The backend entry point flips the role before running the server."""
-    import alasio.backend.app.asgi as asgi
+def test_set_backend_role(monkeypatch):
+    """The backend marks this process as the backend before serving."""
+    from alasio.backend.app.app import set_backend_role
 
-    calls = []
-    monkeypatch.setattr(asgi, 'run', lambda args: calls.append(args))
     monkeypatch.setattr(env, 'PROCESS_ROLE', 'worker')
 
-    from alasio.backend.entry import backend_entry
-
-    backend_entry(['--port', '8080'])
+    result = set_backend_role()
 
     assert env.PROCESS_ROLE == 'backend'
-    assert calls == [['--port', '8080']]
+    # a plain function, not a decorated one that only prepares a generator
+    assert result is None
+
+
+def test_lifespan_is_an_async_context_manager():
+    """Only the lifespan carries the asynccontextmanager decorator."""
+    from alasio.backend.app import app as app_module
+
+    # asynccontextmanager sets __wrapped__ on the function it returns
+    assert hasattr(app_module.lifespan, '__wrapped__')
+    assert not hasattr(app_module.set_backend_role, '__wrapped__')
+    cm = app_module.lifespan(None)
+    assert hasattr(cm, '__aenter__')
+
+
+def test_lifespan_calls_set_backend_role():
+    """The lifespan runs the role switch, a manual ASGI server included."""
+    import inspect
+
+    from alasio.backend.app import app as app_module
+
+    source = inspect.getsource(app_module.lifespan)
+    assert 'set_backend_role()' in source

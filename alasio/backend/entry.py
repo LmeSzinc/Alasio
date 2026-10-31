@@ -35,11 +35,6 @@ def backend_entry(args):
     Args:
         args (list[str] | None): Command line args for the backend
     """
-    # This is the process that serves every mod and never runs a game script,
-    # so it loads the models without touching sys.modules (see env.PROCESS_ROLE)
-    from alasio.ext import env
-    env.PROCESS_ROLE = 'backend'
-
     # asgi (the server layer) instead of app: asgi imports the ASGI app
     # lazily, only after create_config() set PROJECT_ROOT -- the app chain
     # binds env.PROJECT_ROOT at import time (see asgi.py)

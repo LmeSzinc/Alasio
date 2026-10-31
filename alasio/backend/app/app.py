@@ -170,11 +170,27 @@ async def task_gc(wait=8):
             logger.exception(e)
 
 
+def set_backend_role():
+    """
+    Mark this process as the backend of the GUI.
+
+    The role decides how a model file is loaded (see env.PROCESS_ROLE): the
+    backend serves every mod and never runs a game script, so it loads the
+    models without touching sys.modules.
+    """
+    from alasio.ext import env
+    env.PROCESS_ROLE = 'backend'
+
+
 @contextlib.asynccontextmanager
 async def lifespan(app):
     """
     A global starlette lifespan
     """
+    # Set here rather than in the process entry: any ASGI server that runs
+    # this app, a manual one included, gets the right role.
+    set_backend_role()
+
     restore_context_cls()
     logger.info('Lifespan start')
     async with trio.open_nursery() as nursery:
