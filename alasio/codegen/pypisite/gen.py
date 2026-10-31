@@ -63,7 +63,12 @@ class PypiSite(HtmlGen):
 
     def Wheel(self, link, with_name=False):
         """
-        Define one wheel of the page.
+        Define one wheel of the page, where the caller puts it.
+
+        The single wheel is written in the order the caller writes the calls:
+        it is the escape hatch for a line the module should not reorder (a
+        hand-written page, a wheel the run wants first). Use Wheels() for a set
+        of wheels: it checks, deduplicates and orders them.
 
         Args:
             link (WheelLink): The wheel to link
@@ -84,9 +89,10 @@ class PypiSite(HtmlGen):
         """
         Define the wheels of the page: checked, deduplicated and sorted.
 
-        The order is fixed by the module (version, then file name; the name
-        first when with_name is True), so two runs of the same links render the
-        same page and a page that did not change is not written again.
+        The order is the one pip resolves a version in (PEP 440): version, then
+        file name, and the name first when with_name is True. The caller's
+        order does not matter, so two runs of the same links render the same
+        page and a page that did not change is not written again.
 
         Args:
             links (Iterable[WheelLink]): The wheels of the page

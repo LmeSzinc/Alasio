@@ -32,12 +32,14 @@ import re
 
 from msgspec import Struct
 
+from alasio.deploy.pip_download._version import InvalidVersion, Version
+
 __all__ = [
     'WheelLink',
     'is_name',
-    'natural_key',
     'normalize_name',
     'prepare_links',
+    'version_key',
 ]
 
 # PEP 503: runs of '-', '_' and '.' are one '-'
@@ -53,9 +55,6 @@ URL_SEPARATORS = '/\\#?'
 
 # The digest pip verifies, the lowercase hex sha256 an index link carries
 SHA256 = re.compile(r'[0-9a-f]{64}')
-
-# A run of digits of a version or of a file name
-DIGITS = re.compile(r'(\d+)')
 
 
 def normalize_name(name):
@@ -85,23 +84,36 @@ def is_name(name):
     return bool(NORMALIZED_NAME.fullmatch(name))
 
 
-def natural_key(text):
+def version_key(version):
     """
-    Sort key of a version or of a file name: the numbers compare as numbers.
+    Sort key of a version: the PEP 440 order, the one pip picks a candidate by.
 
-    The key is not the PEP 440 order: a pre-release sorts after the release it
-    precedes. The order of an index page is not a part of the pip contract, the
-    key only has to be total and stable so two runs render the same page.
+    The implementation is the one the deploy domain vendored from packaging
+    (alasio.deploy.pip_download._version), so the pages order versions with the
+    same rules pip does instead of a rule of their own.
+
+    The obvious key (split the digits and compare them as numbers) gets the
+    common cases right and the interesting ones wrong: it puts '2.0.0rc1' after
+    '2.0.0' and knows nothing about epochs, post releases or local versions.
+    The pages are read next to the versions pip resolves, so they use the same
+    rules.
+
+    A version that is not PEP 440 is not part of any pip candidate set. It sorts
+    after every version that is, by its text, so a page always renders and two
+    runs of the same links still agree.
 
     Args:
-        text (str): Version or file name
+        version (str): Exact version of a distribution
 
     Returns:
-        tuple: Comparable key, the digit runs as ints and the text runs as
-            strings, so '2.9.0' sorts before '2.13.1'
+        tuple: Comparable key, PEP 440 order first and the unparsable text
+            after it
     """
-    return tuple(
-        (1, int(part)) if part.isdigit() else (0, part) for part in DIGITS.split(text) if part)
+    try:
+        parsed = Version(version)
+    except InvalidVersion:
+        return 1, str(version)
+    return 0, parsed._cmpkey
 
 
 class WheelLink(Struct, frozen=True):
@@ -185,7 +197,8 @@ def prepare_links(links, with_name=False, project=''):
 
     A page is written from the places a run read, and the same wheel can be read
     twice; the answer holds it once. The order is fixed here and not by the
-    caller, so two runs of the same links render the same bytes:
+    caller, so two runs of the same links render the same bytes, and it is the
+    order pip resolves a version in (PEP 440, see version_key):
 
     - the page of a distribution (with_name=False) sorts by version, then by
       file name;
@@ -231,7 +244,7 @@ def prepare_links(links, with_name=False, project=''):
                 raise ValueError(
                     f'The page of "{page}" cannot link the wheel of another distribution: '
                     f'"{link.filename}" of "{link.name}"')
-        out.sort(key=lambda link: (natural_key(link.version), link.filename))
+        out.sort(key=lambda link: (version_key(link.version), link.filename))
     else:
-        out.sort(key=lambda link: (link.key, natural_key(link.version), link.filename))
+        out.sort(key=lambda link: (link.key, version_key(link.version), link.filename))
     return out

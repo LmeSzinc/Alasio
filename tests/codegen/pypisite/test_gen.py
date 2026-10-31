@@ -122,6 +122,38 @@ class TestWheelMethods:
         ])
         assert [item.link.filename for item in items] == [FILE_WIN, FILE_PURE]
 
+    def test_wheels_sorted_by_pep440(self):
+        """The versions order the way pip resolves them, a pre-release before its release."""
+        gen = PypiSite()
+        items = gen.Wheels([
+            WheelLink('httpx2', '2.13.1', 'httpx2-2.13.1-py3-none-any.whl'),
+            WheelLink('httpx2', '2.14.0rc1', 'httpx2-2.14.0rc1-py3-none-any.whl'),
+            WheelLink('httpx2', '2.9.0', 'httpx2-2.9.0-py3-none-any.whl'),
+        ])
+        assert [item.link.version for item in items] == ['2.9.0', '2.13.1', '2.14.0rc1']
+
+    def test_wheel_keeps_the_caller_order(self):
+        """The single wheel is written where the caller puts it, no order of its own."""
+        gen = PypiSite()
+        gen.Wheel(WheelLink('httpx2', '2.13.1', 'httpx2-2.13.1-py3-none-any.whl'))
+        gen.Wheel(WheelLink('httpx2', '2.9.0', 'httpx2-2.9.0-py3-none-any.whl'))
+        assert gen.generate_str() == """\
+<a href="2.13.1/httpx2-2.13.1-py3-none-any.whl">httpx2-2.13.1-py3-none-any.whl</a><br>
+<a href="2.9.0/httpx2-2.9.0-py3-none-any.whl">httpx2-2.9.0-py3-none-any.whl</a><br>
+"""
+
+    def test_wheels_of_the_same_links_sort(self):
+        """The same calls through Wheels come out ordered."""
+        gen = PypiSite()
+        gen.Wheels([
+            WheelLink('httpx2', '2.13.1', 'httpx2-2.13.1-py3-none-any.whl'),
+            WheelLink('httpx2', '2.9.0', 'httpx2-2.9.0-py3-none-any.whl'),
+        ])
+        assert gen.generate_str() == """\
+<a href="2.9.0/httpx2-2.9.0-py3-none-any.whl">httpx2-2.9.0-py3-none-any.whl</a><br>
+<a href="2.13.1/httpx2-2.13.1-py3-none-any.whl">httpx2-2.13.1-py3-none-any.whl</a><br>
+"""
+
     def test_wheels_in_a_container(self):
         gen = PypiSite()
         with gen.Div():

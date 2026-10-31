@@ -3,7 +3,7 @@ Tests for the data of a pip index page: the wheel link and the list of them.
 """
 import pytest
 
-from alasio.codegen.pypisite import WheelLink, is_name, natural_key, normalize_name, prepare_links
+from alasio.codegen.pypisite import WheelLink, is_name, normalize_name, prepare_links, version_key
 
 # the digest of a wheel, the shape the fetcher of the pack server records
 DIGEST_A = 'a' * 64
@@ -42,24 +42,57 @@ class TestNormalizeName:
         assert is_name(name) is expected
 
 
-class TestNaturalKey:
+class TestVersionKey:
     @pytest.mark.parametrize('versions', [
         ('2.9.0', '2.13.1'),
         ('2.13.1', '2.13.10'),
         ('1.0', '1.0.1'),
         ('0.9', '1.0'),
     ])
-    def test_order(self, versions):
+    def test_numbers_compare_as_numbers(self, versions):
         """The digit runs compare as numbers, the text order would be wrong."""
         small, big = versions
-        assert natural_key(small) < natural_key(big)
+        assert version_key(small) < version_key(big)
+
+    @pytest.mark.parametrize('versions', [
+        # a pre-release comes before the release it precedes
+        ('2.0.0rc1', '2.0.0'),
+        ('2.0.0a1', '2.0.0b1'),
+        ('2.0.0b1', '2.0.0rc1'),
+        # a dev release comes before every pre-release of the same version
+        ('1.0.dev1', '1.0a1'),
+        # a post release comes after the release
+        ('1.0', '1.0.post1'),
+        # an epoch outranks the release number
+        ('2024.1', '1!0.1'),
+        # a local version comes after the plain one
+        ('1.0', '1.0+local'),
+        ('1.0+abc', '1.0+bcd'),
+    ])
+    def test_pep440_order(self, versions):
+        """The order is the one pip resolves a version in, not the text order."""
+        small, big = versions
+        assert version_key(small) < version_key(big)
 
     def test_equal(self):
-        assert natural_key('2.13.1') == natural_key('2.13.1')
+        assert version_key('2.13.1') == version_key('2.13.1')
+
+    def test_equal_across_spellings(self):
+        """PEP 440 reads '1.0' and '1.0.0' as one version."""
+        assert version_key('1.0') == version_key('1.0.0')
+
+    @pytest.mark.parametrize('version', ['not-a-version', '', '1.0-', 'v1.0x'])
+    def test_unparsable_sorts_last(self, version):
+        """A version pip cannot resolve is not a candidate, it sorts after the rest."""
+        assert version_key('999999999') < version_key(version)
+
+    def test_unparsable_is_total(self):
+        """Two unparsable versions still order by their text, a page always renders."""
+        assert version_key('aaa') < version_key('bbb')
 
     def test_same_prefix(self):
         """A version that is the prefix of another sorts before it."""
-        assert natural_key('1.0') < natural_key('1.0a')
+        assert version_key('1.0') < version_key('1.0.1')
 
 
 class TestWheelLink:
