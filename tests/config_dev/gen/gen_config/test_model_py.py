@@ -1362,20 +1362,35 @@ class Group(a.GroupBase):
     X: int = 1
 """
 
-    @pytest.mark.xfail(strict=True, reason='a group without args has no class, its manual methods are dropped on regeneration')
     def test_methods_of_group_without_args_are_kept(self, fs):
-        """A group without args keeps the manual methods of its class."""
+        """A group without args keeps its class and the manual methods of it."""
         gen = make_generator(fs, yaml="""\
 Mixin:
+Group:
+  args:
+    X: 1
 """, model="""\
 class Mixin:
     def run(self):
         return 1
-""")
-        code = model_code(gen) if gen.model_gen else ''
-        assert 'def run' in code
 
-    @pytest.mark.xfail(strict=True, reason='generate() rewrites the model of the mixin nav and drops its manual base class')
+class Group:
+    def run(self):
+        return 2
+""")
+        assert definitions(model_code(gen)) == """\
+class Mixin(a.GroupBase):
+    def run(self):
+        return 1
+
+
+class Group(a.GroupBase):
+    X: int = 1
+
+    def run(self):
+        return 2
+"""
+
     def test_mixin_nav_model_is_not_generated(self, fs):
         """The model of the mixin nav is manually maintained, like the store nav."""
         gen = make_alasio_generator(fs, nav='mixin', yaml="""\
@@ -1385,7 +1400,7 @@ Future12hMixin:
       dt: datetime
       value: 2020-01-01 00:00:00
 """)
-        fs.create_file(gen.model_file, contents="""\
+        model = """\
 class _FutureMixinBase:
     def limit_future(self, delta):
         return delta
@@ -1394,9 +1409,12 @@ class _FutureMixinBase:
 class Future12hMixin(_FutureMixinBase):
     def post_edit(self, old, edits):
         return self.limit_future(12)
-""")
-        gen.generate()
-        assert '_FutureMixinBase' in gen.model_file.atomic_read_text()
+"""
+        fs.create_file(gen.model_file, contents=model)
+        with logger.mock_capture_writer() as capture:
+            gen.generate()
+        assert capture.concat() == ''
+        assert gen.model_file.atomic_read_text() == model
 
     def test_syntax_error_in_model_file(self, fs):
         """A broken manual method is reported instead of dropped."""

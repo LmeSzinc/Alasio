@@ -89,6 +89,24 @@ class ConfigGenerator(ParseGroups, ParseTasks):
         # group declared in another nav.
         self.cross: "Optional[CrossNavGenerator]" = None
 
+    @cached_property
+    def is_alasio_mixin(self):
+        """
+        This nav is the mixin nav of the alasio entry.
+
+        The mixin nav only declares classes that other groups inherit. Its base
+        classes and methods are written by hand, they can not be derived from
+        {nav}.args.yaml, so {nav}_model.py is maintained by hand. The classes
+        are not shown on the frontend, so the nav has no i18n either.
+
+        Only the alasio entry has a nav named mixin: a mod can not reuse a nav
+        name of alasio, see CrossNavGenerator.dict_nav_config().
+
+        Returns:
+            bool: True for the mixin nav of the alasio entry
+        """
+        return not self.alasio and self.nav_name == 'mixin'
+
     """
     Generate model
     """
@@ -200,7 +218,7 @@ class ConfigGenerator(ParseGroups, ParseTasks):
         Returns:
             CodeGen | None:
         """
-        _ = self.model_methods
+        methods = self.model_methods
         gen = CodeGen()
         # no datetime because we have alias: a.T_DATETIME, a.DEFAULT_TIME
         # gen.Import('datetime').as_('d')
@@ -215,14 +233,15 @@ class ConfigGenerator(ParseGroups, ParseTasks):
             gen.CommentCodeGen('alasio.config_dev.gen_alasio')
 
         # Empty group has no class, so it does not reserve a name either,
-        # unless another group inherits it: the class of the child refers to it
-        # by name, whether the child is in this file or in another nav
+        # unless another group inherits it or it has manual methods: the class
+        # of the child refers to it by name, whether the child is in this file
+        # or in another nav, and the manual methods need a class to live in
         parents = {parent for group in self.groups_data.values() for parent in group.parent}
         for names in self.parent_imports.values():
             parents.update(names)
         groups = [
             (name, g) for name, g in self.groups_data.items()
-            if g.args or name in parents
+            if g.args or name in parents or name in methods
         ]
         used_names = {name for name, _ in groups}
 
@@ -295,9 +314,9 @@ class ConfigGenerator(ParseGroups, ParseTasks):
                     gen.Anno(arg_name, arg.get_anno()).Var(arg.get_value())
 
                 # keep manual methods
-                methods = self.model_methods.get(group_name)
-                if methods:
-                    for method_name, lines in methods.items():
+                group_methods = methods.get(group_name)
+                if group_methods:
+                    for method_name, lines in group_methods.items():
                         with gen.RawDef():
                             for line in lines:
                                 gen.Raw(line, indent=False)
@@ -437,7 +456,7 @@ class ConfigGenerator(ParseGroups, ParseTasks):
                 value: translation
         """
         # No i18n for mixin class, because they won't be shown
-        if self.nav_name == 'mixin':
+        if self.is_alasio_mixin:
             return {}
 
         _ = self._i18n_old
@@ -487,7 +506,9 @@ class ConfigGenerator(ParseGroups, ParseTasks):
                     gitadd.stage_add(file)
 
         # {nav}_model.py
-        if self.model_gen:
+        # The model of the mixin nav is maintained by hand, generating it would
+        # drop the classes without args and the hand-written base classes
+        if not self.is_alasio_mixin and self.model_gen:
             file = self.model_file
             op = self.model_gen.write(file, skip_same=True)
             if op:
