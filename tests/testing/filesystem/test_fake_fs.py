@@ -969,11 +969,14 @@ class TestOsFd:
                 # fsync of a pipe is a successful no-op on windows
                 os.fsync(write_fd)
             else:
-                # the pipe of the process reports EINVAL, only a closed fake
-                # descriptor reports EBADF
+                # the descriptor belongs to the process, so the fake filesystem
+                # passes it to the real os.fsync() and the error is the one the
+                # platform reports for a pipe: EINVAL on linux, ENOTSUP on macos.
+                # EBADF here would mean the fake filesystem claimed a descriptor
+                # it never handed out.
                 with pytest.raises(OSError) as exc_info:
                     os.fsync(write_fd)
-                assert exc_info.value.errno == errno.EINVAL
+                assert exc_info.value.errno in (errno.EINVAL, errno.ENOTSUP)
         finally:
             os.close(read_fd)
             os.close(write_fd)
