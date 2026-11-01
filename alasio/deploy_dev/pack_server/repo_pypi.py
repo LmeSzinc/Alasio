@@ -32,6 +32,10 @@ The pages of a name the run did not publish are removed by the cleanup of the
 run (RepoBase.cleanup), like every other file of the workspace the run did not
 touch: a name that leaves the provided set takes its folder with it.
 
+The step runs with the publication barrier, see repo.Repo.commit(): a page
+lists the wheels of a version, and a client of the previous version must keep
+reading the index of the version it runs until it switches.
+
 Usage:
     from alasio.deploy_dev.pack_server.repo_base import RepoBase
     from alasio.deploy_dev.pack_server.repo_wheel import RepoWheel
@@ -41,6 +45,7 @@ Usage:
     wheel = RepoWheel(base)
     wheel.run()
     pypi = RepoPypi(base, wheel)
+    # after every pack of the version is on the disk, before latest.pack
     pypi.run()
 """
 

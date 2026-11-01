@@ -12,6 +12,8 @@ them: the wheels are the input of the pages, and the git repo is a MockGitRepo
 of a linear chain. The mirror is the MockMirror of the fetch tests.
 """
 
+import pytest
+
 from alasio.deploy_dev.pack_server.repo_base import RepoBase
 from alasio.deploy_dev.pack_server.repo_pypi import RepoPypi
 from alasio.deploy_dev.pack_server.repo_wheel import RepoWheel
@@ -317,16 +319,60 @@ class TestFlatPage:
 class TestFlow:
     """The pages of the flow of repo.Repo."""
 
-    def test_pages_written_by_run(self, fs, run_dir, mirror):
+    def test_pages_written_by_commit(self, fs, run_dir, mirror):
+        """The pages of the index belong to the publication: a run writes them at commit."""
         register_provided_wheels(mirror)
         gen = RepoFlow(make_provided_repo(), make_config(), client=mirror.client)
         with logger.mock_capture_writer():
             gen.run()
 
+        assert not page_file(run_dir, 'index.html').exists()
+        assert not page_file(run_dir, 'httpx', 'index.html').exists()
+
+        with logger.mock_capture_writer():
+            gen.commit()
+
         assert page_file(run_dir, 'index.html').isfile()
         assert page_file(run_dir, 'flat.html').isfile()
         assert page_file(run_dir, 'httpx', 'index.html').isfile()
         assert page_file(run_dir, 'msgspec', 'index.html').isfile()
+
+    def test_failed_run_keeps_the_index_of_the_previous_version(self, fs, run_dir, mirror):
+        """A run that fails keeps serving the version latest.pack names, index included."""
+        register_provided_wheels(mirror)
+        with logger.mock_capture_writer():
+            run_commit(make_provided_repo(), make_config(), mirror.client)
+        index = page_file(run_dir, 'msgspec', 'index.html')
+        before = index.atomic_read_text()
+        assert '0.22.0/' in before
+
+        # the next version publishes another version of msgspec, and the tree
+        # packs of that run fail before the publication
+        mirror.register('msgspec', '0.23.0', tags='cp38-cp38-win_amd64')
+        requirements = {
+            'c1': requirement('httpx==0.27.7'),
+            'c2': requirement('httpx==0.27.8'),
+            'c3': (
+                requirement('httpx==0.28.1')
+                + requirement('msgspec==0.22.0', f'{PROVIDED_URL}/')),
+            'c4': (
+                requirement('httpx==0.28.1')
+                + requirement('msgspec==0.23.0', f'{PROVIDED_URL}/')),
+        }
+        gen = RepoFlow(make_provided_repo(requirements), make_config(), client=mirror.client)
+
+        def fail():
+            raise RuntimeError('the tree packs failed')
+
+        gen.pack.run = fail
+        with logger.mock_capture_writer():
+            with pytest.raises(RuntimeError, match='the tree packs failed'):
+                gen.run()
+
+        # the wheels of the new version are on the disk, the index still lists
+        # the wheels of the version latest.pack names
+        assert join_path(run_dir, WHEEL_ROOT, 'msgspec', '0.23.0').isdir()
+        assert index.atomic_read_text() == before
 
     def test_pages_kept_by_the_cleanup(self, fs, run_dir, mirror):
         """The pages are in the manifest of the run, the cleanup keeps them."""

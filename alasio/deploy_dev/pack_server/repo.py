@@ -13,16 +13,18 @@ on the disk.
        cache `_wheel_cache/{name}/{version}/` and synced to the pip index
        `wheel/{name}/{version}/` (see repo_wheel), the files a client installs
        when it cannot reach the index the pin came from
-    3. the pages of the pip index of that folder are written (see repo_pypi):
-       the simple page of every name, the find-links page of the folder, and
-       the flat page a person reads
-    4. the pure python wheel of every version the dependency packs are built of
+    3. the pure python wheel of every version the dependency packs are built of
        is downloaded to the same cache, and the packs of the dependencies are
        built to `packdep/{name}/{version}/` (see repo_dep): the latest commit
        and the lookback commits alike
-    5. the packs of the repo tree are generated to `packrepo/{commit}/` (see
+    4. the packs of the repo tree are generated to `packrepo/{commit}/` (see
        repo_pack), the full pack of the latest commit carries the dependency
        snapshot of the step above
+    5. the pages of the pip index of the wheel folder are written (see
+       repo_pypi): the simple page of every name, the find-links page of the
+       folder, and the flat page a person reads. They are written with the
+       barrier below, never before: the page of a distribution lists the
+       wheels of the version latest.pack names
     6. latest.pack is written (see repo_latest), the version a client reads:
        the barrier of the run, a client that reads it finds every pack of the
        version on the disk
@@ -30,9 +32,10 @@ on the disk.
        (RepoBase.cleanup()), after the barrier, so a client that still runs the
        previous version keeps working until its next check
 
-A step that fails fails the run: latest.pack keeps naming the previous version,
-and the client keeps running it. The next run starts over, the atomic writes
-never leave a truncated pack at its final path.
+A step that fails fails the run, and steps 5 to 7 do not run: latest.pack keeps
+naming the previous version, its index pages keep listing the wheels of it, and
+the client keeps running it. The next run starts over, the atomic writes never
+leave a truncated pack at its final path.
 
 The repo itself is an input of the flow: the caller clones and fetches it
 (see PackRepo) and passes it in, the flow only reads it.
@@ -44,8 +47,8 @@ Usage:
     gen = Repo(repo, config.data)
     # generate the workspace
     gen.run()
-    # publish the version and clean the workspace, after every pack of the
-    # version is on the disk
+    # write the pip index, publish the version and clean the workspace, after
+    # every pack of the version is on the disk
     gen.commit()
 """
 
@@ -145,15 +148,12 @@ class Repo:
                 f'Provided {count} pin{plural} of "{self.base.workspace.name}": '
                 + ', '.join(f'{name}=={pin.version}' for name, pin in provided))
 
-        # 1. the wheels of the provided pins and the pip index they are
-        # published into
+        # 1. the wheels of the provided pins, the files the index is written of
         self.wheel.run()
-        # 2. the pages of the pip index of the folder
-        self.pypi.run()
-        # 3. the wheels of the dependency packs and the packs themselves, the
+        # 2. the wheels of the dependency packs and the packs themselves, the
         # snapshots go to the tree pack
         self.dep.run()
-        # 4. the packs of the repo tree
+        # 3. the packs of the repo tree
         self.pack.run()
         self._generated = True
 
@@ -161,19 +161,26 @@ class Repo:
         """
         Publish the version and remove the entries the window does not ask for.
 
-        latest.pack is written first: it is the barrier a client switches the
-        version at. Only after it are the leftover packs and wheels removed, so
-        a client that still runs the previous version keeps working until its
-        next check.
+        The pages of the pip index and latest.pack are written first: both are
+        what a client reads, and a client of the previous version must not read
+        an index of this one. The index page of a distribution lists the wheels
+        of the version latest.pack names, so a run that failed before this
+        point leaves both as they were, and the client keeps installing the
+        version it runs.
+
+        Only after them are the leftover packs and wheels removed, so a client
+        that still runs the previous version keeps working until its next
+        check.
 
         Raises:
             RuntimeError: If run() was not called
-            OSError: If latest.pack cannot be written
+            OSError: If a page or latest.pack cannot be written
         """
         if not self._generated:
             raise RuntimeError('Repo.run() must be called before commit()')
-        # the publication barrier, then the cleanup of everything the run did
-        # not touch: a client that reads the new latest.pack finds its packs
+        # the pages of the wheels of the version, then the publication barrier:
+        # a client that reads the new latest.pack finds the index of it too
+        self.pypi.run()
         self.latest.run()
         self.base.cleanup()
         self._generated = False

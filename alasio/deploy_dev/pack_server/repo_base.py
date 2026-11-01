@@ -16,8 +16,10 @@ The generation is the flow of PackRepoModel, one module per step:
 - repo_wheel: steps 4.2 and 5, every wheel of the pins the repo provides,
   downloaded to the same cache and synced to `wheel/{name}/{version}/`, the
   folder a client installs from;
-- repo_pypi: step 3, the pages of the pip index of that folder: the simple page
-  of every name, the find-links page of the folder and the flat page;
+- repo_pypi: the pages of the pip index of that folder: the simple page of
+  every name, the find-links page of the folder and the flat page. The pages
+  are written with latest.pack, never before it: the page of a distribution
+  lists the wheels of the version latest.pack names;
 - repo_pack: step 2, the full pack and the update packs of the repo tree to
   `packrepo/{commit}/`;
 - repo_latest: step 7, `packrepo/latest.pack`, the version a client reads;
