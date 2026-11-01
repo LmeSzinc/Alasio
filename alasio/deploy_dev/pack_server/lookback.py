@@ -53,6 +53,11 @@ class PackRepoLookback:
        stricter restriction wins. Tags are counted from the newest tag.
     3. Commits in AdditionalCommit, all restrictions are ignored.
 
+LookbackConfig.StopCommit is the bottom of the history: the commit it names is
+the oldest lookback version, and every commit older than it is not a lookback
+version, whatever branch or tag it is reached by. The latest commit is never
+bounded by it, it is not a lookback version at all, see latest_commit.
+
     Duplicated commits are removed, lookback_commit is sorted by the commit
     time of the committer, the newest commit first. Commits of the same time
     keep the order of their source: the branches to lookback in the order of
@@ -76,6 +81,38 @@ class PackRepoLookback:
         """
         self.repo = repo
         self.config = config
+
+    @cached_property
+    def stop_time(self):
+        """
+        The time of LookbackConfig.StopCommit, the oldest version to lookback.
+
+        The commit named by StopCommit is the bottom of the lookback: it is the
+        oldest version that is still generated, and every commit older than it
+        is not a lookback version, on any branch. A history is shown as a line
+        in an IDE or on GitHub, and an operator reading that line names the
+        oldest version they still want a pack of.
+
+        The commit itself is kept: the bound is inclusive. The latest commit is
+        not bounded by it, it is the latest version and never a lookback one.
+
+        A commit that does not exist is reported and answered with 0, the way
+        an additional commit that does not exist is skipped: a wrong config
+        regenerates more versions than asked, it does not stop the repo.
+
+        Returns:
+            int: Committer time in unix seconds, 0 for no limit
+        """
+        sha1 = self.config.Lookback.StopCommit
+        if not sha1:
+            return 0
+        commit = self._get_commit(sha1)
+        if commit is None:
+            logger.warning(
+                f'PackRepoLookback: StopCommit {sha1} is not a commit of the repo, '
+                f'the lookback has no bound, repo={self.repo.path}')
+            return 0
+        return commit.committer_time
 
     @cached_property
     def latest_commit(self):
@@ -168,8 +205,9 @@ class PackRepoLookback:
         yielded once.
 
         The walk stops at the first restriction reached: the count of
-        commits, or the day of a commit. Note that the commit the walk starts
-        from is counted too, like the have_lookback of list_commit_have().
+        commits, the day of a commit, or a commit older than StopCommit. Note
+        that the commit the walk starts from is counted too, like the
+        have_lookback of list_commit_have().
 
         Args:
             head (str): Commit sha1 to start from, the head of a branch
@@ -184,6 +222,7 @@ class PackRepoLookback:
         max_day = config.MaxCommitDay
         rule = config.Parent
         min_time = now - max_day * SECONDS_PER_DAY if max_day else 0
+        stop_time = self.stop_time
 
         commit = self._get_commit(head)
         if commit is None:
@@ -205,6 +244,10 @@ class PackRepoLookback:
                 continue
             if min_time and commit.committer_time < min_time:
                 # the queue is ordered by time, the rest are all out of the day limit
+                break
+            if stop_time and commit.committer_time < stop_time:
+                # the queue is ordered by time, the rest are all older than the
+                # bottom of the lookback
                 break
 
             yield sha1, commit
@@ -252,7 +295,8 @@ class PackRepoLookback:
         Tags are sorted by the tagger time, the newest tag first, and are
         limited by the count and the day of the tags. A tag that points to a
         blob / tree instead of a commit is skipped, a nested tag object is
-        resolved to the commit it points to.
+        resolved to the commit it points to. A tag of a commit newer than
+        StopCommit is skipped too, and it does not count towards MaxTagCount.
 
         Args:
             now (int): Current unix timestamp in seconds, the reference of
@@ -265,6 +309,7 @@ class PackRepoLookback:
         max_count = config.MaxTagCount
         max_day = config.MaxTagDay
         min_time = now - max_day * SECONDS_PER_DAY if max_day else 0
+        stop_time = self.stop_time
 
         # read all tags, newest tag first
         list_tag = []
@@ -288,18 +333,26 @@ class PackRepoLookback:
             if min_time and tag.tagger_time < min_time:
                 # tags are sorted by tagger time, the rest are all out of the day limit
                 break
-            count += 1
 
             resolved = self._resolve_commit(tag.object)
             if resolved is None:
                 logger.warning(f'PackRepoLookback: tag "{tag.tag}" does not point to a commit, '
                                f'repo={self.repo.path}')
                 continue
+            if stop_time and resolved[1].committer_time < stop_time:
+                # a tag of a commit older than the bottom of the lookback: the
+                # tag is not ordered by the commit it points to, so the scan
+                # goes on instead of stopping like the commit walk does
+                continue
+            count += 1
             yield resolved
 
     def _iter_additional_commit(self):
         """
         Iter the commits in AdditionalCommit, all lookback restrictions are ignored
+
+        StopCommit bounds the history, and a listed commit is still answered:
+        the operator asked for that version by name.
 
         An additional commit that does not exist in the repo is skipped with
         a warning, so that a wrong config does not stop the whole repo.

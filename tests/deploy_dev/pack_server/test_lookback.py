@@ -61,7 +61,7 @@ def _make_branch(repo, sha1, branch='master'):
 
 
 def _make_config(max_commit_count=0, max_commit_day=0, max_tag_count=0, max_tag_day=0, additional=None,
-                 lookback_branch=None, parent=None):
+                 lookback_branch=None, parent=None, stop_commit=''):
     """
     Build a pack config, every lookback restriction is 0 (no limit) by default.
 
@@ -73,6 +73,7 @@ def _make_config(max_commit_count=0, max_commit_day=0, max_tag_count=0, max_tag_
         additional: LookbackConfig.AdditionalCommit
         lookback_branch: LookbackConfig.LookbackBranch
         parent (str): LookbackConfig.Parent, default to the default of the model
+        stop_commit (str): LookbackConfig.StopCommit, '' for no bound
 
     Returns:
         PackRepoModel: Config
@@ -85,6 +86,7 @@ def _make_config(max_commit_count=0, max_commit_day=0, max_tag_count=0, max_tag_
         LookbackBranch=lookback_branch if lookback_branch is not None else [],
         Parent=parent if parent is not None else LookbackConfig().Parent,
         AdditionalCommit=additional if additional is not None else [],
+        StopCommit=stop_commit,
     ))
 
 
@@ -269,6 +271,102 @@ class TestCommitChain:
         assert capture.concat() == """\
 WARNING | PackRepoLookback: object gone does not exist, repo=
 """
+
+
+class TestStopCommit:
+    """The bottom of the history: a commit older than StopCommit is not a version."""
+
+    def test_older_commits_are_dropped(self):
+        """Every commit older than StopCommit is dropped, the commit itself is kept."""
+        repo = _make_chain([100, 200, 300, 400, 500])
+        lookback = PackRepoLookback(repo, _make_config(stop_commit='c2'))
+        assert lookback.lookback_commit == ['c3', 'c2']
+
+    def test_bound_at_the_latest_commit(self):
+        """A bound at the newest commit leaves no lookback version."""
+        repo = _make_chain([100, 200, 300])
+        lookback = PackRepoLookback(repo, _make_config(stop_commit='c2'))
+        assert lookback.lookback_commit == []
+
+    def test_bound_at_the_root(self):
+        """A bound at the root keeps the whole chain: nothing is older than it."""
+        repo = _make_chain([100, 200, 300])
+        lookback = PackRepoLookback(repo, _make_config(stop_commit='c0'))
+        assert lookback.lookback_commit == ['c1', 'c0']
+
+    def test_bound_above_the_root(self):
+        """The bound is a time, the commits of the same time are kept."""
+        repo = _make_chain([100, 100, 200])
+        lookback = PackRepoLookback(repo, _make_config(stop_commit='c1'))
+        assert lookback.lookback_commit == ['c1', 'c0']
+
+    def test_no_bound(self):
+        """The empty value is no bound."""
+        repo = _make_chain([100, 200, 300])
+        assert PackRepoLookback(repo, _make_config()).lookback_commit == ['c1', 'c0']
+        assert PackRepoLookback(repo, _make_config(stop_commit='')).lookback_commit == ['c1', 'c0']
+
+    def test_max_commit_count_still_applies(self):
+        """The count and the bound are both restrictions, the stricter one wins."""
+        repo = _make_chain([100, 200, 300, 400])
+        # the count cuts at c2, the bound would allow down to c1
+        lookback = PackRepoLookback(repo, _make_config(max_commit_count=2, stop_commit='c1'))
+        assert lookback.lookback_commit == ['c2']
+
+    def test_commit_of_another_branch(self):
+        """The bound is a time, so it holds for every branch of the walk."""
+        repo = _make_chain([100, 200, 300])
+        # a branch whose commits are older than the bound
+        repo.register_commit('f1', parents=['c0'], author_time=50)
+        repo.register_branch('feature', 'f1')
+        lookback = PackRepoLookback(
+            repo, _make_config(stop_commit='c1', lookback_branch=['feature']))
+        assert 'f1' not in lookback.lookback_commit
+        assert lookback.lookback_commit == ['c1']
+
+    def test_tag_of_an_older_commit(self):
+        """A tag of a commit older than the bound names no lookback version."""
+        repo = _make_chain([100, 200, 300, 400])
+        repo.register_tag('v0.1', 'c0')
+        repo.register_tag('v0.2', 'c2')
+        lookback = PackRepoLookback(repo, _make_config(stop_commit='c2'))
+        assert lookback.lookback_commit == ['c2']
+
+    def test_tag_count_skips_the_older_tags(self):
+        """A tag dropped by StopCommit does not use up MaxTagCount."""
+        repo = _make_chain([100, 200, 300])
+        # the newest tag points at the oldest commit, so it is scanned first
+        repo.register_tag_object('tag_old', 'c0', tag='v0.1', tagger_time=500)
+        repo.register_tag('v0.1', 'tag_old')
+        repo.register_tag_object('tag_new', 'c1', tag='v0.2', tagger_time=200)
+        repo.register_tag('v0.2', 'tag_new')
+        lookback = PackRepoLookback(
+            repo, _make_config(max_commit_count=1, max_tag_count=1, stop_commit='c1'))
+        assert lookback.lookback_commit == ['c1']
+
+    def test_additional_commit_is_still_answered(self):
+        """A version listed by name is answered, the operator asked for it."""
+        repo = _make_chain([100, 200, 300, 400])
+        lookback = PackRepoLookback(
+            repo, _make_config(stop_commit='c2', additional=['c0']))
+        # c0 is older than the bound and still a version, c1 is dropped
+        assert 'c0' in lookback.lookback_commit
+        assert 'c1' not in lookback.lookback_commit
+
+    def test_unknown_commit_is_reported(self):
+        """A bound that names no commit of the repo is reported, and not enforced."""
+        repo = _make_chain([100, 200, 300])
+        lookback = PackRepoLookback(repo, _make_config(stop_commit='ff00'))
+        with logger.mock_capture_writer() as capture:
+            assert lookback.lookback_commit == ['c1', 'c0']
+        assert 'does not exist' in capture.concat()
+        assert 'the lookback has no bound' in capture.concat()
+
+    def test_stop_time(self):
+        """The bound is the committer time of the commit, 0 for no bound."""
+        repo = _make_chain([100, 200, 300])
+        assert PackRepoLookback(repo, _make_config(stop_commit='c1')).stop_time == 200
+        assert PackRepoLookback(repo, _make_config()).stop_time == 0
 
 
 class TestLookbackBranch:

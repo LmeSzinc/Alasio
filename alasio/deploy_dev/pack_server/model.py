@@ -67,6 +67,12 @@ class LookbackConfig(Struct):
     AdditionalCommit: Annotated[List[str], Meta(extra={"help": [
         "List of additional commits to lookback, ignoring lookback restrictions",
     ]})] = field(default_factory=list)
+    StopCommit: Annotated[str, Meta(extra={"help": [
+        "Oldest commit to lookback, '' for no limit, example: '6a1f2e0', or full commit sha1",
+        "Every commit older than it is not a lookback version, on any branch. The commit itself is kept.",
+        "It applies to the commits of the branches and of the tags alike,",
+        "so a tag pointing at an older commit is dropped too.",
+    ]})] = ""
 
 
 class PackRepoModel(Struct):
