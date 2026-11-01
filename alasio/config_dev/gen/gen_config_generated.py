@@ -95,8 +95,11 @@ class GenConfigGenerated(GenNavIndex):
         # TYPE_CHECKING block - imports only used for type hints
         with gen.If('t.TYPE_CHECKING'):
             gen.Import('alasio.config.alasio.group_export').as_('alasio').lazy()
-            # Sort nav names for stable output
-            for nav_name, config in self.dict_nav_config.items():
+            # Sort nav names for stable output: the order of dict_nav_config comes
+            # from the nav folders, sorting keeps the file stable when a folder is
+            # added or removed
+            for nav_name in sorted(self.dict_nav_config):
+                config = self.dict_nav_config[nav_name]
                 # from .{nav} import {nav}_model as {nav}
                 gen.FromImport(f'..{config.folder}').Import(f'{nav_name}_model').as_(nav_name).lazy()
 

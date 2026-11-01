@@ -91,8 +91,8 @@ from alasio.config.base import AlasioConfigBase
 from ..const import entry
 
 if t.TYPE_CHECKING:
-    from ..main import main_model as main
     from ..gems import gems_model as gems
+    from ..main import main_model as main
 
 
 # This file was auto-generated, do not modify it manually. To generate:
@@ -147,13 +147,23 @@ Task:
         assert capture.concat() == 'WARNING | No navigation configs found for config_generated.py\n'
         assert gitadd.files == []
 
-    @pytest.mark.xfail(strict=True, reason='the comment says sorted, the imports keep the filesystem order of the navs')
     def test_type_checking_imports_are_sorted(self, fs):
-        """The lazy model imports are sorted by nav name."""
+        """The lazy model imports are sorted by nav name.
+
+        The navs of dict_nav_config come from the folders of the mod, so their
+        order is the order of the filesystem. The imports must not change when
+        a nav folder is added or removed elsewhere, while the class body keeps
+        the order of nav.order.yaml.
+        """
         gen = build(fs)
         code = generated(gen)
-        # the class body is ordered by nav.order.yaml, mains is after gems
-        assert code.index('from ..gems import gems_model') < code.index('from ..main import main_model')
+        imports = [line.strip() for line in code.splitlines() if line.startswith('    from ..')]
+        assert imports == [
+            'from ..gems import gems_model as gems',
+            'from ..main import main_model as main',
+        ]
+        # the class body is still ordered by nav.order.yaml, gems first
+        assert code.index('========== nav: gems') < code.index('========== nav: main')
 
     def test_group_without_args_is_skipped(self, fs):
         """An inforef group has no model, it is not annotated."""
