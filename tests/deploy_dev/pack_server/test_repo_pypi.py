@@ -12,10 +12,12 @@ them: the wheels are the input of the pages, and the git repo is a MockGitRepo
 of a linear chain. The mirror is the MockMirror of the fetch tests.
 """
 
+import re
+
 import pytest
 
 from alasio.deploy_dev.pack_server.repo_base import RepoBase
-from alasio.deploy_dev.pack_server.repo_pypi import RepoPypi
+from alasio.deploy_dev.pack_server.repo_pypi import FLAT_PAGE, RepoPypi
 from alasio.deploy_dev.pack_server.repo_wheel import RepoWheel
 from alasio.logger import logger
 from alasio.testing.filesystem import fs  # noqa: F401
@@ -444,3 +446,101 @@ class TestWheelLinkOfTheRun:
         for (name, version), wheels in gen.wheel.publish_files.items():
             for wheel in wheels:
                 assert (f'{name}/{version}/{wheel.file.name}#sha256={wheel.hashes["sha256"]}') in page
+
+
+class TestPageLayout:
+    """
+    The paths and the links of the pages: the shape a client may rely on.
+
+    A client of the pack server never asks a host to turn a directory into an
+    `index.html`: it asks the file. So the page of a distribution is at
+    `{name}/index.html` and every link inside a page is relative, resolving
+    under the folder of the page; a page that pointed at an absolute url, or
+    walked up with `..`, would leave the folder the static host serves.
+    """
+
+    def test_pages_are_files(self, fs, run_dir, mirror):
+        """Every page the run writes is a file, and it is an index.html or the flat page."""
+        register_provided_wheels(mirror)
+        gen = PypiFlow(make_provided_repo(), client=mirror.client).run()
+
+        for file in gen.pypi.pages:
+            assert file.isfile()
+            assert file.name in ('index.html', FLAT_PAGE)
+
+    def test_per_name_page_is_name_index_html(self, fs, run_dir, mirror):
+        """The page of a distribution is the index.html of its folder, name normalized."""
+        register_provided_wheels(mirror)
+        gen = PypiFlow(make_provided_repo(), client=mirror.client).run()
+
+        for (name, _version) in gen.wheel.publish_files:
+            file = page_file(run_dir, name, 'index.html')
+            assert file in gen.pypi.pages
+            # the name of the folder is the normalized one, the same the client
+            # builds its url from
+            assert file.uppath().name == name
+
+    @pytest.mark.parametrize('file_of', ['index.html', 'flat.html'])
+    def test_links_of_the_folder_page(self, fs, run_dir, mirror, file_of):
+        """A link of the folder page starts at the name and stays below the folder."""
+        register_provided_wheels(mirror)
+        PypiFlow(make_provided_repo(), client=mirror.client).run()
+
+        page = page_file(run_dir, file_of).atomic_read_text()
+        # the anchors of the page itself (#name, #name-version) are not links
+        # to a file, the rest of them are
+        hrefs = [href for href in _hrefs(page) if not href.startswith('#')]
+        assert hrefs
+        for href in hrefs:
+            assert not _is_absolute(href), href
+            assert '..' not in href, href
+            assert href.split('/', 1)[0] in ('httpx', 'msgspec'), href
+
+    def test_links_of_a_per_name_page(self, fs, run_dir, mirror):
+        """A link of the page of a distribution starts at the version of it."""
+        register_provided_wheels(mirror)
+        PypiFlow(make_provided_repo(), client=mirror.client).run()
+
+        page = page_file(run_dir, 'msgspec', 'index.html').atomic_read_text()
+        hrefs = [href for href in _hrefs(page) if not href.startswith('#')]
+        assert hrefs
+        for href in hrefs:
+            assert not _is_absolute(href), href
+            assert '..' not in href, href
+            # {version}/{file}, resolved against {name}/index.html, lands in
+            # {name}/{version}/{file} of the static host
+            assert href.split('/')[0] == '0.22.0', href
+
+    def test_no_page_of_the_folder_is_a_directory(self, fs, run_dir, mirror):
+        """The run writes no page at a path a host would have to map to a file."""
+        register_provided_wheels(mirror)
+        gen = PypiFlow(make_provided_repo(), client=mirror.client).run()
+        for file in gen.pypi.pages:
+            assert file.suffix == '.html'
+            assert not str(file).endswith('/')
+
+
+def _hrefs(page):
+    """
+    The hrefs of a page, escaped entities left as they are.
+
+    Args:
+        page (str): Text of the page
+
+    Returns:
+        list[str]: The values of the href attributes, in the order of the page
+    """
+    return re.findall(r'href="([^"]*)"', page)
+
+
+def _is_absolute(href):
+    """
+    Whether a link names its own scheme or host, so it leaves the folder.
+
+    Args:
+        href (str): Value of an href attribute
+
+    Returns:
+        bool: True for a scheme ('https:'), a host ('//host') or a root ('/')
+    """
+    return ':' in href.split('/', 1)[0] or href.startswith(('/', '//'))

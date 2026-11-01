@@ -671,6 +671,73 @@ class TestProperties:
         assert fetcher.mirrors_text == 'http://a.example/simple, http://b.example/simple'
 
 
+class TestPageUrlShape:
+    """
+    The shape of the page url: the directory of the distribution, never a file.
+
+    PEP 503 names the page of a distribution `{root}/{name}/`, and pip builds
+    every index request that way (`mkurl_pypi_url()` in pip joins the name and
+    appends a trailing slash). A server that only answers an explicit
+    `index.html` is not a pip index at all: pypi.org answers 404 for
+    `/simple/{name}/index.html`, and a mirror that does answer it may answer
+    with something else entirely (a global index of every distribution).
+
+    So the url is a directory, and no request of the flow appends `index.html`
+    to it: `INDEX_FILE` is the name of the local snapshot only.
+    """
+
+    @pytest.mark.parametrize('name', [
+        'httpx',
+        'PyYAML',
+        'opencv-python-headless',
+        'ruamel.yaml',
+        'zope__interface',
+    ])
+    def test_url_is_a_directory(self, root, name):
+        folder = root.joinpath(CACHE_FOLDER).joinpath('a').joinpath('1')
+        url = WheelFetcher(folder, 'http://mirror/simple', name, '1').page_url
+        assert url.startswith('http://mirror/simple/')
+        assert url.endswith('/')
+        assert 'index.html' not in url
+        # the name of the page is one path segment: a name that escapes it
+        # would ask another distribution of the mirror
+        tail = url[len('http://mirror/simple/'):].rstrip('/')
+        assert '/' not in tail
+        assert tail == tail.lower()
+
+    def test_snapshot_name_is_not_the_url(self, make_fetcher):
+        """The snapshot file is index.html, the url it was served at is not."""
+        fetcher = make_fetcher('httpx', '0.28.1')
+        assert fetcher.index_file.name == 'index.html'
+        assert not fetcher.page_url.endswith('index.html')
+
+    def test_one_request_to_the_directory(self, make_fetcher, mirror):
+        """The page of a version costs one request, at the directory form."""
+        mirror.register('httpx', '0.28.1')
+        fetch(make_fetcher('httpx', '0.28.1'))
+        page_requests = [url for url in mirror.requests if not url.endswith('.whl')]
+        assert page_requests == ['http://mirror/httpx/']
+
+    def test_no_request_to_an_index_html(self, make_fetcher, mirror):
+        """Nothing of the flow asks a mirror for an index.html."""
+        mirror.register('httpx', '0.28.1')
+        mirror.register('httpx', '0.28.1', tags='cp38-cp38-win_amd64')
+        fetcher = make_fetcher('httpx', '0.28.1')
+        # both modes read the page and fetch the wheels, the page once
+        fetch_all(fetcher, DOWNLOAD_MODE_PY3_ANY)
+        fetch_all(fetcher, DOWNLOAD_MODE_ALL)
+        assert not [url for url in mirror.requests if 'index.html' in url]
+
+    def test_page_url_of_a_mirror_group(self, root):
+        """Every mirror of a set is asked at the directory form, the first is the base."""
+        folder = root.joinpath(CACHE_FOLDER).joinpath('httpx').joinpath('0.28.1')
+        mirrors = {'cn': {'a': 'http://a.example/simple', 'b': 'http://b.example/simple'}}
+        fetcher = WheelFetcher(folder, mirrors, 'httpx', '0.28.1')
+        for url in fetcher.mirrors.urls.values():
+            assert f'{url}/httpx/'.endswith('/')
+            assert 'index.html' not in url
+
+
 class TestIndexPage:
     """The snapshot of the index page of a version, the slowest request of the flow."""
 
