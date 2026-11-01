@@ -14,10 +14,11 @@ The package has four parts:
   python as a list of versions;
 - obj_flat: the sections, the tables and the contents, plus the registry the
   index and the badges read when the page renders;
-- gen: PypiSiteFlat, the five methods a page is written with.
+- gen: PypiSiteFlat, the five methods a page is written with, and the css sheet
+  it inlines into the head of the page (style.css).
 
 Usage:
-    from alasio.codegen.pypisite.flat import FLAT_STYLE, PypiSiteFlat, WheelLink
+    from alasio.codegen.pypisite.flat import PypiSiteFlat, WheelLink
 
     gen = PypiSiteFlat()
     with gen.Doc('Wheels') as page:
@@ -31,12 +32,10 @@ Usage:
 
 from .gen import PypiSiteFlat, flat_page, flat_site
 from .obj_flat import FlatIndex, FlatProject, FlatRegistry, FlatTableCompiled, FlatTablePure, FlatVersion
-from .style import FLAT_STYLE
 from .table import FlatCell, VersionTable, build_pure_table, build_version
 from .tags import column_key, column_sort_key, is_pure, parse_tags, row_display, row_key, row_sort_key, tag_label
 
 __all__ = [
-    'FLAT_STYLE',
     'FlatCell',
     'FlatIndex',
     'FlatProject',

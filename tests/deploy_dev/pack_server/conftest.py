@@ -4,11 +4,12 @@ Fixtures shared by the tests of the pack server flow.
 The flow of a repo (repo.Repo) writes one workspace in the run directory, and
 its steps read the git repo of the config: every test needs a run directory in
 the fake filesystem, with the builtin .gitattributes of the library next to it
-(the pack encoders resolve the eol of the files with it), and the in-memory
-pypi mirror of the fetch tests.
+(the pack encoders resolve the eol of the files with it), the css sheet the flat
+page inlines, and the in-memory pypi mirror of the fetch tests.
 """
 import pytest
 
+from alasio.codegen.pypisite.flat.gen import STYLE_FILE
 from alasio.deploy_dev.pack_server.repo_base import RepoBase
 from alasio.ext import env
 from alasio.ext.path import PathStr
@@ -19,6 +20,10 @@ from tests.deploy_dev.pack_server.test_fetch_wheel import MockMirror
 # by the run_dir fixture, see GitAttributes
 BUILTIN_GITATTRIBUTES = env.ALASIO_ROOT.joinpath('.gitattributes').atomic_read_bytes()
 
+# the sheet a flat page inlines into its head, read before the fake filesystem
+# replaces the disk, see run_dir
+PAGE_SHEET = PathStr.new(STYLE_FILE).atomic_read_text()
+
 
 @pytest.fixture
 def run_dir(fs, monkeypatch):
@@ -27,7 +32,8 @@ def run_dir(fs, monkeypatch):
 
     env.ALASIO_ROOT points at a folder of its own with the builtin
     .gitattributes of the library, so the pack encoders resolve the eol of the
-    files in the fake filesystem.
+    files in the fake filesystem. The css sheet of the flat page is there too,
+    the generator reads it from the folder of its module when a page is written.
 
     Returns:
         PathStr: Absolute path of the run directory
@@ -38,6 +44,7 @@ def run_dir(fs, monkeypatch):
     fs.create_dir(library)
     fs.create_dir(run)
     fs.create_file(library.joinpath('.gitattributes'), contents=BUILTIN_GITATTRIBUTES)
+    fs.create_file(STYLE_FILE, contents=PAGE_SHEET)
     monkeypatch.setattr(env, 'ALASIO_ROOT', library)
     monkeypatch.setattr(env, 'PROJECT_ROOT', run)
     return run

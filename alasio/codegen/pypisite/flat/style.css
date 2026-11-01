@@ -1,23 +1,3 @@
-"""
-The style sheet of a flat page, written into the head of it.
-
-The page is a single file, so the sheet is inline: a second file would have to
-be published next to it and cached with it, for a page that is one document of
-a folder of wheels. The selectors are the classes the objects of the page write
-(see obj_flat), so the two modules are read together.
-
-Usage:
-    from alasio.codegen.pypisite.flat import FLAT_STYLE
-
-    with gen.Doc('Wheels', head=[Element(gen, 'style', Raw(gen, FLAT_STYLE, indent=False))]):
-        ...
-"""
-
-__all__ = [
-    'FLAT_STYLE',
-]
-
-FLAT_STYLE = """\
 :root { --fg:#1f2328; --muted:#59636e; --faint:#8c959f; --line:#d1d9e0; --soft:#e6eaef;
         --bg:#fff; --head:#f6f8fa; --accent:#0969da; --pure:#dafbe1; --pure-line:#aceebb;
         --pure-fg:#116329; --compiled:#ddf4ff; --compiled-line:#b6e3ff; --compiled-fg:#0550ae;
@@ -74,4 +54,3 @@ table.matrix.pure tbody th { text-align:center; }
 .note { color:var(--muted); font-size:.8rem; margin:.45rem 0 0; }
 footer { margin-top:3rem; padding-top:1rem; border-top:1px solid var(--line); color:var(--faint); font-size:.8rem; }
 @media (max-width:640px) { body { padding:1.25rem .75rem 3rem; } }
-"""

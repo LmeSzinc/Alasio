@@ -44,12 +44,15 @@ Usage:
     flat_page({'httpx2': links}, 'Wheels of Author_Repo_master')
 """
 
+from functools import cached_property
+
 from alasio.codegen.html import Element, Raw
+from alasio.ext.path import PathStr
+from alasio.ext.path.atomic import atomic_read_text
 
 from ..gen import PypiSite
 from ..wheel import normalize_name, split_by_version
 from .obj_flat import FlatIndex, FlatProject, FlatRegistry, FlatTableCompiled, FlatTablePure, FlatVersion
-from .style import FLAT_STYLE
 from .tags import is_pure, parse_tags
 
 __all__ = [
@@ -57,6 +60,12 @@ __all__ = [
     'flat_page',
     'flat_site',
 ]
+
+# The sheet of a flat page, a css file next to this module. The page is a single
+# file a reader opens, so the sheet is inlined into its head instead of being
+# published next to it: the file is the source of the sheet, never a link of a
+# page.
+STYLE_FILE = PathStr.new(__file__).with_name('style.css')
 
 # The line under the heading of a flat page, written by flat_page
 LEDE = ('Every wheel this index provides, one section per distribution. '
@@ -204,6 +213,21 @@ class PypiSiteFlat(PypiSite):
         self._add_item(item)
         return item
 
+    @cached_property
+    def style(self):
+        """
+        The sheet of the page, the css file next to this module.
+
+        The page is a single file a reader opens, so the sheet is inlined into
+        its head: the file is the source of the sheet, never a link of a page.
+        A generator reads the file the first time a page asks for the sheet, and
+        every page it writes shares the text.
+
+        Returns:
+            str: The css text
+        """
+        return atomic_read_text(STYLE_FILE)
+
 
 def _project(gen, name, links, origins):
     """
@@ -280,7 +304,7 @@ def flat_site(projects, title, command=None, lang='en', origins=None):
     """
     origins = {normalize_name(name): value for name, value in (origins or {}).items()}
     gen = PypiSiteFlat()
-    head = [Element(gen, 'style', Raw(gen, FLAT_STYLE, indent=False))]
+    head = [Element(gen, 'style', Raw(gen, gen.style, indent=False))]
     with gen.Doc(title, head=head, lang=lang) as page:
         with page.body():
             with gen.Header():

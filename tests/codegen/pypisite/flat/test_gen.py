@@ -6,18 +6,36 @@ import pytest
 
 from alasio.codegen.html import Element, HtmlGen, Raw
 from alasio.codegen.pypisite import PypiSite, WheelLink
-from alasio.codegen.pypisite.flat import FLAT_STYLE, PypiSiteFlat, flat_page, flat_site
+from alasio.codegen.pypisite.flat import PypiSiteFlat, flat_page, flat_site
+from alasio.codegen.pypisite.flat.gen import STYLE_FILE
+from alasio.ext.path import PathStr
 from alasio.testing.filesystem import fs  # noqa: F401
 
 from .data import DIGEST_A, DIGEST_B, FILE_MAC, FILE_PURE, FILE_WIN
 from .expected import PURE_SECTION, WHEELS_PAGE, page_of
 
+# the sheet of the page, read before the fake filesystem of a test replaces the
+# disk: a test that writes a page creates it in the fake filesystem
+SHEET = PathStr.new(STYLE_FILE).atomic_read_text()
+
 
 class TestStyle:
-    def test_sheet_is_inline(self):
-        """The page is one file: the sheet is a text of the module, not a second file."""
-        assert FLAT_STYLE.startswith(':root {')
-        assert FLAT_STYLE.endswith('}\n')
+    def test_sheet_is_the_css_file(self):
+        """The sheet of the page is the css file of the module, the page inlines it."""
+        assert PypiSiteFlat().style == SHEET
+        assert SHEET.startswith(':root {')
+        assert SHEET.endswith('}\n')
+
+    def test_sheet_is_read_once(self, fs):
+        """The sheet is cached: a page reads the file once, a later change is not seen."""
+        fs.create_file(STYLE_FILE, contents='a { color: red; }\n')
+        gen = PypiSiteFlat()
+        assert gen.style == 'a { color: red; }\n'
+        with open(STYLE_FILE, 'w', encoding='utf-8') as f:
+            f.write('b { color: blue; }\n')
+        assert gen.style == 'a { color: red; }\n'
+        # a generator of its own reads the sheet of the moment it asks for it
+        assert PypiSiteFlat().style == 'b { color: blue; }\n'
 
     def test_pure_table_column(self):
         """The version of a pure table is a label: it centres in the width of the text.
@@ -26,12 +44,16 @@ class TestStyle:
         matrix is the wide column of the platforms. A version is not a platform,
         so the table of the pure wheels takes the two rules back.
         """
-        assert 'table.matrix.pure th:first-child { width:auto;' in FLAT_STYLE
-        assert 'table.matrix.pure tbody th { text-align:center;' in FLAT_STYLE
+        assert """\
+/* the version column of a pure table is a label, not the wide platform column
+   of a matrix: it takes the width of the version and centres it */
+table.matrix.pure th:first-child { width:auto; padding:.3rem .75rem; }
+table.matrix.pure tbody th { text-align:center; }
+""" in SHEET
 
     def test_abi3_mark(self):
         """The mark of a stable abi wheel has a style of its own, in a cell and in the note."""
-        assert '.abi3 {' in FLAT_STYLE
+        assert '.abi3 {' in SHEET
 
 
 class TestFlatPage:
@@ -107,7 +129,7 @@ class TestFlatPage:
     def test_style_in_the_head(self):
         """The page is one file: the sheet goes into the head of the document."""
         gen = PypiSiteFlat()
-        head = [Element(gen, 'style', Raw(gen, FLAT_STYLE, indent=False))]
+        head = [Element(gen, 'style', Raw(gen, gen.style, indent=False))]
         with gen.Doc('Wheels', head=head) as page:
             with page.body():
                 gen.H1('Wheels')
@@ -186,7 +208,7 @@ class TestFlatPageFunction:
     def test_the_same_page_as_the_methods(self):
         """The page of the function is the page a caller composes with the methods."""
         gen = PypiSiteFlat()
-        head = [Element(gen, 'style', Raw(gen, FLAT_STYLE, indent=False))]
+        head = [Element(gen, 'style', Raw(gen, gen.style, indent=False))]
         with gen.Doc('Wheels', head=head) as page:
             with page.body():
                 with gen.Header():
@@ -294,6 +316,8 @@ class TestFlatPageFunction:
         assert gen.generate_str() == flat_page(projects, 'Wheels')
 
     def test_flat_site_written(self, fs):
+        # the page of the test inlines the sheet, the fake filesystem holds it
+        fs.create_file(STYLE_FILE, contents=SHEET)
         projects = {'httpx2': [WheelLink('httpx2', '2.13.1', FILE_WIN)]}
         gen = flat_site(projects, 'Wheels')
         assert gen.write('/wheel/flat.html') is True
