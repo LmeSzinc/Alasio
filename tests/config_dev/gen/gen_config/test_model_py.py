@@ -1416,6 +1416,24 @@ class Future12hMixin(_FutureMixinBase):
         assert capture.concat() == ''
         assert gen.model_file.atomic_read_text() == model
 
+    def test_mixin_nav_model_is_not_removed(self, fs):
+        """The model of the mixin nav survives an empty {nav}.args.yaml.
+
+        The other navs lose the model of a nav whose groups are all removed,
+        the mixin nav keeps its hand-written classes.
+        """
+        gen = make_alasio_generator(fs, nav='mixin', yaml='')
+        model = """\
+class _FutureMixinBase:
+    def limit_future(self, delta):
+        return delta
+"""
+        fs.create_file(gen.model_file, contents=model)
+        with logger.mock_capture_writer() as capture:
+            gen.generate()
+        assert 'Delete file' not in capture.concat()
+        assert gen.model_file.atomic_read_text() == model
+
     def test_syntax_error_in_model_file(self, fs):
         """A broken manual method is reported instead of dropped."""
         gen = make_generator(fs, yaml="""\
@@ -1470,12 +1488,33 @@ Group:
         gen.generate()
         assert not gen.model_file.exists()
 
-    @pytest.mark.xfail(strict=True, reason='a stale model file is left behind when all groups are removed')
     def test_stale_model_file_is_removed(self, fs):
-        """The model of a nav without group is removed."""
+        """The model of a nav whose groups are all removed is deleted."""
         gen = make_generator(fs, yaml="Info:\n", model="class Removed:\n    pass\n")
-        gen.generate()
+        gitadd = GitAddSpy()
+        with logger.mock_capture_writer() as capture:
+            gen.generate(gitadd=gitadd)
+        assert capture.concat() == f"""\
+INFO | Write file {gen.tasks_file}
+INFO | Delete file {gen.model_file}
+INFO | Write file {gen.i18n_file}
+"""
+        assert gitadd.files == [
+            str(gen.tasks_file),
+            str(gen.model_file),
+            str(gen.i18n_file),
+        ]
         assert not gen.model_file.exists()
+
+    def test_absent_stale_model_file_is_not_reported(self, fs):
+        """A nav without groups and without a previous model deletes nothing."""
+        gen = make_generator(fs, yaml="Info:\n")
+        with logger.mock_capture_writer() as capture:
+            gen.generate()
+        assert capture.concat() == f"""\
+INFO | Write file {gen.tasks_file}
+INFO | Write file {gen.i18n_file}
+"""
 
 
 class TestGeneratedCode:

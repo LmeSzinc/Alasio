@@ -490,6 +490,37 @@ class ConfigGenerator(ParseGroups, ParseTasks):
     Generate all
     """
 
+    @staticmethod
+    def _remove_stale(file, gitadd=None):
+        """
+        Remove a generated file that has nothing to generate anymore.
+
+        A nav whose groups are all removed does not keep the file of the
+        previous generation: a stale translation or a model class of a group
+        that no longer exists would mislead the next reader, and the model
+        class may still be imported by file name.
+
+        The file is removed with a plain unlink: the generator owns its output,
+        nothing reads or replaces it while the generation runs, so the retries
+        atomic_remove() does for a concurrent writer are not needed. The return
+        value tells whether there was a file to remove, so no existence check
+        is done beforehand.
+
+        Args:
+            file (PathStr): File to remove
+            gitadd (GitAdd, optional): Tracks the removed file
+
+        Returns:
+            bool: True if the file was removed
+        """
+        if not file.file_remove():
+            # no such file, nothing to delete
+            return False
+        logger.info(f'Delete file {file}')
+        if gitadd:
+            gitadd.stage_add(file)
+        return True
+
     def generate(self, gitadd=None):
         """
         Generate configs and msgspec models
@@ -508,15 +539,20 @@ class ConfigGenerator(ParseGroups, ParseTasks):
                     gitadd.stage_add(file)
 
         # {nav}_model.py
-        # The model of the mixin nav is maintained by hand, generating it would
-        # drop the classes without args and the hand-written base classes
-        if not self.is_alasio_mixin and self.model_gen:
-            file = self.model_file
-            op = self.model_gen.write(file, skip_same=True)
-            if op:
-                logger.info(f'Write file {file}')
-                if gitadd:
-                    gitadd.stage_add(file)
+        # The model of the mixin nav is maintained by hand: generating it would
+        # drop the classes without args and the hand-written base classes, and
+        # it is never removed either, whatever its groups are
+        if not self.is_alasio_mixin:
+            if self.model_gen:
+                file = self.model_file
+                op = self.model_gen.write(file, skip_same=True)
+                if op:
+                    logger.info(f'Write file {file}')
+                    if gitadd:
+                        gitadd.stage_add(file)
+            else:
+                # no class to generate, the model of the previous generation is stale
+                self._remove_stale(self.model_file, gitadd)
 
         # {nav}_i18n.json
         if self.i18n_data:
@@ -526,6 +562,9 @@ class ConfigGenerator(ParseGroups, ParseTasks):
                 logger.info(f'Write file {file}')
                 if gitadd:
                     gitadd.stage_add(file)
+        else:
+            # nothing to translate, the i18n of the previous generation is stale
+            self._remove_stale(self.i18n_file, gitadd)
 
         # format yaml
         op = format_yaml(self.file, yaml_formatter)

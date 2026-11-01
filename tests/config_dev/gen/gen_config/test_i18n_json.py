@@ -8,8 +8,6 @@ to the default is written inline, so an untranslated file stays compact.
 
 import json
 
-import pytest
-
 from alasio.config_dev.parse.load_alas_i18n import LoadAlasI18n
 from alasio.ext.file.jsonfile import NoIndent, json_dumps_custom_indent
 from alasio.ext.path.calc import joinpath
@@ -586,13 +584,49 @@ Group:
         gen.generate()
         assert not gen.i18n_file.exists()
 
-    @pytest.mark.xfail(strict=True, reason='a stale i18n file is left behind when all groups are removed')
     def test_stale_i18n_file_is_removed(self, fs):
-        """The i18n of a nav without group is removed."""
+        """The i18n of a nav whose groups are all removed is deleted."""
         gen = make_generator(
             fs, yaml="", i18n={'Removed': {'_info': {'zh-CN': {'name': 'x'}}}})
-        gen.generate()
+        gitadd = GitAddSpy()
+        with logger.mock_capture_writer() as capture:
+            gen.generate(gitadd=gitadd)
+        assert capture.concat() == f"""\
+INFO | Write file {gen.tasks_file}
+INFO | Delete file {gen.i18n_file}
+"""
+        assert gitadd.files == [str(gen.tasks_file), str(gen.i18n_file)]
         assert not gen.i18n_file.exists()
+
+    def test_stale_i18n_file_is_kept_when_a_group_needs_a_model(self, fs):
+        """Only the stale file of a nav is deleted: the other one is rewritten."""
+        gen = make_generator(fs, yaml="""\
+Base:
+  args:
+    X: 1
+
+Variant:
+  parent: Base
+""", i18n={
+            'Removed': {'_info': {'zh-CN': {'name': 'x'}}},
+            'Base': {'_info': {'zh-CN': {'name': 'base'}}},
+        })
+        gen.generate()
+        # the nav still has a model, and only the groups of it are translated
+        assert gen.model_file.exists()
+        assert gen.i18n_file.atomic_read_text() == """\
+{
+  "Base": {
+    "_info": {
+      "zh-CN": {"name": "base", "help": ""},
+      "en-US": {"name": "Base", "help": ""}
+    },
+    "X": {
+      "zh-CN": {"name": "Base.X", "help": ""},
+      "en-US": {"name": "Base.X", "help": ""}
+    }
+  }
+}"""
 
     def test_multiline_group_name_is_formatted(self, fs):
         """A multi-line group name is written as a list of lines.

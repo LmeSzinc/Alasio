@@ -49,3 +49,23 @@ class TestModelIndex:
         gen = build(fs, {'main': 'Campaign:\n  args:\n    Name: main\n'})
         assert gen.dict_nav_config['main'].model_file.exists()
         assert list(gen.model_index_data) == ['main/main_model.py']
+
+    def test_removed_nav_leaves_the_plan(self, fs):
+        """A nav whose groups are all removed leaves the plan with its model.
+
+        The files of a previous generation are written by hand here: a stale
+        model file, its i18n and the plan that listed it.
+        """
+        folder = nav_dir(fs, 'main')
+        fs.create_file(joinpath(folder, 'main.args.yaml'), contents='Info:\n')
+        fs.create_file(joinpath(folder, 'main_model.py'), contents='class Removed:\n    pass\n')
+        fs.create_file(joinpath(folder, 'main_i18n.json'), contents='{"Removed": {"_info": {}}}')
+        gen = IndexGenerator(make_entry(fs))
+        fs.create_file(gen.model_index_file, contents='{"main/main_model.py": {}}')
+
+        gen._generate()
+
+        # the model of a nav without a class is stale, so the plan has no entry
+        # left either: a plan listing a deleted file would be a broken import
+        assert not gen.dict_nav_config['main'].model_file.exists()
+        assert not gen.model_index_file.exists()
