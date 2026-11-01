@@ -451,6 +451,7 @@ jobs:
       # the normal state of a fix commit and releases nothing. The release
       # workflow never creates a tag, it only publishes the one found here.
       - name: Tag the built version
+        id: tag
         if: github.ref == 'refs/heads/master'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -478,8 +479,28 @@ jobs:
             gh api -X POST "repos/{owner}/{repo}/git/refs" \
               -f ref="refs/tags/$tag" -f sha="$sha" > /dev/null
             echo "Tagged $tag at $sha"
+            echo "publish=true" >> "$GITHUB_OUTPUT"
           elif [ "$existing" = "$sha" ]; then
             echo "$tag already points to $sha"
+            echo "publish=true" >> "$GITHUB_OUTPUT"
           else
             echo "::notice::$tag already points to $existing, the version was not bumped, nothing is released"
+            echo "publish=false" >> "$GITHUB_OUTPUT"
           fi
+
+      # Publishing is the continuation of this run, not a second run of the
+      # same checks: the artifacts only leave for pypi when this run tagged its
+      # own version. repository_dispatch is one of the two events a
+      # GITHUB_TOKEN may create, which is what makes the hand-off possible
+      # without a deploy key. A commit that did not bump the version stays a
+      # single run in the actions list instead of adding a skipped one.
+      - name: Trigger the release
+        if: steps.tag.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh api -X POST "repos/{owner}/{repo}/dispatches" --input - <<JSON
+          {"event_type": "alasio-release", "client_payload": {"run_id": "${{ github.run_id }}"}}
+          JSON

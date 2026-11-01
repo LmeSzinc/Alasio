@@ -5,12 +5,15 @@ name: Release
 # version it built; this workflow downloads that very artifact and publishes
 # it, so the files on pypi are the files the test matrix passed. Nothing is
 # rebuilt here, and no tag is created here: the tag is the release signal.
+#
+# CI dispatches this only after it tagged a version, so a commit that did not
+# bump the version produces no run here at all, not an empty one. A
+# repository_dispatch is one of the two events a GITHUB_TOKEN may create, which
+# is why the hand-off needs no deploy key and no personal token.
 
 on:
-  workflow_run:
-    workflows: [CI]
-    types: [completed]
-    branches: [master]
+  repository_dispatch:
+    types: [alasio-release]
   workflow_dispatch:
     inputs:
       run_id:
@@ -35,13 +38,9 @@ env:
 jobs:
   release:
     name: release
-    # A failed or cancelled CI run publishes nothing. A manual dispatch may
-    # pick any run, but it still has to be a successful one, which the first
-    # step checks.
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (github.event.workflow_run.conclusion == 'success' &&
-       github.event.workflow_run.event == 'push')
+    # A failed or cancelled CI run publishes nothing: CI dispatches only from a
+    # green run, and the first step re-checks the conclusion of the run it was
+    # asked to publish, which is what keeps a manual dispatch honest too.
     runs-on: ubuntu-22.04
     timeout-minutes: 20
     permissions:
@@ -59,7 +58,9 @@ jobs:
       - name: Resolve the CI run
         id: run
         env:
-          RUN_ID: ${{ github.event.workflow_run.id || github.event.inputs.run_id }}
+          # the dispatch carries the run that tagged the version, so the id is
+          # already the right one; only a manual run has to look it up
+          RUN_ID: ${{ github.event.client_payload.run_id || github.event.inputs.run_id }}
         run: |
           set -euo pipefail
           run_id="${RUN_ID:-}"
