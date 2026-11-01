@@ -136,6 +136,14 @@ class TestNavIndexData:
         # a nav without translation falls back to its name
         assert gen.nav_index_data['gems']['_info']['i18n'] == {'zh-CN': 'gems', 'en-US': 'gems'}
 
+    def test_multiline_nav_info_is_kept(self, fs):
+        """A nav name with multiple lines is a list, the generation keeps it."""
+        gen = build(fs, index={'main': {'_info': {'i18n': {'zh-CN': ['主界面', '主线'], 'en-US': 'Main'}}}})
+        assert gen.nav_index_data['main']['_info']['i18n'] == {
+            'zh-CN': ['主界面', '主线'],
+            'en-US': 'Main',
+        }
+
     def test_task_without_display_has_no_nav_info(self, fs):
         """A nav of tasks without a card is not listed as a nav entry."""
         gen = build(fs, navs={'main': """\
