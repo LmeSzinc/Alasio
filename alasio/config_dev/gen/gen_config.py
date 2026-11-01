@@ -429,11 +429,13 @@ class ConfigGenerator(ParseGroups, ParseTasks):
         new = {}
         for lang in self.entry.gui_language:
             # name, name must not be empty, default to {group_name}
+            # a name may have multiple lines, like help, so it is formatted
+            # rather than converted to a str
             key = [lang, 'name']
             value = deep_get(old, key, default='')
             if not value:
                 value = group_name
-            deep_set(new, key, str(value))
+            deep_set(new, key, format_i18n(value))
             # help, help can be empty
             key = [lang, 'help']
             value = deep_get(old, key, default='')

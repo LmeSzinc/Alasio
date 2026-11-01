@@ -22,9 +22,9 @@ class GenNavIndex(CrossNavGenerator):
     def dict_group_name_i18n(self):
         """
         Returns:
-            dict[str, dict[str, str]]:
+            dict[str, dict[str, str | list[str]]]:
                 key: {group_name}.{lang}
-                value: translation
+                value: translation, a list of lines if the name has multiple lines
         """
         out = {}
 

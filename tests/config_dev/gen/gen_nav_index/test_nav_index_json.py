@@ -12,8 +12,9 @@ import pytest
 from alasio.config_dev.gen.gen_nav_index import GenNavIndex
 from alasio.config_dev.parse.base import DefinitionError
 from alasio.ext.file.jsonfile import json_dumps_custom_indent
+from alasio.ext.path.calc import joinpath
 from alasio.testing.filesystem import fs  # noqa: F401
-from tests.config_dev.gen.helpers import make_cross
+from tests.config_dev.gen.helpers import make_cross, nav_dir
 
 NAVS = {
     'main': """\
@@ -51,7 +52,7 @@ GemsFarming:
 }
 
 
-def build(fs, navs=NAVS, tasks=TASKS, index=None):
+def build(fs, navs=NAVS, tasks=TASKS, index=None, i18n=None):
     """
     Build a GenNavIndex with the cards of every nav generated.
 
@@ -60,6 +61,7 @@ def build(fs, navs=NAVS, tasks=TASKS, index=None):
         navs (dict[str, str]): key: nav name, value of {nav}.args.yaml
         tasks (dict[str, str]): key: nav name, value of {nav}.tasks.yaml
         index (dict, optional): Content of the existing nav.index.json
+        i18n (dict[str, dict], optional): key: nav name, value of {nav}_i18n.json
 
     Returns:
         GenNavIndex:
@@ -67,6 +69,10 @@ def build(fs, navs=NAVS, tasks=TASKS, index=None):
     gen = make_cross(fs, navs, tasks, GenNavIndex)
     if index is not None:
         fs.create_file(gen.nav_index_file, contents=json.dumps(index, ensure_ascii=False))
+    for nav, data in (i18n or {}).items():
+        fs.create_file(
+            joinpath(nav_dir(fs, nav), f'{nav}_i18n.json'),
+            contents=json.dumps(data, ensure_ascii=False))
     for nav in gen.dict_nav_config.values():
         gen._generate_nav_config_json(nav)
     return gen
@@ -114,6 +120,14 @@ class TestNavIndexData:
         gen = build(fs)
         assert gen.nav_index_data['main']['card-Farming-Campaign']['scheduler'] is True
         assert 'scheduler' not in gen.nav_index_data['gems']['card-GemsFarming-GemsCampaign']
+
+    def test_multiline_card_name(self, fs):
+        """A card of a group named with multiple lines lists them, not a str repr."""
+        gen = build(fs, i18n={'main': {'Campaign': {'_info': {'zh-CN': {'name': ['the name', 'the subtitle']}}}}})
+        assert gen.nav_index_data['main']['card-Farming-Campaign']['i18n'] == {
+            'zh-CN': ['the name', 'the subtitle'],
+            'en-US': 'Campaign',
+        }
 
     def test_existing_nav_info_is_kept(self, fs):
         """The manual translation of a nav name survives the generation."""

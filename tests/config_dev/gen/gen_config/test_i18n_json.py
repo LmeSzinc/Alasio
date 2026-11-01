@@ -594,11 +594,42 @@ Group:
         gen.generate()
         assert not gen.i18n_file.exists()
 
-    @pytest.mark.xfail(strict=True, reason='a multi-line group name is converted with str(), the file contains a python list repr')
     def test_multiline_group_name_is_formatted(self, fs):
-        """A multi-line group name is written as a list of lines."""
+        """A multi-line group name is written as a list of lines.
+
+        The name of a group and the name of an arg are both translated text, so
+        both may have multiple lines and are formatted the same way. str() of
+        the name would write the repr of a python list instead.
+        """
         gen = make_generator(
-            fs, yaml="Info:\n",
-            i18n={'Info': {'_info': {'zh-CN': {'name': ['line1', 'line2']}}}},
+            fs, yaml="Info:\n\nGroup:\n  args:\n    Mode: normal\n",
+            i18n={
+                'Info': {'_info': {'zh-CN': {'name': ['line1', 'line2']}}},
+                'Group': {
+                    '_info': {'zh-CN': {'name': 'one line', 'help': ['help1', 'help2']}},
+                    'Mode': {'zh-CN': {'name': ['arg1', 'arg2']}},
+                },
+            },
             languages=('zh-CN',))
-        assert gen.i18n_data['Info']['_info']['zh-CN']['name'] == ['line1', 'line2']
+        assert i18n_text(gen.i18n_data) == """\
+{
+  "Info": {
+    "_info": {
+      "zh-CN": {"name": ["line1", "line2"], "help": ""}
+    }
+  },
+  "Group": {
+    "_info": {
+      "zh-CN": {
+        "name": "one line",
+        "help": [
+          "help1",
+          "help2"
+        ]
+      }
+    },
+    "Mode": {
+      "zh-CN": {"name": ["arg1", "arg2"], "help": ""}
+    }
+  }
+}"""
