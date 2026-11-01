@@ -3,6 +3,7 @@ Tests for alasio/testing/filesystem/fake_fs.py.
 
 The FakeFilesystem class and the mocked os / builtins functions.
 """
+import _io
 import builtins
 import errno
 import io
@@ -11,7 +12,6 @@ import stat as statmod
 import subprocess
 import sys
 
-import _io
 import pytest
 
 from alasio.ext.path import PathStr
@@ -961,6 +961,29 @@ class TestOsFd:
         with pytest.raises(OSError):
             os.fsync(fd)
 
+    def test_os_fsync_of_a_process_fd(self, fs):
+        """A descriptor of the process is synced for real, not as a fake fd."""
+        read_fd, write_fd = os.pipe()
+        try:
+            if FS_IS_WINDOWS:
+                # fsync of a pipe is a successful no-op on windows
+                os.fsync(write_fd)
+            else:
+                # the pipe of the process reports EINVAL, only a closed fake
+                # descriptor reports EBADF
+                with pytest.raises(OSError) as exc_info:
+                    os.fsync(write_fd)
+                assert exc_info.value.errno == errno.EINVAL
+        finally:
+            os.close(read_fd)
+            os.close(write_fd)
+
+    def test_os_fsync_of_an_unhandled_fake_fd(self, fs):
+        """A number the filesystem never handed out is treated as a closed fake fd."""
+        with pytest.raises(OSError) as exc_info:
+            os.fsync(FD_BASE)
+        assert exc_info.value.errno == errno.EBADF
+
     def test_os_fstat(self, fs):
         """os.fstat() should return the stat of the open file."""
         fd = os.open(join(fs, 'a.bin'), os.O_CREAT | os.O_WRONLY, 0o600)
@@ -971,6 +994,34 @@ class TestOsFd:
         os.close(fd)
         with pytest.raises(OSError):
             os.fstat(fd)
+
+    def test_os_fstat_of_a_process_fd(self, fs):
+        """
+        A descriptor of the process is stated for real.
+
+        pytest's capture stats its own temp file with os.fstat() between two
+        tests, a fake EBADF there breaks every test that follows.
+        """
+        read_fd, write_fd = os.pipe()
+        try:
+            write_stat = os.fstat(write_fd)
+            read_stat = os.fstat(read_fd)
+            # windows reports every pipe with the same padding record, the
+            # type bit of a POSIX pipe is the one the real os reports
+            if FS_IS_WINDOWS:
+                assert write_stat == read_stat
+            else:
+                assert statmod.S_ISFIFO(write_stat.st_mode)
+                assert statmod.S_ISFIFO(read_stat.st_mode)
+        finally:
+            os.close(read_fd)
+            os.close(write_fd)
+
+    def test_os_fstat_of_an_unhandled_fake_fd(self, fs):
+        """A number the filesystem never handed out is treated as a closed fake fd."""
+        with pytest.raises(OSError) as exc_info:
+            os.fstat(FD_BASE)
+        assert exc_info.value.errno == errno.EBADF
 
 
 class TestSubprocess:

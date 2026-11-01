@@ -2,6 +2,7 @@
 The FakeFilesystem class: an in-memory filesystem and the mock of the
 os / builtins file functions.
 """
+import _io
 import builtins
 import contextlib
 import errno
@@ -9,8 +10,6 @@ import io
 import os
 import time
 from threading import RLock
-
-import _io
 
 from alasio.ext.path.calc import joinpath
 
@@ -27,13 +26,17 @@ except AttributeError:
 
 # File descriptors of the fake filesystem start above the descriptors of the
 # process: a descriptor the filesystem did not hand out belongs to the
-# process, open(), os.close() and os.write() serve it for real (POSIX
-# subprocess.Popen() wraps, writes and closes its pipes with all three), and
-# a fake number is never mistaken for a real one
+# process, open(), os.close(), os.write(), os.fsync() and os.fstat() serve it
+# for real (POSIX subprocess.Popen() writes and closes its pipes with the
+# first three, pytest's capture stats its own temp file between two tests),
+# and a fake number is never mistaken for a real one
 FD_BASE = 1000
-# The real open / os.close / os.write, the fake filesystem patches them
+# The real open / os.close / os.write / os.fsync / os.fstat, the fake
+# filesystem patches them, so they are bound before any patch can be made
 _platform_open = builtins.open
 _platform_close = os.close
+_platform_fstat = os.fstat
+_platform_fsync = os.fsync
 _platform_write = os.write
 
 
@@ -57,6 +60,13 @@ class FakeFilesystem:
     - os.utime / chmod / getcwd / chdir
 
     Everything is served from memory, the real disk is never touched.
+
+    A descriptor the filesystem did not hand out belongs to the process:
+    open(fd) and os.write / os.close / os.fsync / os.fstat serve it with the
+    real functions, so the pipes of a subprocess, the capture file of pytest
+    and every other handle of the interpreter keep working while the
+    filesystem is active. A number above FD_BASE that the filesystem no
+    longer holds is a closed file of it and raises EBADF.
 
     open() and os.open() follow the real os: a file is only created when
     its parent directory exists, a missing parent raises FileNotFoundError
@@ -1301,24 +1311,36 @@ class FakeFilesystem:
     @synchronized
     def os_fsync(self, fd):
         """
-        Mock of os.fsync(), a no-op because content is already in memory.
+        Mock of os.fsync().
+
+        The content of a file of the fake filesystem is already in memory, so
+        syncing it is a no-op. A descriptor the fake filesystem did not hand
+        out belongs to the process, it is synced for real.
 
         Args:
-            fd (int): Fake file descriptor
+            fd (int): Fake file descriptor, or a descriptor of the process
 
         Raises:
             OSError: If the fd is not open
         """
-        if fd not in self._fds:
+        if fd in self._fds:
+            return
+        if isinstance(fd, int) and fd >= FD_BASE:
+            # A descriptor of the fake filesystem that is already closed
             raise OSError(errno.EBADF, 'Bad file descriptor')
+        _platform_fsync(fd)
 
     @synchronized
     def os_fstat(self, fd):
         """
         Mock of os.fstat().
 
+        A descriptor the fake filesystem did not hand out belongs to the
+        process, e.g. the capture file pytest stats between two tests, it is
+        stated for real.
+
         Args:
-            fd (int): Fake file descriptor
+            fd (int): Fake file descriptor, or a descriptor of the process
 
         Returns:
             os.stat_result: Stat result of the open file
@@ -1327,9 +1349,12 @@ class FakeFilesystem:
             OSError: If the fd is not open
         """
         fobj = self._fds.get(fd)
-        if fobj is None:
+        if fobj is not None:
+            return fobj._entry.stat()
+        if isinstance(fd, int) and fd >= FD_BASE:
+            # A descriptor of the fake filesystem that is already closed
             raise OSError(errno.EBADF, 'Bad file descriptor')
-        return fobj._entry.stat()
+        return _platform_fstat(fd)
 
     """
     Other os functions
