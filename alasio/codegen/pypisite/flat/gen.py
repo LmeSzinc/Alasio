@@ -55,6 +55,7 @@ from .tags import is_pure, parse_tags
 __all__ = [
     'PypiSiteFlat',
     'flat_page',
+    'flat_site',
 ]
 
 # The line under the heading of a flat page, written by flat_page
@@ -245,14 +246,17 @@ def _project(gen, name, links, origins):
             gen.WheelTablePurePython(pure, origins=pure_origins)
 
 
-def flat_page(projects, title, command=None, lang='en', origins=None):
+def flat_site(projects, title, command=None, lang='en', origins=None):
     """
-    Render a whole flat page of a folder of wheels as a text.
+    Build a whole flat page of a folder of wheels: the generator of it.
 
     The page is the one a reader opens: a heading, the index of the projects, a
     section a project, and the footer. The tables of the page are the ones the
     methods above write, so the page of this function and the page a caller
-    composes with them are the same page.
+    composes with them are the same page. The generator is the page, so a caller
+    that writes it to a file writes only when the page changed:
+
+        flat_site(projects, title).write('wheel/flat.html')
 
     Args:
         projects (dict[str, Iterable[WheelLink]]): {name: the wheels of it}. The
@@ -267,7 +271,7 @@ def flat_page(projects, title, command=None, lang='en', origins=None):
             no version names a source
 
     Returns:
-        str: The page
+        PypiSiteFlat: The generator of the page
 
     Raises:
         ValueError: If a link is not a WheelLink, if a name is not a
@@ -291,4 +295,28 @@ def flat_page(projects, title, command=None, lang='en', origins=None):
                     _project(gen, name, links, origins.get(normalize_name(name)) or {})
             with gen.Footer():
                 gen.P(FOOTER).wrap('inline')
-    return gen.generate_str()
+    return gen
+
+
+def flat_page(projects, title, command=None, lang='en', origins=None):
+    """
+    Render a whole flat page of a folder of wheels as a text.
+
+    Args:
+        projects (dict[str, Iterable[WheelLink]]): {name: the wheels of it}, see
+            flat_site
+        title (str): Title and heading of the page, escaped
+        command (str, optional): Command a reader copies. Defaults to None
+        lang (str): Language of the page. Defaults to 'en'
+        origins (dict, optional): {name: {version: (text, url)}}. Defaults to
+            None, no version names a source
+
+    Returns:
+        str: The page
+
+    Raises:
+        ValueError: If a link is not a WheelLink, if a name is not a
+            distribution name, or if an origin names a version a project does
+            not have
+    """
+    return flat_site(projects, title, command=command, lang=lang, origins=origins).generate_str()

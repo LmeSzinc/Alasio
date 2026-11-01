@@ -29,7 +29,7 @@ Usage:
     gen.generate_str()
 """
 
-from .gen import PypiSiteFlat, flat_page
+from .gen import PypiSiteFlat, flat_page, flat_site
 from .obj_flat import FlatIndex, FlatProject, FlatRegistry, FlatTableCompiled, FlatTablePure, FlatVersion
 from .style import FLAT_STYLE
 from .table import FlatCell, VersionTable, build_pure_table, build_version
@@ -51,6 +51,7 @@ __all__ = [
     'column_key',
     'column_sort_key',
     'flat_page',
+    'flat_site',
     'is_pure',
     'parse_tags',
     'row_display',

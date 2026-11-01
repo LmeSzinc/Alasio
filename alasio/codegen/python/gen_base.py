@@ -1,13 +1,13 @@
+from alasio.codegen.gen_base import GenBase
 from alasio.codegen.python.libscan import EnvLibraryScanner, ModuleType
 from alasio.codegen.python.obj_class import *
 from alasio.codegen.python.obj_closure import *
 from alasio.codegen.python.obj_import import *
 from alasio.ext import env
 from alasio.ext.cache import cached_property
-from alasio.ext.path.atomic import atomic_read_text, atomic_write
 
 
-class CodeGenBase(AutoBlankLineMixin, ClosureObject):
+class CodeGenBase(AutoBlankLineMixin, ClosureObject, GenBase):
     """
     A python code generator
     """
@@ -275,33 +275,4 @@ class CodeGenBase(AutoBlankLineMixin, ClosureObject):
                     and CodeGenBase._is_empty_object(sub_item):
                 continue
             return False
-        return True
-
-    def write(self, file='', gitadd=None, skip_same=True):
-        """
-        Write generated code to file
-
-        Args:
-            file (str):
-            gitadd (GitAdd): Input a GitAdd object to track the generated files
-            skip_same (bool):
-                True to skip writing if existing content is the same as content to write.
-                This would reduce disk write but add disk read
-
-        Returns:
-            bool: if write
-        """
-        data = self.generate_str()
-        if skip_same:
-            try:
-                old = atomic_read_text(file)
-                old = old.replace('\r\n', '\n')
-                if data == old:
-                    return False
-            except FileNotFoundError:
-                pass
-
-        atomic_write(file, data)
-        if gitadd:
-            gitadd.stage_add(file)
         return True

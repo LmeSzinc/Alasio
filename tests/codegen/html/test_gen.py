@@ -3,17 +3,26 @@ Tests for the generator: the tag methods, the rendering and the write.
 """
 import pytest
 
-import alasio.codegen.html.gen_base as gen_base_module
-import alasio.codegen.html.write as write_module
+import alasio.codegen.gen_base as file_module
 from alasio.codegen.html import TAG_TABLE, Comment, Document, Element, HtmlGen, HtmlGenBase, Line, Raw, Text
 from alasio.testing.filesystem import fs  # noqa: F401
 
 
 class FakeGitAdd:
-    """The part of GitAdd the generator uses."""
+    """
+    The part of GitAdd the generator uses, and the bool that turns it off.
 
-    def __init__(self):
+    The real object answers whether the files of a run are staged, and the
+    generator reads that answer: a git add of a run that stages nothing is a
+    falsy object, and the files are left as they are.
+    """
+
+    def __init__(self, enabled=True):
+        self.enabled = enabled
         self.files = []
+
+    def __bool__(self):
+        return self.enabled
 
     def stage_add(self, file):
         self.files.append(file)
@@ -209,7 +218,7 @@ class TestWrite:
         def boom(*args, **kwargs):
             raise AssertionError('the page did not change, the file must not be written')
 
-        monkeypatch.setattr(write_module, 'atomic_write', boom)
+        monkeypatch.setattr(file_module, 'atomic_write', boom)
         assert gen.write('/out/index.html') is False
 
     def test_write_changed(self, fs, monkeypatch):
@@ -217,13 +226,13 @@ class TestWrite:
         gen = HtmlGen()
         gen.P('a')
         calls = []
-        real = write_module.atomic_write
+        real = file_module.atomic_write
 
         def record(file, data):
             calls.append((file, data))
             real(file, data)
 
-        monkeypatch.setattr(write_module, 'atomic_write', record)
+        monkeypatch.setattr(file_module, 'atomic_write', record)
         assert gen.write('/out/index.html') is True
         (file, data), = calls
         assert file == '/out/index.html'
@@ -244,7 +253,7 @@ class TestWrite:
         def boom(*args, **kwargs):
             raise AssertionError('the page did not change, the file must not be written')
 
-        monkeypatch.setattr(write_module, 'atomic_write', boom)
+        monkeypatch.setattr(file_module, 'atomic_write', boom)
         assert gen.write('/out/index.html') is False
 
     def test_skip_same_false_always_writes(self, fs, monkeypatch):
@@ -252,13 +261,13 @@ class TestWrite:
         gen = HtmlGen()
         gen.P('a')
         calls = []
-        real = gen_base_module.atomic_write
+        real = file_module.atomic_write
 
         def record(file, data):
             calls.append((file, data))
             real(file, data)
 
-        monkeypatch.setattr(gen_base_module, 'atomic_write', record)
+        monkeypatch.setattr(file_module, 'atomic_write', record)
         assert gen.write('/out/index.html', skip_same=False) is True
         (file, data), = calls
         assert file == '/out/index.html'
@@ -282,7 +291,7 @@ class TestWrite:
         assert gen.write('/out/index.html', gitadd=gitadd) is True
         assert gitadd.files == ['/out/index.html']
 
-        monkeypatch.setattr(write_module, 'atomic_write', lambda *a, **k: None)
+        monkeypatch.setattr(file_module, 'atomic_write', lambda *a, **k: None)
         assert gen.write('/out/index.html', gitadd=gitadd) is False
         assert gitadd.files == ['/out/index.html']
 
@@ -290,3 +299,49 @@ class TestWrite:
         gen = HtmlGen()
         gen.P('a')
         assert gen.write('/out/index.html') is True
+
+    def test_gitadd_that_says_no(self, fs):
+        """A git add that answers False stages nothing, the write still happens."""
+        gen = HtmlGen()
+        gen.P('a')
+        gitadd = FakeGitAdd(enabled=False)
+        assert bool(gitadd) is False
+        assert gen.write('/out/index.html', gitadd=gitadd) is True
+        assert gitadd.files == []
+        with open('/out/index.html', encoding='utf-8') as f:
+            assert f.read() == """\
+<p>a</p>
+"""
+
+    def test_crlf_of_another_text(self, fs):
+        """A CRLF file of another text is a page that changed."""
+        fs.create_file('/out/index.html', contents='<p>b</p>\r\n')
+        gen = HtmlGen()
+        gen.P('a')
+        assert gen.write('/out/index.html') is True
+
+    def test_not_utf8_file_replaced(self, fs):
+        """A file of another encoding is not a page of the generator, it is replaced."""
+        fs.create_file('/out/index.html', contents=b'\xff\xfe\x00')
+        gen = HtmlGen()
+        gen.P('a')
+        assert gen.write('/out/index.html') is True
+        with open('/out/index.html', encoding='utf-8') as f:
+            assert f.read() == """\
+<p>a</p>
+"""
+
+    def test_empty_page(self, fs):
+        gen = HtmlGenBase()
+        assert gen.write('/out/index.html') is True
+        with open('/out/index.html', encoding='utf-8') as f:
+            assert f.read() == ''
+
+    def test_unicode(self, fs):
+        gen = HtmlGen()
+        gen.P('\u4f60\u597d')
+        assert gen.write('/out/index.html') is True
+        with open('/out/index.html', encoding='utf-8') as f:
+            assert f.read() == """\
+<p>\u4f60\u597d</p>
+"""

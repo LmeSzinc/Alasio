@@ -44,9 +44,8 @@ Usage:
     pypi.run()
 """
 
-from alasio.codegen.html import write_if_changed
-from alasio.codegen.pypisite import WheelLink, find_links_page, simple_page
-from alasio.codegen.pypisite.flat import flat_page
+from alasio.codegen.pypisite import WheelLink, find_links_site, simple_site
+from alasio.codegen.pypisite.flat import flat_site
 from alasio.logger import logger
 
 __all__ = [
@@ -112,8 +111,10 @@ class RepoPypi:
         logger.info(
             f'Publishing the pip index pages of "{self.base.workspace.name}": '
             f'{", ".join(groups)}')
-        for file, text in pages:
-            written = write_if_changed(file, text)
+        for file, gen in pages:
+            # the generator writes the page, and only when it changed: the
+            # steps of a write are the ones of every generator of codegen
+            written = gen.write(file)
             # a page the run did not change is a page the run uses: the cleanup
             # of the version keeps what the run touches, whether it wrote it or
             # found it current
@@ -150,21 +151,24 @@ class RepoPypi:
         """
         The pages of the run, in the order they are written.
 
+        A page is a generator, not a text: the generator is what writes it, and
+        it writes only when the page changed.
+
         Args:
             groups (dict[str, list[WheelLink]]): The wheels, see _groups
 
         Returns:
-            list: [(file, text)] of the pages
+            list: [(file, generator)] of the pages
         """
         folder = self.base.wheel_folder
         pages = [
-            (folder.joinpath(name).joinpath(INDEX_PAGE), simple_page(name, links))
+            (folder.joinpath(name).joinpath(INDEX_PAGE), simple_site(name, links))
             for name, links in groups.items()
         ]
         links = [link for group in groups.values() for link in group]
         title = self._title()
-        pages.append((folder.joinpath(INDEX_PAGE), find_links_page(links, title=title)))
-        pages.append((folder.joinpath(FLAT_PAGE), flat_page(groups, title, command=self._command())))
+        pages.append((folder.joinpath(INDEX_PAGE), find_links_site(links, title=title)))
+        pages.append((folder.joinpath(FLAT_PAGE), flat_site(groups, title, command=self._command())))
         return pages
 
     def _title(self):

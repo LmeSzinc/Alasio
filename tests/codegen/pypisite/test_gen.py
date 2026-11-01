@@ -4,7 +4,9 @@ Tests for the generator of pip index pages and the two page builders.
 import pytest
 
 from alasio.codegen.html import HtmlGen
-from alasio.codegen.pypisite import PypiHeader, PypiSite, Wheel, WheelLink, find_links_page, simple_page
+from alasio.codegen.pypisite import (
+    PypiHeader, PypiSite, Wheel, WheelLink, find_links_page, find_links_site, simple_page, simple_site
+)
 from alasio.testing.filesystem import fs  # noqa: F401
 
 # the digest of a wheel, the shape the fetcher of the pack server records
@@ -328,3 +330,34 @@ class TestPagesAreStable:
                 gen.H1('Links for httpx2')
                 gen.Wheels(links)
         assert gen.generate_str() == simple_page('httpx2', links)
+
+
+class TestSiteBuilders:
+    """The pages as generators: the caller writes them, the generator skips an unchanged one."""
+
+    def test_simple_site_is_a_generator(self):
+        gen = simple_site('httpx2', [WheelLink('httpx2', '2.13.1', FILE_PURE, DIGEST_A)])
+        assert isinstance(gen, PypiSite)
+        assert gen.generate_str() == simple_page('httpx2', [WheelLink('httpx2', '2.13.1', FILE_PURE, DIGEST_A)])
+
+    def test_simple_site_written(self, fs):
+        """The file of the page is the one the generator writes, and only once."""
+        gen = simple_site('httpx2', [
+            WheelLink('httpx2', '2.13.1', FILE_PURE, DIGEST_A),
+            WheelLink('httpx2', '2.13.1', FILE_WIN, DIGEST_B),
+        ])
+        assert gen.write('/wheel/httpx2/index.html') is True
+        with open('/wheel/httpx2/index.html', encoding='utf-8') as f:
+            assert f.read() == SIMPLE_PAGE
+        assert gen.write('/wheel/httpx2/index.html') is False
+
+    def test_find_links_site_is_a_generator(self):
+        links = [WheelLink('httpx2', '2.13.1', FILE_PURE, DIGEST_A)]
+        gen = find_links_site(links, title='Wheels of Author_Repo_master')
+        assert isinstance(gen, PypiSite)
+        assert gen.generate_str() == find_links_page(links, title='Wheels of Author_Repo_master')
+
+    def test_find_links_site_written(self, fs):
+        gen = find_links_site([WheelLink('httpx2', '2.13.1', FILE_PURE, DIGEST_A)])
+        assert gen.write('/wheel/index.html') is True
+        assert gen.write('/wheel/index.html') is False

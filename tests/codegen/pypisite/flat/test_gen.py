@@ -6,7 +6,7 @@ import pytest
 
 from alasio.codegen.html import Element, HtmlGen, Raw
 from alasio.codegen.pypisite import PypiSite, WheelLink
-from alasio.codegen.pypisite.flat import FLAT_STYLE, PypiSiteFlat, flat_page
+from alasio.codegen.pypisite.flat import FLAT_STYLE, PypiSiteFlat, flat_page, flat_site
 from alasio.testing.filesystem import fs  # noqa: F401
 
 from .data import DIGEST_A, DIGEST_B, FILE_MAC, FILE_PURE, FILE_WIN
@@ -285,6 +285,31 @@ class TestFlatPageFunction:
         page = flat_page({}, 'Wheels')
         assert '<main>' in page
         assert '<ul class="toc">\n      </ul>' in page
+
+    def test_flat_site_is_a_generator(self):
+        """The page as a generator: the caller writes it, an unchanged page is not written."""
+        projects = {'httpx2': [WheelLink('httpx2', '2.13.1', FILE_WIN)]}
+        gen = flat_site(projects, 'Wheels')
+        assert isinstance(gen, PypiSiteFlat)
+        assert gen.generate_str() == flat_page(projects, 'Wheels')
+
+    def test_flat_site_written(self, fs):
+        projects = {'httpx2': [WheelLink('httpx2', '2.13.1', FILE_WIN)]}
+        gen = flat_site(projects, 'Wheels')
+        assert gen.write('/wheel/flat.html') is True
+        with open('/wheel/flat.html', encoding='utf-8') as f:
+            assert f.read() == flat_page(projects, 'Wheels')
+        assert gen.write('/wheel/flat.html') is False
+
+    def test_flat_site_takes_the_same_arguments(self):
+        projects = {'httpx2': [WheelLink('httpx2', '2.13.1', FILE_WIN)]}
+        assert flat_page(
+            projects, 'Wheels', command='pip install x', lang='zh-CN',
+            origins={'httpx2': {'2.13.1': ('tag', 'https://example.com')}},
+        ) == flat_site(
+            projects, 'Wheels', command='pip install x', lang='zh-CN',
+            origins={'httpx2': {'2.13.1': ('tag', 'https://example.com')}},
+        ).generate_str()
 
     def test_name_normalized(self):
         page = flat_page({'HTTPX2': [WheelLink('HTTPX2', '2.13.1', FILE_PURE)]}, 'Wheels')

@@ -24,7 +24,6 @@ from .obj_base import DEFAULT_WIDTH, HtmlContainer, HtmlError, HtmlObject, NotIn
 from .obj_document import Body, Document, Head
 from .obj_element import ELEMENTS, TAG_TABLE, VOID_ELEMENTS, Element, Line
 from .obj_simple import Comment, Raw, Text
-from .write import is_current, write_if_changed
 
 __all__ = [
     'DEFAULT_WIDTH',
@@ -46,6 +45,4 @@ __all__ = [
     'Raw',
     'Text',
     'escape',
-    'is_current',
-    'write_if_changed',
 ]

@@ -3,7 +3,9 @@ The root generator of an html page: the item list, the context and the write.
 
 The design is the one of alasio.codegen.python: a generator holds the objects
 of the page, a method of it makes an object and takes it into the current
-container, and the generator renders the page one line at a time.
+container, and the generator renders the page one line at a time. The write is
+the one of alasio.codegen.gen_base, the write of every generator of the project,
+so a page and a python module are written by the same steps.
 
     gen = HtmlGen()
     with gen.Div(class_='card'):
@@ -31,17 +33,16 @@ Usage:
     gen.write('hello.html')
 """
 
-from alasio.ext.path.atomic import atomic_write
+from alasio.codegen.gen_base import GenBase
 
 from .obj_base import HtmlObject
-from .write import write_if_changed
 
 __all__ = [
     'HtmlGenBase',
 ]
 
 
-class HtmlGenBase:
+class HtmlGenBase(GenBase):
     """
     The state of one page: the objects, the current container, the indent.
 
@@ -138,36 +139,6 @@ class HtmlGenBase:
         """
         for line in self.generate():
             print(line)
-
-    def write(self, file, gitadd=None, skip_same=True):
-        """
-        Write the page to a file.
-
-        Args:
-            file (str): Path of the file, the parent folder is created when it
-                is missing
-            gitadd (GitAdd, optional): Git add of the project, the file is
-                staged when it was written. Defaults to None, nothing is staged
-            skip_same (bool): True to read the file first and skip the write
-                when it already holds the page. This costs a read and saves a
-                write, the publish record of a rerun stays as it was. False to
-                write whatever the file holds
-
-        Returns:
-            bool: True when the file was written
-
-        Raises:
-            OSError: If the file cannot be read or written
-        """
-        data = self.generate_str()
-        if skip_same:
-            written = write_if_changed(file, data)
-        else:
-            atomic_write(file, data)
-            written = True
-        if written and gitadd is not None:
-            gitadd.stage_add(file)
-        return written
 
     def __repr__(self):
         return f'<{type(self).__name__} {len(self.items)} item(s)>'

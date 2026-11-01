@@ -43,7 +43,9 @@ from .wheel import prepare_links
 __all__ = [
     'PypiSite',
     'find_links_page',
+    'find_links_site',
     'simple_page',
+    'simple_site',
 ]
 
 
@@ -135,12 +137,37 @@ class PypiSite(HtmlGen):
         return item
 
 
+def simple_site(project, links, lang='en'):
+    """
+    Build the page of one distribution: the generator of it.
+
+    The page sits in the folder of the distribution (wheel/{name}/index.html):
+    its wheels link to the version folders below it. The generator is the page,
+    so a caller that writes it to a file writes only when the page changed:
+
+        simple_site('httpx2', links).write('wheel/httpx2/index.html')
+
+    Args:
+        project (str): Distribution name, any case and separator style
+        links (Iterable[WheelLink]): The wheels of the distribution
+        lang (str): Language of the page
+
+    Returns:
+        PypiSite: The generator of the page
+
+    Raises:
+        ValueError: If the project is not a distribution name, or a link is a
+            wheel of another distribution
+    """
+    gen = PypiSite()
+    with gen.PypiHeader(project, lang=lang):
+        gen.Wheels(links)
+    return gen
+
+
 def simple_page(project, links, lang='en'):
     """
     Render the page of one distribution as a text.
-
-    The page sits in the folder of the distribution (wheel/{name}/index.html):
-    its wheels link to the version folders below it.
 
     Args:
         project (str): Distribution name, any case and separator style
@@ -154,19 +181,38 @@ def simple_page(project, links, lang='en'):
         ValueError: If the project is not a distribution name, or a link is a
             wheel of another distribution
     """
+    return simple_site(project, links, lang=lang).generate_str()
+
+
+def find_links_site(links, title='Wheels'):
+    """
+    Build the find-links page of a folder of wheels: the generator of it.
+
+    The page is the index.html of the folder (wheel/index.html): its wheels link
+    to the version folders below the folders of the distributions, the path
+    `name/version/file` pip reads with --find-links.
+
+    Args:
+        links (Iterable[WheelLink]): The wheels of the folder
+        title (str): Title and heading of the page, escaped
+
+    Returns:
+        PypiSite: The generator of the page
+
+    Raises:
+        ValueError: If two links carry one file name with different digests
+    """
     gen = PypiSite()
-    with gen.PypiHeader(project, lang=lang):
-        gen.Wheels(links)
-    return gen.generate_str()
+    with gen.Doc(title) as page:
+        with page.body():
+            gen.H1(title)
+            gen.Wheels(links, with_name=True)
+    return gen
 
 
 def find_links_page(links, title='Wheels'):
     """
     Render the find-links page of a folder of wheels as a text.
-
-    The page is the index.html of the folder (wheel/index.html): its wheels link
-    to the version folders below the folders of the distributions, the path
-    `name/version/file` pip reads with --find-links.
 
     Args:
         links (Iterable[WheelLink]): The wheels of the folder
@@ -178,9 +224,4 @@ def find_links_page(links, title='Wheels'):
     Raises:
         ValueError: If two links carry one file name with different digests
     """
-    gen = PypiSite()
-    with gen.Doc(title) as page:
-        with page.body():
-            gen.H1(title)
-            gen.Wheels(links, with_name=True)
-    return gen.generate_str()
+    return find_links_site(links, title=title).generate_str()
