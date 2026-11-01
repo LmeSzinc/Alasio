@@ -23,7 +23,7 @@ from alasio.deploy.simple_pip.parse_req import DepInfo
 from alasio.deploy_dev.pack import pack_wheel
 from alasio.deploy_dev.pack._pack_cache import PackCache
 from alasio.deploy_dev.pack.pack_wheel import PackWheel
-from alasio.deploy_dev.pack_server import repo_dep
+from alasio.deploy_dev.pack_server import repo_base, repo_dep
 from alasio.deploy_dev.pack_server.fetch_wheel import WheelNotFoundError
 from alasio.deploy_dev.pack_server.model import LookbackConfig, PackRepoModel
 from alasio.deploy_dev.pack_server.pack_check import PackChecksum
@@ -37,7 +37,8 @@ from alasio.testing.filesystem import fs  # noqa: F401
 from tests.deploy.simple_pip.conftest import build_wheel
 from tests.deploy_dev.pack_server.conftest import join_path
 from tests.deploy_dev.pack_server.test_repo import (
-    CORE_V1, CORE_V2, make_config, make_repo, pack_file, read_tree, register_wheel, register_wheels, requirement
+    CORE_V1, CORE_V2, PROXY, make_config, make_proxy_config, make_repo, pack_file, read_tree, register_wheel,
+    register_wheels, requirement
 )
 
 # folder of the workspace of the config in the run directory
@@ -274,6 +275,79 @@ INFO | No dependency to build of "Author_Repo_master", skipped
 """
         assert mirror.requests == []
         assert gen.dep.published == {}
+
+
+class TestProxy:
+    """The downloads go through the client of the step, see RepoBase.fetch_client."""
+
+    def test_wheels_through_the_proxy(self, fs, run_dir, mirror, monkeypatch):
+        """A step without an injected client fetches with the client the proxy built."""
+        register_wheels(mirror)
+        created = []
+
+        def create_client(proxy):
+            created.append(proxy)
+            return mirror.client
+
+        monkeypatch.setattr(repo_base, 'create_client', create_client)
+        gen = DepFlow(make_repo(), config=make_proxy_config())
+
+        with logger.mock_capture_writer() as capture:
+            gen.run()
+
+        assert capture.concat() == f"""\
+INFO | Using update_pack_deps of module/config/const.py at c3: httpx
+INFO | Downloading the wheels through the proxy "{PROXY}"
+INFO | [1/3] Fetching wheel of "httpx==0.28.1", index="http://mirror", role=target
+INFO | Download index page: "http://mirror/httpx/"
+INFO | Download wheel: "http://mirror/packages/httpx-0.28.1-py3-none-any.whl" -> "{cache_folder(run_dir, 'httpx', '0.28.1')}/httpx-0.28.1-py3-none-any.whl"
+INFO | [2/3] Fetching wheel of "httpx==0.27.8", index="http://mirror", role=historical
+INFO | Download index page: "http://mirror/httpx/"
+INFO | Download wheel: "http://mirror/packages/httpx-0.27.8-py3-none-any.whl" -> "{cache_folder(run_dir, 'httpx', '0.27.8')}/httpx-0.27.8-py3-none-any.whl"
+INFO | [3/3] Fetching wheel of "httpx==0.27.7", index="http://mirror", role=historical
+INFO | Download index page: "http://mirror/httpx/"
+INFO | Download wheel: "http://mirror/packages/httpx-0.27.7-py3-none-any.whl" -> "{cache_folder(run_dir, 'httpx', '0.27.7')}/httpx-0.27.7-py3-none-any.whl"
+INFO | Generating the dependency packs of "Author_Repo_master": 1 dependencies, 3 versions
+INFO | [1/1] Building dependency packs of "httpx": 3 versions, target=0.28.1
+INFO | Writing full pack: "{channel_folder(run_dir, 'httpx')}/0.28.1/full.pack"
+INFO | Writing update pack: 0.27.8 -> 0.28.1, "{channel_folder(run_dir, 'httpx')}/0.28.1/update_0.27.8.pack"
+INFO | Writing update pack: 0.27.7 -> 0.28.1, "{channel_folder(run_dir, 'httpx')}/0.28.1/update_0.27.7.pack"
+INFO | Dependency packs of "Author_Repo_master" generated
+"""
+        # the wheels are the files of the mirror, fetched by the client the
+        # proxy built, and the client is closed with the step
+        assert created == [PROXY]
+        assert mirror.client.is_closed is True
+        assert join_path(channel_folder(run_dir, 'httpx'), '0.28.1', 'full.pack').isfile()
+
+    def test_one_client_of_the_step(self, fs, run_dir, mirror, monkeypatch):
+        """Without a proxy the versions of the window share one client of the step."""
+        register_wheels(mirror)
+        created = []
+
+        def create_client(proxy):
+            created.append(proxy)
+            return mirror.client
+
+        monkeypatch.setattr(repo_base, 'create_client', create_client)
+        gen = DepFlow(make_repo())
+
+        with logger.mock_capture_writer() as capture:
+            gen.run()
+
+        # three versions of the window, one client: the pages and the wheels of
+        # all of them go through the same connection pool, closed at the end
+        assert created == ['']
+        assert 'Downloading the wheels through the proxy' not in capture.concat()
+        assert mirror.requests == [
+            'http://mirror/httpx/',
+            'http://mirror/packages/httpx-0.28.1-py3-none-any.whl',
+            'http://mirror/httpx/',
+            'http://mirror/packages/httpx-0.27.8-py3-none-any.whl',
+            'http://mirror/httpx/',
+            'http://mirror/packages/httpx-0.27.7-py3-none-any.whl',
+        ]
+        assert mirror.client.is_closed is True
 
 
 class TestPacks:
@@ -539,7 +613,6 @@ INFO | Dependency packs of "Author_Repo_master" generated
         decoder = PackDecodeBase(file_read_bytes(file))
         decoder.validate()
         assert decoder.old_version == ''
-
 
 
 class TestGuards:

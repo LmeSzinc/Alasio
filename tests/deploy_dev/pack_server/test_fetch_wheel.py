@@ -24,7 +24,7 @@ import trio
 
 from alasio.deploy.pip_download.pypi_file import DOWNLOAD_MODE_ALL, DOWNLOAD_MODE_PY3_ANY
 from alasio.deploy_dev.pack_server.fetch_wheel import (
-    INDEX_FILE, JSON_PAGE, WheelFetcher, WheelHashError, WheelNotFoundError
+    INDEX_FILE, JSON_PAGE, WheelFetcher, WheelHashError, WheelNotFoundError, create_client
 )
 from alasio.deploy_dev.pack_server.parse_dep import normalize_name
 from alasio.ext import env
@@ -35,6 +35,10 @@ from alasio.testing.filesystem import fs  # noqa: F401
 # folder of the downloaded wheels in the workspace of the tests, see
 # RepoBase.wheel_cache_folder
 CACHE_FOLDER = '_wheel_cache'
+
+# proxy url of the tests: nothing listens on the port, the client of the tests
+# only reads the route it was built with
+PROXY = 'http://127.0.0.1:7890'
 
 
 def wheel_file(root, name, version, filename):
@@ -1079,3 +1083,33 @@ INFO | Download wheel: "{compiled_url}" -> "{compiled_file}"
         assert requests.count('http://mirror/httpx/') == 1
         assert requests.count(f'http://mirror/packages/{pure_name}') == 1
         assert requests.count(f'http://mirror/packages/{compiled_name}') == 2
+
+
+class TestCreateClient:
+    """The client a step downloads the wheels with, see create_client."""
+
+    def test_proxy(self):
+        """The client ignores the environment of the user and routes every scheme to the proxy."""
+        client = create_client(PROXY)
+        try:
+            assert isinstance(client, httpx2.AsyncClient)
+            # the proxy is the one the operator configured, never the one a proxy
+            # tool left in the environment of the process
+            assert client.trust_env is False
+            # httpx keeps the proxy transports in the mounts of the client: one
+            # pattern of every scheme is the route of the requests through the
+            # proxy (a private attribute, the only way to read the route without
+            # a proxy server)
+            assert [pattern.pattern for pattern in client._mounts] == ['all://']
+        finally:
+            trio.run(client.aclose)
+
+    def test_direct(self):
+        """Without a proxy the client is the direct one of the domain, no mount of its own."""
+        client = create_client()
+        try:
+            assert isinstance(client, httpx2.AsyncClient)
+            assert client.trust_env is False
+            assert client._mounts == {}
+        finally:
+            trio.run(client.aclose)

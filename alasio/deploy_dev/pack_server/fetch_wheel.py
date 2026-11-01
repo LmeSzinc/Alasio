@@ -67,6 +67,7 @@ Usage:
         await fetcher.aclose()
 """
 
+from alasio.deploy.httpclient.client_async import AsyncHttpClient
 from alasio.deploy.httpclient.probe_mirrors import Mirrors
 from alasio.deploy.pip_download._link import parse_links
 from alasio.deploy.pip_download._utils import canonicalize_name
@@ -82,6 +83,7 @@ __all__ = [
     'WheelHashError',
     'WheelInfo',
     'WheelNotFoundError',
+    'create_client',
 ]
 
 # the snapshot of the index page of a version, in the folder of the version. The
@@ -91,6 +93,38 @@ INDEX_FILE = 'index.html'
 # the content type of a PEP 691 JSON page: the snapshot keeps the body only, so
 # a page is told from an HTML one by its first character, see WheelFetcher.links
 JSON_PAGE = 'application/vnd.pypi.simple.v1+json'
+
+
+def create_client(proxy=''):
+    """
+    Create the http client the wheel fetches of one step are sent with.
+
+    A fetcher takes any client (see WheelFetcher.__init__), so the route and the
+    lifetime of the requests are decided by the caller: a step of the pack
+    server builds one client and hands it to every fetcher of the step, so the
+    versions of the window reuse the connections of that client instead of
+    opening a connection pool each.
+
+    The environment of the user is ignored, the rule of the clients of the
+    deploy domain (see AsyncHttpClient.create_client): the proxy is the one the
+    operator configured (PackRepoModel.Env), never the one a proxy tool left in
+    the environment of the process.
+
+    Args:
+        proxy (str): Proxy url the requests are routed through, e.g.
+            'http://127.0.0.1:7890' or 'socks5://127.0.0.1:7890'. Defaults to
+            '', a direct connection
+
+    Returns:
+        httpx2.AsyncClient: The client, its requests go out directly or through
+            the proxy. Nothing is connected by the creation, the first request
+            of the client opens the connection
+    """
+    if not proxy:
+        # the factory of the domain: the same trust_env=False without a proxy
+        return AsyncHttpClient.create_client()
+    import httpx2
+    return httpx2.AsyncClient(trust_env=False, proxy=proxy)
 
 
 class WheelFetcher:

@@ -145,30 +145,33 @@ class RepoDep:
         wheel_files = {}
         targets = [(info, pin) for info in deps for pin in info.versions]
         total = len(targets)
-        for index, (info, pin) in enumerate(targets, start=1):
-            name = info.name
-            fetcher = WheelFetcher(
-                self.base.wheel_cache_of(name, pin.version), pin.source or DEFAULT_INDEX,
-                name, pin.version, client=self.base.client)
-            role = _role_of(info, pin)
-            logger.info(
-                f'[{index}/{total}] Fetching wheel of "{pin.name}=={pin.version}", '
-                f'index="{fetcher.mirrors_text}", role={role}')
-            try:
+        # one client for the whole step, see RepoBase.fetch_client: the proxy of
+        # the run when it is set, None means a client per fetcher
+        async with self.base.fetch_client() as client:
+            for index, (info, pin) in enumerate(targets, start=1):
+                name = info.name
+                fetcher = WheelFetcher(
+                    self.base.wheel_cache_of(name, pin.version), pin.source or DEFAULT_INDEX,
+                    name, pin.version, client=client)
+                role = _role_of(info, pin)
+                logger.info(
+                    f'[{index}/{total}] Fetching wheel of "{pin.name}=={pin.version}", '
+                    f'index="{fetcher.mirrors_text}", role={role}')
                 try:
-                    files = await fetcher.fetch_async(DOWNLOAD_MODE_PY3_ANY)
-                except WheelNotFoundError as e:
-                    raise WheelNotFoundError(
-                        f'No usable wheel of the {role} dependency '
-                        f'"{name}=={pin.version}", the dependency packs cannot be '
-                        f'generated: {e}') from e
-                wheel_files[(name, pin.version)] = files[0].file
-                # the files of the run only: a file an earlier run left in the
-                # cache folder is a leftover, the cleanup removes it
-                self.base.touch(files[0].file)
-                self.base.touch(fetcher.index_file)
-            finally:
-                await fetcher.aclose()
+                    try:
+                        files = await fetcher.fetch_async(DOWNLOAD_MODE_PY3_ANY)
+                    except WheelNotFoundError as e:
+                        raise WheelNotFoundError(
+                            f'No usable wheel of the {role} dependency '
+                            f'"{name}=={pin.version}", the dependency packs cannot be '
+                            f'generated: {e}') from e
+                    wheel_files[(name, pin.version)] = files[0].file
+                    # the files of the run only: a file an earlier run left in
+                    # the cache folder is a leftover, the cleanup removes it
+                    self.base.touch(files[0].file)
+                    self.base.touch(fetcher.index_file)
+                finally:
+                    await fetcher.aclose()
         return wheel_files
 
     def _write_dep_packs(self, info, wheel_files):
@@ -243,6 +246,7 @@ class RepoDep:
             old_pack = PackWheel(wheel_files[(name, version)])
             logger.info(f'Writing update pack: {version} -> {target.version}, "{file}"')
             atomic_write_stream(file, PackWheelUpdate(new_pack, old_pack).iter_pack_data())
+
 
 def _role_of(info, pin):
     """

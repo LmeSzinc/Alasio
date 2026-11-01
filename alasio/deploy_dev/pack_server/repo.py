@@ -88,8 +88,9 @@ class Repo:
                 declared by the mod entry of the repo
             client (httpx2.AsyncClient | AsyncHttpClient, optional): Client
                 the wheel fetches are sent with, e.g. the injected client of a
-                test. Its lifetime belongs to the caller. Defaults to None,
-                every fetch creates and closes the client of its own
+                test. Its lifetime belongs to the caller. Defaults to None, the
+                steps create the client of their own, through the proxy of the
+                config Env when it is set (see RepoBase.fetch_client)
             find_links_url (str, optional): Url the folder of the wheels is
                 served at, written into the command of the flat page, e.g.
                 'https://packs.example/pack/Author_Repo_master/wheel'. Defaults

@@ -51,6 +51,10 @@ PROVIDED_URL = 'http://provided.example/simple'
 # the repo, the source of a pin the repo does not provide
 OTHER_URL = 'https://other.example/simple'
 
+# the proxy of the downloads of the tests: a local port the tests never connect
+# to, the client it builds is replaced by the one of the mock mirror
+PROXY = 'http://127.0.0.1:7890'
+
 
 def requirement(pin, source=MIRROR_URL):
     """
@@ -177,6 +181,21 @@ def make_config():
         ),
         Lookback=LookbackConfig(MaxCommitDay=0),
     )
+
+
+def make_proxy_config(proxy=PROXY):
+    """
+    Build a pack config whose downloads go through a proxy.
+
+    Args:
+        proxy (str): Proxy url. Defaults to PROXY, the proxy of the tests
+
+    Returns:
+        PackRepoModel: Config
+    """
+    config = make_config()
+    config.Env.Proxy = proxy
+    return config
 
 
 def demo_files(version, core):

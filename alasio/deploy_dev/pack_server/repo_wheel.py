@@ -100,30 +100,33 @@ class RepoWheel:
         targets = [
             (info.name, info.latest) for info in self.base.deps.values() if info.provide_wheel]
         total = len(targets)
-        for index, (name, pin) in enumerate(targets, start=1):
-            fetcher = WheelFetcher(
-                self.base.wheel_cache_of(name, pin.version), pin.source or DEFAULT_INDEX,
-                name, pin.version, client=self.base.client)
-            logger.info(
-                f'[{index}/{total}] Fetching wheels of "{name}=={pin.version}", '
-                f'index="{fetcher.mirrors_text}"')
-            try:
+        # one client for the whole step, see RepoBase.fetch_client: the proxy of
+        # the run when it is set, None means a client per fetcher
+        async with self.base.fetch_client() as client:
+            for index, (name, pin) in enumerate(targets, start=1):
+                fetcher = WheelFetcher(
+                    self.base.wheel_cache_of(name, pin.version), pin.source or DEFAULT_INDEX,
+                    name, pin.version, client=client)
+                logger.info(
+                    f'[{index}/{total}] Fetching wheels of "{name}=={pin.version}", '
+                    f'index="{fetcher.mirrors_text}"')
                 try:
-                    # every wheel of the version: the client installs the one
-                    # of its platform, see DOWNLOAD_MODE_ALL
-                    wheels = await fetcher.fetch_async(DOWNLOAD_MODE_ALL)
-                    self.publish_files[(name, pin.version)] = wheels
-                    # the files of the run only: a wheel an earlier run left in
-                    # the cache folder is a leftover, the cleanup removes it
-                    for wheel in wheels:
-                        self.base.touch(wheel.file)
-                    self.base.touch(fetcher.index_file)
-                except WheelNotFoundError as e:
-                    raise WheelNotFoundError(
-                        f'No usable wheel of the provided dependency "{name}=={pin.version}", '
-                        f'the pip index cannot be generated: {e}') from e
-            finally:
-                await fetcher.aclose()
+                    try:
+                        # every wheel of the version: the client installs the one
+                        # of its platform, see DOWNLOAD_MODE_ALL
+                        wheels = await fetcher.fetch_async(DOWNLOAD_MODE_ALL)
+                        self.publish_files[(name, pin.version)] = wheels
+                        # the files of the run only: a wheel an earlier run left in
+                        # the cache folder is a leftover, the cleanup removes it
+                        for wheel in wheels:
+                            self.base.touch(wheel.file)
+                        self.base.touch(fetcher.index_file)
+                    except WheelNotFoundError as e:
+                        raise WheelNotFoundError(
+                            f'No usable wheel of the provided dependency "{name}=={pin.version}", '
+                            f'the pip index cannot be generated: {e}') from e
+                finally:
+                    await fetcher.aclose()
 
     def _sync(self):
         """
@@ -149,6 +152,7 @@ class RepoWheel:
                 # the write is atomic and creates the folder of the version:
                 # a client never reads a half copied wheel
                 atomic_copy(wheel.file, file)
+
 
 def _is_synced(source, target, sha256):
     """

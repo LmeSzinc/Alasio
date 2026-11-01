@@ -19,7 +19,7 @@ import pytest
 from alasio.deploy.pip_download.pypi_file import WheelHashError, WheelNotFoundError
 from alasio.deploy_dev.pack import pack_wheel
 from alasio.deploy_dev.pack._pack_cache import PackCache
-from alasio.deploy_dev.pack_server import repo_wheel
+from alasio.deploy_dev.pack_server import repo_base
 from alasio.deploy_dev.pack_server.repo_base import RepoBase
 from alasio.deploy_dev.pack_server.repo_dep import RepoDep
 from alasio.deploy_dev.pack_server.repo_wheel import RepoWheel
@@ -28,7 +28,8 @@ from alasio.logger import logger
 from alasio.testing.filesystem import fs  # noqa: F401
 from tests.deploy_dev.pack_server.conftest import join_path
 from tests.deploy_dev.pack_server.test_repo import (
-    PROVIDED_URL, entry_source, make_config, make_repo, read_tree, register_wheels, requirement
+    PROVIDED_URL, PROXY, entry_source, make_config, make_proxy_config, make_repo, read_tree, register_wheels,
+    requirement
 )
 
 # folder of the workspace of the config in the run directory
@@ -284,6 +285,70 @@ INFO | No update_pack_deps declared by module/config/const.py at c3, no dependen
             'httpx-0.28.1-py3-none-any.whl']
 
 
+class TestProxy:
+    """The downloads go through the client of the step, see RepoBase.fetch_client."""
+
+    def test_wheels_through_the_proxy(self, fs, run_dir, mirror, monkeypatch):
+        """A step without an injected client fetches with the client the proxy built."""
+        register_msgspec_wheels(mirror)
+        created = []
+
+        def create_client(proxy):
+            created.append(proxy)
+            return mirror.client
+
+        monkeypatch.setattr(repo_base, 'create_client', create_client)
+        gen = WheelFlow(make_provided_repo(), config=make_proxy_config())
+
+        with logger.mock_capture_writer() as capture:
+            gen.generate()
+
+        cache = cache_folder(run_dir, 'msgspec', '0.22.0')
+        published = published_folder(run_dir, 'msgspec', '0.22.0')
+        assert capture.concat() == f"""\
+INFO | No update_pack_deps declared by module/config/const.py at c3, no dependency pack is built
+INFO | Downloading the wheels through the proxy "{PROXY}"
+INFO | [1/1] Fetching wheels of "msgspec==0.22.0", index="http://provided.example/simple"
+INFO | Download index page: "http://provided.example/simple/msgspec/"
+INFO | Download wheel: "http://provided.example/packages/msgspec-0.22.0-cp38-cp38-manylinux_2_17_x86_64.whl" -> "{cache}/msgspec-0.22.0-cp38-cp38-manylinux_2_17_x86_64.whl"
+INFO | Download wheel: "http://provided.example/packages/msgspec-0.22.0-cp38-cp38-win_amd64.whl" -> "{cache}/msgspec-0.22.0-cp38-cp38-win_amd64.whl"
+INFO | [1/1] Publishing wheels of "msgspec==0.22.0"
+INFO | Copy wheel: "{cache}/msgspec-0.22.0-cp38-cp38-manylinux_2_17_x86_64.whl" -> "{published}/msgspec-0.22.0-cp38-cp38-manylinux_2_17_x86_64.whl"
+INFO | Copy wheel: "{cache}/msgspec-0.22.0-cp38-cp38-win_amd64.whl" -> "{published}/msgspec-0.22.0-cp38-cp38-win_amd64.whl"
+"""
+        # the wheels are the files of the mirror, fetched by the client the
+        # proxy built, and the client is closed with the step
+        assert created == [PROXY]
+        assert sorted(published.iter_filenames()) == list(MSGS_WHEELS)
+        assert mirror.client.is_closed is True
+
+    def test_one_client_of_the_step(self, fs, run_dir, mirror, monkeypatch):
+        """Without a proxy the step still fetches with one client of its own."""
+        register_msgspec_wheels(mirror)
+        created = []
+
+        def create_client(proxy):
+            created.append(proxy)
+            return mirror.client
+
+        monkeypatch.setattr(repo_base, 'create_client', create_client)
+        gen = WheelFlow(make_provided_repo())
+
+        with logger.mock_capture_writer() as capture:
+            gen.generate()
+
+        # the client is built once for the whole step, direct, and the two
+        # wheels of the version go through it
+        assert created == ['']
+        assert 'Downloading the wheels through the proxy' not in capture.concat()
+        assert mirror.requests == [
+            'http://provided.example/simple/msgspec/',
+            'http://provided.example/packages/msgspec-0.22.0-cp38-cp38-manylinux_2_17_x86_64.whl',
+            'http://provided.example/packages/msgspec-0.22.0-cp38-cp38-win_amd64.whl',
+        ]
+        assert mirror.client.is_closed is True
+
+
 class TestSync:
     """The published files, verified against the cache."""
 
@@ -348,5 +413,3 @@ INFO | Wheel exists, skipped: "{published_folder(run_dir, 'msgspec', '0.22.0')}/
         assert (f'INFO | Copy wheel: "{cache_folder(run_dir, "msgspec", "0.22.0")}/'
                 f'{MSGS_WHEELS[1]}" -> "{file}"\n' in capture.concat())
         assert file.atomic_read_bytes() == content
-
-

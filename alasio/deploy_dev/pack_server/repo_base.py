@@ -57,12 +57,14 @@ Usage:
 """
 
 import os
+from contextlib import asynccontextmanager
 from typing import Dict
 
 import msgspec
 
 from alasio.deploy.simple_pip.cleanup_folder import CleanupByPreserved
 from alasio.deploy.simple_pip.parse_req import DepInfo, normalize_index_url
+from alasio.deploy_dev.pack_server.fetch_wheel import create_client
 from alasio.deploy_dev.pack_server.lookback_wheel import LookbackWheel
 from alasio.deploy_dev.pack_server.parse_dep import normalize_name
 from alasio.deploy_dev.pack_server.parse_entry import ENTRY_FILE
@@ -187,7 +189,8 @@ class RepoBase:
             client (httpx2.AsyncClient | AsyncHttpClient, optional): Client
                 the wheel fetches of the flow are sent with, e.g. the injected
                 client of a test. Its lifetime belongs to the caller. Defaults
-                to None, every fetch creates and closes the client of its own
+                to None, the steps create the client of their own, through the
+                proxy of the config Env when it is set (see fetch_client)
 
         Raises:
             ValueError: If the config makes a folder name that is not a
@@ -285,6 +288,49 @@ class RepoBase:
             PathStr: {workspace}/_wheel_cache/{name}/{version}
         """
         return self.wheel_cache_folder.joinpath(name).joinpath(version)
+
+    # ------------------------------------------------------------------
+    # The http client of the fetches
+    # ------------------------------------------------------------------
+
+    @asynccontextmanager
+    async def fetch_client(self):
+        """
+        The http client the wheel fetches of one step are sent with.
+
+        The index pages and the wheels are downloaded from the index a pin
+        declares (PyPI, py38deps, ...), never from a mirror of the client: the
+        mirror is the output of the pack server, so the server cannot install
+        its own input from it. The machine reaches those indexes itself, or
+        through Env.Proxy when the local network cannot, see PackRepoModel.Env.
+
+        One client serves every fetcher of the step, with or without the proxy:
+        the versions of the window and the distributions of the step reuse the
+        connections of that client instead of opening a connection pool each,
+        and it is closed when the step ends. An injected client takes
+        precedence and is used as it is: its lifetime and its route belong to
+        the caller.
+
+        A client is per step because a step is one event loop (the two steps
+        that fetch run through trio.run, see RepoWheel and RepoDep): the pool
+        and the keep-alive connections of a client belong to the loop they were
+        used on, and the loop of a step is gone when the step returns.
+
+        Yields:
+            httpx2.AsyncClient | AsyncHttpClient: The client to send the fetches
+                with, the injected one or the one of the step
+        """
+        if self.client is not None:
+            yield self.client
+            return
+        proxy = self.config.Env.Proxy
+        if proxy:
+            logger.info(f'Downloading the wheels through the proxy "{proxy}"')
+        client = create_client(proxy)
+        try:
+            yield client
+        finally:
+            await client.aclose()
 
     # ------------------------------------------------------------------
     # The files of the run

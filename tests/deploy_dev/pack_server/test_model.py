@@ -12,7 +12,7 @@ import pytest
 
 from alasio.deploy_dev.pack_server import model
 from alasio.deploy_dev.pack_server.gate import RunDirError, check_run_dir
-from alasio.deploy_dev.pack_server.model import LookbackConfig, PackRepoConfig, PackRepoModel, RepoConfig
+from alasio.deploy_dev.pack_server.model import EnvConfig, LookbackConfig, PackRepoConfig, PackRepoModel, RepoConfig
 from alasio.ext import env
 from alasio.ext.file.yamlconfig import build_help_map
 from alasio.ext.file.yamlfile import yaml_loads
@@ -91,14 +91,24 @@ class TestLookbackConfig:
         assert LookbackConfig().AdditionalCommit == []
 
 
+class TestEnvConfig:
+    """The environment of the machine the pack server runs on."""
+
+    def test_default(self):
+        """No proxy by default: the downloads of the server go out directly."""
+        assert EnvConfig().Proxy == ''
+
+
 class TestPackRepoModel:
     """The pack config of a repo."""
 
     def test_default(self):
-        """The default config of a repo is empty, with the default restrictions."""
+        """The default config of a repo is empty, with the default restrictions and no proxy."""
         model = PackRepoModel()
         assert model.Repo == RepoConfig()
         assert model.Lookback == LookbackConfig()
+        assert model.Env == EnvConfig()
+        assert model.Env.Proxy == ''
 
     def test_no_python_deps_group(self):
         """The python dependencies are declared by the mod entry, not by the config."""
@@ -347,6 +357,67 @@ did not find expected ',' or ']'
 INFO | Write config {run_dir}/config/LmeSzinc_AzurLaneAutoScript.yaml
 """
         assert read_config(config_file(run_dir)) == msgspec.to_builtins(PackRepoModel())
+
+    @pytest.mark.parametrize('proxy', [
+        'http://127.0.0.1:7890',
+        'https://user:pass@proxy.example:8080',
+        'socks5://127.0.0.1:7890',
+        'socks5h://127.0.0.1:7890',
+    ])
+    def test_read_proxy(self, fs, run_dir, proxy):
+        """A proxy url the http client can use is read as it is."""
+        fs.create_file(config_file(run_dir), contents=f"""\
+Repo:
+  Remote: https://github.com/LmeSzinc/AzurLaneAutoScript
+  Author: LmeSzinc
+  Repo: AzurLaneAutoScript
+  Branch: master
+Env:
+  Proxy: {proxy}
+""")
+        config = PackRepoConfig(FILE)
+        assert config.errors == []
+        assert config.data.Env.Proxy == proxy
+
+    @pytest.mark.parametrize('proxy', [
+        '127.0.0.1:7890',
+        'ftp://127.0.0.1:7890',
+        'http://',
+    ])
+    def test_invalid_proxy(self, fs, run_dir, proxy):
+        """A value the http client cannot use fails the config, the run never starts."""
+        fs.create_file(config_file(run_dir), contents=f"""\
+Repo:
+  Remote: https://github.com/LmeSzinc/AzurLaneAutoScript
+  Author: LmeSzinc
+  Repo: AzurLaneAutoScript
+  Branch: master
+Env:
+  Proxy: {proxy}
+""")
+        with pytest.raises(ValueError) as e:
+            PackRepoConfig(FILE)
+        assert str(e.value).startswith('Invalid Env.Proxy of the pack config')
+        assert config_file(run_dir) in str(e.value)
+        # the value of the operator is kept, the operator fixes the file
+        assert read_config(config_file(run_dir))['Env']['Proxy'] == proxy
+
+    def test_invalid_proxy_empty_host(self, fs, run_dir):
+        """A proxy url without a host is refused with its own message."""
+        fs.create_file(config_file(run_dir), contents="""\
+Repo:
+  Remote: https://github.com/LmeSzinc/AzurLaneAutoScript
+  Author: LmeSzinc
+  Repo: AzurLaneAutoScript
+  Branch: master
+Env:
+  Proxy: http://
+""")
+        with pytest.raises(ValueError) as e:
+            PackRepoConfig(FILE)
+        assert str(e.value) == (
+            "Invalid Env.Proxy of the pack config, the host is empty: 'http://', "
+            f'file="{config_file(run_dir)}"')
 
     def test_config_of_each_file(self, fs, run_dir):
         """Every file has its own config, the reader is not bound to a single file."""
