@@ -1,3 +1,4 @@
+from alasio.config_dev.gen.gen_config import remove_stale_file
 from alasio.config_dev.gen.gen_config_generated import GenConfigGenerated
 from alasio.config_dev.gen.gen_config_index import GenConfigIndex
 from alasio.config_dev.gen.gen_queue_index import GenQueueIndex
@@ -89,11 +90,8 @@ class IndexGenerator(
                     if gitadd:
                         gitadd.stage_add(f)
             else:
-                if f.exists():
-                    logger.info(f'Delete file {f}')
-                    f.atomic_remove()
-                    if gitadd:
-                        gitadd.stage_add(f)
+                # nothing to write, the index of the previous generation is stale
+                remove_stale_file(f, gitadd)
 
         # task.index.json
         write(self.task_index_file, self.task_index_data)

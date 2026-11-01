@@ -2,7 +2,7 @@ from typing import Optional
 
 from alasio.backport import removeprefix
 from alasio.config.entry.const import ModEntryInfo
-from alasio.config_dev.gen.gen_config import ConfigGenerator
+from alasio.config_dev.gen.gen_config import ConfigGenerator, remove_stale_file
 from alasio.config_dev.parse.base import DefinitionError
 from alasio.config_dev.parse.build_mro import MroError, build_mro
 from alasio.config_dev.parse.cache_alasio import CacheAlasio
@@ -428,10 +428,8 @@ class CrossNavGenerator:
                 if gitadd:
                     gitadd.stage_add(file)
         else:
-            if file.atomic_remove():
-                logger.info(f'Delete file {file}')
-                if gitadd:
-                    gitadd.stage_add(file)
+            # no model file of this mod, the plan of the previous generation is stale
+            remove_stale_file(file, gitadd)
 
     """
     Generate task.index.json
@@ -705,5 +703,5 @@ class CrossNavGenerator:
                     if gitadd:
                         gitadd.stage_add(file)
             else:
-                if config.config_file.atomic_remove():
-                    logger.info(f'Delete file {file}')
+                # no card in this nav, the config json of the previous generation is stale
+                remove_stale_file(file, gitadd)

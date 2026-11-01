@@ -297,7 +297,6 @@ INFO | Write file {gems.config_file}
         assert capture.concat() == ''
         assert gitadd.files == []
 
-    @pytest.mark.xfail(strict=True, reason='a deleted {nav}_config.json is not staged to git')
     def test_deletes_empty_nav(self, fs):
         """A nav without card no longer has a config json, the deletion is staged."""
         gen = make_cross(fs, {'main': 'Info:\n'}, {'main': ''})
@@ -309,6 +308,17 @@ INFO | Write file {gems.config_file}
         assert capture.concat() == f'INFO | Delete file {config.config_file}\n'
         assert not config.config_file.exists()
         assert gitadd.files == [str(config.config_file)]
+
+    def test_absent_empty_nav_is_not_reported(self, fs):
+        """A nav without card and without a previous config json deletes nothing."""
+        gen = make_cross(fs, {'main': 'Info:\n'}, {'main': ''})
+        config = gen.dict_nav_config['main']
+        gitadd = GitAddSpy()
+        with logger.mock_capture_writer() as capture:
+            gen.generate_config_json(gitadd=gitadd)
+        assert capture.concat() == ''
+        assert gitadd.files == []
+        assert not config.config_file.exists()
 
 
 class TestConfigJsonFile:

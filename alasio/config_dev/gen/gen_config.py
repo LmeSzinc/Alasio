@@ -22,6 +22,33 @@ if TYPE_CHECKING:
     from alasio.config_dev.gen.gen_cross import CrossNavGenerator
 
 
+def remove_stale_file(file, gitadd=None):
+    """
+    Remove a generated file that has nothing to generate anymore.
+
+    A nav whose cards, groups or tasks are all removed does not keep the file
+    of the previous generation: a stale translation, a model class or a card
+    entry of something that no longer exists would mislead the next reader, and
+    a model class may still be imported by file name.
+
+    The file is removed with a plain unlink: the generator owns its output,
+    nothing reads or replaces it while the generation runs, so the retries
+    atomic_remove() does for a concurrent writer are not needed. The return
+    value of the removal tells whether there was a file, so no existence check
+    is done beforehand.
+
+    Args:
+        file (PathStr): Generated file to remove
+        gitadd (GitAdd, optional): Tracks the removed file
+    """
+    if not file.file_remove():
+        # no such file, nothing to delete
+        return
+    logger.info(f'Delete file {file}')
+    if gitadd:
+        gitadd.stage_add(file)
+
+
 class ConfigGenerator(ParseGroups, ParseTasks):
     def __init__(self, entry, file):
         """
@@ -490,37 +517,6 @@ class ConfigGenerator(ParseGroups, ParseTasks):
     Generate all
     """
 
-    @staticmethod
-    def _remove_stale(file, gitadd=None):
-        """
-        Remove a generated file that has nothing to generate anymore.
-
-        A nav whose groups are all removed does not keep the file of the
-        previous generation: a stale translation or a model class of a group
-        that no longer exists would mislead the next reader, and the model
-        class may still be imported by file name.
-
-        The file is removed with a plain unlink: the generator owns its output,
-        nothing reads or replaces it while the generation runs, so the retries
-        atomic_remove() does for a concurrent writer are not needed. The return
-        value tells whether there was a file to remove, so no existence check
-        is done beforehand.
-
-        Args:
-            file (PathStr): File to remove
-            gitadd (GitAdd, optional): Tracks the removed file
-
-        Returns:
-            bool: True if the file was removed
-        """
-        if not file.file_remove():
-            # no such file, nothing to delete
-            return False
-        logger.info(f'Delete file {file}')
-        if gitadd:
-            gitadd.stage_add(file)
-        return True
-
     def generate(self, gitadd=None):
         """
         Generate configs and msgspec models
@@ -552,7 +548,7 @@ class ConfigGenerator(ParseGroups, ParseTasks):
                         gitadd.stage_add(file)
             else:
                 # no class to generate, the model of the previous generation is stale
-                self._remove_stale(self.model_file, gitadd)
+                remove_stale_file(self.model_file, gitadd)
 
         # {nav}_i18n.json
         if self.i18n_data:
@@ -564,7 +560,7 @@ class ConfigGenerator(ParseGroups, ParseTasks):
                     gitadd.stage_add(file)
         else:
             # nothing to translate, the i18n of the previous generation is stale
-            self._remove_stale(self.i18n_file, gitadd)
+            remove_stale_file(self.i18n_file, gitadd)
 
         # format yaml
         op = format_yaml(self.file, yaml_formatter)
