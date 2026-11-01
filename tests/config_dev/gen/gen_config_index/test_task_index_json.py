@@ -210,10 +210,45 @@ class TestRegroupIntaskGroup:
         assert tasks == ['Farming', 'GemsFarming']
         assert groups == []
 
-    @pytest.mark.xfail(strict=True, reason='dict_intask_group is a defaultdict, the unknown task branch is unreachable')
     def test_unknown_task(self, fs):
         """A reference to a task that does not exist is reported."""
         gen = make_cross(fs, NAVS, TASKS, GenConfigIndex)
         with pytest.raises(DefinitionError) as e:
             gen._regroup_intask_group([('Missing', 'Campaign')])
         assert e.value.msg == 'No such task "Missing"'
+
+    def test_unknown_task_of_several(self, fs):
+        """A known task does not hide an unknown one beside it."""
+        gen = make_cross(fs, NAVS, TASKS, GenConfigIndex)
+        with pytest.raises(DefinitionError) as e:
+            gen._regroup_intask_group([('Farming', 'Campaign'), ('Missing', 'Campaign')])
+        assert e.value.msg == 'No such task "Missing"'
+
+    def test_intask_group_is_a_plain_dict(self, fs):
+        """A task that does not exist has no entry, it is not an empty set."""
+        gen = make_cross(fs, NAVS, TASKS, GenConfigIndex)
+        assert gen.dict_intask_group['Farming'] == {'Campaign', 'StopCondition'}
+        assert 'Missing' not in gen.dict_intask_group
+        with pytest.raises(KeyError):
+            _ = gen.dict_intask_group['Missing']
+
+    def test_task_with_only_borrowed_groups(self, fs):
+        """A task borrowing every group of another one is known, with no own group.
+
+        The own groups of a task are the ones bound to the task itself, so a
+        task that only borrows has an empty set. It must not read as an
+        unknown task, which is what a plain dict has to tell apart.
+        """
+        gen = make_cross(fs, NAVS, {
+            'main': TASKS['main'],
+            'gems': """\
+GemsFarming:
+  groups:
+    Campaign:
+      task: Farming
+""",
+        }, GenConfigIndex)
+        assert gen.dict_intask_group['GemsFarming'] == set()
+        # the borrowed group reads from the task owning it, one group per query
+        assert gen._regroup_intask_group([('Farming', 'Campaign')]) == (
+            [], [['Farming', 'Campaign']])

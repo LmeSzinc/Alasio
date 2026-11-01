@@ -23,6 +23,12 @@ class GenConfigIndex(CrossNavGenerator):
     @cached_property
     def dict_intask_group(self):
         """
+        The groups of each task, read from the groups bound to the task itself.
+
+        A plain dict, not a defaultdict: a caller that looks up a task which is
+        not in the mod must get a KeyError it can report, instead of an empty
+        set that reads as a task without groups.
+
         Returns:
             dict[str, set[str]]:
                 key: task_name
@@ -34,11 +40,14 @@ class GenConfigIndex(CrossNavGenerator):
                 yield from deep_iter_depth2(self.alasio.model_data)
             yield from deep_iter_depth2(self.model_data)
 
-        out = defaultdict(set)
+        out = {}
         for task_name, group_name, ref in iter_model_data():
             # drop _global_bind
             if task_name.startswith('_'):
                 continue
+            # the task exists even when every group of it comes from another
+            # task: a task without own group is an empty set, not an unknown task
+            group_set = out.setdefault(task_name, set())
             try:
                 task = ref['task']
             except KeyError:
@@ -47,7 +56,7 @@ class GenConfigIndex(CrossNavGenerator):
             if task_name != task:
                 # skip cross task ref
                 continue
-            out[task_name].add(group_name)
+            group_set.add(group_name)
         return out
 
     def _regroup_intask_group(self, all_task_groups, current_task=''):
