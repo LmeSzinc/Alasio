@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { type I18nTextData, i18nTextToLines } from "$lib/components/arg/utils.svelte";
   import SafeBold from "$lib/components/aside/SafeBold.svelte";
   import { SidebarRowIndicator, sidebarRowClass } from "$lib/components/sidebar-accordion";
   import { Button } from "$lib/components/ui/button";
@@ -11,7 +12,8 @@
     class: className,
     ...restprops
   }: {
-    name: string;
+    // The name of the card, one row or one entry per row
+    name: I18nTextData;
     active: boolean;
     // Dot on the right, marking a task that can be enabled in the scheduler:
     // - true: the task is enabled, a gray outline circle with an inner dot in
@@ -43,7 +45,16 @@
   {...restprops}
 >
   <SidebarRowIndicator {active} />
-  <SafeBold {active} text={name}></SafeBold>
+  <!--
+    A name may have several lines: every line goes through SafeBold on its own,
+    so it keeps the word wrapping and the bold/normal swap of a single line,
+    and the lines stack because each call is a block of its own.
+  -->
+  <div class="flex w-full flex-col" data-slot="sidebar-label">
+    {#each i18nTextToLines(name) as line}
+      <SafeBold {active} text={line} />
+    {/each}
+  </div>
   {#if scheduler !== undefined}
     <!--
       The scheduler state of the card, a dot at the right end of the row. This

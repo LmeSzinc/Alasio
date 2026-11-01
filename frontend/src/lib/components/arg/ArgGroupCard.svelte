@@ -3,18 +3,20 @@
   import * as Card from "$lib/components/ui/card";
   import { cn } from "$lib/utils";
   import I18nText from "./I18nText.svelte";
+  import type { I18nTextData } from "./utils.svelte";
 
   type Props = {
     /**
      * Card title shown in the header, e.g. `t.DevTool.SystemTool()`.
      * The caller is responsible for resolving i18n text.
+     * Supports i18n text or a list of lines, one line per row of the title.
      */
-    title: string;
+    title: I18nTextData;
     /**
      * Optional help text shown below the title as a card description.
      * Supports i18n text or a list of lines.
      */
-    help?: string | string[];
+    help?: I18nTextData;
     /**
      * Optional extra content rendered in the header below title/help,
      * e.g. scheduler args or enable controls for the settings page.
@@ -38,7 +40,9 @@
   <Card.Header class="flex flex-col gap-y-1.5">
     <!-- Group name -->
     <div class="flex w-full items-center justify-between gap-x-4">
-      <Card.Title class="flex-1 text-2xl font-bold">{title}</Card.Title>
+      <Card.Title class="flex-1 text-2xl font-bold">
+        <I18nText text={title} />
+      </Card.Title>
     </div>
     {#if help}
       <Card.Description class="text-xs">

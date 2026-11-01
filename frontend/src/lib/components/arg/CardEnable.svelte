@@ -8,7 +8,7 @@
   import Enable from "../arginput/Enable.svelte";
   import Input from "../arginput/Input.svelte";
   import Static from "../arginput/Static.svelte";
-  import type { CardData, InfoData, InputProps } from "./utils.svelte";
+  import { type CardData, type InfoData, type InputProps, i18nTextToOneLine } from "./utils.svelte";
 
   type Props = {
     cardData: CardData;
@@ -129,7 +129,7 @@ Z`;
     <Dialog.Header>
       <Dialog.Title>{t.Input.GroupResetTitle()}</Dialog.Title>
       <Dialog.Description>
-        {t.Input.GroupResetDesc({ name: cardData?._info?.name || "UnknownGroupName" })}
+        {t.Input.GroupResetDesc({ name: i18nTextToOneLine(cardData?._info?.name) || "UnknownGroupName" })}
       </Dialog.Description>
     </Dialog.Header>
     <Dialog.Footer>

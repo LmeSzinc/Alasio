@@ -3,7 +3,7 @@
   import Check from "@lucide/svelte/icons/check";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
-  import { type InputProps, getArgName, useArgValue } from "$lib/components/arg/utils.svelte";
+  import { type InputProps, getArgName, i18nTextToOneLine, useArgValue } from "$lib/components/arg/utils.svelte";
   import * as Popover from "$lib/components/ui/popover";
   import { cn } from "$lib/utils";
 
@@ -257,7 +257,7 @@
             <div
               role="listbox"
               id={listboxId}
-              aria-label={getArgName(data)}
+              aria-label={i18nTextToOneLine(getArgName(data))}
               aria-activedescendant={options.length ? optionId(highlighted) : undefined}
               tabindex={0}
               bind:this={listboxEl}

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { toast } from "svelte-sonner";
   import GripVertical from "@lucide/svelte/icons/grip-vertical";
-  import { type ArgData, getArgName, useArgValue } from "$lib/components/arg/utils.svelte";
+  import { type ArgData, getArgName, i18nTextToOneLine, useArgValue } from "$lib/components/arg/utils.svelte";
   import { type DndEndCallbackDetail, DndProvider } from "$lib/components/dnd";
   import { Button } from "$lib/components/ui/button";
   import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "$lib/components/ui/dialog";
@@ -41,7 +41,8 @@
   let { open = $bindable(false), data, value, onSave, onReset }: Props = $props();
 
   const arg = $derived(useArgValue<FilterOrderItemValue[]>(data));
-  const displayName = $derived(getArgName(data));
+  // Dialog title is a heading of one row, so a name of multiple lines is flattened
+  const displayName = $derived(i18nTextToOneLine(getArgName(data)));
 
   // Working copy, only save commits it
   let draft = $state<FilterOrderItemValue[]>([]);

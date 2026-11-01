@@ -1,7 +1,7 @@
 <script lang="ts">
   import { untrack } from "svelte";
   import { cn } from "$lib/utils";
-  import { type ArgData, getArgName } from "../arg/utils.svelte";
+  import { type ArgData, getArgName, i18nTextToOneLine } from "../arg/utils.svelte";
   import ColorDot from "./ColorDot.svelte";
   import PrettyValue from "./PrettyValue.svelte";
   import ReadableTime from "./ReadableTime.svelte";
@@ -23,6 +23,8 @@
   } = $props();
 
   const info = $derived(data._info ?? {}) as ArgData;
+  // The label of the item is one row, so a name of multiple lines is flattened
+  const displayName = $derived(i18nTextToOneLine(getArgName(info)));
   const time = $derived(data.Time?.value ?? "");
 
   // --- Flash on value change ---
@@ -145,8 +147,8 @@
         flashing ? "text-primary-foreground" : "text-muted-foreground",
       )}
     >
-      <span class="max-w-full shrink-0 truncate" title={getArgName(info)}>
-        {getArgName(info)}
+      <span class="max-w-full shrink-0 truncate" title={displayName}>
+        {displayName}
       </span>
       <span class="max-w-max min-w-0 grow basis-[2.5em] truncate">
         <span class="opacity-50">-</span>

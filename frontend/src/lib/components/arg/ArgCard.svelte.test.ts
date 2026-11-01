@@ -67,6 +67,25 @@ afterEach(() => {
   document.body.innerHTML = "";
 });
 
+describe("TestArgCardTitle", () => {
+  it("renders a title of one line", async () => {
+    const target = await mountCard(makeCard());
+    const title = target.querySelector('[data-slot="card-title"]')!;
+
+    expect([...title.querySelectorAll("p")].map((el) => el.textContent)).toEqual(["Card"]);
+  });
+
+  it("renders a name of multiple lines as one row per line", async () => {
+    const card = makeCard();
+    card._info.name = ["The card", "of the task"];
+    const target = await mountCard(card);
+    const title = target.querySelector('[data-slot="card-title"]')!;
+
+    expect([...title.querySelectorAll("p")].map((el) => el.textContent)).toEqual(["The card", "of the task"]);
+    expect(target.textContent).not.toContain("The card,of the task");
+  });
+});
+
 describe("TestArgCardPlannerPair", () => {
   it("renders a prefixed Value/Total pair under the progress line", async () => {
     const target = await mountCard(makeCard());

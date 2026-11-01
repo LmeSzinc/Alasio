@@ -5,14 +5,23 @@ export const DEFAULT_TIME = "2020-01-01T00:00:00Z";
 export const DEFAULT_TIME_DISPLAY = "2020-01-01 00:00:00";
 export const DEFAULT_TIME_MS = new Date(DEFAULT_TIME).getTime();
 
+/**
+ * A translated text: one line, or one entry per line.
+ *
+ * The i18n files may write a text with multiple lines either as a str with
+ * `\n` or as a list of lines, the generator normalizes both to a str when the
+ * text has one line and to a list of str when it has more.
+ */
+export type I18nTextData = string | string[];
+
 export type ArgData = {
   task: string;
   group: string;
   arg: string;
   dt: string;
   value: any;
-  name?: string;
-  help?: string;
+  name?: I18nTextData;
+  help?: I18nTextData;
 
   /**
    * Dashboard type if arg is dashboard arg (`dt` startswith "dashboard")
@@ -97,8 +106,8 @@ export type InfoData = {
   arg: string;
   // usually to be "card-{task}-{group}"
   card: string;
-  name?: string;
-  help?: string;
+  name?: I18nTextData;
+  help?: I18nTextData;
 };
 
 export type CardData = {
@@ -132,13 +141,48 @@ export type ArgProps = InputProps & {
   isAdvanced?: boolean;
 };
 
-export function getArgName(arg: ArgData | InfoData) {
+export function getArgName(arg: ArgData | InfoData): I18nTextData {
   // Show name if available
   if (arg.name) {
     return arg.name;
   }
   // Othersize show as {group_name}.{arg_name}
   return `${arg.group || "<UnknownGroup>"}.${arg.arg || "<UnknownArg>"}`;
+}
+
+/**
+ * The rows of a translated text, as one entry per line.
+ *
+ * A caller that lays out each line itself (a row of the navigation, a label
+ * that measures its own wrapping) uses this instead of the text itself, so a
+ * str and a str[] read the same way.
+ *
+ * Args:
+ *   text: Translated text of an arg or a group, or nothing
+ *
+ * Returns:
+ *   The lines of the text, empty for an empty text
+ */
+export function i18nTextToLines(text: I18nTextData | undefined | null): string[] {
+  if (!text) return [];
+  if (typeof text === "string") return [text];
+  return text;
+}
+
+/**
+ * Flatten a translated text to one line, for the places that can only show a
+ * str: a fixed height bar, an aria-label, a sentence of a dialog.
+ *
+ * Args:
+ *   text: Translated text of an arg or a group, or nothing
+ *
+ * Returns:
+ *   The lines joined by a space, empty for an empty text
+ */
+export function i18nTextToOneLine(text: I18nTextData | undefined | null): string {
+  if (!text) return "";
+  if (typeof text === "string") return text;
+  return text.join(" ");
 }
 
 /**

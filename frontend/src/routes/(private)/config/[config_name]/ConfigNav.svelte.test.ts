@@ -45,6 +45,19 @@ function deliverNav(group: string) {
   );
 }
 
+/** Delivers the navigation with a name of multiple lines on the nav and card. */
+function deliverMultilineNav() {
+  FakeWebSocket.last!.serverMessage(
+    JSON.stringify({
+      t: "ConfigNav",
+      o: "full",
+      v: {
+        main: { _info: { i18n: ["Main", "nav"] }, task1: { i18n: ["Task", "one"] } },
+      },
+    }),
+  );
+}
+
 /**
  * The empty-state placeholder of the nav, or null when the nav has data. It is
  * laid out as a row of the sidebar family (the row metrics, the space of the
@@ -53,6 +66,23 @@ function deliverNav(group: string) {
  */
 function emptyPlaceholder(target: HTMLElement): HTMLElement | null {
   return target.querySelector<HTMLElement>("span.italic");
+}
+
+/**
+ * The rows of the label of a navigation row, a trigger or a card.
+ *
+ * A label may hold a measuring layer of SafeBold, which is aria-hidden and
+ * carries the text twice: only what a reader sees is returned.
+ */
+function labelLines(row: HTMLElement): (string | undefined)[] {
+  const label = row.querySelector<HTMLElement>('[data-slot="sidebar-label"]')!;
+  return [...label.children].map((el) => {
+    const visible = el.cloneNode(true) as HTMLElement;
+    for (const hidden of visible.querySelectorAll('[aria-hidden="true"]')) {
+      hidden.remove();
+    }
+    return visible.textContent?.trim();
+  });
 }
 
 // mount() is generic over the component's props/exports, so its return type
@@ -135,5 +165,27 @@ describe("TestConfigNavEmptyConfig", () => {
     await flushEffects();
     expect(target.textContent).toContain("opsi");
     expect(emptyPlaceholder(target)).toBeNull();
+  });
+});
+
+describe("TestConfigNavMultilineName", () => {
+  it("shows the lines of a nav name and of a card name one under the other", async () => {
+    const target = await mountNav();
+    deliverMultilineNav();
+    await flushEffects();
+
+    // The nav name is the label of the accordion trigger, one row per line
+    const trigger = target.querySelector<HTMLElement>('[data-slot="accordion-trigger"]')!;
+    expect(labelLines(trigger)).toEqual(["Main", "nav"]);
+
+    // The cards are the content of the accordion, shown once its nav opens
+    trigger.click();
+    await flushEffects();
+    const card = target.querySelector<HTMLElement>('[data-slot="accordion-content"] [data-slot="button"]')!;
+    expect(labelLines(card)).toEqual(["Task", "one"]);
+
+    // ... each line keeps its own row, so nothing is joined into one
+    expect(target.textContent).not.toContain("Main nav");
+    expect(target.textContent).not.toContain("Task one");
   });
 });

@@ -1,6 +1,11 @@
 <script lang="ts">
   import { untrack } from "svelte";
-  import type { CardData } from "$lib/components/arg/utils.svelte";
+  import {
+    type CardData,
+    type I18nTextData,
+    i18nTextToLines,
+    i18nTextToOneLine,
+  } from "$lib/components/arg/utils.svelte";
   import SafeBold from "$lib/components/aside/SafeBold.svelte";
   import {
     SidebarAccordion,
@@ -40,9 +45,11 @@
   const argClient = useTopic<Record<string, CardData>>("ConfigArg");
 
   // --- Data Types ---
-  type ConfigNavCard = { i18n: string; scheduler?: boolean };
-  type CardItem = { key: string; name: string; scheduler: boolean | undefined };
-  type NavItem = { key: string; name: string; cards: CardItem[] };
+  // The i18n text of a nav or a card may have multiple lines, the row of the
+  // navigation shows the lines one under the other
+  type ConfigNavCard = { i18n: I18nTextData; scheduler?: boolean };
+  type CardItem = { key: string; name: I18nTextData; scheduler: boolean | undefined };
+  type NavItem = { key: string; name: I18nTextData; cards: CardItem[] };
 
   /**
    * Scheduler state of a card, drawn as a dot on its NavButton:
@@ -77,9 +84,11 @@
     if (!navData) return [] as NavItem[];
 
     return Object.entries(navData).map(([navKey, navEntry]) => {
+      // a nav without a translation falls back to its name
+      const navLines = i18nTextToLines(navEntry._info?.i18n);
       return {
         key: navKey,
-        name: navEntry._info?.i18n || navKey,
+        name: navLines.length ? navLines : navKey,
         cards: Object.entries(navEntry)
           .filter(([cardKey]) => cardKey !== "_info")
           .map(([cardKey, card]) => ({
@@ -169,7 +178,9 @@
     const navData = topicClient.data;
     if (ui.isOverview) return t.Overview.OverviewTitle();
     if (ui.isDevice) return t.Device.DeviceTitle();
-    return navData?.[ui.nav_name]?._info?.i18n || ui.nav_name;
+    // The header is a bar of a fixed height, so a nav name of multiple lines
+    // is flattened here; the navigation below shows the lines one under the other
+    return i18nTextToOneLine(navData?.[ui.nav_name]?._info?.i18n) || ui.nav_name;
   });
   HeaderContext.use(header);
 </script>
@@ -205,7 +216,12 @@
         <div bind:this={itemElements[nav.key]}>
           <SidebarAccordionItem value={nav.key}>
             <SidebarAccordionTrigger>
-              {nav.name}
+              <!-- A nav name may have several lines, one row each -->
+              <div class="flex min-w-0 flex-1 flex-col" data-slot="sidebar-label">
+                {#each i18nTextToLines(nav.name) as line}
+                  <div>{line}</div>
+                {/each}
+              </div>
             </SidebarAccordionTrigger>
             <SidebarAccordionContent class="bg-accent border-y">
               <div class="flex flex-col">

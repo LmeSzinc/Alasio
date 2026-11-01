@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { type ArgData, getDashboardPairText, isDashboardInternalArg, isDashboardPairArg } from "./utils.svelte";
+import {
+  type ArgData,
+  type InfoData,
+  getArgName,
+  getDashboardPairText,
+  i18nTextToLines,
+  i18nTextToOneLine,
+  isDashboardInternalArg,
+  isDashboardPairArg,
+} from "./utils.svelte";
 
 describe("TestIsDashboardInternalArg", () => {
   it.each([
@@ -99,5 +108,55 @@ describe("TestGetDashboardPairText", () => {
         OrphanTotal: pairArg(2),
       }),
     ).toBe("8 / 10");
+  });
+});
+
+function namedArg(name: string | string[] | undefined): ArgData {
+  return { task: "Task", group: "Group", arg: "Mode", dt: "input", value: "", name };
+}
+
+describe("TestGetArgName", () => {
+  it("keeps a name of one line and a name of multiple lines as is", () => {
+    expect(getArgName(namedArg("The mode"))).toBe("The mode");
+    expect(getArgName(namedArg(["The mode", "of the task"]))).toEqual(["The mode", "of the task"]);
+  });
+
+  it("falls back to {group}.{arg} without a name", () => {
+    expect(getArgName(namedArg(undefined))).toBe("Group.Mode");
+    expect(getArgName({ group: "", arg: "_info", card: "card" } as InfoData)).toBe("<UnknownGroup>._info");
+  });
+});
+
+describe("TestI18nTextToLines", () => {
+  it("keeps a text of one line as one row", () => {
+    expect(i18nTextToLines("The mode")).toEqual(["The mode"]);
+  });
+
+  it("keeps the rows of a text of multiple lines", () => {
+    expect(i18nTextToLines(["The mode", "of the task"])).toEqual(["The mode", "of the task"]);
+  });
+
+  it("returns no row for a missing or empty text", () => {
+    expect(i18nTextToLines(undefined)).toEqual([]);
+    expect(i18nTextToLines(null)).toEqual([]);
+    expect(i18nTextToLines("")).toEqual([]);
+    expect(i18nTextToLines([])).toEqual([]);
+  });
+});
+
+describe("TestI18nTextToOneLine", () => {
+  it("joins the lines of a text with a space", () => {
+    expect(i18nTextToOneLine(["The mode", "of the task"])).toBe("The mode of the task");
+  });
+
+  it("keeps a text of one line as is", () => {
+    expect(i18nTextToOneLine("The mode")).toBe("The mode");
+  });
+
+  it("returns an empty str for a missing or empty text", () => {
+    expect(i18nTextToOneLine(undefined)).toBe("");
+    expect(i18nTextToOneLine(null)).toBe("");
+    expect(i18nTextToOneLine("")).toBe("");
+    expect(i18nTextToOneLine([])).toBe("");
   });
 });
