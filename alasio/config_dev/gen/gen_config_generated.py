@@ -41,6 +41,36 @@ class GenConfigGenerated(GenNavIndex):
         if config is not None:
             yield nav_name, config
 
+    def _is_related_model(self, models, model):
+        """
+        Whether a model bound to an already declared group name still fits it.
+
+        A model of the same inheritance chain (a subclass or a base class of the
+        models already bound) is a variant of the group, which is what variant
+        groups are for: the declared one still gives the IDE a usable type.
+
+        Args:
+            models (dict[str, str]): Models already bound to the group name,
+                key: class name, value: reference in the generated file
+            model (str): Class name of the model of the binding to check
+
+        Returns:
+            bool: True if the model is related to every model already bound
+        """
+
+        def mro_of(name):
+            group = self.groups_data.get(name, None)
+            if group is None or not group.mro:
+                # unknown group, or a chain that is not built: it stands alone
+                return (name,)
+            return group.mro
+
+        mro = mro_of(model)
+        return all(
+            other in mro or model in mro_of(other)
+            for other in models
+        )
+
     def generate_config_generated_file(self, gitadd=None):
         """
         Generate config_generated.py file with type hints for IDE auto-completion
@@ -86,7 +116,7 @@ class GenConfigGenerated(GenNavIndex):
 
             # Generate group attributes organized by nav
             # Sort nav names for stable output, but keep group order as defined
-            collected_groups = defaultdict(set)
+            collected_groups = defaultdict(dict)
             for nav_name, config in self._iter_nav_config_by_order():
                 # Nav comment
                 gen.MultilineComment(f'========== nav: {nav_name} ==========')
@@ -126,17 +156,25 @@ class GenConfigGenerated(GenNavIndex):
                             gen.Comment(f'{group_name}: "{anno}"')
                             continue
                         # generate group_name: anno
-                        if group_name in collected_groups:
-                            gen.Comment(f'{group_name}: "{anno}"')
-                        else:
+                        # A group name may be bound by several tasks: the first
+                        # binding declares the attribute, the later ones only add
+                        # a comment. Binding it to a model of another inheritance
+                        # chain is reported: the same input would be validated by
+                        # two unrelated models, and the IDE reads a wrong type.
+                        # A variant of the declared model is what variant groups
+                        # are for, so it is not reported.
+                        models = collected_groups[group_name]
+                        if not models:
                             gen.use_import(model_nav)
                             gen.Anno(group_name, anno=f'"{anno}"')
-                            # validate if Multiple validation model bound on the same group
-                            collected_groups[group_name].add(anno)
-                            if len(collected_groups[group_name]) > 1:
+                        else:
+                            gen.Comment(f'{group_name}: "{anno}"')
+                            if cls_name not in models and not self._is_related_model(models, cls_name):
                                 logger.warning(
                                     f'Multiple validation model bound on group {task_name}.{group_name}, '
-                                    f'might cause unexpected behaviour, models: {collected_groups[group_name]}')
+                                    f'might cause unexpected behaviour, '
+                                    f'models: {sorted(list(models.values()) + [anno])}')
+                        models[cls_name] = anno
 
                 gen.Empty()
 

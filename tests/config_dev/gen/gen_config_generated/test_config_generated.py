@@ -175,34 +175,11 @@ Task:
         assert 'Info:' not in code
 
     def test_group_bound_twice_is_commented(self, fs):
-        """The second model of one group name only adds a comment."""
-        gen = build(fs, navs={'main': """\
-Base:
-  args:
-    X: 1
-Other:
-  parent: Base
-  args:
-    X: 2
-Group:
-  parent: Base
-  args:
-    X: 3
-"""}, tasks={'main': """\
-First:
-  groups:
-    Group: Base
-Second:
-  groups:
-    Group: Other
-"""})
-        code = generated(gen)
-        assert code.count('    Group: "main.Base"') == 1
-        assert '# Group: "main.Other"' in code
+        """The second model of one group name only adds a comment.
 
-    @pytest.mark.xfail(strict=True, reason='the second binding is commented before the warning check, the warning is unreachable')
-    def test_group_bound_to_two_models_warns(self, fs):
-        """A group name validated by two different models is reported."""
+        The second model is a variant of the first one, so the declared type
+        still describes it and the binding is not reported.
+        """
         gen = build(fs, navs={'main': """\
 Base:
   args:
@@ -224,10 +201,89 @@ Second:
     Group: Other
 """})
         with logger.mock_capture_writer() as capture:
+            code = generated(gen)
+        assert code.count('    Group: "main.Base"') == 1
+        assert '# Group: "main.Other"' in code
+        assert 'Multiple validation model bound' not in capture.concat()
+
+    def test_group_bound_to_two_models_warns(self, fs):
+        """A group name validated by two unrelated models is reported."""
+        gen = build(fs, navs={'main': """\
+Base:
+  args:
+    X: 1
+Other:
+  args:
+    Y: 2
+Group:
+  parent: Base
+  args:
+    X: 3
+"""}, tasks={'main': """\
+First:
+  groups:
+    Group: Base
+Second:
+  groups:
+    Group: Other
+"""})
+        # the second generation writes nothing, so the log holds the warning only
+        gen.generate_config_generated_file()
+        with logger.mock_capture_writer() as capture:
             gen.generate_config_generated_file()
-        assert any(
-            'Multiple validation model bound on group Second.Group' in log['m']
-            for log in capture.backend.logs
+        assert capture.concat() == (
+            'WARNING | Multiple validation model bound on group Second.Group, '
+            "might cause unexpected behaviour, models: ['main.Base', 'main.Other']\n"
+        )
+
+    def test_group_bound_to_the_same_model_is_silent(self, fs):
+        """The same group bound by several tasks validates with one model."""
+        gen = build(fs, navs={'main': """\
+Group:
+  args:
+    X: 1
+"""}, tasks={'main': """\
+First:
+  groups:
+    Group:
+Second:
+  groups:
+    Group:
+"""})
+        with logger.mock_capture_writer() as capture:
+            gen.generate_config_generated_file()
+        assert 'Multiple validation model bound' not in capture.concat()
+
+    def test_conflict_warns_once_per_model(self, fs):
+        """A model already reported is not reported again by the next task."""
+        gen = build(fs, navs={'main': """\
+Base:
+  args:
+    X: 1
+Other:
+  args:
+    Y: 2
+Group:
+  parent: Base
+  args:
+    X: 3
+"""}, tasks={'main': """\
+First:
+  groups:
+    Group: Base
+Second:
+  groups:
+    Group: Other
+Third:
+  groups:
+    Group: Other
+"""})
+        gen.generate_config_generated_file()
+        with logger.mock_capture_writer() as capture:
+            gen.generate_config_generated_file()
+        assert capture.concat() == (
+            'WARNING | Multiple validation model bound on group Second.Group, '
+            "might cause unexpected behaviour, models: ['main.Base', 'main.Other']\n"
         )
 
     def test_group_without_parser_is_reported(self, fs):
