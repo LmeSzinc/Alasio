@@ -7,11 +7,11 @@ one TaskData per task. Cross-task and cross-nav checks (does the target
 task/group exist, is a display model generated) happen in the MRO build; here
 only the per-file structure and the source file of every error are checked.
 
-msgspec reports a broken mapping entry as `$[...]`, so the location of a
-validated file keeps that placeholder: it names the broken field but not the
-task or the group that owns it, and the offending value is not collected.
-Resolving the placeholder is left to msgspecerror for now, it only changes the
-hint a developer reads, not what the parser accepts.
+msgspec reports a broken mapping entry as `$[...]`, msgspecerror resolves that
+placeholder against the yaml data, so the location of a rejected file names the
+task and the group that own the broken field, and the offending value is
+collected. A location that can not be walked keeps the placeholder as msgspec
+reported it.
 """
 
 import pytest
@@ -242,20 +242,20 @@ task:
 
 
 class TestTasksDataError:
-    @pytest.mark.parametrize('body, msg', [
-        ('', 'Expected `object`, got `null` - at `$[...]`'),
-        ('  - Group\n', 'Expected `object`, got `array` - at `$[...]`'),
-        (' Group\n', 'Expected `object`, got `str` - at `$[...]`'),
+    @pytest.mark.parametrize('body, value, msg', [
+        ('', None, 'Expected `object`, got `null` - at `$[...]`'),
+        ('  - Group\n', ['Group'], 'Expected `object`, got `array` - at `$[...]`'),
+        (' Group\n', 'Group', 'Expected `object`, got `str` - at `$[...]`'),
     ], ids=['null', 'list', 'str'])
-    def test_task_body_must_be_a_mapping(self, fs, body, msg):
+    def test_task_body_must_be_a_mapping(self, fs, body, value, msg):
         parser = make_parser(fs, tasks_yaml=f'Task:\n{body}')
         with pytest.raises(DefinitionError) as e:
             _ = parser.tasks_data
         assert e.value.msg == msg
         assert e.value.file == parser.tasks_file
-        # msgspec reports the task key as a `...` placeholder
-        assert e.value.keys == ['...']
-        assert 'value=' not in str(e.value)
+        # the `...` placeholder of the task key is resolved by msgspecerror
+        assert e.value.keys == ['Task']
+        assert e.value.value == value
 
     def test_unknown_field_gets_file(self, fs):
         parser = make_parser(fs, tasks_yaml="""\
@@ -266,8 +266,8 @@ Task:
             _ = parser.tasks_data
         assert e.value.msg == 'Object contains unknown field `grops` - at `$[...]`'
         assert e.value.file == parser.tasks_file
-        assert e.value.keys == ['...', 'grops']
-        assert 'value=' not in str(e.value)
+        assert e.value.keys == ['Task', 'grops']
+        assert e.value.value == {}
 
     def test_group_error_gets_file(self, fs):
         parser = make_parser(fs, tasks_yaml="""\
@@ -322,63 +322,89 @@ Task:
 class TestErrorLocation:
     """
     The whole file is converted with msgspec, whose mapping errors carry a
-    `$[...]` placeholder. Both the keys and the message keep the placeholder
-    as msgspec reports it: it points at the broken field, and resolving it to
-    the task and the group name is left to msgspecerror.
+    `$[...]` placeholder. msgspecerror resolves it against the yaml data, so
+    both `keys` and `value` name the task and the group that own the broken
+    field. The message keeps the placeholder, it is msgspec's own text.
+
+    A location that can not be walked keeps the placeholder as msgspec
+    reported it, `test_group_unknown_field_keeps_the_placeholder` pins that
+    fallback.
     """
 
-    @pytest.mark.parametrize('tasks_yaml, keys, msg', [
+    @pytest.mark.parametrize('tasks_yaml, keys, value, msg', [
         (
             'Task:\n  groups:\n    Group: 1\n',
-            ['...', 'groups', '...'],
+            ['Task', 'groups', 'Group'],
+            1,
             'Expected `str | object | null`, got `int` - at `$[...].groups[...]`',
         ),
         (
             'Task:\n  groups:\n    Group:\n      task: 1\n',
-            ['...', 'groups', '...', 'task'],
+            ['Task', 'groups', 'Group', 'task'],
+            1,
             'Expected `str`, got `int` - at `$[...].groups[...].task`',
         ),
         (
-            'Task:\n  groups:\n    Group:\n      task: Task\n      model: Base\n',
-            ['...', 'groups', '...', 'model'],
-            'Object contains unknown field `model` - at `$[...].groups[...]`',
-        ),
-        (
             'Task:\n  groups: [1]\n',
-            ['...', 'groups'],
+            ['Task', 'groups'],
+            [1],
             'Expected `object | null`, got `array` - at `$[...].groups`',
         ),
         (
             'Task:\n  displays:\n    - [{info: 1}]\n',
-            ['...', 'displays', 0, 0, 'info'],
+            ['Task', 'displays', 0, 0, 'info'],
+            1,
             'Expected `str`, got `int` - at `$[...].displays[0][0].info`',
         ),
         (
             'Task:\n  displays:\n    - {task: Device, group: Emulator}\n',
-            ['...', 'displays', 0],
+            ['Task', 'displays', 0],
+            {'task': 'Device', 'group': 'Emulator'},
             'Expected `str | array`, got `object` - at `$[...].displays[0]`',
         ),
         (
             'Task:\n  displays: 0\n',
-            ['...', 'displays'],
+            ['Task', 'displays'],
+            0,
             'Expected `str | array | null`, got `int` - at `$[...].displays`',
         ),
         (
             'Task:\n  global_bind: "false"\n',
-            ['...', 'global_bind'],
+            ['Task', 'global_bind'],
+            'false',
             'Expected `bool`, got `str` - at `$[...].global_bind`',
         ),
     ], ids=[
-        'group-value', 'group-field', 'group-unknown-field', 'groups-type',
-        'card-item-field', 'card-type', 'displays-type', 'global-bind',
+        'group-value', 'group-field', 'groups-type', 'card-item-field',
+        'card-type', 'displays-type', 'global-bind',
     ])
-    def test_location(self, fs, tasks_yaml, keys, msg):
+    def test_location(self, fs, tasks_yaml, keys, value, msg):
         parser = make_parser(fs, tasks_yaml=tasks_yaml)
         with pytest.raises(DefinitionError) as e:
             _ = parser.tasks_data
         assert e.value.msg == msg
         assert e.value.file == parser.tasks_file
         assert e.value.keys == keys
+        assert e.value.value == value
+
+    def test_group_unknown_field_keeps_the_placeholder(self, fs):
+        """
+        An unknown field of a group is reported at the placeholder path: the
+        field is not part of the model, so the walk can not descend into it
+        and leaves the location as msgspec reported it, with no value.
+        """
+        parser = make_parser(fs, tasks_yaml="""\
+Task:
+  groups:
+    Group:
+      task: Task
+      model: Base
+""")
+        with pytest.raises(DefinitionError) as e:
+            _ = parser.tasks_data
+        assert e.value.msg == 'Object contains unknown field `model` - at `$[...].groups[...]`'
+        assert e.value.file == parser.tasks_file
+        assert e.value.keys == ['...', 'groups', '...', 'model']
         assert 'value=' not in str(e.value)
 
     def test_location_of_the_second_task(self, fs):
@@ -392,12 +418,13 @@ Bad:
 """)
         with pytest.raises(DefinitionError) as e:
             _ = parser.tasks_data
-        # the task name is the placeholder, not `Bad`
-        assert e.value.keys == ['...', 'groups', '...']
+        # the placeholder of the task key is resolved to the second task
+        assert e.value.keys == ['Bad', 'groups', 'Group']
+        assert e.value.value == 1
 
     def test_an_unencodable_value_is_still_reported(self, fs):
         """
-        The location does not depend on the value being walkable, so a value
+        The location and the value are walked from the yaml data, so a value
         that msgpack can not hold is reported like any other.
         """
         parser = make_parser(fs, tasks_yaml="""\
@@ -409,23 +436,25 @@ Task:
             _ = parser.tasks_data
         assert e.value.msg == 'Expected `str | object | null`, got `int` - at `$[...].groups[...]`'
         assert e.value.file == parser.tasks_file
-        assert e.value.keys == ['...', 'groups', '...']
-        assert 'value=' not in str(e.value)
+        assert e.value.keys == ['Task', 'groups', 'Group']
+        assert e.value.value == 1000000000000000000000000000000000000000000
 
 
 class TestDisplayFormat:
-    @pytest.mark.parametrize('card, msg', [
+    @pytest.mark.parametrize('card, value, msg', [
         (
             '  - {task: Device, group: Emulator}\n',
+            {'task': 'Device', 'group': 'Emulator'},
             'Expected `str | array`, got `object` - at `$[...].displays[0]`',
         ),
         (
             '  - info: Fleet\n    groups: [Group]\n',
+            {'info': 'Fleet', 'groups': ['Group']},
             'Expected `str | array`, got `object` - at `$[...].displays[0]`',
         ),
-        ('  - 1\n', 'Expected `str | array`, got `int` - at `$[...].displays[0]`'),
+        ('  - 1\n', 1, 'Expected `str | array`, got `int` - at `$[...].displays[0]`'),
     ], ids=['group-ref', 'info-with-groups', 'int'])
-    def test_a_card_is_a_list_or_a_group_name(self, fs, card, msg):
+    def test_a_card_is_a_list_or_a_group_name(self, fs, card, value, msg):
         """
         A card is a list of items or the name of its only group. The pre-list
         format is rejected: a mapping is neither.
@@ -435,8 +464,8 @@ class TestDisplayFormat:
             _ = parser.tasks_data
         assert e.value.msg == msg
         assert e.value.file == parser.tasks_file
-        assert e.value.keys == ['...', 'displays', 0]
-        assert 'value=' not in str(e.value)
+        assert e.value.keys == ['Task', 'displays', 0]
+        assert e.value.value == value
 
     def test_a_group_name_is_a_card_of_one_group(self, fs):
         parser = make_parser(fs, tasks_yaml="""\

@@ -2,7 +2,7 @@ from typing import Dict, List, Optional, Union
 
 import msgspec
 from msgspec import field
-from msgspecerror import parse_msgspec_error
+from msgspecerror import convert_with_error_detail
 
 from alasio.config.entry.utils import validate_task_name
 from alasio.config_dev.parse.base import ParseBase
@@ -450,16 +450,16 @@ class ParseTasks(ParseBase):
                     file=self.tasks_file, keys=[], value=task_name
                 )
         # The whole file is checked by msgspec, instead of one task at a time
-        try:
-            definitions = msgspec.convert(data, type=TasksDefinition)
-        except msgspec.ValidationError as e:
-            # The error location carries msgspec's `...` placeholder, so it
-            # names the broken field but not the task or the group it belongs
-            # to, and the offending value is not collected. Resolving the
-            # placeholder is left to msgspecerror, the message and the file are
-            # still enough for a developer to find the definition.
-            error = parse_msgspec_error(e)
-            raise DefinitionError(error.msg, file=self.tasks_file, keys=list(error.loc)) from e
+        definitions, error = convert_with_error_detail(data, TasksDefinition)
+        if error is not msgspec.NODEFAULT:
+            # msgspec reports a broken mapping entry as `$[...]`, the detail
+            # resolves it against the yaml data, so the location names the task
+            # and the group the definition belongs to, and carries the value
+            # that failed validation.
+            keys = list(error.loc)
+            if error.error_value_resolved:
+                raise DefinitionError(error.msg, file=self.tasks_file, keys=keys, value=error.error_value)
+            raise DefinitionError(error.msg, file=self.tasks_file, keys=keys)
 
         output = {}
         for task_name, definition in definitions.items():

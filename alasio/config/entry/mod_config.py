@@ -3,9 +3,8 @@ from collections import defaultdict
 from msgspec import NODEFAULT, ValidationError, convert
 from msgspec.msgpack import encode
 from msgspec.structs import asdict
-from msgspecerror import (
-    ErrorInfo, ErrorType, get_field_default, get_model_changes, load_msgpack_with_default, parse_msgspec_error
-)
+from msgspecerror import ErrorInfo, ErrorType, convert_with_error, load_msgpack_with_default
+from msgspecerror.parse_model_struct import get_struct_field_default, get_struct_model_changes
 
 from alasio.base.pretty import pretty_value
 from alasio.config.const import DataInconsistent
@@ -17,8 +16,10 @@ from alasio.logger import logger
 
 
 def get_field_default_with_error(model, arg):
+    # Model of a config group is always a msgspec Struct, so the struct
+    # implementation is called directly instead of the kind dispatching one
     try:
-        default = get_field_default(model, arg)
+        default = get_struct_field_default(model, arg)
     except AttributeError:
         # no default
         default = NODEFAULT
@@ -189,17 +190,14 @@ class ModConfig(ModBase):
                 # this shouldn't happen, as dict_model is paired with dict_value
                 continue
             task, group = key
-            try:
-                # may raise error
-                value_obj = convert(value, model)
-                # note that value type might change after convert
-            except ValidationError as e:
-                error = parse_msgspec_error(e)
+            # note that value type might change after convert
+            value_obj, error = convert_with_error(value, model)
+            if error is not NODEFAULT:
                 try:
                     arg = error.loc[0]
                 except IndexError:
                     # can't parse
-                    raise DataInconsistent(f'Failed to parse error.loc from "{e}"') from None
+                    raise DataInconsistent(f'Failed to parse error.loc from "{error.msg}"') from None
                 dict_convert_error[key] = (arg, error)
                 has_error = True
                 continue
@@ -310,7 +308,7 @@ class ModConfig(ModBase):
                     # log changes and collect post_edit side effects
                     if obj != obj_patch:
                         try:
-                            dict_diff = get_model_changes(obj_patch, obj)
+                            dict_diff = get_struct_model_changes(obj_patch, obj)
                         except (TypeError, AttributeError) as e:
                             logger.error(f'Failed to get model changes: {e}')
                         else:
@@ -375,14 +373,12 @@ class ModConfig(ModBase):
 
         # validate
         value = {event.arg: event.value}
-        try:
-            value_obj = convert(value, model)
-        except ValidationError as e:
-            error = parse_msgspec_error(e)
+        value_obj, error = convert_with_error(value, model)
+        if error is not NODEFAULT:
             try:
                 arg = error.loc[0]
             except IndexError:
-                raise DataInconsistent(f'Failed to parse error.loc from "{e}"') from None
+                raise DataInconsistent(f'Failed to parse error.loc from "{error.msg}"') from None
             # rollback event should restore to the current user setting, not the model default.
             # query user setting with a plain read without exclusive lock (nothing is written on failure),
             # but the stored data is still validated against the model after the read
@@ -452,7 +448,7 @@ class ModConfig(ModBase):
                 # log changes and collect post_edit side effects
                 if obj != obj_patch:
                     try:
-                        dict_diff = get_model_changes(obj_patch, obj)
+                        dict_diff = get_struct_model_changes(obj_patch, obj)
                     except (TypeError, AttributeError) as e:
                         logger.error(f'Failed to get model changes: {e}')
                     else:
