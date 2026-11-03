@@ -22,15 +22,18 @@ the failed mirror and retry it once:
 
 - `get_package_index(name)` requests `{mirror}/{dist-key}/` and returns the
   page: the links parsed from it, the body as the mirror served it and the url
-  it was served at. The probe of the path is the default HEAD of the probe
-  layer: the page of a big distribution is large (the page of numpy is a few
-  MB), a probe must not transfer it. The page is fetched once by the work of
-  the flow, on the selected mirror. The body answers the caller that keeps a
-  snapshot of the page instead of only its links (the pack server caches the
-  page of a version, see fetch_wheel); the optional `select` step answers the
-  flow that asks a question about the page, and it runs inside the probe, so a
-  page without the answer is a failure of the mirror like a page that does not
-  parse (see download());
+  it was served at. A fetcher built with `html=True` requests
+  `{mirror}/{dist-key}/index.html` instead, the page of the pack server on a
+  static host that does not redirect a folder to its index page. The probe of
+  the path is the default HEAD of the probe layer: the page of a big
+  distribution is large (the page of numpy is a few MB), a probe must not
+  transfer it. The page is fetched once by the work of the flow, on the
+  selected mirror. The body answers the caller that keeps a snapshot of the
+  page instead of only its links (the pack server caches the page of a version,
+  see fetch_wheel); the optional `select` step answers the flow that asks a
+  question about the page, and it runs inside the probe, so a page without the
+  answer is a failure of the mirror like a page that does not parse (see
+  download());
 - `get_wheel(url)` downloads one wheel of a page by the absolute url of its
   link, and returns the wheel with the digests of its bytes. A page may point
   at a files host of its own (files.pythonhosted.org), so the url is used as it
@@ -400,6 +403,12 @@ class PypiFile(AsyncHttpProbe):
     must not transfer the page. The page is fetched by the work of the flow,
     once, on the selected mirror.
 
+    The page is requested at the folder of the distribution. A caller that
+    reads the published output of the pack server on a static file service
+    turns on `html`: some services do not redirect a folder to its index page
+    (and do not list a folder at all), so the page is requested as
+    `{dist-key}/index.html`, see __init__.
+
     A wheel is not a path of a mirror: it is served by the host of its url (see
     get_wheel()), so its transfer goes through the http client alone.
 
@@ -413,7 +422,7 @@ class PypiFile(AsyncHttpProbe):
     SCENE = 'pypi'
     FAILURES = (WheelNotFoundError,)
 
-    def __init__(self, mirrors, dest, name='', client=None, target=None):
+    def __init__(self, mirrors, dest, name='', client=None, target=None, html=False):
         """
         Args:
             mirrors (Mirrors | str | dict): The pypi mirrors to select from,
@@ -430,10 +439,20 @@ class PypiFile(AsyncHttpProbe):
                 aclose() closes it
             target (TargetPython | None): The interpreter the wheels are
                 selected for. Defaults to None, the running interpreter
+            html (bool): True to request the page as
+                `{mirror}/{dist-key}/index.html` instead of the folder
+                `{mirror}/{dist-key}/`. Defaults to False, the folder a simple
+                index mirror answers (it redirects to its page). A static file
+                service may not redirect a folder to its index page, so a
+                caller that knows it reads the output of the pack server,
+                whose page is the file `{dist-key}/index.html`, turns it on.
+                The links of the page are relative to its folder either way,
+                so the selection of the wheels does not depend on it
         """
         super().__init__(mirrors, name=name, client=client)
         self.dest = PathStr.new(dest)
         self.target = target if target is not None else TargetPython()
+        self.html = html
 
     async def warmup(self):
         """
@@ -504,14 +523,17 @@ class PypiFile(AsyncHttpProbe):
         """
         Get the index page of a distribution from {mirror}/{dist-key}/.
 
-        The page is the probed path, and the probe is the default HEAD of the
-        probe layer: the page of a big distribution is large (the page of
-        numpy is a few MB), so the probe must not transfer it. The page itself
-        is fetched once by the work below, on the selected mirror, and the
-        redirects of the mirror are followed: a mirror may send `/{dist}` to
-        `/{dist}/`, or serve its index below another host. The links carry the
-        filenames, the hashes and the `data-*` attributes of the page, whatever
-        the version (see select_wheels() for the filter).
+        A fetcher built with `html=True` requests the page as
+        `{mirror}/{dist-key}/index.html`, the file of a static host that does
+        not redirect a folder to its index page (see __init__). The page is the
+        probed path, and the probe is the default HEAD of the probe layer: the
+        page of a big distribution is large (the page of numpy is a few MB), so
+        the probe must not transfer it. The page itself is fetched once by the
+        work below, on the selected mirror, and the redirects of the mirror are
+        followed: a mirror may send `/{dist}` to `/{dist}/`, or serve its index
+        below another host. The links carry the filenames, the hashes and the
+        `data-*` attributes of the page, whatever the version (see
+        select_wheels() for the filter).
 
         Args:
             name (str): Distribution name, any case and separator style
@@ -532,7 +554,10 @@ class PypiFile(AsyncHttpProbe):
                 mirror for a distribution it has no index of)
             AllMirrorsFailedError: If no mirror is usable
         """
-        path = f'/{canonicalize_name(name)}/'
+        dist = canonicalize_name(name)
+        # the folder of the distribution, or the file of it on a static host
+        # that does not redirect the folder to its index page
+        path = f'/{dist}/index.html' if self.html else f'/{dist}/'
 
         async def work(mirror_name, url):
             page_url = f'{url}{path}'

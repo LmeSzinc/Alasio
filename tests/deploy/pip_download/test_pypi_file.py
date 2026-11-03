@@ -31,10 +31,11 @@ class MockIndex:
     """
     An in-memory PyPI simple index, served through a MockTransport handler.
 
-    Every distribution has an index page at `{base}/{dist}/`, and every wheel
+    Every distribution has an index page at `{base}/{dist}/`, served at
+    `{base}/{dist}/index.html` too (the file of a static host), and every wheel
     of it is served at `{base}/{dist}/{filename}`; the links of the page are
-    relative and carry the sha256 of the content, unless the registration says
-    otherwise.
+    absolute unless `relative=True`, and carry the sha256 of the content unless
+    the registration says otherwise.
 
     Attributes:
         base (str): Base url of the index, e.g. 'https://a.example/simple'
@@ -43,16 +44,21 @@ class MockIndex:
             order
     """
 
-    def __init__(self, base, files_base=None):
+    def __init__(self, base, files_base=None, relative=False):
         """
         Args:
             base (str): Base url of the index, without the trailing '/'
             files_base (str | None): Base url the page links its files with,
                 None for the base of the index (a real mirror may point at a
                 files host of its own)
+            relative (bool): True to link a wheel by its file name, the shape
+                of the pack server page (the file sits in the folder of the
+                page); False for the absolute urls of a mirror. Defaults to
+                False
         """
         self.base = base.rstrip('/')
         self.files_base = (files_base or base).rstrip('/')
+        self.relative = relative
         # {dist key: [file info]}, the file info: filename, content, digest,
         # requires_python, yanked
         self.dists = {}
@@ -126,9 +132,15 @@ class MockIndex:
         anchors = []
         for info in self.dists.get(name, []):
             fragment = f'#sha256={info["digest"]}' if info['digest'] else ''
-            # the link is absolute, like the links of a mirror that serves the
-            # files from a host of its own
-            attrs = f' href="{self.file_url(name, info["filename"])}{fragment}"'
+            if self.relative:
+                # the shape of the pack server page: the file sits in the
+                # folder of the page
+                href = info['filename']
+            else:
+                # the links of a mirror that serves the files from a host of
+                # its own
+                href = self.file_url(name, info['filename'])
+            attrs = f' href="{href}{fragment}"'
             if info['requires_python'] is not None:
                 attrs += f' data-requires-python="{info["requires_python"]}"'
             if info['yanked'] is not None:
@@ -159,9 +171,9 @@ class MockIndex:
         name, sep, filename = rest.partition('/')
         if not sep:
             return httpx2.Response(404)
-        if not filename:
-            # the index page of the distribution, 404 when the mirror has no
-            # index of it
+        if not filename or filename == 'index.html':
+            # the index page of the distribution, as a folder or as the file a
+            # static host serves, 404 when the mirror has no index of it
             if name not in self.dists:
                 return httpx2.Response(404)
             if name in self.broken_pages:
@@ -760,6 +772,78 @@ INFO | Download wheel: "https://files.example/packages/httpx/httpx-0.28.1-py3-no
         assert info.hashes == {'sha256': digest}
         assert index.requests == []
         assert capture.concat() == f'INFO | Wheel exists, skipped: "{file}"\n'
+
+
+class TestHtmlPage:
+    """The page of a static host that serves it as a file (html=True)."""
+
+    @pytest.mark.trio
+    async def test_get_package_index(self, index, dest):
+        """html=True requests {dist}/index.html instead of the folder."""
+        index.register('httpx', '0.28.0')
+        index.register('httpx', '0.28.1', requires_python='>=3.8')
+        pypi = PypiFile(index.base, dest, client=make_client(index), html=True)
+        page_url = f'{index.base}/httpx/index.html'
+        with logger.mock_capture_writer() as capture:
+            page = await pypi.get_package_index('HTTPX')
+        assert capture.concat() == f"""\
+INFO | Download index page: "{page_url}"
+"""
+        assert [link.filename for link in page.links] == [
+            'httpx-0.28.0-py3-none-any.whl',
+            'httpx-0.28.1-py3-none-any.whl',
+        ]
+        assert page.url == page_url
+        assert page.body == index.page('httpx')
+        assert index.requests == [('GET', page_url)]
+
+    @pytest.mark.trio
+    async def test_download_of_relative_links(self, dest):
+        """The page of the pack server links its wheels by their file name: the
+        links resolve in the folder of index.html."""
+        index = MockIndex('https://a.example/simple', relative=True)
+        content = index.register('httpx', '0.28.1')
+        pypi = PypiFile(index.base, dest, client=make_client(index), html=True)
+        with logger.mock_capture_writer() as capture:
+            files = await pypi.download('httpx', '0.28.1', 'py3-any')
+        assert capture.concat() == f"""\
+INFO | Download index page: "https://a.example/simple/httpx/index.html"
+INFO | Download wheel: "https://a.example/simple/httpx/httpx-0.28.1-py3-none-any.whl" -> "{dest}/httpx-0.28.1-py3-none-any.whl"
+"""
+        assert [file.name for file in files] == ['httpx-0.28.1-py3-none-any.whl']
+        assert files[0].atomic_read_bytes() == content
+        assert index.requests == [
+            ('GET', 'https://a.example/simple/httpx/index.html'),
+            ('GET', 'https://a.example/simple/httpx/httpx-0.28.1-py3-none-any.whl'),
+        ]
+
+    @pytest.mark.trio
+    async def test_probe_path(self, record_table, dest):
+        """The probed path is the page file, not the folder: a static host may
+        answer neither the folder nor its redirect."""
+        first = MockIndex('https://a.example/simple', relative=True)
+        second = MockIndex('https://b.example/simple', relative=True)
+        first.register('httpx', '0.28.1')
+        second.register('httpx', '0.28.1')
+        pypi = PypiFile(
+            {'cn': {'a': first.base, 'b': second.base}}, dest,
+            client=make_client(first, second), target=PY38_WIN, html=True)
+        with logger.mock_capture_writer() as capture:
+            files = await pypi.download('httpx', '0.28.1', 'py3-any')
+        assert capture.concat() == f"""\
+INFO | Probing `pypi` for "/httpx/index.html": a, b
+INFO | Mirror "a" responded in 0ms
+INFO | [Mirror `pypi`] a
+INFO | Download index page: "https://a.example/simple/httpx/index.html"
+INFO | Download wheel: "https://a.example/simple/httpx/httpx-0.28.1-py3-none-any.whl" -> "{dest}/httpx-0.28.1-py3-none-any.whl"
+"""
+        assert [file.name for file in files] == ['httpx-0.28.1-py3-none-any.whl']
+        assert first.requests == [
+            ('HEAD', 'https://a.example/simple/httpx/index.html'),
+            ('GET', 'https://a.example/simple/httpx/index.html'),
+            ('GET', 'https://a.example/simple/httpx/httpx-0.28.1-py3-none-any.whl'),
+        ]
+        assert second.requests == []
 
 
 class TestIndexErrors:
