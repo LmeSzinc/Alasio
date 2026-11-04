@@ -7,9 +7,6 @@ from alasio.ext.deep import deep_set
 from alasio.ext.env import set_project_root
 from alasio.logger import logger
 
-# The declaration of this mod, the file the framework reads
-entry = ModEntry.create(__file__, uppath=3)
-
 CHAPTER_MAP = {
     'chapter1': ['1-1', '1-2', '1-3', '1-4'],
     'chapter2': ['2-1', '2-2', '2-3', '2-4'],
@@ -47,6 +44,10 @@ class Generator(IndexGenerator):
 if __name__ == '__main__':
     set_project_root(__file__, up=4)
     logger.mute(fd=True)
+    # The entry of the mod, for the generation itself: module/config/_index/
+    # mod_entry.py, which every other module of the mod imports, is written by
+    # the generation, so the generator creates its entry of its own
+    entry = ModEntry.create(__file__, uppath=3)
     # generate
     logger.info(f'ModEntry: {entry.data}')
     self = Generator(entry)

@@ -5,6 +5,26 @@ from alasio.codegen.python.obj_closure import *
 from alasio.codegen.python.obj_if import *
 from alasio.codegen.python.obj_import import *
 
+# Marker of a generated file: the two lines of the banner, one place for every
+# generator, so a change of the wording reaches every generated file
+AUTO_GEN_COMMENT = (
+    'This file was auto-generated, do not modify it manually. To generate:',
+    '``` python -m {} ```',
+)
+
+
+def auto_gen_comment(file):
+    """
+    Build the lines of the auto generated banner.
+
+    Args:
+        file (str): Path to code generator, such as "dev_tools.button_extract"
+
+    Returns:
+        tuple[str, str]: The lines of the banner, without the comment marker
+    """
+    return AUTO_GEN_COMMENT[0], AUTO_GEN_COMMENT[1].format(file)
+
 
 class CodeGen(CodeGenBase):
     """
@@ -224,8 +244,25 @@ class CodeGen(CodeGenBase):
         Args:
             file (str): Path to code generator, such as "dev_tools.button_extract"
         """
-        self.AutoGenComment('This file was auto-generated, do not modify it manually. To generate:')
-        self.AutoGenComment(f'``` python -m {file} ```')
+        for line in auto_gen_comment(file):
+            self.AutoGenComment(line)
+
+    def CommentCodeGenInline(self, file):
+        """
+        The auto generated banner as plain comments, for a file whose code is
+        not a class or a function.
+
+        A banner of CommentCodeGen is a file header: sort_import() puts it after
+        the import block with 2 blank lines, which is what PEP8 asks before a
+        class or a definition. A file of top-level assignments gets 1 blank
+        line from the formatters, so its banner has to be a plain comment for
+        the generated file to be a fixed point of them.
+
+        Args:
+            file (str): Path to code generator, such as "dev_tools.button_extract"
+        """
+        for line in auto_gen_comment(file):
+            self.Comment(line)
 
     def Class(self, name):
         """

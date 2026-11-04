@@ -3,6 +3,7 @@ import inspect
 from collections import defaultdict
 
 from alasio.codegen.python import CodeGen
+from alasio.config.entry.mod_entry import MOD_ENTRY_NAME
 from alasio.config_dev.gen.gen_nav_index import GenNavIndex
 from alasio.config_dev.parse.base import DefinitionError
 from alasio.logger import logger
@@ -91,7 +92,7 @@ class GenConfigGenerated(GenNavIndex):
         gen.Import('typing').as_('t')
         if self.alasio:
             gen.FromImport('alasio.config.base').Import('AlasioConfigBase')
-            gen.FromImport('alasio.config.entry.mod_entry').Import('ModEntry')
+            gen.FromImport('.mod_entry').Import(MOD_ENTRY_NAME)
         # TYPE_CHECKING block - imports only used for type hints
         with gen.If('t.TYPE_CHECKING'):
             gen.Import('alasio.config.alasio.group_export').as_('alasio').lazy()
@@ -114,9 +115,9 @@ class GenConfigGenerated(GenNavIndex):
         with cls:
             gen.MultilineComment('A generated config struct to fool IDE\'s type-predict and auto-complete')
             if self.alasio:
-                # The file lives in <mod root>/module/config/_index/, so the
-                # mod root is 4 levels above it
-                gen.Raw('entry = ModEntry.create(__file__, uppath=4)')
+                # The entry of the mod is created in mod_entry.py, next to this
+                # file: the mod states its layout once, see GenModEntry
+                gen.Raw(f'entry = {MOD_ENTRY_NAME}')
             gen.Empty()
 
             # Generate group attributes organized by nav

@@ -36,9 +36,14 @@ the code, see :meth:`ModEntry.alasio`.
 Usage:
     from alasio.config.entry.mod_entry import ModEntry
 
+    # a module of a mod, 3 levels below its root
     entry = ModEntry.create(__file__, uppath=3)
     entry.gui_language
-    entry.write()
+
+    # a caller that probes a folder, e.g. the loader of the mods
+    entry = ModEntry(root)
+    if entry.validate():
+        ...
 """
 
 import os
@@ -114,6 +119,11 @@ MOD_ENTRY_SUBPATH = f'{MOD_ENTRY_FOLDER}/{MOD_ENTRY_FILE}'
 # file at this path from the git blob of a commit, where the root of the mod
 # is the root of the repo, and no working tree exists to find it in
 MOD_ENTRY_PATH = f'{MOD_CONFIG}/{MOD_ENTRY_SUBPATH}'
+
+# Name of the entry of a mod in the generated module next to its declaration
+# (<mod>/<MOD_CONFIG>/_index/mod_entry.py): the one place the code of a mod
+# creates its entry, every other module imports this name, see GenModEntry
+MOD_ENTRY_NAME = 'MOD_ENTRY'
 
 # Default dependency file of a mod, relative to the mod root, see
 # ModEntryModel.requirements_file
@@ -538,6 +548,11 @@ class ModEntry:
         or the repository that holds the mod) and the mod would silently read
         a declaration that is not its own.
 
+        The creation touches no file: an entry whose folder declares nothing
+        is created too, the declaration is read and checked on the first
+        access of :attr:`data` (or by :meth:`validate`), so a mod can hold its
+        entry before the file exists and a caller builds the object cheaply.
+
         Args:
             path (str): File or folder of the mod, usually __file__. A relative
                 path is resolved against the working folder
@@ -546,16 +561,33 @@ class ModEntry:
 
         Returns:
             ModEntry: The entry of the mod
-
-        Raises:
-            ModEntryError: If the folder at that level declares no mod entry
         """
-        root = PathStr.new(normpath(abspath(path))).uppath(uppath)
-        if not cls.is_mod(root):
-            raise ModEntryError(
-                f'No mod entry at "{root}": "{path}" is {uppath} level(s) below the root of '
-                f'a mod, expected {MOD_ENTRY_PATH}')
-        return cls(root)
+        return cls(PathStr.new(normpath(abspath(path))).uppath(uppath))
+
+    def validate(self):
+        """
+        Check that the declaration of the mod can be read.
+
+        The check a caller makes before it uses an entry it did not create at
+        a known path, e.g. ModLoader on the folders next to the project root:
+        the declaration is read (and cached), and the reason it cannot be read
+        is logged, so the caller only decides what to do with a False.
+
+        A folder that declares no entry is not reported as an error: most of
+        the folders a caller probes are not mods.
+
+        Returns:
+            bool: True when the declaration is read and valid
+        """
+        try:
+            _ = self.data
+        except FileNotFoundError:
+            logger.debug(f'No mod entry: "{self.file}"')
+            return False
+        except ModEntryError as e:
+            logger.error(f'Invalid mod entry, mod skipped: {e}')
+            return False
+        return True
 
     @classmethod
     def from_source(cls, source, source_name=''):

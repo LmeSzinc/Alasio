@@ -1,11 +1,16 @@
 """
-Tests of mod_entry.yaml (GenModEntry.generate_mod_entry).
+Tests of the declaration of a mod and its entry module
+(GenModEntry.generate_mod_entry).
 
 The declaration of a mod is maintained like config/deploy.yaml: the generator
 writes it from the yaml model, so the file follows the model — the keys in the
 order of the model, the comments of its ``help`` annotations, and the format
 of YamlConfig. The write itself is ``ModEntry.write``, the generator only
 hands it the git staging.
+
+Next to it the generator writes ``mod_entry.py``, the one place the code of
+the mod creates its entry: every module of the mod imports MOD_ENTRY from it
+instead of computing the root from its own depth.
 """
 from alasio.config.entry.mod_entry import MOD_CONFIG, ModEntry, ModEntryModel
 from alasio.config_dev.gen.gen_mod_entry import GenModEntry
@@ -114,10 +119,10 @@ class TestGenerateModEntry:
         gitadd = GitAddSpy()
 
         gen.generate_mod_entry(gitadd=gitadd)
-        assert [PathStr.new(f).name for f in gitadd.files] == ['mod_entry.yaml']
+        assert [PathStr.new(f).name for f in gitadd.files] == ['mod_entry.yaml', 'mod_entry.py']
 
         gen.generate_mod_entry(gitadd=gitadd)
-        assert [PathStr.new(f).name for f in gitadd.files] == ['mod_entry.yaml']
+        assert [PathStr.new(f).name for f in gitadd.files] == ['mod_entry.yaml', 'mod_entry.py']
 
     def test_file_of_the_entry_layout(self, fs):
         """The declaration is written under the config folder of the mod."""
@@ -126,13 +131,21 @@ class TestGenerateModEntry:
         assert PathStr.new(gen.mod_entry_file) == \
             PathStr.new(fs.root_dir.path).joinpath(f'{MOD_CONFIG}/_index/mod_entry.yaml')
 
-    def test_alasio_layout(self):
+    def test_alasio_layout(self, fs):
         """The entry of the library writes its declaration under alasio/config."""
         gen = GenModEntry(ModEntry.alasio)
 
         file = PathStr.new(gen.mod_entry_file)
         assert file.name == 'mod_entry.yaml'
         assert file.uppath(3).name == 'alasio'
+
+    def test_alasio_layout_writes_no_module(self, fs):
+        """The entry of the library is a value of its code, no module of it."""
+        gen = GenModEntry(ModEntry.alasio)
+
+        gen.generate_mod_entry()
+
+        assert not PathStr.new(gen.mod_entry_py_file).exists()
 
     def test_logs_the_write(self, fs):
         """A write is reported, a skipped one is silent."""
@@ -145,6 +158,41 @@ class TestGenerateModEntry:
         with logger.mock_capture_writer() as capture:
             gen.generate_mod_entry()
         assert not capture.fd.any_contains('Write file')
+
+
+class TestGenerateModEntryPy:
+    """The module that exposes the entry to the code of the mod."""
+
+    def test_file_content(self, fs):
+        """The module creates the entry from its own depth, 4 levels below the root."""
+        gen = build(fs)
+
+        assert gen.generate_mod_entry_py() is True
+
+        assert open(gen.mod_entry_py_file, encoding='utf-8').read() == """\
+from alasio.config.entry.mod_entry import ModEntry
+
+# This file was auto-generated, do not modify it manually. To generate:
+# ``` python -m module.config.gen ```
+
+MOD_ENTRY = ModEntry.create(__file__, uppath=4)
+"""
+
+    def test_next_to_the_declaration(self, fs):
+        """The module lives next to mod_entry.yaml, in the _index folder."""
+        gen = build(fs)
+
+        assert PathStr.new(gen.mod_entry_py_file) == \
+            PathStr.new(fs.root_dir.path).joinpath(f'{MOD_CONFIG}/_index/mod_entry.py')
+        assert PathStr.new(gen.mod_entry_py_file).uppath(1) == \
+            PathStr.new(gen.mod_entry_file).uppath(1)
+
+    def test_second_run_writes_nothing(self, fs):
+        """The generator is idempotent: the module is written once."""
+        gen = build(fs)
+
+        assert gen.generate_mod_entry_py() is True
+        assert gen.generate_mod_entry_py() is False
 
 
 class TestModEntryBlockScalar:

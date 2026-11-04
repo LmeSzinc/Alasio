@@ -20,6 +20,7 @@ from alasio.deploy.httpclient.probe_mirrors import Mirrors
 from alasio.ext import env
 from alasio.ext.cache.msgspec_meta import get_field_metadata
 from alasio.ext.path import PathStr
+from alasio.logger import logger
 from alasio.testing.filesystem import fs  # noqa: F401
 
 # A complete declaration, every key the model accepts
@@ -426,12 +427,15 @@ class TestCreate:
         assert ModEntry.create('/mod/module/map/map.py', uppath=3).data.name == 'm'
 
     def test_no_walk_up(self, fs):
-        """A depth that lands between the root and the file is an error, not a walk."""
+        """A depth that lands between the root and the file is not searched up."""
         write_entry(fs, '/mod', 'name: m\n')
         fs.create_file('/mod/module/map/map.py', contents='')
 
-        with pytest.raises(ModEntryError, match='No mod entry at'):
-            ModEntry.create('/mod/module/map/map.py', uppath=1)
+        entry = ModEntry.create('/mod/module/map/map.py', uppath=1)
+
+        assert entry.root == PathStr.new('/mod/module/map')
+        with pytest.raises(FileNotFoundError):
+            _ = entry.data
 
     def test_nested_mod(self, fs):
         """A nested mod is its own mod, the root is the one stated, not the nearest."""
@@ -442,11 +446,14 @@ class TestCreate:
         assert ModEntry.create('/mod/module/config', uppath=2).data.name == 'outer'
 
     def test_no_mod(self, fs):
-        """A folder without a declaration is not a mod, the error names the root."""
+        """A folder without a declaration creates an entry that has nothing to read."""
         fs.create_file('/work/module/main.py', contents='')
 
-        with pytest.raises(ModEntryError, match=r'No mod entry at "/work"'):
-            ModEntry.create('/work/module/main.py', uppath=2)
+        entry = ModEntry.create('/work/module/main.py', uppath=2)
+
+        assert entry.root == PathStr.new('/work')
+        with pytest.raises(FileNotFoundError):
+            _ = entry.data
 
     @pytest.mark.parametrize('file', [
         # another layout: a mod is module/config, not any folder holding a file
@@ -458,11 +465,11 @@ class TestCreate:
         'alasio/config/_index/mod_entry.yaml',
     ])
     def test_only_the_mod_layout(self, fs, file):
-        """Only the fixed relative path of a mod makes a root."""
+        """Only the fixed relative path of a mod is read."""
         fs.create_file(f'/work/{file}', contents='name: m\n')
 
-        with pytest.raises(ModEntryError, match='No mod entry at'):
-            ModEntry.create('/work', uppath=0)
+        with pytest.raises(FileNotFoundError):
+            _ = ModEntry.create('/work', uppath=0).data
 
     def test_relative_path(self, fs):
         """A relative path is resolved against the working folder."""
@@ -473,6 +480,41 @@ class TestCreate:
 
         assert PathStr.new(root).name == 'mod'
         assert ModEntry(root).data.name == 'm'
+
+
+class TestValidate:
+    """The check a caller makes on an entry it did not create at a known path."""
+
+    def test_valid(self, fs):
+        """A readable declaration validates, and is cached by the check."""
+        write_entry(fs, '/mod', 'name: m\n')
+        entry = ModEntry('/mod')
+
+        assert entry.validate() is True
+        assert entry.name == 'm'
+
+    def test_missing_file(self, fs):
+        """A folder that declares nothing is not valid, and is silent."""
+        with logger.mock_capture_writer() as capture:
+            assert ModEntry('/mod').validate() is False
+        assert capture.concat() == ''
+
+    def test_invalid_declaration(self, fs):
+        """A broken declaration is not valid, and the reason is reported."""
+        write_entry(fs, '/mod', 'name: [unclosed\n')
+        entry = ModEntry('/mod')
+
+        with logger.mock_capture_writer() as capture:
+            assert entry.validate() is False
+        assert 'invalid yaml' in capture.concat()
+
+    def test_a_name_is_required(self, fs):
+        """A declaration that names no mod is not valid."""
+        write_entry(fs, '/mod', 'path_main: module/entry.py\n')
+
+        with logger.mock_capture_writer() as capture:
+            assert ModEntry('/mod').validate() is False
+        assert 'name is required' in capture.concat()
 
 
 class TestWrite:
@@ -631,3 +673,11 @@ class TestExampleModDeclaration:
         file = root.joinpath('module/map/button.py')
 
         assert ModEntry.create(file, uppath=3).root == root
+
+    def test_the_generated_module_creates_the_entry(self):
+        """mod_entry.py next to the declaration is the entry the mod imports."""
+        root = env.ALASIO_ROOT.joinpath('ExampleMod')
+        file = root.joinpath('module/config/_index/mod_entry.py')
+
+        assert file.isfile()
+        assert ModEntry.create(file, uppath=4).root == root

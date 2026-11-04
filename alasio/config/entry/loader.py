@@ -3,7 +3,7 @@ from collections import defaultdict
 from msgspec import ValidationError
 
 from alasio.config.entry.mod import Mod
-from alasio.config.entry.mod_entry import MOD_FOLDERS, ModEntry, ModEntryError
+from alasio.config.entry.mod_entry import MOD_FOLDERS, ModEntry
 from alasio.config.entry.model import ConfigSetEvent
 from alasio.config.entry.utils import validate_nav_name
 from alasio.ext import env
@@ -53,11 +53,13 @@ class ModLoader:
     def dict_mod(self):
         """
         The mods of the library: the project root itself and the folders
-        declared by MOD_FOLDERS that hold a declaration.
+        declared by MOD_FOLDERS that hold a valid declaration.
 
         A folder without ``module/config/_index/mod_entry.yaml`` is not a mod
         and is skipped, a folder that declares one is a mod whether or not its
-        config index is generated.
+        config index is generated. A folder whose declaration cannot be read
+        is reported and skipped: one broken mod must not take the backend
+        down.
 
         Returns:
             dict[str, Mod]:
@@ -74,16 +76,12 @@ class ModLoader:
         # add sub mods
         for folder in self.mod_folders:
             root = joinnormpath(env.PROJECT_ROOT, folder)
-            if not ModEntry.is_mod(root):
+            entry = ModEntry(root)
+            # the declaration is read here, so a broken one is reported now
+            # instead of at the first use of the mod
+            if not entry.validate():
                 continue
-            try:
-                entry = ModEntry(root)
-                name = entry.name
-            except ModEntryError as e:
-                # One broken mod must not take the backend down: it is
-                # reported and skipped, the other mods still load
-                logger.error(f'Invalid mod entry, mod skipped: {e}')
-                continue
+            name = entry.name
             # No duplicate or nested mod
             if name in out:
                 continue
