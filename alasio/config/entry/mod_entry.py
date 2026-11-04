@@ -108,6 +108,16 @@ ALASIO_CONFIG = 'alasio/config'
 # folder of a mod: <root>/<MOD_CONFIG>/_index/mod_entry.yaml
 MOD_ENTRY_FILE = 'mod_entry.yaml'
 MOD_ENTRY_FOLDER = '_index'
+MOD_ENTRY_SUBPATH = f'{MOD_ENTRY_FOLDER}/{MOD_ENTRY_FILE}'
+
+# Path of the declaration from the root of a mod: the pack server reads the
+# file at this path from the git blob of a commit, where the root of the mod
+# is the root of the repo, and no working tree exists to find it in
+MOD_ENTRY_PATH = f'{MOD_CONFIG}/{MOD_ENTRY_SUBPATH}'
+
+# Default dependency file of a mod, relative to the mod root, see
+# ModEntryModel.requirements_file
+DEFAULT_REQUIREMENTS_FILE = 'requirements.txt'
 
 # Modules of the library that live next to it, relative to PROJECT_ROOT, the
 # mods the backend loads besides the project root itself. A folder without a
@@ -119,6 +129,12 @@ MOD_FOLDERS = ('ExampleMod', 'AzurLaneAutoScript', 'StarRailCopilot')
 # the flat/nested mix, see
 # alasio.deploy.httpclient.probe_mirrors.Mirrors.from_input()
 ModMirrorInput = Union[str, Dict[str, Union[str, Dict[str, str]]]]
+
+# An index the update pack of a mod provides: an http(s) base url, no trailing
+# slash required. The urls are matched against the sources of a dependency
+# file, a value the pack server cannot request would silently provide nothing,
+# so the declaration is refused instead
+ModProvideIndex = Annotated[str, Meta(pattern=r'^https?://\S+$')]
 
 
 class ModEntryError(ValueError):
@@ -185,7 +201,7 @@ class ModEntryModel(Struct):
         "Mirrors of the PyPI simple index the distributions are downloaded from",
         "The same forms as 'mirrors'; remove the key to use the default mirrors",
     ]})] = field(default_factory=lambda: deepcopy(DEFAULT_PYPI_MIRRORS))
-    update_provide_pypi_mirrors: Annotated[List[str], Meta(extra={"help": [
+    update_provide_pypi_mirrors: Annotated[List[ModProvideIndex], Meta(extra={"help": [
         "PyPI indexes the update packs of the mod provide",
         "The wheels of the dependencies that a dependency file annotates with",
         "one of these indexes are published with the update pack",
@@ -194,7 +210,7 @@ class ModEntryModel(Struct):
     requirements_file: Annotated[str, Meta(extra={"help": [
         "Relative path from the mod root to the requirements file of the mod",
         "Every distribution in it is pinned to an exact version",
-    ]})] = 'requirements.txt'
+    ]})] = DEFAULT_REQUIREMENTS_FILE
     update_pack_deps: Annotated[List[str], Meta(extra={"help": [
         "Distributions updated from the pack channel instead of pip",
         "Any case and separator style, the compare is on the PEP 503 name",
@@ -293,8 +309,7 @@ class ModEntry:
         # chdirs to the mod root) and one of the backend equal
         self.root = abspath(root) if root else ''
         self.path_config = path_config
-        self.file = joinnormpath(
-            joinnormpath(self.root, path_config), f'{MOD_ENTRY_FOLDER}/{MOD_ENTRY_FILE}')
+        self.file = joinnormpath(joinnormpath(self.root, path_config), MOD_ENTRY_SUBPATH)
         self._data = data
 
     def __str__(self):
@@ -503,8 +518,7 @@ class ModEntry:
         Returns:
             bool: True when the folder declares a mod entry
         """
-        file = joinnormpath(
-            joinnormpath(abspath(root), MOD_CONFIG), f'{MOD_ENTRY_FOLDER}/{MOD_ENTRY_FILE}')
+        file = joinnormpath(joinnormpath(abspath(root), MOD_CONFIG), MOD_ENTRY_SUBPATH)
         try:
             os.stat(file)
         except OSError:
@@ -562,6 +576,22 @@ class ModEntry:
             ModEntryError: If the declaration cannot be read
         """
         return cls(data=_parse(source, source_name=source_name))
+
+    @classmethod
+    def defaults(cls):
+        """
+        The entry of a mod whose newest revision declares none.
+
+        A pack server reads the declaration of a commit whose repo may not
+        have the file yet, not even at the newest commit: the defaults are the
+        layout the mod has always had, and the mod still gets its packs. The
+        entry carries no location and no name, it only answers the defaults of
+        the declaration.
+
+        Returns:
+            ModEntry: The entry of the defaults
+        """
+        return cls(data=ModEntryModel())
 
     @cached_class_property
     def alasio(cls):

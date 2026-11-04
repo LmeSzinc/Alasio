@@ -182,6 +182,12 @@ class TestFromSource:
         """A key the model does not know is ignored, msgspec drops it."""
         assert ModEntry.from_source('name: m\nfuture_key: 1\n').name == 'm'
 
+    @pytest.mark.parametrize('url', ['ftp://a.example/simple', 'a.example/simple', 'https://'])
+    def test_provided_index_must_be_http(self, url):
+        """An index the pack server cannot request is refused, not silently skipped."""
+        with pytest.raises(ModEntryError, match='invalid entry value'):
+            ModEntry.from_source(f'name: m\nupdate_provide_pypi_mirrors: ["{url}"]\n')
+
     @pytest.mark.parametrize('key', ['root', 'path_config'])
     def test_location_keys_are_ignored(self, key):
         """The location belongs to ModEntry, a file that declares it is ignored."""

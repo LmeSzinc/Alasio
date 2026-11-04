@@ -15,6 +15,7 @@ import os
 import pytest
 import trio
 
+from alasio.config.entry.mod_entry import MOD_ENTRY_PATH
 from alasio.deploy.pack.decode_base import PackDecodeBase
 from alasio.deploy.pack.job_unpack import UnpackJob
 from alasio.deploy.pack.packdep import PACKDEP_PATH, decode_packdep
@@ -23,7 +24,6 @@ from alasio.deploy_dev.pack._pack_cache import PackCache
 from alasio.deploy_dev.pack_server import repo_base, repo_dep
 from alasio.deploy_dev.pack_server.fetch_wheel import WheelNotFoundError
 from alasio.deploy_dev.pack_server.model import LookbackConfig, PackRepoModel, RepoConfig
-from alasio.deploy_dev.pack_server.parse_entry import ENTRY_FILE
 from alasio.deploy_dev.pack_server.repo import Repo
 from alasio.deploy_dev.pack_server.repo_base import DEFAULT_INDEX
 from alasio.ext.path.atomic import file_read_bytes
@@ -82,7 +82,7 @@ REQUIREMENTS = {
 
 # entry of the mock repo: by default it declares the dependency the tests build
 # a pack channel of, see entry_source
-DEFAULT_ENTRY = "entry = ModEntry(name='m', update_pack_deps=('httpx',))\n"
+DEFAULT_ENTRY = "name: m\nupdate_pack_deps:\n  - httpx\n"
 
 # folder of the workspace of the config in the run directory
 WORKSPACE = 'pack/Author_Repo_master'
@@ -105,29 +105,31 @@ def _fresh_cache(monkeypatch):
 
 def entry_source(*names, provide=None, requirements_file=None):
     """
-    Build the source of a mod entry declaring update_pack_deps.
+    Build the declaration of a mod entry declaring update_pack_deps.
 
     Args:
-        *names (str): Names to declare, none for an entry without the
-            declaration (an entry never declares the mirror the pack server
-            fetches from: the pins of the dependency file do)
+        *names (str): Names to declare, none for a declaration that omits the
+            key (an entry never declares the mirror the pack server fetches
+            from: the pins of the dependency file do)
         provide (Iterable[str] | None): Value of the
-            update_provide_pypi_mirrors declaration, None for a declaration of
-            the entry that omits the key (the default of ModEntry)
+            update_provide_pypi_mirrors declaration, None for a declaration
+            that omits the key (the default of ModEntry)
         requirements_file (str | None): Value of the requirements_file
-            declaration, None for a declaration of the entry that omits the key
+            declaration, None for a declaration that omits the key
 
     Returns:
-        str: Source of the entry module
+        str: Content of the mod entry file
     """
-    declared = ''
+    lines = ['name: m']
+    if names:
+        lines.append('update_pack_deps:')
+        lines.extend(f'  - {name}' for name in names)
     if provide is not None:
-        declared += f', update_provide_pypi_mirrors={tuple(provide)!r}'
+        lines.append('update_provide_pypi_mirrors:')
+        lines.extend(f'  - {url!r}' for url in provide)
     if requirements_file is not None:
-        declared += f', requirements_file={requirements_file!r}'
-    if not names:
-        return f"entry = ModEntry(name='m'{declared})\n"
-    return f"entry = ModEntry(name='m'{declared}, update_pack_deps={tuple(names)!r})\n"
+        lines.append(f'requirements_file: {requirements_file!r}')
+    return '\n'.join(lines) + '\n'
 
 
 def make_repo(requirements=None, branch='master', entry=DEFAULT_ENTRY):
@@ -154,7 +156,7 @@ def make_repo(requirements=None, branch='master', entry=DEFAULT_ENTRY):
         repo.register_file(commit, 'requirements.txt', content.encode('utf-8'))
         source = entry.get(commit) if isinstance(entry, dict) else entry
         if source is not None:
-            repo.register_file(commit, ENTRY_FILE, source.encode('utf-8'))
+            repo.register_file(commit, MOD_ENTRY_PATH, source.encode('utf-8'))
         repo.register_commit(
             commit, parents=[parent] if parent else None,
             author_name='Author', author_time=index, message=f'commit {commit}')
@@ -360,7 +362,7 @@ class TestDeps:
             gen = Repo(make_repo(entry=entry_source('requests')), make_config())
             assert gen.base.deps == {}
         assert capture.concat() == """\
-INFO | Using update_pack_deps of module/config/const.py at c3: requests
+INFO | Using update_pack_deps of module/config/_index/mod_entry.yaml at c3: requests
 WARNING | Dependency "requests" is not pinned to a version in the lookback window, nothing is built of it; a dependency of the mod entry update_pack_deps must be pinned with "==" in the dependency file of the repo
 """
 
@@ -383,14 +385,14 @@ WARNING | Dependency "requests" is not pinned to a version in the lookback windo
             gen = Repo(make_repo(entry=None), make_config())
             assert gen.base.deps == {}
         assert capture.concat() == """\
-INFO | No update_pack_deps declared by module/config/const.py at c3, no dependency pack is built
+INFO | No update_pack_deps declared by module/config/_index/mod_entry.yaml at c3, no dependency pack is built
 """
 
     def test_entry_broken(self, fs, run_dir, mirror):
-        """A dynamic declaration fails the sample, no dependency is silently dropped."""
-        entry = "entry = ModEntry(name='m', update_pack_deps=get_deps())\n"
+        """A declaration that cannot be read fails the sample, nothing is silently dropped."""
+        entry = 'name: m\nupdate_pack_deps: [unclosed\n'
         gen = Repo(make_repo(entry=entry), make_config())
-        with pytest.raises(ValueError, match='unsupported call'):
+        with pytest.raises(ValueError, match='invalid yaml'):
             _ = gen.base.deps
 
     def test_name_without_latest(self, fs, run_dir, mirror):
@@ -403,7 +405,7 @@ INFO | No update_pack_deps declared by module/config/const.py at c3, no dependen
         with logger.mock_capture_writer() as capture:
             assert gen.base.deps == {}
         assert capture.concat() == """\
-INFO | Using update_pack_deps of module/config/const.py at c2: httpx
+INFO | Using update_pack_deps of module/config/_index/mod_entry.yaml at c2: httpx
 WARNING | Dependency "httpx" is not pinned by the latest commit, no pack is built of it, its historical packs are kept
 """
 
@@ -569,7 +571,7 @@ class TestRun:
             gen = Repo(make_repo(entry=None), make_config())
             assert gen.run() is None
         assert capture.concat() == """\
-INFO | No update_pack_deps declared by module/config/const.py at c3, no dependency pack is built
+INFO | No update_pack_deps declared by module/config/_index/mod_entry.yaml at c3, no dependency pack is built
 INFO | No dependency to build of "Author_Repo_master", skipped
 INFO | Generating packs of "Author_Repo_master": 3 versions, latest=c3
 INFO | Writing full pack: "{run_dir}/pack/Author_Repo_master/packrepo/c3/full.pack"

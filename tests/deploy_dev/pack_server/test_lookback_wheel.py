@@ -14,11 +14,10 @@ from types import SimpleNamespace
 
 import pytest
 
+from alasio.config.entry.mod_entry import MOD_ENTRY_PATH, ModEntry
 from alasio.deploy.simple_pip.parse_req import DepInfo
-from alasio.deploy_dev.pack_server import parse_entry
 from alasio.deploy_dev.pack_server.lookback_wheel import LookbackWheel
 from alasio.deploy_dev.pack_server.model import LookbackConfig, PackRepoModel
-from alasio.deploy_dev.pack_server.parse_entry import ENTRY_FILE
 from alasio.git.mock.mock_repo import MockGitRepo
 from alasio.logger import logger
 
@@ -41,16 +40,16 @@ def pin(name, version, source=''):
 
 def entry_source(requirements_file='requirements.txt'):
     """
-    Build the source of a mod entry that declares a dependency file.
+    Build the declaration of a mod entry that names a dependency file.
 
     Args:
-        requirements_file (str): ModEntryInfo.requirements_file to declare.
-            Defaults to 'requirements.txt', the same path as the default
+        requirements_file (str): requirements_file to declare. Defaults to
+            'requirements.txt', the same path as the default
 
     Returns:
-        str: Source of the entry module
+        str: Content of the mod entry file
     """
-    return f"entry = ModEntryInfo(name='m', requirements_file={requirements_file!r})\n"
+    return f'name: m\nrequirements_file: {requirements_file!r}\n'
 
 
 def _make_chain(times):
@@ -122,7 +121,7 @@ def _register_entry(repo, commit, requirements_file='requirements.txt'):
         requirements_file (str): Dependency file the entry declares.
             Defaults to 'requirements.txt'
     """
-    _register(repo, commit, ENTRY_FILE, entry_source(requirements_file))
+    _register(repo, commit, MOD_ENTRY_PATH, entry_source(requirements_file))
 
 
 class TestLookbackWheelSample:
@@ -223,12 +222,46 @@ class TestLookbackWheelSample:
         assert wheel.lookback_deps == {}
 
     def test_no_entry_file(self):
-        """A commit without an entry samples the defaults of ModEntryInfo."""
+        """A window whose commits all lack the entry file samples the defaults of ModEntry."""
         repo = _make_chain([100])
         _register(repo, 'c0', 'requirements.txt', 'httpx==0.28.1\n')
         wheel = LookbackWheel(repo, _make_config())
         assert wheel.repo_entry['c0'].requirements_file == 'requirements.txt'
         assert wheel.latest_deps == {'httpx': pin('httpx', '0.28.1')}
+
+    def test_no_entry_file_inherits_the_newer_commit(self):
+        """A commit without an entry file is read as the nearest newer declaration."""
+        repo = _make_chain([100, 200])
+        _register_entry(repo, 'c1', 'deps/requirements.txt')
+        _register(repo, 'c0', 'deps/requirements.txt', 'httpx==0.27.8\n')
+        _register(repo, 'c1', 'deps/requirements.txt', 'httpx==0.28.1\n')
+        wheel = LookbackWheel(repo, _make_config())
+        # c0 predates the declaration file: it is the mod of c1, not a mod of
+        # the defaults, so its pins are sampled from the file c1 names
+        assert wheel.repo_entry['c0'] is wheel.repo_entry['c1']
+        assert wheel.latest_deps == {'httpx': pin('httpx', '0.28.1')}
+        assert wheel.lookback_deps == {('httpx', '0.27.8'): pin('httpx', '0.27.8')}
+
+    def test_no_entry_file_inherits_the_nearest_newer_commit(self):
+        """A commit takes the declaration of the nearest newer commit, not the latest one."""
+        repo = _make_chain([100, 200, 300, 400])
+        _register_entry(repo, 'c1', 'deps/requirements.txt')
+        _register_entry(repo, 'c3', 'requirements.txt')
+        _register(repo, 'c0', 'deps/requirements.txt', 'httpx==0.27.7\n')
+        _register(repo, 'c2', 'requirements.txt', 'httpx==0.28.0\n')
+        _register(repo, 'c3', 'requirements.txt', 'httpx==0.28.1\n')
+        wheel = LookbackWheel(repo, _make_config())
+        # c2 drops the file: it takes the declaration of c3, its nearest newer
+        # commit, and c0 takes the one of c1, its own nearest newer commit
+        assert wheel.repo_entry['c2'] is wheel.repo_entry['c3']
+        assert wheel.repo_entry['c0'] is wheel.repo_entry['c1']
+        assert wheel.repo_entry['c1'] is not wheel.repo_entry['c3']
+        assert wheel.latest_deps == {'httpx': pin('httpx', '0.28.1')}
+        # c2 is sampled from the file c3 names, c0 from the file c1 names
+        assert wheel.lookback_deps == {
+            ('httpx', '0.28.0'): pin('httpx', '0.28.0'),
+            ('httpx', '0.27.7'): pin('httpx', '0.27.7'),
+        }
 
     def test_scan_commit(self):
         """The scan samples the latest commit first, then the lookback commits newest first."""
@@ -297,13 +330,13 @@ class TestLookbackWheelEntry:
             _register_entry(repo, commit)
             _register(repo, commit, 'requirements.txt', 'httpx==0.28.1\n')
         calls = []
-        real = parse_entry.parse_mod_entry
+        real = ModEntry.from_source
 
         def counting(source, source_name=''):
             calls.append(source_name)
             return real(source, source_name=source_name)
 
-        monkeypatch.setattr(parse_entry, 'parse_mod_entry', counting)
+        monkeypatch.setattr(ModEntry, 'from_source', counting)
         wheel = LookbackWheel(repo, _make_config())
         assert wheel.latest_deps == {'httpx': pin('httpx', '0.28.1')}
         assert len(calls) == 1
@@ -325,11 +358,11 @@ class TestLookbackWheelEntry:
     def test_entry_broken(self):
         """An entry of any commit of the window that cannot be parsed fails the sample."""
         repo = _make_chain([100, 200])
-        _register(repo, 'c0', ENTRY_FILE, "entry = ModEntryInfo(name='m', requirements_file=get_file())\n")
+        _register(repo, 'c0', MOD_ENTRY_PATH, 'name: m\nrequirements_file: [unclosed\n')
         _register_entry(repo, 'c1')
         _register(repo, 'c1', 'requirements.txt', 'httpx==0.28.1\n')
         wheel = LookbackWheel(repo, _make_config())
-        with pytest.raises(ValueError, match='module/config/const.py at commit c0'):
+        with pytest.raises(ValueError, match='module/config/_index/mod_entry.yaml at commit c0'):
             _ = wheel.latest_deps
 
     def test_entry_symlink(self):
@@ -340,7 +373,7 @@ class TestLookbackWheelEntry:
         real = repo.get_file
 
         def get_file(commit, path):
-            if path == ENTRY_FILE:
+            if path == MOD_ENTRY_PATH:
                 return SimpleNamespace(sha1='x', mode=b'120000')
             return real(commit, path)
 
@@ -358,7 +391,7 @@ class TestLookbackWheelEntry:
             wheel = LookbackWheel(repo, _make_config())
             assert wheel.latest_deps == {}
         assert capture.concat() == f"""\
-WARNING | LookbackWheel: no such dependency file "requirements-deps.txt" at the latest commit c0, declared by {ENTRY_FILE}; repo=
+WARNING | LookbackWheel: no such dependency file "requirements-deps.txt" at the latest commit c0, declared by {MOD_ENTRY_PATH}; repo=
 """
 
     def test_missing_declared_file_in_old_commit_is_silent(self):
@@ -370,6 +403,41 @@ WARNING | LookbackWheel: no such dependency file "requirements-deps.txt" at the 
         with logger.mock_capture_writer() as capture:
             wheel = LookbackWheel(repo, _make_config())
             assert wheel.latest_deps == {'httpx': pin('httpx', '0.28.1')}
+        assert capture.concat() == ''
+
+    def test_commit_before_the_entry_is_silent(self):
+        """A commit without an entry file is read as the newer declaration, no warning."""
+        repo = _make_chain([100, 200])
+        _register(repo, 'c0', 'requirements.txt', 'httpx==0.27.8\n')
+        _register_entry(repo, 'c1')
+        _register(repo, 'c1', 'requirements.txt', 'httpx==0.28.1\n')
+        with logger.mock_capture_writer() as capture:
+            wheel = LookbackWheel(repo, _make_config())
+            assert wheel.latest_deps == {'httpx': pin('httpx', '0.28.1')}
+            assert wheel.lookback_deps == {('httpx', '0.27.8'): pin('httpx', '0.27.8')}
+        assert capture.concat() == ''
+
+    def test_commit_before_the_entry_of_another_file_is_silent(self):
+        """A commit before the entry file is sampled from the file the newer entry names."""
+        repo = _make_chain([100, 200])
+        _register(repo, 'c0', 'deps/requirements.txt', 'httpx==0.27.8\n')
+        _register_entry(repo, 'c1', 'deps/requirements.txt')
+        _register(repo, 'c1', 'deps/requirements.txt', 'httpx==0.28.1\n')
+        with logger.mock_capture_writer() as capture:
+            wheel = LookbackWheel(repo, _make_config())
+            assert wheel.lookback_deps == {('httpx', '0.27.8'): pin('httpx', '0.27.8')}
+        assert capture.concat() == ''
+
+    def test_commit_before_the_entry_without_the_file_is_silent(self):
+        """A commit that holds no dependency file at all is skipped, not warned."""
+        repo = _make_chain([100, 200])
+        _register(repo, 'c0', 'old.txt', 'httpx==0.27.8\n')
+        _register_entry(repo, 'c1')
+        _register(repo, 'c1', 'requirements.txt', 'httpx==0.28.1\n')
+        with logger.mock_capture_writer() as capture:
+            wheel = LookbackWheel(repo, _make_config())
+            assert wheel.latest_deps == {'httpx': pin('httpx', '0.28.1')}
+            assert wheel.lookback_deps == {}
         assert capture.concat() == ''
 
     def test_empty_requirements_file(self):

@@ -174,7 +174,7 @@ class TestFetch:
             gen.run()
 
         assert capture.concat() == f"""\
-INFO | Using update_pack_deps of module/config/const.py at c3: httpx
+INFO | Using update_pack_deps of module/config/_index/mod_entry.yaml at c3: httpx
 INFO | [1/3] Fetching wheel of "httpx==0.28.1", index="http://mirror", role=target
 INFO | Download index page: "http://mirror/httpx/"
 INFO | Download wheel: "http://mirror/packages/httpx-0.28.1-py3-none-any.whl" -> "{cache_folder(run_dir, 'httpx', '0.28.1')}/httpx-0.28.1-py3-none-any.whl"
@@ -210,7 +210,7 @@ INFO | Dependency packs of "Author_Repo_master" generated
             DepFlow(repo, client=mirror.client).run()
 
         assert capture.concat() == f"""\
-INFO | Using update_pack_deps of module/config/const.py at c3: httpx
+INFO | Using update_pack_deps of module/config/_index/mod_entry.yaml at c3: httpx
 INFO | [1/3] Fetching wheel of "httpx==0.28.1", index="http://mirror", role=target
 INFO | Wheel exists, skipped: "{cache_folder(run_dir, 'httpx', '0.28.1')}/httpx-0.28.1-py3-none-any.whl"
 INFO | [2/3] Fetching wheel of "httpx==0.27.8", index="http://mirror", role=historical
@@ -270,7 +270,7 @@ INFO | Dependency packs of "Author_Repo_master" generated
         with logger.mock_capture_writer() as capture:
             gen.run()
         assert capture.concat() == """\
-INFO | No update_pack_deps declared by module/config/const.py at c3, no dependency pack is built
+INFO | No update_pack_deps declared by module/config/_index/mod_entry.yaml at c3, no dependency pack is built
 INFO | No dependency to build of "Author_Repo_master", skipped
 """
         assert mirror.requests == []
@@ -296,7 +296,7 @@ class TestProxy:
             gen.run()
 
         assert capture.concat() == f"""\
-INFO | Using update_pack_deps of module/config/const.py at c3: httpx
+INFO | Using update_pack_deps of module/config/_index/mod_entry.yaml at c3: httpx
 INFO | Downloading the wheels through the proxy "{PROXY}"
 INFO | [1/3] Fetching wheel of "httpx==0.28.1", index="http://mirror", role=target
 INFO | Download index page: "http://mirror/httpx/"
@@ -447,7 +447,7 @@ class TestPacks:
             'c2': requirement('httpx==0.27.8') + requirement('demo==1.0'),
             'c3': requirement('httpx==0.28.1') + requirement('demo==1.0'),
         }
-        entry = "entry = ModEntryInfo(name='m', update_pack_deps=('httpx', 'demo'))\n"
+        entry = 'name: m\nupdate_pack_deps:\n  - httpx\n  - demo\n'
         gen = DepFlow(make_repo(requirements, entry=entry), client=mirror.client)
 
         with logger.mock_capture_writer() as capture:
@@ -558,7 +558,7 @@ class TestKeptPacks:
             DepFlow(repo, client=mirror.client).run()
 
         assert capture.concat() == f"""\
-INFO | Using update_pack_deps of module/config/const.py at c3: httpx
+INFO | Using update_pack_deps of module/config/_index/mod_entry.yaml at c3: httpx
 INFO | [1/3] Fetching wheel of "httpx==0.28.1", index="http://mirror", role=target
 INFO | Wheel exists, skipped: "{cache_folder(run_dir, 'httpx', '0.28.1')}/httpx-0.28.1-py3-none-any.whl"
 INFO | [2/3] Fetching wheel of "httpx==0.27.8", index="http://mirror", role=historical

@@ -2,7 +2,7 @@
 Look back the dependency files of a repo, the pins the lookback window asks for.
 
 A repo declares the python dependencies of a mod in a dependency file, the
-file its mod entry names (`ModEntryInfo.requirements_file`). This module
+file its mod entry names (`ModEntry.requirements_file`). This module
 samples that file over the lookback window and answers the input of the wheel
 fetch, as two mappings of DepInfo:
 
@@ -28,15 +28,18 @@ and what is published (the pins whose source the entry provides).
 The file to read is the one the commit itself declares, the version of the mod
 the commit is:
 
-- the entry of the commit is read first (module/config/const.py at that
-  commit), then the dependency file it names at that commit: the file of an
-  old commit is the one that commit declares, not the one the latest commit
-  declares now, so a mod that renamed or moved its dependency file is still
-  sampled as it asked to be;
+- the entry of the commit is read first (module/config/_index/mod_entry.yaml
+  at that commit), then the dependency file it names at that commit: the file
+  of an old commit is the one that commit declares, not the one the latest
+  commit declares now, so a mod that renamed or moved its dependency file is
+  still sampled as it asked to be;
 - both are read from the git repository (get_file, cat), not from a working
   tree: the revision of an old commit is read as the commit wrote it;
-- a commit without an entry file samples the defaults of ModEntryInfo, e.g.
-  'requirements.txt', the same values the runtime entry of the mod declares;
+- a commit without an entry file takes the declaration of the nearest newer
+  commit that has one, so a commit that predates the declaration file is
+  read as the version of the mod it was; a window whose commits all lack the
+  file samples the defaults of ModEntry, e.g. 'requirements.txt', the same
+  values the runtime entry of the mod declares;
 - a dependency file that does not exist at a commit is skipped there, e.g. a
   file that a later commit added, and one the entry of the latest commit names
   but the latest commit does not hold is reported with a warning, the entry
@@ -60,9 +63,9 @@ Usage:
     wheel.lookback_deps
 """
 
+from alasio.config.entry.mod_entry import MOD_ENTRY_PATH, ModEntry
 from alasio.deploy_dev.pack_server.lookback import PackRepoLookback
 from alasio.deploy_dev.pack_server.parse_dep import PyprojectParser, RequirementsParser
-from alasio.deploy_dev.pack_server.parse_entry import ENTRY_FILE, PackRepoEntry
 from alasio.ext.cache import cached_property
 from alasio.logger import logger
 
@@ -152,44 +155,52 @@ class LookbackWheel:
     @cached_property
     def repo_entry(self):
         """
-        The mod entry of every commit of the window: {commit: PackRepoEntry}.
+        The mod entry of every commit of the window: {commit: ModEntry}.
 
         The entry file of a commit is read from the git blob of the commit,
         never from a working tree, and the parse is shared by the commits that
-        did not change the file: a revision is parsed once per blob sha1. A
-        commit without an entry file gets the defaults of ModEntryInfo, the
-        entry the runtime of the mod implies.
+        did not change the file: a revision is parsed once per blob sha1.
+
+        A commit without an entry file takes the entry of the nearest newer
+        commit that declares one: the commits are scanned newest first, so the
+        declaration is the one the mod had when the file was introduced, and a
+        commit that predates the file is read as the version of the mod it
+        was instead of a declaration of nothing. A window whose commits all
+        lack the file falls back to the defaults of the model, the layout the
+        mod has always had.
 
         Returns:
-            dict[str, PackRepoEntry]: Commit sha1 -> entry of that commit
+            dict[str, ModEntry]: Commit sha1 -> entry of that commit
 
         Raises:
             ValueError: If the repo has no branch to pack, the entry path is a
                 symlink (its blob is a path, not the source), or the entry of
                 a commit cannot be parsed
         """
-        # {blob sha1 | None: PackRepoEntry}, None for the commits that hold
-        # no entry file: the entries of a window that did not change the file
-        # share one parse
+        # {blob sha1: ModEntry} of the revisions read so far
         cache = {}
         out = {}
+        # the entry of the nearest newer commit that declares one, None until
+        # the newest commit with an entry file is read
+        newer = None
         for commit in self.scan_commit:
-            file = self.repo.get_file(commit, ENTRY_FILE)
+            file = self.repo.get_file(commit, MOD_ENTRY_PATH)
             if file is None:
-                key = None
-            else:
-                if file.mode == _SYMLINK_MODE:
-                    raise ValueError(
-                        f'{ENTRY_FILE} at commit {commit} is a symlink, not a file')
-                key = file.sha1
-            entry = cache.get(key)
+                if newer is None:
+                    newer = ModEntry.defaults()
+                out[commit] = newer
+                continue
+            if file.mode == _SYMLINK_MODE:
+                raise ValueError(
+                    f'{MOD_ENTRY_PATH} at commit {commit} is a symlink, not a file')
+            entry = cache.get(file.sha1)
             if entry is None:
-                # a commit without an entry file declares the defaults of the
-                # model, the empty source parses to them
-                source = b'' if file is None else self.repo.cat(file.sha1).decoded
-                entry = PackRepoEntry(source, source_name=f'{ENTRY_FILE} at commit {commit}')
-                cache[key] = entry
+                source = self.repo.cat(file.sha1).decoded
+                entry = ModEntry.from_source(
+                    source, source_name=f'{MOD_ENTRY_PATH} at commit {commit}')
+                cache[file.sha1] = entry
             out[commit] = entry
+            newer = entry
         return out
 
     @cached_property
@@ -228,7 +239,7 @@ class LookbackWheel:
                     # file the commit does not hold, the path is a mistake
                     logger.warning(
                         f'LookbackWheel: no such dependency file "{path}" at the latest commit '
-                        f'{commit}, declared by {ENTRY_FILE}; repo={self.repo.path}')
+                        f'{commit}, declared by {MOD_ENTRY_PATH}; repo={self.repo.path}')
                 continue
             pyproject = _is_pyproject(path)
             key = (file.sha1, pyproject)

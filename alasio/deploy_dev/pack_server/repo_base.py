@@ -35,11 +35,11 @@ like the git flow of the packs. Nothing here writes to the repo and nothing
 writes to the workspace: the steps of the flow do.
 
 The mod entry of the latest commit declares what is generated, see
-PackRepoEntry: the dependency file of the repo (requirements_file), the names
+ModEntry: the dependency file of the repo (requirements_file), the names
 that update by pack (update_pack_deps) and the indexes the repo provides
-(update_provide_pypi_mirrors). The declarations are read from the source of
-the entry, never from the config of the run directory: the config is the same
-for every version of the repo, the entry is the version.
+(update_provide_pypi_mirrors). The declarations are read from the entry file
+of the commit, never from the config of the run directory: the config is the
+same for every version of the repo, the entry is the version.
 
 The wheels are fetched from the index every pin of the dependency file
 annotates ('# from <index>', the annotation uv writes with
@@ -62,12 +62,12 @@ from typing import Dict
 
 import msgspec
 
+from alasio.config.entry.mod_entry import MOD_ENTRY_PATH
 from alasio.deploy.simple_pip.cleanup_folder import CleanupByPreserved
 from alasio.deploy.simple_pip.parse_req import DepInfo, normalize_index_url
 from alasio.deploy_dev.pack_server.fetch_wheel import create_client
 from alasio.deploy_dev.pack_server.lookback_wheel import LookbackWheel
 from alasio.deploy_dev.pack_server.parse_dep import normalize_name
-from alasio.deploy_dev.pack_server.parse_entry import ENTRY_FILE
 from alasio.ext import env
 from alasio.ext.cache import cached_property
 from alasio.ext.path.atomic import file_remove, folder_rmtree_empty
@@ -451,7 +451,7 @@ class RepoBase:
         with the sample of the window.
 
         Returns:
-            PackRepoEntry: The declarations of the entry
+            ModEntry: The declarations of the entry
 
         Raises:
             ValueError: If the repo has no branch to pack, or the entry cannot
@@ -480,22 +480,23 @@ class RepoBase:
         Raises:
             ValueError: If the repo has no branch to pack, the entry cannot
                 be read, or an index of it is not an http(s) url (see
-                PackRepoEntry)
+                ModEntry)
         """
         out = {}
         commit = self.latest_commit
         for url in self.entry.update_provide_pypi_mirrors:
             normalized = normalize_index_url(url)
             if not normalized:
-                # the entry parser refuses a url that is not http(s), this is
-                # the guard of a value that reached the model another way
+                # the model refuses a url that is not http(s), this is the
+                # guard of a value that reached it another way (an entry built
+                # in code, never read from a file)
                 logger.warning(
-                    f'Provided index of {ENTRY_FILE} at commit {commit} '
+                    f'Provided index of {MOD_ENTRY_PATH} at commit {commit} '
                     f'is not an http(s) url, skipped: {url!r}')
                 continue
             out.setdefault(normalized, url)
         logger.debug(
-            f'Using update_provide_pypi_mirrors of {ENTRY_FILE} at commit '
+            f'Using update_provide_pypi_mirrors of {MOD_ENTRY_PATH} at commit '
             f'{commit}: {", ".join(out)}')
         return out
 
@@ -527,10 +528,10 @@ class RepoBase:
         commit = self.latest_commit
         if declared:
             logger.info(
-                f'Using update_pack_deps of {ENTRY_FILE} at {commit}: {", ".join(declared)}')
+                f'Using update_pack_deps of {MOD_ENTRY_PATH} at {commit}: {", ".join(declared)}')
         else:
             logger.info(
-                f'No update_pack_deps declared by {ENTRY_FILE} at {commit}, '
+                f'No update_pack_deps declared by {MOD_ENTRY_PATH} at {commit}, '
                 f'no dependency pack is built')
         # the names are matched PEP 503 normalized: the entry may write a name
         # the dependency file writes another way. A dict keeps the order of the
