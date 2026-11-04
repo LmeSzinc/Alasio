@@ -13,12 +13,15 @@ from alasio.config.alasio.group_proxy import GroupProxy, batch_set
 from alasio.config.alasio.store_model import DashboardAmount
 from alasio.config.base import AlasioConfigBase
 from alasio.config.entry.mod import Mod
-from alasio.config.entry.mod_entry import ModEntryModel
+from alasio.config.entry.mod_entry import ModEntry, ModEntryModel
 from alasio.config.entry.utils import validate_task_name
 from alasio.db.conn import SQLITE_POOL
+from alasio.ext import env
 from alasio.ext.cache import cached_property as alasio_cached_property
 from alasio.logger import logger
-from ExampleMod.module.config.const import entry
+
+# The mod the tests of this file run on
+entry = ModEntry(env.ALASIO_ROOT.joinpath('ExampleMod'))
 
 
 # Define a custom decorator with wraps

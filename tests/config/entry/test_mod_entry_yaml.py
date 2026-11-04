@@ -395,42 +395,58 @@ class TestIsMod:
         assert ModEntry.is_mod('/missing') is False
 
 
-class TestFindModEntry:
-    """The one walk up that locates the root of a mod."""
+class TestCreate:
+    """The one way the code of a mod locates its root: it states its own depth."""
 
     def test_from_the_root(self, fs):
-        """The walk answers the folder itself."""
+        """A folder at the depth 0 is the root itself."""
         write_entry(fs, '/mod', 'name: m\n')
 
-        assert ModEntry.find_mod_entry('/mod').root == PathStr.new('/mod')
+        assert ModEntry.create('/mod', uppath=0).root == PathStr.new('/mod')
 
-    def test_from_the_config_folder(self, fs):
-        """A folder of a mod resolves to the root above it."""
+    def test_from_a_folder(self, fs):
+        """A folder resolves to the root the stated levels above it."""
         write_entry(fs, '/mod', 'name: m\n')
 
-        assert ModEntry.find_mod_entry('/mod/module/config').root == PathStr.new('/mod')
-        assert ModEntry.find_mod_entry('/mod/module/config/_index').root == PathStr.new('/mod')
+        assert ModEntry.create('/mod/module', uppath=1).root == PathStr.new('/mod')
+        assert ModEntry.create('/mod/module/config', uppath=2).root == PathStr.new('/mod')
 
     def test_from_a_file(self, fs):
-        """A file of a mod resolves to its root, the usual call is from __file__."""
+        """A file resolves to the root, the usual call is from __file__."""
         write_entry(fs, '/mod', 'name: m\n')
         fs.create_file('/mod/module/map/map.py', contents='')
 
-        assert ModEntry.find_mod_entry('/mod/module/map/map.py').root == PathStr.new('/mod')
+        assert ModEntry.create('/mod/module/map/map.py', uppath=3).root == PathStr.new('/mod')
 
-    def test_the_nearest_root(self, fs):
-        """A nested mod is its own mod, the walk stops at the nearest one."""
+    def test_the_declaration_is_read(self, fs):
+        """The entry answers the declaration of the root it computed."""
+        write_entry(fs, '/mod', 'name: m\n')
+        fs.create_file('/mod/module/map/map.py', contents='')
+
+        assert ModEntry.create('/mod/module/map/map.py', uppath=3).data.name == 'm'
+
+    def test_no_walk_up(self, fs):
+        """A depth that lands between the root and the file is an error, not a walk."""
+        write_entry(fs, '/mod', 'name: m\n')
+        fs.create_file('/mod/module/map/map.py', contents='')
+
+        with pytest.raises(ModEntryError, match='No mod entry at'):
+            ModEntry.create('/mod/module/map/map.py', uppath=1)
+
+    def test_nested_mod(self, fs):
+        """A nested mod is its own mod, the root is the one stated, not the nearest."""
         write_entry(fs, '/mod', 'name: outer\n')
         write_entry(fs, '/mod/sub', 'name: inner\n')
 
-        assert ModEntry.find_mod_entry('/mod/sub/module/config').root == PathStr.new('/mod/sub')
-        assert ModEntry.find_mod_entry('/mod/module/config').root == PathStr.new('/mod')
+        assert ModEntry.create('/mod/sub/module/config', uppath=2).data.name == 'inner'
+        assert ModEntry.create('/mod/module/config', uppath=2).data.name == 'outer'
 
     def test_no_mod(self, fs):
-        """A tree without a declaration has no root."""
+        """A folder without a declaration is not a mod, the error names the root."""
         fs.create_file('/work/module/main.py', contents='')
 
-        assert ModEntry.find_mod_entry('/work/module/main.py') is None
+        with pytest.raises(ModEntryError, match=r'No mod entry at "/work"'):
+            ModEntry.create('/work/module/main.py', uppath=2)
 
     @pytest.mark.parametrize('file', [
         # another layout: a mod is module/config, not any folder holding a file
@@ -445,14 +461,15 @@ class TestFindModEntry:
         """Only the fixed relative path of a mod makes a root."""
         fs.create_file(f'/work/{file}', contents='name: m\n')
 
-        assert ModEntry.find_mod_entry('/work') is None
+        with pytest.raises(ModEntryError, match='No mod entry at'):
+            ModEntry.create('/work', uppath=0)
 
     def test_relative_path(self, fs):
         """A relative path is resolved against the working folder."""
         write_entry(fs, '/mod', 'name: m\n')
         fs.chdir('/mod')
 
-        root = ModEntry.find_mod_entry('module/config').root
+        root = ModEntry.create('module/config', uppath=2).root
 
         assert PathStr.new(root).name == 'mod'
         assert ModEntry(root).data.name == 'm'
@@ -575,9 +592,8 @@ class TestAlasioEntry:
         assert tuple(parse_filter(entry.scheduler_priority)) == ('RestartDevice', 'RestartGame')
 
     def test_the_library_is_not_a_mod(self):
-        """The library is named by the code, it is not found by a walk up."""
+        """The library is named by the code, it declares no mod entry."""
         assert ModEntry.is_mod(env.ALASIO_ROOT) is False
-        assert ModEntry.find_mod_entry(env.ALASIO_ROOT) is None
 
     def test_shipped_file_matches_the_code(self):
         """The declaration shipped with the package is the one the code declares.
@@ -610,8 +626,8 @@ class TestExampleModDeclaration:
             parse_filter(EXAMPLE_PRIORITY_PYTHON)
 
     def test_found_from_a_file(self):
-        """The mod is found from any file of its tree."""
+        """The mod is created from any file of its tree by its depth."""
         root = env.ALASIO_ROOT.joinpath('ExampleMod')
         file = root.joinpath('module/map/button.py')
 
-        assert ModEntry.find_mod_entry(file).root == root
+        assert ModEntry.create(file, uppath=3).root == root

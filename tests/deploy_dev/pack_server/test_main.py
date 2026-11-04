@@ -379,7 +379,8 @@ INFO | Ran 1 config: 1 done, 0 failed
 
     def test_run_dir_is_a_mod(self, fs, run_dir, monkeypatch):
         """The run refuses a mod directory, like the modules it chains."""
-        fs.create_file(join_path(run_dir, 'module', 'main.py'), contents='')
+        fs.create_file(
+            join_path(run_dir, 'module', 'config', '_index', 'mod_entry.yaml'), contents='name: m\n')
         # check_run_dir runs once per process (init_once), the bare check runs
         # the gate for the run directory of this test
         monkeypatch.setattr(main, 'check_run_dir', check_run_dir.__wrapped__)

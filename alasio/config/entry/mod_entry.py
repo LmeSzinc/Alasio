@@ -36,7 +36,7 @@ the code, see :meth:`ModEntry.alasio`.
 Usage:
     from alasio.config.entry.mod_entry import ModEntry
 
-    entry = ModEntry.find_mod_entry(__file__)
+    entry = ModEntry.create(__file__, uppath=3)
     entry.gui_language
     entry.write()
 """
@@ -96,7 +96,7 @@ DEFAULT_SCHEDULER_PRIORITY = 'RestartDevice > RestartGame'
 # a mod is the folder holding `module/config/_index/mod_entry.yaml`. The
 # layout is not configurable on purpose, a declaration cannot tell where the
 # declaration is: the file is found at a fixed relative path, which is what
-# makes the walk up in ModEntry.find_mod_entry() work
+# lets ModEntry.create() compute the root of a mod from any file of it
 MOD_CONFIG = 'module/config'
 
 # Layout of the config folder of the library itself: the config tree of the
@@ -528,32 +528,34 @@ class ModEntry:
         return True
 
     @classmethod
-    def find_mod_entry(cls, path):
+    def create(cls, path, uppath=1):
         """
-        Walk up from a path to the nearest folder declaring a mod entry.
+        Create the entry of a mod from a file or a folder of the mod.
 
-        The one way the framework locates a mod root, replacing the per-file
-        offsets and the per-consumer markers: a file of a mod only has to name
-        itself, the walk answers the root from the fixed layout.
+        The caller states how many levels it lives below the root of the mod,
+        so the root is computed, never searched: a walk up would answer a
+        foreign root when the layout drifts (a folder of another mod above it,
+        or the repository that holds the mod) and the mod would silently read
+        a declaration that is not its own.
 
         Args:
-            path (str): File or folder to start from, a relative path is
-                resolved against the working folder
+            path (str): File or folder of the mod, usually __file__. A relative
+                path is resolved against the working folder
+            uppath (int): Levels from path up to the root of the mod, 1 for
+                the folder holding path. Defaults to 1
 
         Returns:
-            ModEntry | None: The entry of the mod, None when no ancestor
-                declares one
+            ModEntry: The entry of the mod
+
+        Raises:
+            ModEntryError: If the folder at that level declares no mod entry
         """
-        folder = PathStr.new(normpath(abspath(path)))
-        while folder:
-            if cls.is_mod(folder):
-                return cls(folder)
-            parent = folder.uppath(1)
-            if parent == folder:
-                # the filesystem root, and its own parent
-                break
-            folder = parent
-        return None
+        root = PathStr.new(normpath(abspath(path))).uppath(uppath)
+        if not cls.is_mod(root):
+            raise ModEntryError(
+                f'No mod entry at "{root}": "{path}" is {uppath} level(s) below the root of '
+                f'a mod, expected {MOD_ENTRY_PATH}')
+        return cls(root)
 
     @classmethod
     def from_source(cls, source, source_name=''):

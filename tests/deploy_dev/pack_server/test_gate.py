@@ -11,7 +11,7 @@ and TestCheckRunDirOnce tests the decorator on the decorated one.
 """
 import pytest
 
-from alasio.deploy_dev.pack_server.gate import RunDirError, check_run_dir, is_library_dir, is_mod_dir
+from alasio.deploy_dev.pack_server.gate import RunDirError, check_run_dir, is_library_dir
 from alasio.ext import env
 from alasio.ext.path import PathStr
 from alasio.testing.filesystem import fs  # noqa: F401
@@ -83,19 +83,29 @@ class TestCheckRunDir:
             raw_check(inside)
         assert 'Cannot run in the alasio library' in str(e.value)
 
-    @pytest.mark.parametrize('marker', [
-        'module/config/_index/config.index.json',
-        'module/main.py',
-        'module',
-        'assets',
+    @pytest.mark.parametrize('path', [
+        # the only marker of a mod, see ModEntry.is_mod
+        'module/config/_index/mod_entry.yaml',
     ])
-    def test_mod(self, fs, root, marker):
-        """A mod (a game script) is refused, the marker is named."""
-        fs.create_file(root.joinpath(marker), contents='')
+    def test_mod(self, fs, root, path):
+        """A mod (a game script) is refused."""
+        fs.create_file(root.joinpath(path), contents='name: m\n')
         with pytest.raises(RunDirError) as e:
             raw_check(root)
         assert 'Cannot run in a mod' in str(e.value)
-        assert marker in str(e.value)
+
+    @pytest.mark.parametrize('path', [
+        # the outputs and the folders of a mod are not what makes it one
+        'module/config/_index/config.index.json',
+        'module/main.py',
+        'assets/cn/a.png',
+        # the removed declaration, a file of it does not make a mod
+        'module/config/const.py',
+    ])
+    def test_not_a_mod(self, fs, root, path):
+        """A folder that only holds files of a mod layout is accepted."""
+        fs.create_file(root.joinpath(path), contents='')
+        assert raw_check(root) is None
 
 
 class TestCheckRunDirOnce:
@@ -116,19 +126,12 @@ class TestCheckRunDirOnce:
         assert check_run_dir() is None
 
 
-class TestIsModDir:
-    """Check whether a folder is the library or a mod."""
+class TestIsLibraryDir:
+    """Check whether a folder is the alasio library."""
 
     def test_run_dir(self, fs, root):
-        """A directory of its own is neither the library nor a mod."""
+        """A directory of its own is not the library."""
         assert is_library_dir(root) is False
-        assert is_mod_dir(root) == ''
-
-    def test_marker_priority(self, fs, root):
-        """The marker found is returned, the strongest one first."""
-        fs.create_file(root.joinpath('module/main.py'), contents='')
-        fs.create_file(root.joinpath('module/config/_index/config.index.json'), contents='')
-        assert is_mod_dir(root) == 'module/config/_index/config.index.json'
 
     def test_library_dir(self, fs, root):
         """The library root and the folders inside it are the library."""

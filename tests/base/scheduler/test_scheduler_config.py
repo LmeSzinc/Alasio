@@ -19,10 +19,13 @@ import pytest
 
 from alasio.config.alasio.group_proxy import GroupProxy
 from alasio.config.base import AlasioConfigBase
+from alasio.config.entry.mod_entry import ModEntry
 from alasio.db.conn import SQLITE_POOL
 from alasio.ext import env
 from alasio.logger import logger
-from ExampleMod.module.config.const import entry
+
+# The mod the tests of this file run on
+entry = ModEntry(env.ALASIO_ROOT.joinpath('ExampleMod'))
 
 env.ALASIO_ROOT.chdir_here()
 

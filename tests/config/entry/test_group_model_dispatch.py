@@ -95,10 +95,8 @@ class TestWorkerRole:
         """The whole point: the config group is an instance of the script class."""
         monkeypatch.setattr(env, 'PROCESS_ROLE', 'worker')
 
-        from ExampleMod.module.config.const import entry as EXAMPLE_ENTRY
-
         class Config(AlasioConfigBase):
-            entry = EXAMPLE_ENTRY
+            entry = ModEntry(env.ALASIO_ROOT.joinpath('ExampleMod'))
             Campaign: "main.Campaign"
 
         cfg = Config(':memory:', task='Main')

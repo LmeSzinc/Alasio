@@ -11,11 +11,11 @@ These tests run the entry startup order in a fresh interpreter
 --root <project root>) and assert that the repo mod ExampleMod is loaded from
 the resolved root, in both project layouts:
 
-- repo_root: the repo is the project root, ExampleMod is the mod registered
-  under it (DICT_MOD_ENTRY, root="ExampleMod");
+- repo_root: the repo is the project root, ExampleMod is the mod next to it
+  (MOD_FOLDERS, root="ExampleMod");
 - example_mod_root: ExampleMod is the project root, so it declares itself the
-  mod (<root>/module/config/const.py, loaded by ModLoader.self_mod) -- the
-  layout a real mod repo has, and the layout the empty mod root bug was
+  mod (<root>/module/config/_index/mod_entry.yaml, read by ModLoader.self_mod)
+  -- the layout a real mod repo has, and the layout the empty mod root bug was
   reported with: the mod root came out '', worker_start() was handed an empty
   mod_root and the worker died with KeyError('No such mod to run ...').
 
@@ -33,7 +33,7 @@ import pytest
 
 from alasio.ext.env import ALASIO_ROOT
 
-# the mod under test: <repo>/ExampleMod, registered as DICT_MOD_ENTRY "example_mod"
+# the mod under test: <repo>/ExampleMod, declared as the mod "example_mod"
 MOD_NAME = 'example_mod'
 MOD_ROOT = ALASIO_ROOT.joinpath('ExampleMod')
 # the test folder: a cwd that is not the project root, so the probe must
@@ -166,16 +166,16 @@ class TestModLoading:
     def test_self_mod_declared_by_project_root(self, report, case_root):
         """
         ExampleMod as the project root declares itself the mod in
-        <root>/module/config/const.py (ModLoader.self_mod): the mod entry is
-        loaded from that file and resolves its own root from it.
+        <root>/module/config/_index/mod_entry.yaml (ModLoader.self_mod): the
+        mod entry is read from that file and answers its own root.
         """
         if _norm(case_root) == _norm(MOD_ROOT):
             assert report['self_mod'] is not None
             assert report['self_mod']['name'] == MOD_NAME
             assert _norm(report['self_mod']['root']) == _norm(MOD_ROOT)
         else:
-            # the repo root has no module/config/const.py: the mod is only
-            # registered in DICT_MOD_ENTRY
+            # the repo root declares no mod entry: the mod is only one of the
+            # folders MOD_FOLDERS names
             assert report['self_mod'] is None
 
     def test_example_mod_index_data(self, report):

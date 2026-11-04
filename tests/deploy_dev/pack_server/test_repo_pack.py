@@ -314,7 +314,8 @@ class TestConfigAndFolders:
         """The flow refuses to run in a mod, like the config reader."""
         from alasio.deploy_dev.pack_server import repo as repo_flow
 
-        fs.create_file(join_path(run_dir, 'module', 'main.py'), contents='')
+        fs.create_file(
+            join_path(run_dir, 'module', 'config', '_index', 'mod_entry.yaml'), contents='name: m\n')
         # check_run_dir runs once per process (init_once), the bare check runs
         # the gate for the run directory of this test
         monkeypatch.setattr(repo_flow, 'check_run_dir', check_run_dir.__wrapped__)

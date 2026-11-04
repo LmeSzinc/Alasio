@@ -102,13 +102,13 @@ class PackRepoModel(Struct):
     4. Download wheels to: {workspace}/_wheel_cache/{dep_name}/{dep_version}/*.whl
       If wheels already exists, validate sha256 from {dep_name}/{dep_version}/index.html
       {dep_name}/{dep_version} comes from:
-      - [4.1] deps that declared in `ModEntryInfo.requirements_file` and its name hits `ModEntryInfo.update_pack_deps`
+      - [4.1] deps that declared in `ModEntry.requirements_file` and its name hits `ModEntry.update_pack_deps`
         from both latest commit and lookback commits
-      - [4.2] deps that declared in `ModEntryInfo.requirements_file` and its source hits
-        `ModEntryInfo.update_provide_pypi_mirrors`
+      - [4.2] deps that declared in `ModEntry.requirements_file` and its source hits
+        `ModEntry.update_provide_pypi_mirrors`
         from latest commit only
     5. Sync wheels from [4.2] to {workspace}/wheel/{dep_name}/{dep_version}/*.whl
-    6. Generate full packs and update packs for deps that declared in `ModEntryInfo.update_provide_pypi_mirrors`
+    6. Generate full packs and update packs for deps that declared in `ModEntry.update_provide_pypi_mirrors`
       - [6.1] Generate full packs to: {workspace}/packdep/{dep_name}/{dep_version}/full.pack
         only the deps defined in latest commit will have full pack
       - [6.2] Generate update packs to: {workspace}/packdep/{dep_name}/{dep_version}/update_{old}.pack

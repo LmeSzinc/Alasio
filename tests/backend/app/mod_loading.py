@@ -16,8 +16,8 @@ Started by tests/backend/app/test_mod_loading.py in a fresh interpreter with
 Importing the app chain before step 2 freezes MOD_LOADER.root to an empty
 root (MOD_LOADER = ModLoader(env.PROJECT_ROOT), bound at import time, see
 alasio/backend/app/asgi.py): a mod declared by the project root itself
-(module/config/const.py, loaded by ModLoader.self_mod) then resolves its own
-root to '' and worker_start() is handed an empty mod_root.
+(module/config/_index/mod_entry.yaml, read by ModLoader.self_mod) then
+resolves its own root to '' and worker_start() is handed an empty mod_root.
 
 The probe prints one `MOD_REPORT=<json>` line (pure ASCII) for the test to
 parse, everything else on stdout is logger noise.

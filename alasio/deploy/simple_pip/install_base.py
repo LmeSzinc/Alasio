@@ -6,7 +6,7 @@ with the pack channels of the mod.
 The requirements file of the mod (mod.entry.requirements_file, default
 'requirements.txt' under the mod root) pins the distributions the mod runs
 with, every one pinned to an exact version -- the file style the mod entry
-names (ModEntryInfo.requirements_file, see
+names (ModEntry.requirements_file, see
 alasio.deploy.simple_pip.parse_req). The distributions a mod updates by pack are declared on its entry
 (mod.entry.update_pack_deps, an entry attribute like mirrors); the other
 pins install with pip, by the flow of the caller. install_pack() hands every

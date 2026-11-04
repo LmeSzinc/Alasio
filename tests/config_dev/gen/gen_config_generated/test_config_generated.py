@@ -87,8 +87,7 @@ class TestConfigGenerated:
 import typing as t
 
 from alasio.config.base import AlasioConfigBase
-
-from ..const import entry
+from alasio.config.entry.mod_entry import ModEntry
 
 if t.TYPE_CHECKING:
     from ..gems import gems_model as gems
@@ -102,7 +101,7 @@ class ConfigGenerated(AlasioConfigBase):
     \"\"\"
     A generated config struct to fool IDE's type-predict and auto-complete
     \"\"\"
-    entry = entry
+    entry = ModEntry.create(__file__, uppath=4)
 
     \"\"\"
     ========== nav: gems ==========

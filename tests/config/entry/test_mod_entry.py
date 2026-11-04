@@ -295,7 +295,7 @@ class TestModEntryModelAssetLang:
         assert list(entry.iter_asset_lang()) == ['', 'cn', 'jp']
 
 
-class TestModEntryInfoLayout:
+class TestModEntryLayout:
     """The location of an entry, one of the two layouts the framework knows."""
 
     def test_default(self):
@@ -332,7 +332,7 @@ class TestModEntryInfoLayout:
         assert entry.copy().path_config == 'alasio/config'
 
 
-class TestModEntryInfoData:
+class TestModEntryData:
     """The declaration an entry answers."""
 
     def test_given_data(self):
@@ -373,7 +373,7 @@ class TestModEntryInfoData:
         assert ModEntry.alasio.data.name == 'alasio'
 
 
-class TestModEntryInfoExist:
+class TestModEntryExist:
     """The readiness of a mod, the generated index of its config."""
 
     def test_missing(self, fs):

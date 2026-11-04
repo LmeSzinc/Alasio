@@ -8,7 +8,7 @@ from alasio.ext.env import set_project_root
 from alasio.logger import logger
 
 # The declaration of this mod, the file the framework reads
-entry = ModEntry.find_mod_entry(__file__)
+entry = ModEntry.create(__file__, uppath=3)
 
 CHAPTER_MAP = {
     'chapter1': ['1-1', '1-2', '1-3', '1-4'],

@@ -126,8 +126,8 @@ def check_no_database():
 
 class TestProjectRootManager:
     """
-    The project root of a test is the nearest ancestor of the test file holding
-    `module/config/const.py`, the entry file of a mod
+    The project root of a test is the nearest ancestor of the test file declaring
+    a mod entry, `module/config/_index/mod_entry.yaml`
     """
 
     def test_project_root_of_a_test_inside_a_mod(self):
@@ -150,18 +150,15 @@ class TestProjectRootManager:
         """
         manager = ProjectRootManager()
         monkeypatch.setattr(screenshot_module, 'PROJECT_ROOT_MANAGER', manager)
-        # A step of the walk is one existence check of a folder. os.stat is not
-        # counted as well: on Windows python 3.12+ os.path.isfile() takes the
-        # nt._path_isfile() fast path and never calls the python level os.stat,
-        # which made the walk read as a walk of no folder
+        # A step of the walk is one existence check of the entry file of a mod
         calls = []
-        original = os.path.isfile
+        original = screenshot_module.ModEntry.is_mod
 
-        def counting_isfile(path):
-            calls.append(path)
-            return original(path)
+        def counting_is_mod(root):
+            calls.append(root)
+            return original(root)
 
-        monkeypatch.setattr(os.path, 'isfile', counting_isfile)
+        monkeypatch.setattr(screenshot_module.ModEntry, 'is_mod', counting_is_mod)
 
         manager.get_project_root(TEST_FILE)
         walk = len(calls)

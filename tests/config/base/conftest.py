@@ -2,10 +2,17 @@ import pytest
 
 from alasio.config.base import AlasioConfigBase
 from alasio.config.entry.mod import Mod
+from alasio.config.entry.mod_entry import ModEntry
 from alasio.db.conn import SQLITE_POOL
 from alasio.ext import env
 from alasio.logger import logger
-from ExampleMod.module.config.const import entry
+
+# The mod the config tests of this folder run on
+entry = ModEntry(env.ALASIO_ROOT.joinpath('ExampleMod'))
+# Importing the mod set the project root to the mod, the tests rely on the
+# value, so it is set here without importing the mod
+if not env.PROJECT_ROOT:
+    env.set_project_root(entry.root)
 
 env.ALASIO_ROOT.chdir_here()
 

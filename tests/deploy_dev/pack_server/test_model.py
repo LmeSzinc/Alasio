@@ -451,7 +451,7 @@ Repo:
 
     def test_run_dir_is_a_mod(self, fs, run_dir, monkeypatch):
         """The pack server refuses to read the config of a mod directory."""
-        fs.create_file(f'{run_dir}/module/main.py', contents='')
+        fs.create_file(f'{run_dir}/module/config/_index/mod_entry.yaml', contents='name: m\n')
         # check_run_dir runs once per process (init_once), the bare check runs
         # the gate for the run directory of this test
         monkeypatch.setattr(model, 'check_run_dir', check_run_dir.__wrapped__)

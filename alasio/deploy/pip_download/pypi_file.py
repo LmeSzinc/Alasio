@@ -431,7 +431,7 @@ class PypiFile(AsyncHttpProbe):
                 the write of a wheel (the atomic write creates the folders of
                 its path), no call creates it up front
             name (str): Identity of this mirror set in the record of the
-                machine, `ModEntryInfo.pypi_record_name`. Defaults to ''
+                machine, `ModEntry.pypi_record_name`. Defaults to ''
             client (httpx2.AsyncClient | AsyncHttpClient, optional): Client to
                 send the requests with, or an AsyncHttpClient whose client is
                 taken. Its lifetime belongs to the caller. Defaults to None, a

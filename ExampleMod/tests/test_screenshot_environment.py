@@ -15,11 +15,14 @@ import os
 
 import pytest
 from module.base.base import ModuleBase
-from module.config.const import entry
 from module.map.assets import FLEET_1_CLEAR
 
+from alasio.config.entry.mod_entry import ModEntry
 from alasio.ext.path import PathStr
 from alasio.testing.screenshot import image
+
+# The declaration of this mod: this file is 2 levels below the mod root
+entry = ModEntry.create(__file__, uppath=2)
 
 # The working folder at collection time, before any fixture of the tests ran
 CWD = os.getcwd()

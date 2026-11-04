@@ -51,10 +51,10 @@ fixture. The plugin is enabled in the pytest configuration of the project:
 It is loaded by module path instead of being an installed entry point, so a
 plain checkout runs the tests without installing the package first.
 
-The project root of a test is the nearest ancestor of the test file holding
-`module/config/const.py`, which covers both layouts of a mod: a mod inside the
-Alasio repository (`<repo>/ExampleMod`) and a mod that is the repository itself
-(`<repo>` as a whole).
+The project root of a test is the nearest ancestor of the test file declaring a
+mod entry (`module/config/_index/mod_entry.yaml`), which covers both layouts of
+a mod: a mod inside the Alasio repository (`<repo>/ExampleMod`) and a mod that
+is the repository itself (`<repo>` as a whole).
 """
 import inspect
 from typing import get_type_hints
@@ -63,6 +63,7 @@ import pytest
 from msgspecerror import get_class_annotation
 
 from alasio.config.base import AlasioConfigBase
+from alasio.config.entry.mod_entry import MOD_ENTRY_PATH, ModEntry
 from alasio.ext.path import PathStr
 from alasio.testing.screenshot_device import ScreenshotDevice, ScreenshotTestError
 
@@ -70,8 +71,6 @@ from alasio.testing.screenshot_device import ScreenshotDevice, ScreenshotTestErr
 ATTR_SCREENSHOT = '__screenshot__'
 # Folder of the collected screenshots, relative to the project root
 COLLECTION = 'collection'
-# Entry file of a mod, the folder holding it is the project root of the mod
-MOD_CONST = 'module/config/const.py'
 # Config name of the tests: a template config, which is read only and never
 # touches the database, every group falls back to its default values
 CONFIG_NAME = 'template'
@@ -125,10 +124,10 @@ class ProjectRootManager:
     """
     The project roots of the mods of the running session.
 
-    A project root is a folder holding `module/config/const.py`, the entry file of
-    a mod. A real mod has many test files and they all live under the one root of
-    the mod, so a root is discovered once and reused: resolving a test file under
-    a known root walks no folder, it is a sub-path check.
+    A project root is a folder declaring a mod entry (`module/config/_index/mod_entry.yaml`).
+    A real mod has many test files and they all live under the one root of the
+    mod, so a root is discovered once and reused: resolving a test file under a
+    known root walks no folder, it is a sub-path check.
 
     Attributes:
         roots (list[PathStr]): The project roots discovered so far
@@ -140,7 +139,7 @@ class ProjectRootManager:
     def get_project_root(self, test_file):
         """
         Get the project root of a test file, which is the nearest ancestor of the
-        test file holding `module/config/const.py`
+        test file declaring a mod entry
 
         Args:
             test_file (str): Path of the test file, absolute like the path pytest
@@ -186,7 +185,7 @@ class ProjectRootManager:
     @staticmethod
     def find_root(path, test_file=None):
         """
-        Walk up from a path to the nearest folder holding `module/config/const.py`
+        Walk up from a path to the nearest folder declaring a mod entry
 
         Args:
             path (str): Normalized absolute path
@@ -200,7 +199,7 @@ class ProjectRootManager:
         """
         folder = PathStr.new(path)
         while folder:
-            if folder.joinpath(MOD_CONST).isfile():
+            if ModEntry.is_mod(folder):
                 return folder
             parent = folder.uppath(1)
             if parent == folder:
@@ -209,7 +208,7 @@ class ProjectRootManager:
 
         raise ScreenshotTestError(
             f'No project root above the test file "{test_file or path}", a project root is '
-            f'a folder holding "{MOD_CONST}"'
+            f'a folder declaring "{MOD_ENTRY_PATH}"'
         )
 
 

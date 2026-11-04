@@ -33,20 +33,8 @@ import os
 import stat
 
 from alasio.backport.once import init_once
+from alasio.config.entry.mod_entry import ModEntry
 from alasio.ext import env
-from alasio.ext.path.calc import joinnormpath
-
-# Markers of a mod (a game script) in its root, see ModEntryInfo:
-# - the generated index of the config definitions, ModEntryInfo.exist()
-# - the scheduler of the mod, ModEntryInfo.path_main
-# - the folder of the mod code, the config definitions are inside it
-# - the assets of the mod, ModEntryInfo.path_assets
-MOD_MARKERS = (
-    'module/config/_index/config.index.json',
-    'module/main.py',
-    'module',
-    'assets',
-)
 
 
 class RunDirError(ValueError):
@@ -71,25 +59,6 @@ def is_library_dir(root):
         return True
     # a folder inside the library
     return root.startswith(library + os.sep)
-
-
-def is_mod_dir(root):
-    """
-    Check whether a folder is a mod, a game script
-
-    Args:
-        root (str): Absolute path of the folder
-
-    Returns:
-        str: The marker found, empty string if the folder is not a mod
-    """
-    for marker in MOD_MARKERS:
-        try:
-            os.stat(joinnormpath(root, marker))
-        except (FileNotFoundError, NotADirectoryError):
-            continue
-        return marker
-    return ''
 
 
 @init_once
@@ -125,9 +94,8 @@ def check_run_dir(root=''):
             f'the pack server needs a run directory of its own'
         )
 
-    marker = is_mod_dir(root)
-    if marker:
+    if ModEntry.is_mod(root):
         raise RunDirError(
-            f'Cannot run in a mod: "{root}" is a game script, "{marker}" is found, '
+            f'Cannot run in a mod: "{root}" is a game script that declares a mod entry, '
             f'the pack server needs a run directory of its own'
         )

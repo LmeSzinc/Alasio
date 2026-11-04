@@ -93,13 +93,6 @@ class RuffFormatter:
                 return env.PROJECT_ROOT
         except Exception:
             pass
-        # maybe module/config/const.py has `entry.root = ...`
-        try:
-            from module.config.const import entry
-            if entry.root:
-                return entry.root
-        except Exception:
-            pass
         # just cwd
         return os.getcwd()
 

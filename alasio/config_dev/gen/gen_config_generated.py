@@ -91,7 +91,7 @@ class GenConfigGenerated(GenNavIndex):
         gen.Import('typing').as_('t')
         if self.alasio:
             gen.FromImport('alasio.config.base').Import('AlasioConfigBase')
-            gen.FromImport('..const').Import('entry')
+            gen.FromImport('alasio.config.entry.mod_entry').Import('ModEntry')
         # TYPE_CHECKING block - imports only used for type hints
         with gen.If('t.TYPE_CHECKING'):
             gen.Import('alasio.config.alasio.group_export').as_('alasio').lazy()
@@ -114,7 +114,9 @@ class GenConfigGenerated(GenNavIndex):
         with cls:
             gen.MultilineComment('A generated config struct to fool IDE\'s type-predict and auto-complete')
             if self.alasio:
-                gen.Raw('entry = entry')
+                # The file lives in <mod root>/module/config/_index/, so the
+                # mod root is 4 levels above it
+                gen.Raw('entry = ModEntry.create(__file__, uppath=4)')
             gen.Empty()
 
             # Generate group attributes organized by nav

@@ -3,7 +3,7 @@ Parse a client requirements file into the distributions pinned to an exact
 version, and the index each pin came from.
 
 The environment of a client has to satisfy the requirements file of the
-deployed tree, the file the mod entry names (ModEntryInfo.requirements_file,
+deployed tree, the file the mod entry names (ModEntry.requirements_file,
 e.g. 'requirements.txt'): it lists the distributions the project runs with,
 every one of them pinned to the exact version of the environment. This module
 parses one such file into its pins, so the client can read the file without
