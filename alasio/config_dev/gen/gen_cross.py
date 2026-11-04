@@ -1,7 +1,7 @@
 from typing import Optional
 
 from alasio.backport import removeprefix
-from alasio.config.entry.const import ModEntryInfo
+from alasio.config.entry.mod_entry import ModEntry
 from alasio.config_dev.gen.gen_config import ConfigGenerator, remove_stale_file
 from alasio.config_dev.parse.base import DefinitionError
 from alasio.config_dev.parse.build_mro import MroError, build_mro
@@ -17,7 +17,7 @@ from alasio.logger import logger
 
 
 class CrossNavGenerator:
-    def __init__(self, entry: ModEntryInfo):
+    def __init__(self, entry: ModEntry):
         """
         维护带跨nav引用的数据
         model.index.json

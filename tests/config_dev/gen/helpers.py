@@ -8,7 +8,7 @@ entry type instead of one per tested method.
 """
 import json
 
-from alasio.config.entry.const import ModEntryInfo
+from alasio.config.entry.mod_entry import ModEntry, ModEntryModel
 from alasio.config_dev.gen.gen_config import ConfigGenerator
 from alasio.config_dev.gen.gen_cross import CrossNavGenerator
 from alasio.ext.path import PathStr
@@ -33,7 +33,7 @@ class GitAddSpy:
 
 def make_entry(fs, name='test', languages=('zh-CN', 'en-US')):
     """
-    Build the ModEntryInfo of the navs generated on the fake filesystem.
+    Build the ModEntry of the navs generated on the fake filesystem.
 
     Args:
         fs (FakeFilesystem): The in-memory filesystem fixture
@@ -41,13 +41,11 @@ def make_entry(fs, name='test', languages=('zh-CN', 'en-US')):
         languages (tuple[str]): gui_language of the entry
 
     Returns:
-        ModEntryInfo:
+        ModEntry:
     """
-    return ModEntryInfo(
-        name=name,
+    return ModEntry(
         root=fs.root_dir.path,
-        path_config='module/config',
-        gui_language=dict.fromkeys(languages),
+        data=ModEntryModel(name=name, gui_language=list(languages)),
     )
 
 
@@ -78,7 +76,7 @@ def make_generator(fs, nav='testnav', yaml='', *, entry=None, languages=('zh-CN'
         fs (FakeFilesystem): The in-memory filesystem fixture
         nav (str): Nav name
         yaml (str | None): Content of {nav}.args.yaml, None to keep the existing file
-        entry (ModEntryInfo, optional): Entry of the mod, default to a new test entry
+        entry (ModEntry, optional): Entry of the mod, default to a new test entry
         languages (tuple[str]): gui_language of the default entry
         model (str, optional): Content of the existing {nav}_model.py
         i18n (dict, optional): Content of the existing {nav}_i18n.json
@@ -119,7 +117,7 @@ def make_alasio_generator(fs, nav='device', yaml=''):
     Returns:
         ConfigGenerator:
     """
-    entry = ModEntryInfo.alasio()
+    entry = ModEntry.alasio
     file = joinpath(fs.root_dir.path, f'alasio/config/{nav}/{nav}.args.yaml')
     fs.create_file(file, contents=yaml)
     gen = ConfigGenerator(entry, PathStr.new(file))

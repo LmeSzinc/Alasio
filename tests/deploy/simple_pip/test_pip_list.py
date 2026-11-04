@@ -3,7 +3,7 @@ import os
 
 import pytest
 
-from alasio.config.entry.const import ModEntryInfo
+from alasio.config.entry.mod_entry import ModEntry, ModEntryModel
 from alasio.deploy.simple_pip import pip_list
 from alasio.deploy.simple_pip.pip_list import Distribution, PipList, normalize_name
 from alasio.deploy_dev.pack.encode_base import PackEncodeBase
@@ -172,7 +172,7 @@ class FakeMod:
             *names (str): Names to declare in update_pack_deps
         """
         self.name = 'alas'
-        self.entry = ModEntryInfo(name='alas', update_pack_deps=tuple(names))
+        self.entry = ModEntry(data=ModEntryModel(name='alas', update_pack_deps=list(names)))
 
 
 def run_pack_list(names, root=SITE):

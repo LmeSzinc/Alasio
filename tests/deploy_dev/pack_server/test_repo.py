@@ -82,7 +82,7 @@ REQUIREMENTS = {
 
 # entry of the mock repo: by default it declares the dependency the tests build
 # a pack channel of, see entry_source
-DEFAULT_ENTRY = "entry = ModEntryInfo(name='m', update_pack_deps=('httpx',))\n"
+DEFAULT_ENTRY = "entry = ModEntry(name='m', update_pack_deps=('httpx',))\n"
 
 # folder of the workspace of the config in the run directory
 WORKSPACE = 'pack/Author_Repo_master'
@@ -113,7 +113,7 @@ def entry_source(*names, provide=None, requirements_file=None):
             fetches from: the pins of the dependency file do)
         provide (Iterable[str] | None): Value of the
             update_provide_pypi_mirrors declaration, None for a declaration of
-            the entry that omits the key (the default of ModEntryInfo)
+            the entry that omits the key (the default of ModEntry)
         requirements_file (str | None): Value of the requirements_file
             declaration, None for a declaration of the entry that omits the key
 
@@ -126,8 +126,8 @@ def entry_source(*names, provide=None, requirements_file=None):
     if requirements_file is not None:
         declared += f', requirements_file={requirements_file!r}'
     if not names:
-        return f"entry = ModEntryInfo(name='m'{declared})\n"
-    return f"entry = ModEntryInfo(name='m'{declared}, update_pack_deps={tuple(names)!r})\n"
+        return f"entry = ModEntry(name='m'{declared})\n"
+    return f"entry = ModEntry(name='m'{declared}, update_pack_deps={tuple(names)!r})\n"
 
 
 def make_repo(requirements=None, branch='master', entry=DEFAULT_ENTRY):
@@ -388,7 +388,7 @@ INFO | No update_pack_deps declared by module/config/const.py at c3, no dependen
 
     def test_entry_broken(self, fs, run_dir, mirror):
         """A dynamic declaration fails the sample, no dependency is silently dropped."""
-        entry = "entry = ModEntryInfo(name='m', update_pack_deps=get_deps())\n"
+        entry = "entry = ModEntry(name='m', update_pack_deps=get_deps())\n"
         gen = Repo(make_repo(entry=entry), make_config())
         with pytest.raises(ValueError, match='unsupported call'):
             _ = gen.base.deps
@@ -448,8 +448,8 @@ class TestProvidedPins:
     """The pins whose index the repo provides, and the index they are fetched from."""
 
     def test_update_provide_pypi_mirrors_default(self, fs, run_dir):
-        """An entry that declares no provided index keeps the default of ModEntryInfo."""
-        from alasio.config.entry.const import DEFAULT_UPDATE_PROVIDE_PYPI_MIRRORS
+        """An entry that declares no provided index keeps the default of ModEntry."""
+        from alasio.config.entry.mod_entry import DEFAULT_UPDATE_PROVIDE_PYPI_MIRRORS
 
         gen = Repo(make_repo(), make_config())
         url = DEFAULT_UPDATE_PROVIDE_PYPI_MIRRORS[0]

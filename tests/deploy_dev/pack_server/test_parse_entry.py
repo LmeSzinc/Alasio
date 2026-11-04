@@ -11,11 +11,11 @@ not declare, because the declaration could not be read.
 """
 import pytest
 
-from alasio.config.entry.const import (
-    DEFAULT_PYPI_MIRRORS, DEFAULT_UPDATE_PROVIDE_PYPI_MIRRORS, DICT_MOD_ENTRY as LIBRARY_MOD_ENTRY
-)
+from alasio.config.entry.mod_entry import DEFAULT_PYPI_MIRRORS, DEFAULT_UPDATE_PROVIDE_PYPI_MIRRORS
 from alasio.deploy_dev.pack_server import parse_entry
-from alasio.deploy_dev.pack_server.parse_entry import ENTRY_FILE, PARSED_KEYS, PackRepoEntry, parse_mod_entry
+from alasio.deploy_dev.pack_server.parse_entry import (
+    ENTRY_FILE, LIBRARY_MOD_ENTRY, PARSED_KEYS, PackRepoEntry, parse_mod_entry
+)
 
 
 def parse(source):

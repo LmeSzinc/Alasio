@@ -1,7 +1,7 @@
 from typing import TYPE_CHECKING, Optional
 
 from alasio.codegen.python import CodeGen
-from alasio.config.entry.const import ModEntryInfo  # noqa: F401
+from alasio.config.entry.mod_entry import ModEntry  # noqa: F401
 from alasio.config_dev.format.extract_method import extract_method
 from alasio.config_dev.format.format_i18n import format_i18n
 from alasio.config_dev.format.format_yaml import yaml_formatter
@@ -97,7 +97,7 @@ class ConfigGenerator(ParseGroups, ParseTasks):
             你不应该修改这个文件。
 
         Args:
-            entry (ModEntryInfo):
+            entry (ModEntry):
             file (PathStr): Absolute filepath to {nav}.args.yaml
         """
         super().__init__(file)

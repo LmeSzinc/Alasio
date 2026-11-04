@@ -22,7 +22,7 @@ import os
 import httpx2
 import pytest
 
-from alasio.config.entry.const import ModEntryInfo
+from alasio.config.entry.mod_entry import ModEntry, ModEntryModel
 from alasio.deploy.pack.decode_base import PackDecodeBase
 from alasio.deploy.pack.job_unpack import UnpackJob
 from alasio.deploy.pack.server_file import LatestInfo
@@ -126,12 +126,14 @@ class FakeMod:
                  requirements_file='requirements.txt', update_pack_deps=()):
         self.name = name
         self.root = PathStr.new(root)
-        self.entry = ModEntryInfo(
-            name=name,
+        self.entry = ModEntry(
             root=root,
-            mirrors=mirrors,
-            requirements_file=requirements_file,
-            update_pack_deps=tuple(update_pack_deps),
+            data=ModEntryModel(
+                name=name,
+                mirrors=mirrors,
+                requirements_file=requirements_file,
+                update_pack_deps=list(update_pack_deps),
+            ),
         )
 
 
@@ -152,7 +154,7 @@ def make_mod(fake, content=None, root='/mod', **kwargs):
     root = abs_path(fake, root)
     mod = FakeMod(root=root, **kwargs)
     if content is not None:
-        fake.create_file(f'{root}/{mod.entry.requirements_file}', contents=content)
+        fake.create_file(f'{root}/{mod.entry.data.requirements_file}', contents=content)
     return mod
 
 
@@ -251,7 +253,7 @@ nopin>=1.0
 
     @pytest.mark.trio
     async def test_the_file_of_the_entry(self, fs):
-        """The pins are read from {mod.root}/{entry.requirements_file}."""
+        """The pins are read from {mod.root}/{entry.data.requirements_file}."""
         site = site_packages(fs)
         root = abs_path(fs, '/mod')
         fs.create_file(f'{root}/requirements.txt', contents='demo==1.0\n')
@@ -594,7 +596,7 @@ class TestInstallPackAllDeclared:
         # the requirements of the mod changed (a new pin joined demo): the
         # satisfied demo is verified, the missing other is installed, and the
         # tree snapshot of the new pin comes with the new tree
-        file_write(f'{mod.root}/{mod.entry.requirements_file}', b'demo==1.0\nother==2.0\n')
+        file_write(f'{mod.root}/{mod.entry.data.requirements_file}', b'demo==1.0\nother==2.0\n')
         snapshots['other'] = snapshot('2.0', other_index)
         install = InstallBase(mod, site)
         assert await install.install_pack() == {'demo': True, 'other': True}

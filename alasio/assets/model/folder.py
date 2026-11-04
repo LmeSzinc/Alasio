@@ -12,7 +12,6 @@ from alasio.base.image.color import get_color
 from alasio.base.image.draw import get_bbox
 from alasio.base.image.imfile import ImageBroken, crop, image_load, image_size
 from alasio.base.op import RGB, Area, random_id
-from alasio.config.entry.const import DICT_MOD_ENTRY
 from alasio.ext import env
 from alasio.ext.cache import cached_property
 from alasio.ext.path.atomic import atomic_read_bytes, atomic_replace
@@ -423,7 +422,6 @@ class AssetFolder(AssetGenerator, ResourceManager):
 
 
 if __name__ == '__main__':
-    _entry = DICT_MOD_ENTRY['example_mod'].copy()
-    _entry.root = env.PROJECT_ROOT.joinpath('ExampleMod')
+    _entry = ModEntry(env.PROJECT_ROOT.joinpath('ExampleMod'))
     self = AssetFolder(_entry, 'assets/combat')
     print(self.data.assets)

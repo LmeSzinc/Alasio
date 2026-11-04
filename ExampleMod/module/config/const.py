@@ -1,30 +1,7 @@
-from alasio.config.entry.const import ConfigConst as ConfigConst_, ModEntryInfo
-from alasio.ext.path import PathStr
+from alasio.config.entry.mod_entry import ModEntry
 
-entry = ModEntryInfo(name='example_mod')
-entry.root = PathStr.new(__file__).uppath(3)
-
-
-class ConfigConst(ConfigConst_):
-    SCHEDULER_PRIORITY = """
-    RestartDevice > RestartGame
-    > OpsiCrossMonth
-    > Commission > Tactical > Research
-    > Exercise
-    > Dorm > Meowfficer > Guild > Gacha
-    > Reward
-    > ShopFrequent > ShopOnce > Shipyard > Freebies
-    > PrivateQuarters
-    > OpsiExplore
-    > Minigame > Awaken
-    > OpsiAshBeacon
-    > OpsiDaily > OpsiShop > OpsiVoucher
-    > OpsiAbyssal > OpsiStronghold > OpsiObscure > OpsiArchive
-    > Daily > Hard > OpsiAshBeacon > OpsiAshAssist > OpsiMonthBoss
-    > Sos > EventSp > EventA > EventB > EventC > EventD
-    > RaidDaily > CoalitionSp > WarArchives > MaritimeEscort
-    > Event > Event2 > Raid > Hospital > Coalition > Main > Main2 > Main3
-    > OpsiMeowfficerFarming
-    > GemsFarming
-    > OpsiHazard1Leveling
-    """
+# A view of mod_entry.yaml for the code of the mod. The framework reads the
+# YAML directly and never imports this module: the declaration of the mod is
+# module/config/_index/mod_entry.yaml, and editing the values here has no
+# effect on it.
+entry = ModEntry.find_mod_entry(__file__)

@@ -508,7 +508,7 @@ class FakePerMod:
         self.mod = SimpleNamespace(
             name=name,
             root=f'/mod-{name}',
-            entry=SimpleNamespace(update_pack_deps=tuple(pack_deps)),
+            entry=SimpleNamespace(update_pack_deps=list(pack_deps)),
         )
 
     async def job(self):

@@ -59,7 +59,6 @@ import trio
 from alasio.backend.mpipe.mpipe_backend import has_supervisor
 from alasio.backend.topic.update import UpdateInfo, UpdateSource
 from alasio.deploy.httpclient.client_async import AsyncHttpClient
-from alasio.deploy.httpclient.probe_mirrors import Mirrors
 from alasio.deploy.pack.job import DeployJob
 from alasio.deploy.pack.server_file import ServerFile
 from alasio.logger import logger
@@ -225,15 +224,9 @@ class ModUpdateCheck:
             Mirrors | None: The mirrors, None when the mod declares none (it is
                 not updated on purpose) or a malformed one (a warning says so)
         """
-        value = self.mod.entry.mirrors
-        if not value:
-            return None
-        try:
-            return Mirrors.from_input(value)
-        except (ValueError, TypeError) as e:
-            logger.warning(f'[Update] Invalid update source of "{self.name}": {e}, '
-                           f'the mod is unmanaged')
-            return None
+        # A malformed declaration is reported by the entry, which reads it as
+        # no source
+        return self.mod.entry.mirrors
 
     @property
     def disabled(self) -> bool:

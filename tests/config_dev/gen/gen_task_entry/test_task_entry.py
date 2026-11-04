@@ -1,6 +1,6 @@
 import pytest
 
-from alasio.config.entry.const import ModEntryInfo
+from alasio.config.entry.mod_entry import ModEntry, ModEntryModel
 from alasio.config_dev.gen.gen_task_entry import GenTaskEntry
 from alasio.config_dev.parse.base import DefinitionError
 from alasio.ext.concurrent.threadpool import Job
@@ -22,14 +22,10 @@ def make_gen(fs, folders=None):
         GenTaskEntry:
     """
     root = fs.root_dir.path
-    entry = ModEntryInfo(
-        name='test',
-        root=root,
-        path_config='module/config',
-    )
+    model = ModEntryModel(name='test')
     if folders is not None:
-        entry.task_entry_folders = dict.fromkeys(folders)
-    return GenTaskEntry(entry)
+        model.task_entry_folders = list(folders)
+    return GenTaskEntry(ModEntry(root=root, data=model))
 
 
 def write_code(fs, path, code):
@@ -273,7 +269,7 @@ class TaskEntryGenerated(AlasioScheduler):
 
     def test_generate_alasio_comment(self, fs):
         """alasio itself is generated with the gen_alasio codegen entry comment."""
-        entry = ModEntryInfo.alasio()
+        entry = ModEntry.alasio
         gen = GenTaskEntry(entry)
         gen.start_task_entry_scan()
         gen.generate_task_entry_file()
@@ -443,7 +439,7 @@ class Main:
 
     def test_no_warn_for_alasio(self, fs):
         """alasio has no MOD scheduler, so it does not override any scheduler task."""
-        entry = ModEntryInfo.alasio()
+        entry = ModEntry.alasio
         gen = GenTaskEntry(entry)
         gen.start_task_entry_scan()
         with logger.mock_capture_writer() as capture:

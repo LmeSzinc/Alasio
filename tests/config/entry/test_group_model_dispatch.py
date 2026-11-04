@@ -21,8 +21,8 @@ import pytest
 
 from alasio.config.alasio.group_proxy import GroupProxy
 from alasio.config.base import AlasioConfigBase
-from alasio.config.entry.const import ModEntryInfo
 from alasio.config.entry.mod_base import ModBase
+from alasio.config.entry.mod_entry import ModEntry, ModEntryModel
 from alasio.ext import env
 from alasio.ext.path import PathStr
 
@@ -38,7 +38,7 @@ def make_mod():
     Returns:
         ModBase:
     """
-    return ModBase(ModEntryInfo(name='example_mod', root=PathStr.new('ExampleMod')))
+    return ModBase(ModEntry(root=PathStr.new('ExampleMod'), data=ModEntryModel(name='example_mod')))
 
 
 @pytest.fixture
@@ -75,8 +75,7 @@ class TestPackageName:
 
     def test_entry_outside_a_package(self):
         """An entry file at the mod root has no package to import from."""
-        mod = make_mod()
-        mod.entry.path_main = 'main.py'
+        mod = ModBase(ModEntry(root=PathStr.new('ExampleMod'), data=ModEntryModel(name='example_mod', path_main='main.py')))
         assert mod.package_name == ''
 
 

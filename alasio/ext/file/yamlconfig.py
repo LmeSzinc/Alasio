@@ -374,6 +374,27 @@ class YamlConfig(Generic[T_model]):
         data = self.model() if template else self.data
         return self._write(data, skip_same=skip_same)
 
+    def write_data(self, data, skip_same=True):
+        """
+        Write the given data into the yaml file, with the comments of the
+        model
+
+        Unlike write(), the file is not read first: a caller that owns the
+        data (a generator that builds it from the object of the file) writes
+        exactly what it has, the model still supplies the comments and the
+        format.
+
+        Args:
+            data (T_model): Data to write, a model instance of this config
+            skip_same (bool): True to skip writing if existing content is the
+                same as content to write. This would reduce disk write but add
+                disk read
+
+        Returns:
+            bool: if write
+        """
+        return self._write(data, skip_same=skip_same)
+
     def _write(self, data, skip_same=True):
         """
         Write data into the yaml file, comments are inserted above the line of

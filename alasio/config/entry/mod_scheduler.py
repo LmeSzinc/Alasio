@@ -9,7 +9,6 @@ from alasio.config.entry.model import TaskItem
 from alasio.config.entry.utils import validate_task_name
 from alasio.config.table.config import AlasioConfigTable, ConfigRow
 from alasio.ext.cache import cached_property
-from alasio.ext.file.loadpy import LOADPY_CACHE
 from alasio.logger import logger
 
 
@@ -21,26 +20,16 @@ class ModScheduler(ModBase):
     @cached_property
     def _dict_task_priority(self) -> "dict[str, int]":
         """
+        The order of the tasks, declared by the entry of the mod.
+
+        The declaration is read with the entry, no file of the mod is imported
+        for it.
+
         Returns:
-            key: task_name, value: priority, starting from 1, smaller for higher priority
+            dict[str, int]: key: task_name, value: priority, starting from 1,
+                smaller for higher priority
         """
-        file = self.path_config / 'const.py'
-        try:
-            # one-time load, use load_resource instead
-            module = LOADPY_CACHE.load_resource(file)
-        except ImportError as e:
-            # DataInconsistent error.
-            # We just log warnings to reduce runtime crash, fallback to no task priority
-            logger.warning(
-                f'DataInconsistent: failed to import model.py "{file}": {e}')
-            return {}
-        try:
-            priority = module.ConfigConst.SCHEDULER_PRIORITY
-        except AttributeError:
-            logger.warning(
-                f'DataInconsistent: Missing ConfigConst.SCHEDULER_PRIORITY in "{file}"')
-            return {}
-        return self.parse_scheduler_priority(priority)
+        return self.parse_scheduler_priority(self.entry.scheduler_priority)
 
     @staticmethod
     def parse_scheduler_priority(priority: str) -> "dict[str, int]":

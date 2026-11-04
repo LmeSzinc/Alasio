@@ -11,8 +11,8 @@ from alasio.base.servertime import ServerTime
 from alasio.config._index.config_generated import AlasioConfigGenerated
 from alasio.config.alasio.group_proxy import GroupProxy
 from alasio.config.const import DataInconsistent
-from alasio.config.entry.const import ModEntryInfo
 from alasio.config.entry.mod import Mod
+from alasio.config.entry.mod_entry import ModEntry
 from alasio.config.entry.model import ConfigSetEvent
 from alasio.config.table.config import AlasioConfigTable, ConfigRow
 from alasio.config.table.key import AlasioKeyTable
@@ -73,7 +73,7 @@ class AlasioConfigBaseAccess(AlasioConfigGenerated):
     Config access and task scheduling.
     """
     # subclasses must override this
-    entry: ModEntryInfo
+    entry: ModEntry
 
     # __slots__ at TYPE_CHECKING only
     # Fooling IDE to give warnings for code like `config.XXX = 1`

@@ -1,6 +1,7 @@
 from alasio.config_dev.gen.gen_config import remove_stale_file
 from alasio.config_dev.gen.gen_config_generated import GenConfigGenerated
 from alasio.config_dev.gen.gen_config_index import GenConfigIndex
+from alasio.config_dev.gen.gen_mod_entry import GenModEntry
 from alasio.config_dev.gen.gen_queue_index import GenQueueIndex
 from alasio.config_dev.gen.gen_task_entry import GenTaskEntry
 from alasio.deploy.config.model import DeployModel
@@ -17,6 +18,7 @@ class IndexGenerator(
     GenQueueIndex,
     GenConfigGenerated,
     GenTaskEntry,
+    GenModEntry,
 ):
     """
     维护一个MOD下所有设置文件的数据一致性，生成json索引文件。
@@ -109,6 +111,10 @@ class IndexGenerator(
 
         # config_generated.py
         self.generate_config_generated_file(gitadd=gitadd)
+
+        # mod_entry.yaml, the declaration of the mod itself: written last, so
+        # the file only follows the model once the config of the mod is valid
+        self.generate_mod_entry(gitadd=gitadd)
 
         # task_entry.py
         self.generate_task_entry_file(gitadd=gitadd)

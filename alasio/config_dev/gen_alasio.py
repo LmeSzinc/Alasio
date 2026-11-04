@@ -1,9 +1,12 @@
-from alasio.config.entry.const import ModEntryInfo
+from alasio.config.entry.mod_entry import ModEntry
 from alasio.config_dev.gen_index import IndexGenerator
 from alasio.config_dev.parse.base import i18n_json_postprocess
 from alasio.ext import env
 from alasio.ext.deep import deep_get, deep_keys_depth1, deep_set
 from alasio.logger import logger
+
+# The GUI languages of the library, declared by its own entry
+GUI_LANGUAGE = ModEntry.alasio.data.gui_language
 
 
 class Generator(IndexGenerator):
@@ -14,16 +17,16 @@ class Generator(IndexGenerator):
             'SchedulerStatic',
             'SchedulerEnable',
         ]:
-            for lang in ModEntryInfo.alasio().gui_language:
+            for lang in GUI_LANGUAGE:
                 for prop in ['name', 'help']:
                     value = deep_get(data, keys=['Scheduler', 'Enable', lang, prop], default='')
                     deep_set(data, keys=[group, 'Enable', lang, prop], value=value)
         # SchedulerEnable shares the same options as Scheduler, copy option translations
-        for lang in ModEntryInfo.alasio().gui_language:
+        for lang in GUI_LANGUAGE:
             value = deep_get(data, keys=['Scheduler', 'Enable', lang, 'option_i18n'], default='')
             deep_set(data, keys=['SchedulerEnable', 'Enable', lang, 'option_i18n'], value=value)
         # SchedulerEnableUedit has an editable ServerUpdate, copy from SchedulerUedit
-        for lang in ModEntryInfo.alasio().gui_language:
+        for lang in GUI_LANGUAGE:
             for prop in ['name', 'help']:
                 value = deep_get(data, keys=['SchedulerUedit', 'ServerUpdate', lang, prop], default='')
                 deep_set(data, keys=['SchedulerEnableUedit', 'ServerUpdate', lang, prop], value=value)
@@ -31,7 +34,7 @@ class Generator(IndexGenerator):
         for group in deep_keys_depth1(data):
             if group == 'Scheduler':
                 continue
-            for lang in ModEntryInfo.alasio().gui_language:
+            for lang in GUI_LANGUAGE:
                 for prop in ['name', 'help']:
                     value = deep_get(data, keys=['Scheduler', '_info', lang, prop], default='')
                     deep_set(data, keys=[group, '_info', lang, prop], value=value)
@@ -42,7 +45,7 @@ if __name__ == '__main__':
     env.set_project_root(env.ALASIO_ROOT)
     logger.mute(fd=True)
     # generate
-    entry = ModEntryInfo.alasio()
+    entry = ModEntry.alasio
     logger.info(f'ModEntry: {entry}')
     self = Generator(entry)
     self.generate()

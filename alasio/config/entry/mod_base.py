@@ -4,7 +4,7 @@ import os
 from msgspec import DecodeError
 from msgspec.json import decode as json_decode
 
-from alasio.config.entry.const import ModEntryInfo
+from alasio.config.entry.mod_entry import ALASIO_CONFIG, ModEntry
 from alasio.config.entry.model import (
     DECODER_CACHE, JSON_PACK_CACHE, MOD_JSON_CACHE, MODEL_CONFIG_INDEX, MODEL_MODEL_INDEX, MODEL_TASK_INDEX
 )
@@ -17,18 +17,18 @@ from alasio.logger import logger
 
 
 class ModBase:
-    def __init__(self, entry: ModEntryInfo):
+    def __init__(self, entry: ModEntry):
         """
         Args:
-            entry: Mod entry info
+            entry (ModEntry): Location and declaration of the mod
         """
         self.entry = entry
-        self.name = entry.name
+        data = entry.data
+        self.name = data.name
         self.root = PathStr.new(entry.root)
         self.path_config = self.root.joinpath(entry.path_config)
-        self.path_assets = self.root.joinpath(entry.path_assets)
-        alasio = ModEntryInfo.alasio()
-        self.path_alasio_config = env.ALASIO_ROOT.joinpath(alasio.path_config)
+        self.path_assets = self.root.joinpath(data.path_assets)
+        self.path_alasio_config = env.ALASIO_ROOT.joinpath(ALASIO_CONFIG)
 
     def __str__(self):
         """

@@ -104,7 +104,7 @@ class PipPack:
         mirrors = mod.entry.mirrors
         if not mirrors:
             raise ValueError(f'The mod declares no update source: "{mod.name}"')
-        self.mirrors = Mirrors.from_input(mirrors)
+        self.mirrors = mirrors
 
     async def install(self, name, version, latest_info=None):
         """

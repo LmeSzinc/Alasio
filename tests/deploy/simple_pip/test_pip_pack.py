@@ -19,7 +19,7 @@ import os
 
 import pytest
 
-from alasio.config.entry.const import ModEntryInfo
+from alasio.config.entry.mod_entry import ModEntry, ModEntryModel
 from alasio.deploy.pack.decode_base import PackDecodeBase
 from alasio.deploy.pack.job_unpack import UnpackJob
 from alasio.deploy.simple_pip import pip_pack
@@ -129,7 +129,7 @@ class FakeMod:
 
     def __init__(self, name='alas', mirrors=MIRROR):
         self.name = name
-        self.entry = ModEntryInfo(name=name, mirrors=mirrors)
+        self.entry = ModEntry(data=ModEntryModel(name=name, mirrors=mirrors))
 
 
 def patch_server(monkeypatch, server, channel, expected_name):
@@ -226,9 +226,13 @@ class TestConstruction:
             PipPack(FakeMod(mirrors=''), '/env/Lib/site-packages')
 
     def test_malformed_mirrors(self):
-        """A broken update source is refused when the entry is read."""
-        with pytest.raises(ValueError, match='Invalid mirror url'):
-            PipPack(FakeMod(mirrors='not-an-url'), '/env/Lib/site-packages')
+        """A broken update source is reported by the entry and read as none."""
+        with logger.mock_capture_writer() as capture:
+            mod = FakeMod(mirrors='not-an-url')
+            assert mod.entry.mirrors is None
+            with pytest.raises(ValueError, match='declares no update source'):
+                PipPack(mod, '/env/Lib/site-packages')
+        assert capture.fd.any_contains('Invalid update source of "alas"')
 
 
 class TestInstall:

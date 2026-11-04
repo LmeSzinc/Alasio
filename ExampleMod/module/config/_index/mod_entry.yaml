@@ -1,0 +1,78 @@
+# Name of the mod, the key the framework identifies it by
+# It must be the name the updater of the mod expects
+name: example_mod
+# Relative path from the mod root to the scheduler
+# The file defining class Scheduler, e.g. 'module/main.py'
+path_main: module/main.py
+# Relative path from the mod root to the assets folder
+path_assets: assets
+# Valid file extensions of the assets
+# 'png' is commonly used because 'jpg' is a lossy compression
+asset_ext:
+- .png
+- .gif
+# Valid languages (or servers) of the assets, in the order they are tried
+# The shared assets ('') are always tried first
+asset_lang:
+- cn
+- en
+# Languages of the GUI, the generated i18n files carry these
+# Use the tags of the frontend, e.g. 'zh-CN', 'en-US', 'ja-JP', 'zh-TW', 'es-ES'
+gui_language:
+- zh-CN
+- en-US
+# Folders scanned for task entry functions, relative to the mod root
+# Every .py file under them is parsed for task entries
+task_entry_folders:
+- module
+- tasks
+# Update source of the mod, the mirrors of its update server
+# A single url, name to url, group to mirrors, or the flat/nested mix
+# An empty value declares no update source, the mod is never checked
+mirrors: ''
+# Mirrors of the PyPI simple index the distributions are downloaded from
+# The same forms as 'mirrors'; remove the key to use the default mirrors
+pypi_mirrors:
+  cn:
+    tsinghua: https://pypi.tuna.tsinghua.edu.cn/simple
+    aliyun: https://mirrors.aliyun.com/pypi/simple
+    tencent: https://mirrors.cloud.tencent.com/pypi/simple
+  global:
+    pypi: https://pypi.org/simple
+# PyPI indexes the update packs of the mod provide
+# The wheels of the dependencies that a dependency file annotates with
+# one of these indexes are published with the update pack
+# Use an empty list to provide no index
+update_provide_pypi_mirrors:
+- https://py38deps.github.io/py38deps/simple/
+# Relative path from the mod root to the requirements file of the mod
+# Every distribution in it is pinned to an exact version
+requirements_file: requirements.txt
+# Distributions updated from the pack channel instead of pip
+# Any case and separator style, the compare is on the PEP 503 name
+# A distribution not declared here installs with pip
+update_pack_deps: []
+# Task order of the scheduler, a task runs before the tasks after it
+# The DSL of alasio.base.filter: 'A > B > C', a line starting with '>'
+# continues the order of the line above it
+scheduler_priority: |-
+  RestartDevice > RestartGame
+  > OpsiCrossMonth
+  > Commission > Tactical > Research
+  > Exercise
+  > Dorm > Meowfficer > Guild > Gacha
+  > Reward
+  > ShopFrequent > ShopOnce > Shipyard > Freebies
+  > PrivateQuarters
+  > OpsiExplore
+  > Minigame > Awaken
+  > OpsiAshBeacon
+  > OpsiDaily > OpsiShop > OpsiVoucher
+  > OpsiAbyssal > OpsiStronghold > OpsiObscure > OpsiArchive
+  > Daily > Hard > OpsiAshBeacon > OpsiAshAssist > OpsiMonthBoss
+  > Sos > EventSp > EventA > EventB > EventC > EventD
+  > RaidDaily > CoalitionSp > WarArchives > MaritimeEscort
+  > Event > Event2 > Raid > Hospital > Coalition > Main > Main2 > Main3
+  > OpsiMeowfficerFarming
+  > GemsFarming
+  > OpsiHazard1Leveling

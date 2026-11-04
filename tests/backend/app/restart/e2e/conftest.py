@@ -65,9 +65,9 @@ from alasio.backend.topic._worker import BackendWorkerManager
 from alasio.backend.topic.scan import ConfigScanSource
 from alasio.backend.worker.event import DECODER_CACHE, ConfigEvent
 from alasio.backend.ws.context import GLOBAL_CONTEXT
-from alasio.config.entry.const import ModEntryInfo
 from alasio.config.entry.loader import MOD_LOADER
 from alasio.config.entry.mod import Mod
+from alasio.config.entry.mod_entry import ModEntry, ModEntryModel
 from alasio.config.table.scan import ConfigInfo
 from alasio.deploy.config import model as deploy_config_module
 from alasio.deploy.pack import job as job_module
@@ -546,7 +546,7 @@ class Backend:
                 'cfg_a' on the default mod
             pack_deps (dict[str, Iterable[str]]): {mod name: the names the
                 entry declares for pack updates}, see
-                ModEntryInfo.update_pack_deps. Defaults to None, every mod
+                ModEntry.update_pack_deps. Defaults to None, every mod
                 declares none
             monkeypatch: The pytest monkeypatch fixture (the manager spawn is
                 watched through it)
@@ -557,9 +557,11 @@ class Backend:
             mods = {'WorkerTestScheduler': f'http://{UPDATE_HOST}'}
         pack_deps = pack_deps or {}
         self.mods = {
-            name: Mod(ModEntryInfo(
-                name=name, root=str(project.mod_root(name)), mirrors=mirrors,
-                update_pack_deps=tuple(pack_deps.get(name, ()))))
+            name: Mod(ModEntry(
+                root=str(project.mod_root(name)),
+                data=ModEntryModel(
+                    name=name, mirrors=mirrors, update_pack_deps=list(pack_deps.get(name, ())),
+                )))
             for name, mirrors in mods.items()
         }
         if configs is None:

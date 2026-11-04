@@ -2,60 +2,63 @@ from collections import defaultdict
 
 from msgspec import ValidationError
 
-import alasio.config.entry.const as const
 from alasio.config.entry.mod import Mod
+from alasio.config.entry.mod_entry import MOD_FOLDERS, ModEntry, ModEntryError
 from alasio.config.entry.model import ConfigSetEvent
 from alasio.config.entry.utils import validate_nav_name
 from alasio.ext import env
 from alasio.ext.cache import cached_property
 from alasio.ext.deep import *
-from alasio.ext.file.loadpy import LOADPY_CACHE
 from alasio.ext.file.msgspecfile import deepcopy_msgpack
-from alasio.ext.path.calc import is_abspath, joinnormpath
+from alasio.ext.path.calc import joinnormpath
 from alasio.logger import logger
 
 
 class ModLoader:
-    def __init__(self, root=None, dict_mod_entry=None):
+    def __init__(self, root=None, mod_folders=None):
         """
         Args:
             root (PathStr): Absolute path to run path
-            dict_mod_entry (dict[str, ModEntryInfo]):
-                see const.DICT_MOD_ENTRY
+            mod_folders (tuple[str, ...]): Folders next to the root that may
+                hold a mod, see MOD_FOLDERS. Defaults to None, the
+                folders of the library
         """
         if root is None:
             root = env.PROJECT_ROOT
         self.root = root
-        if dict_mod_entry is None:
+        if mod_folders is None:
             # dynamic use, just maybe someone want to monkeypatch it
-            dict_mod_entry = const.DICT_MOD_ENTRY
-        self.dict_mod_entry = dict_mod_entry
+            mod_folders = MOD_FOLDERS
+        self.mod_folders = mod_folders
 
     @cached_property
     def self_mod(self):
         """
+        The mod declared by the project root itself, when it declares one.
+
         Returns:
             Mod | None:
         """
-        file = self.root.joinpath('module/config/const.py')
+        entry = ModEntry(self.root)
         try:
-            module = LOADPY_CACHE.get(file)
-        except ImportError:
-            return None
-        try:
-            entry = module.entry
-            if not isinstance(entry, const.ModEntryInfo):
-                return None
-            # try to access name
-            if not isinstance(entry.name, str):
-                return None
-        except (AttributeError, TypeError):
+            # the declaration is read here, so a broken one is reported at
+            # startup instead of at the first use of the mod
+            _ = entry.data
+        except FileNotFoundError:
+            # the project root is not a mod, the mods next to it are
             return None
         return Mod(entry)
 
     @cached_property
     def dict_mod(self):
         """
+        The mods of the library: the project root itself and the folders
+        declared by MOD_FOLDERS that hold a declaration.
+
+        A folder without ``module/config/_index/mod_entry.yaml`` is not a mod
+        and is skipped, a folder that declares one is a mod whether or not its
+        config index is generated.
+
         Returns:
             dict[str, Mod]:
                 key: mod_name
@@ -69,22 +72,24 @@ class ModLoader:
             out[self_mod.name] = self_mod
 
         # add sub mods
-        for entry in self.dict_mod_entry.values():
-            # No duplicate or nested mod
-            if entry.name in out:
+        for folder in self.mod_folders:
+            root = joinnormpath(env.PROJECT_ROOT, folder)
+            if not ModEntry.is_mod(root):
                 continue
-            if not entry.root:
-                # logger.warning(f'Mod entry root empty: name={name}, entry={entry.root}')
-                # continue
-                entry.root = env.PROJECT_ROOT
-            elif not is_abspath(entry.root):
-                entry.root = joinnormpath(env.PROJECT_ROOT, entry.root)
-            # folder must be mod like
-            if not entry.exist():
+            try:
+                entry = ModEntry(root)
+                name = entry.name
+            except ModEntryError as e:
+                # One broken mod must not take the backend down: it is
+                # reported and skipped, the other mods still load
+                logger.error(f'Invalid mod entry, mod skipped: {e}')
+                continue
+            # No duplicate or nested mod
+            if name in out:
                 continue
             # set
             mod = Mod(entry)
-            out[entry.name] = mod
+            out[name] = mod
 
         return out
 

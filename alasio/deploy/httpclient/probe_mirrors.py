@@ -224,6 +224,18 @@ class Mirrors:
             return mirrors
         return cls(mirrors)
 
+    def __bool__(self):
+        """
+        Whether the structure holds a mirror at all.
+
+        An empty input declares no source, a caller that guards on the struct
+        (`if not mirrors:`) must not treat it as a source.
+
+        Returns:
+            bool: True when at least one mirror is declared
+        """
+        return bool(self.urls)
+
     @property
     def single(self):
         """

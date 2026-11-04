@@ -19,9 +19,9 @@ import threading
 import pytest
 import trio
 
-from alasio.config.entry.const import ModEntryInfo
 from alasio.config.entry.loader import MOD_LOADER
 from alasio.config.entry.mod_base import ModBase
+from alasio.config.entry.mod_entry import ModEntry, ModEntryModel
 from alasio.config.entry.model import JSON_PACK_CACHE, MOD_JSON_CACHE
 from alasio.config.entry.preload import ModPreload
 from alasio.ext.file.loadpy import LOADPY_CACHE
@@ -61,7 +61,7 @@ def make_mod():
     Returns:
         ModBase: A mod whose root is the fake filesystem
     """
-    return ModBase(ModEntryInfo(name='test_mod', root=PathStr.new(ROOT)))
+    return ModBase(ModEntry(root=PathStr.new(ROOT), data=ModEntryModel(name='test_mod')))
 
 
 def write(path, content):

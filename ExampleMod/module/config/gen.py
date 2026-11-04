@@ -1,11 +1,14 @@
 from copy import deepcopy
 
-from ExampleMod.module.config.const import entry
+from alasio.config.entry.mod_entry import ModEntry
 from alasio.config_dev.gen_index import IndexGenerator
 from alasio.config_dev.parse.base import args_yaml_postprocess
 from alasio.ext.deep import deep_set
 from alasio.ext.env import set_project_root
 from alasio.logger import logger
+
+# The declaration of this mod, the file the framework reads
+entry = ModEntry.find_mod_entry(__file__)
 
 CHAPTER_MAP = {
     'chapter1': ['1-1', '1-2', '1-3', '1-4'],
@@ -45,6 +48,6 @@ if __name__ == '__main__':
     set_project_root(__file__, up=4)
     logger.mute(fd=True)
     # generate
-    logger.info(f'ModEntry: {entry}')
+    logger.info(f'ModEntry: {entry.data}')
     self = Generator(entry)
     self.generate()

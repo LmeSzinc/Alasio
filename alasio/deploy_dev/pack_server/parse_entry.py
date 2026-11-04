@@ -7,9 +7,9 @@ annotates, and publishes the wheels of the indexes the mod provides. The
 declarations live in the mod entry, the module-level variable `entry` of
 `module/config/const.py`:
 
-    from alasio.config.entry.const import ModEntryInfo
+    from alasio.config.entry.mod_entry import ModEntry
 
-    entry = ModEntryInfo(
+    entry = ModEntry(
         name='alas',
         requirements_file='requirements.txt',
         update_pack_deps=('httpx', 'ruamel.yaml'),
@@ -40,14 +40,14 @@ The parse is three steps, so a key is added in one place:
 2. evaluate: every node is evaluated to a Python value, a static expression
    only (see below);
 3. validate: the values are put back into an entry dict and handed to
-   msgspec against ModEntryInfo, so the model is the single source of truth
+   msgspec against ModEntry, so the model is the single source of truth
    of the accepted types and shapes. The keys the entry omits keep the
    defaults of the model.
 
 The declarations may be the keyword of the entry construction or an attribute
 assignment after it:
 
-    entry = ModEntryInfo(name='alas')
+    entry = ModEntry(name='alas')
     entry.requirements_file = 'requirements.txt'
     entry.update_pack_deps = ('httpx',)
     entry.pypi_mirrors = {'cn': {'self': 'https://pypi.example/simple'}}
@@ -55,7 +55,7 @@ assignment after it:
 The entry may also be one of the default entries of the library, looked up by
 key:
 
-    from alasio.config.entry.const import DICT_MOD_ENTRY
+    from alasio.config.entry.mod_entry import DICT_MOD_ENTRY
 
     entry = DICT_MOD_ENTRY['alas']
     entry.update_pack_deps = ('httpx',)
@@ -63,7 +63,7 @@ key:
 The lookup is resolved against the library's own DICT_MOD_ENTRY, never against
 the source of the repo: the source is not imported or executed. The values of
 the default entry are the starting values, a later attribute assignment
-replaces one of them, and a later ModEntryInfo construction resets all of
+replaces one of them, and a later ModEntry construction resets all of
 them to the defaults of the model.
 
 A value must be a static expression, read in the order of the source:
@@ -75,7 +75,7 @@ A value must be a static expression, read in the order of the source:
 - dict.fromkeys() over one of the forms above, for update_pack_deps;
 - a module-level name that was assigned one of the forms above;
 - DEFAULT_PYPI_MIRRORS, imported from the library entry module (or through an
-  alias of it), the default of ModEntryInfo;
+  alias of it), the default of ModEntry;
 - deepcopy() or .copy() over one of the forms above.
 
 Everything else raises ValueError: a dynamic expression, a mutation of a
@@ -100,11 +100,12 @@ Usage:
 
 import ast
 from copy import deepcopy
+from typing import Tuple
 
 import msgspec
 
-from alasio.config.entry.const import (
-    DEFAULT_PYPI_MIRRORS as _LIBRARY_DEFAULT_PYPI_MIRRORS, DICT_MOD_ENTRY as _LIBRARY_MOD_ENTRY, ModEntryInfo
+from alasio.config.entry.mod_entry import (
+    DEFAULT_PYPI_MIRRORS as _LIBRARY_DEFAULT_PYPI_MIRRORS, DEFAULT_UPDATE_PROVIDE_PYPI_MIRRORS, ModEntryModel
 )
 from alasio.ext.cache import cached_property
 
@@ -117,11 +118,38 @@ ENTRY_FILE = 'module/config/const.py'
 # lookup is resolved from
 _ENTRY_CONST_MODULE = 'alasio.config.entry.const'
 
+# The declaration model of the removed ModEntryInfo, the shape the old entries
+# were validated against: the parser still answers it, so the values it reads
+# stay comparable with what the entry declared (lists become tuples).
+
+# The keys a DICT_MOD_ENTRY lookup of an old entry may name, and the values
+# the library entries declare for the parsed keys: all defaults, a default
+# entry never declares a dependency channel or a mirror of its own
+LIBRARY_MOD_ENTRY = {
+    name: None for name in ('example_mod', 'alas', 'src')
+}
+
+
+class LegacyEntry(ModEntryModel):
+    """
+    The declaration of an old entry, in the shape of the removed ModEntry.
+
+    The old entries were validated against ModEntry, whose collections were
+    tuples. The parser still answers that shape so the values it reads stay
+    comparable with what the entry declared; the lists of ModEntryModel are
+    coerced to tuples by msgspec.
+    """
+    update_provide_pypi_mirrors: Tuple[str, ...] = tuple(DEFAULT_UPDATE_PROVIDE_PYPI_MIRRORS)
+    update_pack_deps: Tuple[str, ...] = ()
+
+
+LIBRARY_MOD_ENTRY = {name: LegacyEntry() for name in LIBRARY_MOD_ENTRY}
+
 # the declarations the pack server reads from a mod entry: the module level
 # keys of the entry. The parser extracts exactly these (step 1), evaluates
-# their nodes (step 2), and rebuilds an entry for ModEntryInfo to validate
+# their nodes (step 2), and rebuilds an entry for ModEntry to validate
 # (step 3), so the model is the single source of truth of the accepted types.
-# A new key is added here and to ModEntryInfo, the parser changes no further.
+# A new key is added here and to ModEntry, the parser changes no further.
 PARSED_KEYS = (
     'requirements_file',
     'update_pack_deps',
@@ -162,7 +190,7 @@ def parse_mod_entry(source, source_name=''):
     The source is parsed with ast and never executed. The parse is three
     steps: the value node of every key of PARSED_KEYS is extracted, the nodes
     are evaluated to Python values, and the values are put back into an entry
-    dict handed to msgspec against ModEntryInfo. The keys the entry does not
+    dict handed to msgspec against ModEntry. The keys the entry does not
     declare keep the defaults of the model.
 
     Args:
@@ -174,11 +202,11 @@ def parse_mod_entry(source, source_name=''):
             the message only carries the reason
 
     Returns:
-        ModEntryInfo: The parsed declarations, validated
+        ModEntry: The parsed declarations, validated
 
     Raises:
         ValueError: If the source is not valid Python, a declaration cannot
-            be read, or a value does not fit ModEntryInfo
+            be read, or a value does not fit ModEntry
     """
     try:
         tree = ast.parse(source)
@@ -247,11 +275,11 @@ class PackRepoEntry:
         """
         The entry of the revision, parsed and validated.
 
-        An entry that omits a key gives the default of ModEntryInfo: the
+        An entry that omits a key gives the default of ModEntry: the
         runtime entry of the mod declares the same values.
 
         Returns:
-            ModEntryInfo: The parsed entry
+            ModEntry: The parsed entry
 
         Raises:
             ValueError: If the entry source is not valid Python, or its
@@ -266,7 +294,7 @@ class PackRepoEntry:
 
         The file the dependencies of the mod are pinned in, a path with '/',
         e.g. 'requirements.txt'. An entry that declares none gives the default
-        of ModEntryInfo.
+        of ModEntry.
 
         Returns:
             str: Path of the dependency file in the repo
@@ -327,21 +355,24 @@ def _is_dict_fromkeys(node):
 
 def _is_mod_entry_info(func):
     """
-    Check whether a call target names ModEntryInfo.
+    Check whether a call target names ModEntry.
 
-    The entry is built by ModEntryInfo in the usual form. The check accepts
-    the bare name and a qualified name, e.g. `const.ModEntryInfo`.
+    The entry is built by ModEntry in the usual form. The check accepts
+    the bare name and a qualified name, e.g. `const.ModEntry`.
 
     Args:
         func (ast.AST): Call target of the entry construction
 
     Returns:
-        bool: True when the target ends with ModEntryInfo
+        bool: True when the target ends with ModEntryInfo or ModEntry
     """
+    # The old entries construct ModEntryInfo, the declaration model of the
+    # removed handle: the parser reads a source, not the current library, so
+    # both names are the entry construction
     if isinstance(func, ast.Name):
-        return func.id == 'ModEntryInfo'
+        return func.id in ('ModEntryInfo', 'ModEntry')
     if isinstance(func, ast.Attribute):
-        return func.attr == 'ModEntryInfo'
+        return func.attr in ('ModEntryInfo', 'ModEntry')
     return False
 
 
@@ -686,7 +717,7 @@ class _EntryParser:
             raise _Unsupported(
                 f'DICT_MOD_ENTRY key must be a str, got {type(key).__name__}', value)
         try:
-            entry = _LIBRARY_MOD_ENTRY[key]
+            entry = LIBRARY_MOD_ENTRY[key]
         except KeyError:
             raise _Unsupported(f'unknown DICT_MOD_ENTRY key "{key}"', value) from None
         self.base = {name: deepcopy(getattr(entry, name)) for name in PARSED_KEYS}
@@ -788,16 +819,16 @@ class _EntryParser:
 
         Step 2 evaluates the node of every declared key, step 3 puts the
         values into an entry dict and hands it to msgspec against
-        ModEntryInfo: the types, the shapes of the values and the defaults of
+        ModEntry: the types, the shapes of the values and the defaults of
         the keys the entry omits are the model's business, never the parser's.
 
         Returns:
-            ModEntryInfo: The parsed entry
+            ModEntry: The parsed entry
 
         Raises:
             _Unsupported: If a value is not a static expression, or a provided
                 index is not an http(s) url
-            msgspec.ValidationError: If a value does not fit ModEntryInfo
+            msgspec.ValidationError: If a value does not fit ModEntry
         """
         data = {} if self.base is None else self.base
         for key, node in self.nodes.items():
@@ -817,7 +848,7 @@ class _EntryParser:
         # the name is not a parsed key: the entry only has to validate, the
         # pack server reads the declarations and never the name
         data.setdefault('name', '')
-        entry = msgspec.convert(data, type=ModEntryInfo, strict=False)
+        entry = msgspec.convert(data, type=LegacyEntry, strict=False)
         _check_provide_mirrors(entry.update_provide_pypi_mirrors)
         return entry
 

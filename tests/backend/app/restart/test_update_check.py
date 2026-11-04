@@ -16,19 +16,20 @@ from alasio.backend.app.restart.update_check import (
     UNMANAGED_MESSAGE, ModUpdateCheck, UpdateCheck
 )
 from alasio.backend.topic.update import UpdateSource
+from alasio.config.entry.mod_entry import ModEntry, ModEntryModel
 from alasio.logger import logger
 
 
-class FakeEntry:
-    def __init__(self, mirrors=None):
-        self.mirrors = mirrors
+def FakeEntry(name='fake', mirrors=None):
+    """A mod entry of the fake mods, the declaration only."""
+    return ModEntry(data=ModEntryModel(name=name, mirrors=mirrors if mirrors is not None else ''))
 
 
 class FakeMod:
     def __init__(self, name, mirrors='https://example.com/alas'):
         self.name = name
         self.root = f'/mods/{name}'
-        self.entry = FakeEntry(mirrors)
+        self.entry = FakeEntry(name, mirrors)
 
 
 class FakeCheck:
