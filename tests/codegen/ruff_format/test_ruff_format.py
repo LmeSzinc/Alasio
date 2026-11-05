@@ -1,7 +1,12 @@
+import os
+import sys
+
 import pytest
 import ruff
 
+from alasio.codegen.ruff.__main__ import main
 from alasio.codegen.ruff.ruff_format import RuffFormatter, is_valid_module, is_valid_py
+from alasio.ext.path import PathStr
 from alasio.testing.filesystem import fs  # noqa: F401
 
 # The in-memory fake filesystem mocks os.path.isfile (breaking the ruff
@@ -361,3 +366,97 @@ class TestFormatCodePrints:
         lines = [line for line in out.splitlines() if line.strip()]
         # Last non-blank line is ruff's stderr before the trailing blank line
         assert len(lines) >= 3  # Formatting, Import, Writing, ruff stderr
+
+
+class TestCwd:
+    """Tests for the cwd argument of RuffFormatter."""
+
+    @pytest.fixture(autouse=True)
+    def ruff_bin(self, monkeypatch):
+        """Patch the ruff binary lookup, the fake filesystem breaks it."""
+        from alasio.codegen.ruff import ruff_format
+
+        monkeypatch.setattr(ruff_format.ruff, 'find_ruff_bin', lambda: RUFF_BIN)
+
+    def test_modules_are_detected_in_the_given_cwd(self, fs):
+        """known_first_party comes from the given cwd, not the working directory."""
+        fs.create_dir('/working/working_module')
+        fs.create_dir('/other/other_module')
+        fs.chdir('/working')
+        formatter = RuffFormatter(cwd='/other')
+        assert PathStr.new(formatter.cwd) == PathStr.new(os.path.abspath('/other'))
+        assert formatter.known_first_party == ['other_module']
+
+    def test_relative_cwd_is_resolved(self, fs, monkeypatch):
+        """A relative cwd is resolved against the working directory.
+
+        os.path.abspath() is a native call on Windows, it resolves against the
+        real working directory instead of the fake one, so it is stubbed.
+        """
+        monkeypatch.setattr(os.path, 'abspath', lambda p: os.path.join(os.getcwd(), p))
+        fs.create_dir('/working/project/project_module')
+        fs.chdir('/working')
+        formatter = RuffFormatter(cwd='project')
+        assert PathStr.new(formatter.cwd) == PathStr.new(os.path.join(os.getcwd(), 'project'))
+        assert formatter.known_first_party == ['project_module']
+
+    def test_default_cwd_is_the_working_directory(self, fs, monkeypatch):
+        """Without cwd the working directory is used."""
+        from alasio.ext import env
+
+        monkeypatch.setattr(env, 'PROJECT_ROOT', '')
+        fs.create_dir('/working/working_module')
+        fs.chdir('/working')
+        formatter = RuffFormatter()
+        assert PathStr.new(formatter.cwd) == PathStr.new(os.getcwd())
+        assert formatter.known_first_party == ['working_module']
+
+    def test_format_code_resolves_relative_to_the_given_cwd(self, fs, capsys):
+        """format_code shows the path relative to the given cwd and formats that file."""
+        fs.create_file('/working/test.py', contents=b'y=2\n')
+        fs.create_file('/other/test.py', contents=b'x=1\n')
+        fs.chdir('/working')
+        formatter = RuffFormatter(cwd='/other')
+        capsys.readouterr()
+        formatter.format_code(os.path.abspath('/other/test.py'))
+        out, _ = capsys.readouterr()
+        assert out.startswith('Formatting: test.py')
+        assert fs.get_file('/other/test.py').content == b'x = 1\n'
+        assert fs.get_file('/working/test.py').content == b'y=2\n'
+
+
+class TestCliCwd:
+    """Tests for the --cwd option of python -m alasio.codegen.ruff."""
+
+    @pytest.fixture(autouse=True)
+    def ruff_bin(self, monkeypatch):
+        """Patch the ruff binary lookup, the fake filesystem breaks it."""
+        from alasio.codegen.ruff import ruff_format
+
+        monkeypatch.setattr(ruff_format.ruff, 'find_ruff_bin', lambda: RUFF_BIN)
+
+    @staticmethod
+    def run(monkeypatch, args):
+        """Run the command line interface with the given arguments."""
+        monkeypatch.setattr(sys, 'argv', ['python -m alasio.codegen.ruff', *args])
+        main()
+
+    def test_cwd_resolves_relative_files(self, fs, monkeypatch):
+        """A relative file is resolved against --cwd, not the working directory."""
+        fs.create_file('/working/test.py', contents=b'y=2\n')
+        fs.create_file('/other/test.py', contents=b'x=1\n')
+        fs.chdir('/working')
+        self.run(monkeypatch, ['--cwd', '/other', 'test.py'])
+        assert fs.get_file('/other/test.py').content == b'x = 1\n'
+        assert fs.get_file('/working/test.py').content == b'y=2\n'
+
+    def test_cwd_resolves_glob_patterns(self, fs, monkeypatch, capsys):
+        """A glob pattern is expanded in --cwd."""
+        fs.create_dir('/working')
+        fs.create_file('/other/a.py', contents=b'x=1\n')
+        fs.create_file('/other/b.txt', contents=b'x=1\n')
+        fs.chdir('/working')
+        self.run(monkeypatch, ['--cwd', '/other', '*.py'])
+        assert fs.get_file('/other/a.py').content == b'x = 1\n'
+        assert fs.get_file('/other/b.txt').content == b'x=1\n'
+        assert 'Ruff format 1 files' in capsys.readouterr().out

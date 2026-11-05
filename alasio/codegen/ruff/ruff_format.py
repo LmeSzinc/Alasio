@@ -69,7 +69,15 @@ def to_toml_list(items):
 class RuffFormatter:
     LINE_LENGTH = 120
 
-    def __init__(self):
+    def __init__(self, cwd=None):
+        """
+        Args:
+            cwd (str): Project root to work on. Relative paths are resolved
+                against it and the project modules are detected there.
+                Defaults to the project root from the environment, or the
+                current working directory.
+        """
+        self._cwd_override = PathStr.new(os.path.abspath(cwd)) if cwd else None
         _ = self.cwd
         _ = self.ruff_bin
         _ = self.rules
@@ -98,7 +106,9 @@ class RuffFormatter:
 
     @cached_property
     def cwd(self):
-        cwd = PathStr.new(self._get_cwd())
+        cwd = self._cwd_override
+        if cwd is None:
+            cwd = PathStr.new(self._get_cwd())
         print(f'Ruff format cwd: {cwd}')
         return cwd
 
