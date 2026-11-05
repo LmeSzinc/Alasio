@@ -95,8 +95,11 @@ class TestLocation:
 
     def test_file(self):
         """The file lives in the config folder of the mod, in the _index folder."""
-        assert ModEntry('E:/mod').file == f'E:/mod/{MOD_CONFIG}/{MOD_ENTRY_FOLDER}/{MOD_ENTRY_FILE}'
-        assert ModEntry('E:/mod/').file == f'E:/mod/{MOD_CONFIG}/{MOD_ENTRY_FOLDER}/{MOD_ENTRY_FILE}'
+        # A drive letter root is absolute on Windows only, and the entry resolves
+        # a relative root against the working folder, see test_root_is_absolute.
+        # '/mod' is rooted on both platforms, so the layout is the same assert.
+        assert ModEntry('/mod').file == f'/mod/{MOD_CONFIG}/{MOD_ENTRY_FOLDER}/{MOD_ENTRY_FILE}'
+        assert ModEntry('/mod/').file == f'/mod/{MOD_CONFIG}/{MOD_ENTRY_FOLDER}/{MOD_ENTRY_FILE}'
 
     def test_the_layout_is_a_constant(self):
         """There is no parameter to change the layout: a mod is module/config."""
