@@ -25,7 +25,7 @@ network is spent once and the local files answer the next runs:
 - get_wheel() keeps the local file that matches the hash of its index link and
   downloads the one that does not;
 - fetch_async(mode) is the two steps: the page, the wheels of the version the
-  mode asks for, one file at a time.
+  mode asks for, a few transfers at a time (FETCH_CONCURRENT).
 
 A local file that does not match the page is a mismatch of two caches of an
 earlier run, and a mismatch does not say which side is stale: the page may
@@ -67,6 +67,8 @@ Usage:
         await fetcher.aclose()
 """
 
+import trio
+
 from alasio.deploy.httpclient.client_async import AsyncHttpClient
 from alasio.deploy.httpclient.probe_mirrors import Mirrors
 from alasio.deploy.pip_download._link import parse_links
@@ -93,6 +95,22 @@ INDEX_FILE = 'index.html'
 # the content type of a PEP 691 JSON page: the snapshot keeps the body only, so
 # a page is told from an HTML one by its first character, see WheelFetcher.links
 JSON_PAGE = 'application/vnd.pypi.simple.v1+json'
+
+# Transfers in flight of one version. A page of a compiled dependency lists tens
+# of wheels (one per platform and interpreter, 46 for av, 126 for multidict),
+# and the files of a release are served by one host: one transfer at a time
+# spends the run on the round trips rather than on the bytes. Measured on a
+# consumer link, the same version of multidict takes 76s at 1, 16s at 4, 3~13s
+# at 8 and 10~12s at 16/12, so 8 is where the round trips stop being the cost
+# and the mirror starts being throttled.
+#
+# The memory of a burst is bounded by the wheels in flight, and a wheel is
+# buffered in memory before it is written (see PypiFile.get_wheel): the worst
+# version of the real repo is av, 46 wheels of up to 42 MiB, so 8 transfers can
+# hold a few hundred MB for the seconds a group of large files takes. A wheel
+# of a pure python dependency is one small file, where the mode is
+# DOWNLOAD_MODE_PY3_ANY.
+FETCH_CONCURRENT = 8
 
 
 def create_client(proxy=''):
@@ -301,7 +319,8 @@ class WheelFetcher:
         DOWNLOAD_MODE_ALL (see RepoWheel).
 
         The page is read (or downloaded) once, the wheels of the mode are
-        selected from its links and fetched one at a time.
+        selected from its links and fetched a few at a time, see
+        _fetch_wheels().
 
         A wheel that does not match the page is a mismatch of two caches, see
         the module docstring: the cached links are dropped with the snapshot
@@ -330,11 +349,8 @@ class WheelFetcher:
         """
         for _ in range(2):
             candidates = select_wheels(await self.links, self.name, self.version, mode)
-            files = []
             try:
-                for candidate in candidates:
-                    wheel = await self.pypi.get_wheel(candidate.link.url)
-                    files.append(wheel)
+                files = await self._fetch_wheels(candidates)
             except WheelHashError:
                 if self._page_reloaded:
                     raise
@@ -347,3 +363,74 @@ class WheelFetcher:
                 self.index_file.atomic_remove()
                 continue
             return files
+
+    async def _fetch_wheels(self, candidates):
+        """
+        Download the wheels of one version, a few transfers in flight.
+
+        The wheels of a compiled dependency are one file per platform and
+        interpreter, all served by the same host: the transfers overlap up to
+        FETCH_CONCURRENT, so the run spends the bytes of the release instead of
+        one round trip per file. A file that is already in the cache folder is
+        answered by get_wheel() without a request, so a burst over a warm cache
+        costs the hash of its files only.
+
+        The whole burst runs: a failure does not cancel the transfers in flight.
+        A wheel that does not match the page makes fetch_async reload the page
+        and check every wheel of the version again, and the files the burst did
+        fetch are then the ones the new page keeps, so the transfers of the
+        failed round are not wasted. The failure raised is the one of the first
+        wheel of the page, not the one that happened to fail first, so a run
+        fails with the same error whatever order the transfers complete in. It
+        is raised as it is, never wrapped in the exception group of the nursery.
+
+        The answer is in the order of the candidates, whatever the order the
+        transfers complete in: the caller publishes the wheels in that order.
+
+        Args:
+            candidates (list[WheelCandidate]): Wheels of the version, most
+                preferred first, see select_wheels()
+
+        Returns:
+            list[WheelInfo]: The wheels, in the order of the candidates
+
+        Raises:
+            WheelHashError: If a downloaded wheel does not match the hash of
+                its link
+            httpx2.HTTPError: If a request fails
+            OSError: If a wheel cannot be written
+        """
+        # (index of the candidate, wheel) of the transfers that answered. The
+        # result is sorted by the index below, so the order of the list is the
+        # order of the candidates whatever order the transfers complete in
+        fetched = []
+        failures = []
+        limiter = trio.CapacityLimiter(FETCH_CONCURRENT)
+        async with trio.open_nursery() as nursery:
+            async def fetch(index, candidate):
+                try:
+                    async with limiter:
+                        wheel = await self.pypi.get_wheel(candidate.link.url)
+                        fetched.append((index, wheel))
+                except Exception as e:
+                    # trio.Cancelled is a BaseException: the cancellation of the
+                    # step is not a failure of the file it interrupted
+                    failures.append((index, e))
+
+            for index, candidate in enumerate(candidates):
+                nursery.start_soon(fetch, index, candidate)
+        if failures:
+            _, failure = min(failures, key=lambda item: item[0])
+            raise failure
+        # every candidate must answer with a wheel: a hole here would be
+        # published as a version that misses a file, and nothing downstream can
+        # tell a missing wheel from a platform the release does not ship
+        files = [wheel for _, wheel in sorted(fetched)]
+        if len(files) != len(candidates):
+            raise RuntimeError(
+                f'Fetched {len(files)} of {len(candidates)} wheels of '
+                f'"{self.name}=={self.version}", the version is incomplete')
+        if any(wheel is None for wheel in files):
+            raise RuntimeError(
+                f'Empty answer of a wheel transfer of "{self.name}=={self.version}"')
+        return files

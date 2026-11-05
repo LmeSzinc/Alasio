@@ -27,6 +27,7 @@ from alasio.ext.path.atomic import atomic_write
 from alasio.logger import logger
 from alasio.testing.filesystem import fs  # noqa: F401
 from tests.deploy_dev.pack_server.conftest import join_path
+from tests.deploy_dev.pack_server.test_fetch_wheel import assert_log_unordered
 from tests.deploy_dev.pack_server.test_repo import (
     PROVIDED_URL, PROXY, entry_source, make_config, make_proxy_config, make_repo, read_tree, register_wheels,
     requirement
@@ -181,7 +182,9 @@ class TestFetch:
 
         cache = cache_folder(run_dir, 'msgspec', '0.22.0')
         published = published_folder(run_dir, 'msgspec', '0.22.0')
-        assert capture.concat() == f"""\
+        # the two wheels of the version are fetched at once, see
+        # WheelFetcher.fetch_async: their lines are the same set every run
+        assert_log_unordered(capture, f"""\
 INFO | No pack_deps declared by module/config/_index/mod_entry.yaml at c3, no dependency pack is built
 INFO | [1/1] Fetching wheels of "msgspec==0.22.0", index="http://provided.example/simple"
 INFO | Download index page: "http://provided.example/simple/msgspec/"
@@ -190,7 +193,7 @@ INFO | Download wheel: "http://provided.example/packages/msgspec-0.22.0-cp38-cp3
 INFO | [1/1] Publishing wheels of "msgspec==0.22.0"
 INFO | Copy wheel: "{cache}/msgspec-0.22.0-cp38-cp38-manylinux_2_17_x86_64.whl" -> "{published}/msgspec-0.22.0-cp38-cp38-manylinux_2_17_x86_64.whl"
 INFO | Copy wheel: "{cache}/msgspec-0.22.0-cp38-cp38-win_amd64.whl" -> "{published}/msgspec-0.22.0-cp38-cp38-win_amd64.whl"
-"""
+""")
         # the index of the pin is the only page read, not the mirror of the
         # other dependencies
         assert [url for url in mirror.requests if url.endswith('/')] == [
@@ -303,7 +306,7 @@ class TestProxy:
 
         cache = cache_folder(run_dir, 'msgspec', '0.22.0')
         published = published_folder(run_dir, 'msgspec', '0.22.0')
-        assert capture.concat() == f"""\
+        assert_log_unordered(capture, f"""\
 INFO | No pack_deps declared by module/config/_index/mod_entry.yaml at c3, no dependency pack is built
 INFO | Downloading the wheels through the proxy "{PROXY}"
 INFO | [1/1] Fetching wheels of "msgspec==0.22.0", index="http://provided.example/simple"
@@ -313,7 +316,7 @@ INFO | Download wheel: "http://provided.example/packages/msgspec-0.22.0-cp38-cp3
 INFO | [1/1] Publishing wheels of "msgspec==0.22.0"
 INFO | Copy wheel: "{cache}/msgspec-0.22.0-cp38-cp38-manylinux_2_17_x86_64.whl" -> "{published}/msgspec-0.22.0-cp38-cp38-manylinux_2_17_x86_64.whl"
 INFO | Copy wheel: "{cache}/msgspec-0.22.0-cp38-cp38-win_amd64.whl" -> "{published}/msgspec-0.22.0-cp38-cp38-win_amd64.whl"
-"""
+""")
         # the wheels are the files of the mirror, fetched by the client the
         # proxy built, and the client is closed with the step
         assert created == [PROXY]
@@ -336,11 +339,13 @@ INFO | Copy wheel: "{cache}/msgspec-0.22.0-cp38-cp38-win_amd64.whl" -> "{publish
             gen.generate()
 
         # the client is built once for the whole step, direct, and the two
-        # wheels of the version go through it
+        # wheels of the version go through it, at once (the order of the two
+        # transfers is not part of the contract)
         assert created == ['']
         assert 'Downloading the wheels through the proxy' not in capture.concat()
-        assert mirror.requests == [
-            'http://provided.example/simple/msgspec/',
+        page, *wheels = mirror.requests
+        assert page == 'http://provided.example/simple/msgspec/'
+        assert sorted(wheels) == [
             'http://provided.example/packages/msgspec-0.22.0-cp38-cp38-manylinux_2_17_x86_64.whl',
             'http://provided.example/packages/msgspec-0.22.0-cp38-cp38-win_amd64.whl',
         ]
@@ -365,7 +370,7 @@ class TestSync:
         with logger.mock_capture_writer() as capture:
             WheelFlow(repo, client=mirror.client).generate()
 
-        assert capture.concat() == f"""\
+        assert_log_unordered(capture, f"""\
 INFO | No pack_deps declared by module/config/_index/mod_entry.yaml at c3, no dependency pack is built
 INFO | [1/1] Fetching wheels of "msgspec==0.22.0", index="http://provided.example/simple"
 INFO | Wheel exists, skipped: "{cache_folder(run_dir, 'msgspec', '0.22.0')}/msgspec-0.22.0-cp38-cp38-manylinux_2_17_x86_64.whl"
@@ -373,7 +378,7 @@ INFO | Wheel exists, skipped: "{cache_folder(run_dir, 'msgspec', '0.22.0')}/msgs
 INFO | [1/1] Publishing wheels of "msgspec==0.22.0"
 INFO | Wheel exists, skipped: "{published_folder(run_dir, 'msgspec', '0.22.0')}/msgspec-0.22.0-cp38-cp38-manylinux_2_17_x86_64.whl"
 INFO | Wheel exists, skipped: "{published_folder(run_dir, 'msgspec', '0.22.0')}/msgspec-0.22.0-cp38-cp38-win_amd64.whl"
-"""
+""")
         # nothing is read from the network, nothing is written
         assert mirror.requests == requests
         assert [file.stat().st_mtime_ns for file in files] == stats

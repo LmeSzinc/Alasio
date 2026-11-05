@@ -24,7 +24,7 @@ import trio
 
 from alasio.deploy.pip_download.pypi_file import DOWNLOAD_MODE_ALL, DOWNLOAD_MODE_PY3_ANY
 from alasio.deploy_dev.pack_server.fetch_wheel import (
-    INDEX_FILE, JSON_PAGE, WheelFetcher, WheelHashError, WheelNotFoundError, create_client
+    FETCH_CONCURRENT, INDEX_FILE, JSON_PAGE, WheelFetcher, WheelHashError, WheelNotFoundError, create_client
 )
 from alasio.deploy_dev.pack_server.parse_dep import normalize_name
 from alasio.ext import env
@@ -59,6 +59,24 @@ def index_file(root, name, version):
         PathStr: {root}/.wheel_cache/{name}/{version}/index.html
     """
     return root.joinpath(CACHE_FOLDER).joinpath(name).joinpath(version).joinpath(INDEX_FILE)
+
+
+def assert_log_unordered(capture, expected):
+    """
+    Assert the lines of a captured log, the order of the lines ignored.
+
+    The wheels of a version are fetched at once (WheelFetcher.fetch_async), so
+    the lines of two transfers of the same version interleave in the order the
+    files answer: the multiset of the lines is the contract of a run, the order
+    of two concurrent transfers is not. Every line is still matched exactly
+    once, so a missing, an added or an edited line fails the assertion like it
+    does against concat().
+
+    Args:
+        capture (CaptureWriter): The capture of logger.mock_capture_writer()
+        expected (str): The expected log, one line each
+    """
+    assert sorted(capture.concat().splitlines()) == sorted(expected.splitlines())
 
 
 def fetch_all(fetcher, mode):
@@ -912,27 +930,40 @@ INFO | Download wheel: "{url}" -> "{file}"
         """The page of a fetch is downloaded again once, however many wheels fail."""
         mirror.register('httpx', '0.28.1', digest='0' * 64)
         mirror.register('httpx', '0.28.1', tags='cp38-cp38-win_amd64', digest='0' * 64)
-        url = 'http://mirror/packages/httpx-0.28.1-cp38-cp38-win_amd64.whl'
-        file = wheel_file(root, 'httpx', '0.28.1', 'httpx-0.28.1-cp38-cp38-win_amd64.whl')
-        mismatch = (
-            f'Request to "{url}" failed (attempt 1/3): WheelHashError: Hash of "{url}" '
-            f'does not match the index: '
-            f'{hashlib.sha256(b"httpx-0.28.1-cp38-cp38-win_amd64.whl content").hexdigest()} '
-            f'!= {"0" * 64}')
+        pure_url = 'http://mirror/packages/httpx-0.28.1-py3-none-any.whl'
+        pure_file = wheel_file(root, 'httpx', '0.28.1', 'httpx-0.28.1-py3-none-any.whl')
+        compiled_url = 'http://mirror/packages/httpx-0.28.1-cp38-cp38-win_amd64.whl'
+        compiled_file = wheel_file(root, 'httpx', '0.28.1', 'httpx-0.28.1-cp38-cp38-win_amd64.whl')
+
+        def mismatch(url, content):
+            return (
+                f'WARNING | Request to "{url}" failed (attempt 1/3): WheelHashError: '
+                f'Hash of "{url}" does not match the index: '
+                f'{hashlib.sha256(content).hexdigest()} != {"0" * 64}')
+
+        pure = mismatch(pure_url, b'httpx-0.28.1-py3-none-any.whl content')
+        compiled = mismatch(compiled_url, b'httpx-0.28.1-cp38-cp38-win_amd64.whl content')
+        page = f'INFO | Download index page: "{mirror.base}/httpx/"'
+        reloaded = (f'WARNING | The wheels do not match the index snapshot, downloaded again: '
+                    f'"{index_file(root, "httpx", "0.28.1")}"')
         with logger.mock_capture_writer() as capture:
             with pytest.raises(WheelHashError):
                 fetch_all(make_fetcher('httpx', '0.28.1'), DOWNLOAD_MODE_ALL)
-        # the first round fails on the first wheel of the page and the page is
-        # downloaded again once, the second round fails on that wheel again
-        assert capture.concat() == f"""\
-INFO | Download index page: "{mirror.base}/httpx/"
-INFO | Download wheel: "{url}" -> "{file}"
-WARNING | {mismatch}
-WARNING | The wheels do not match the index snapshot, downloaded again: "{index_file(root, 'httpx', '0.28.1')}"
-INFO | Download index page: "{mirror.base}/httpx/"
-INFO | Download wheel: "{url}" -> "{file}"
-WARNING | {mismatch}
-"""
+        # both wheels of the page are fetched, and the page is downloaded again
+        # once, the second round fails on the same wrong hash: the reload is spent
+        assert_log_unordered(capture, f"""\
+{page}
+INFO | Download wheel: "{pure_url}" -> "{pure_file}"
+INFO | Download wheel: "{compiled_url}" -> "{compiled_file}"
+{pure}
+{compiled}
+{reloaded}
+{page}
+INFO | Download wheel: "{pure_url}" -> "{pure_file}"
+INFO | Download wheel: "{compiled_url}" -> "{compiled_file}"
+{pure}
+{compiled}
+""")
         # the first page and the page downloaded again, not one per wheel
         assert mirror.requests.count('http://mirror/httpx/') == 2
 
@@ -987,7 +1018,9 @@ INFO | Download index page: "{mirror.base}/httpx/"
         pure_url = 'http://mirror/packages/httpx-0.28.1-py3-none-any.whl'
         py38_url = 'http://mirror/packages/httpx-0.28.1-py38-none-any.whl'
         py38_file = wheel_file(root, 'httpx', '0.28.1', 'httpx-0.28.1-py38-none-any.whl')
-        assert capture.concat() == f"""\
+        # the two wheels of a round are fetched at once: the lines are the same
+        # set every run, their order is not
+        assert_log_unordered(capture, f"""\
 INFO | Wheel exists, skipped: "{pure_file}"
 INFO | Download wheel: "{py38_url}" -> "{py38_file}"
 WARNING | Request to "{py38_url}" failed (attempt 1/3): WheelHashError: Hash of "{py38_url}" does not match the index: {hashlib.sha256(b'py38 v2').hexdigest()} != {hashlib.sha256(b'py38 v1').hexdigest()}
@@ -995,7 +1028,7 @@ WARNING | The wheels do not match the index snapshot, downloaded again: "{index_
 INFO | Download index page: "{mirror.base}/httpx/"
 INFO | Download wheel: "{pure_url}" -> "{pure_file}"
 INFO | Download wheel: "{py38_url}" -> "{py38_file}"
-"""
+""")
 
         # the first wheel was verified against the page of the earlier run, it
         # is verified against the page downloaded again: the file of the index
@@ -1062,7 +1095,7 @@ INFO | Download wheel: "{url}" -> "{file}"
         compiled_url = 'http://mirror/packages/httpx-0.28.1-py38-none-any.whl'
         pure_file = wheel_file(root, 'httpx', '0.28.1', pure_name)
         compiled_file = wheel_file(root, 'httpx', '0.28.1', compiled_name)
-        assert capture.concat() == f"""\
+        assert_log_unordered(capture, f"""\
 INFO | Download wheel: "{pure_url}" -> "{pure_file}"
 INFO | Download wheel: "{compiled_url}" -> "{compiled_file}"
 WARNING | Request to "{compiled_url}" failed (attempt 1/3): WheelHashError: Hash of "{compiled_url}" does not match the index: {hashlib.sha256(b'py38 v2').hexdigest()} != {hashlib.sha256(b'py38 v1').hexdigest()}
@@ -1070,19 +1103,146 @@ WARNING | The wheels do not match the index snapshot, downloaded again: "{index_
 INFO | Download index page: "{mirror.base}/httpx/"
 INFO | Wheel exists, skipped: "{pure_file}"
 INFO | Download wheel: "{compiled_url}" -> "{compiled_file}"
-"""
+""")
 
         assert [wheel.file.name for wheel in files] == [pure_name, compiled_name]
         assert files[0].file.atomic_read_bytes() == pure
         assert files[1].file.atomic_read_bytes() == b'py38 v2'
         # the first round reads the snapshot, the second one downloads the page
-        # again, and the second round starts from the first wheel: the pure
-        # wheel of the new page is the file the first round downloaded, only
-        # its hash is calculated again
+        # again. The pure wheel of the new page is the file the first round
+        # downloaded, only its hash is calculated again
         requests = mirror.requests[start:]
         assert requests.count('http://mirror/httpx/') == 1
         assert requests.count(f'http://mirror/packages/{pure_name}') == 1
         assert requests.count(f'http://mirror/packages/{compiled_name}') == 2
+
+
+class TestConcurrentFetch:
+    """
+    The transfers of one version overlap, see WheelFetcher._fetch_wheels.
+
+    The transfer itself is replaced by a stub: the subject is the scheduling of
+    the burst, not the http client. The stub counts the transfers in flight and
+    decides the order they complete in, which the assertions read.
+    """
+
+    @staticmethod
+    def register_platforms(mirror, count):
+        """
+        Register `count` platform wheels of one version in the mock mirror.
+
+        Args:
+            mirror (MockMirror): Mirror to register the files in
+            count (int): Number of wheels
+
+        Returns:
+            list[str]: The filenames, in the order select_wheels() answers them
+        """
+        names = [
+            f'httpx-0.28.1-cp38-cp38-plat{index}.whl'
+            for index in range(count)
+        ]
+        for name in names:
+            mirror.register('httpx', '0.28.1', filename=name)
+        return sorted(names)
+
+    @staticmethod
+    def filename_of(url):
+        """
+        The filename of a wheel url, the hash fragment of its link dropped.
+
+        Args:
+            url (str): Url of a wheel of an index page
+
+        Returns:
+            str: Filename of the wheel
+        """
+        return url.partition('#')[0].rsplit('/', 1)[-1]
+
+    def test_transfers_overlap_up_to_the_limit(self, make_fetcher, mirror, monkeypatch):
+        """The files of a version are fetched at once, FETCH_CONCURRENT at most."""
+        names = self.register_platforms(mirror, FETCH_CONCURRENT * 2)
+        fetcher = make_fetcher('httpx', '0.28.1')
+        in_flight = []
+        peak = []
+
+        async def get_wheel(url):
+            in_flight.append(url)
+            peak.append(len(in_flight))
+            await trio.sleep(0.01)
+            in_flight.remove(url)
+            return self.filename_of(url)
+
+        monkeypatch.setattr(fetcher.pypi, 'get_wheel', get_wheel)
+        files = fetch_all(fetcher, DOWNLOAD_MODE_ALL)
+
+        assert files == names
+        # every transfer of the burst runs, and the limiter is what bounds them:
+        # one at a time would peak at 1, unbounded ones at 16
+        assert max(peak) == FETCH_CONCURRENT
+
+    def test_answer_keeps_the_page_order(self, make_fetcher, mirror, monkeypatch):
+        """The answer is the order of the page, not the order the transfers complete in."""
+        names = self.register_platforms(mirror, 6)
+        fetcher = make_fetcher('httpx', '0.28.1')
+
+        async def get_wheel(url):
+            # the first wheel of the page answers last, the last one first
+            index = names.index(self.filename_of(url))
+            await trio.sleep(0.01 * (len(names) - index))
+            return self.filename_of(url)
+
+        monkeypatch.setattr(fetcher.pypi, 'get_wheel', get_wheel)
+        files = fetch_all(fetcher, DOWNLOAD_MODE_ALL)
+
+        assert files == names
+
+    def test_no_hole_in_the_answer(self, make_fetcher, mirror, monkeypatch):
+        """A wheel that does not come back fails the run instead of leaving a hole."""
+        names = self.register_platforms(mirror, 4)
+        fetcher = make_fetcher('httpx', '0.28.1')
+
+        async def get_wheel(url):
+            filename = self.filename_of(url)
+            # a transfer that answers nothing: the caller must not publish a
+            # version with a missing wheel, and the answer must not carry a None
+            return None if filename == names[2] else filename
+
+        monkeypatch.setattr(fetcher.pypi, 'get_wheel', get_wheel)
+        with pytest.raises(RuntimeError) as e:
+            fetch_all(fetcher, DOWNLOAD_MODE_ALL)
+
+        assert str(e.value) == 'Empty answer of a wheel transfer of "httpx==0.28.1"'
+
+    def test_a_failed_wheel_does_not_stop_the_others(self, make_fetcher, mirror, monkeypatch):
+        """A failure of one wheel leaves the burst running, and the first wheel answers."""
+        names = self.register_platforms(mirror, 4)
+        fetcher = make_fetcher('httpx', '0.28.1')
+        called = []
+        first = httpx2.ReadError('the first wheel of the page')
+        second = httpx2.ReadError('the second wheel of the page')
+
+        async def get_wheel(url):
+            filename = self.filename_of(url)
+            called.append(filename)
+            if filename == names[0]:
+                # the first wheel of the page fails last: the answer of the run
+                # is its failure either way
+                await trio.sleep(0.02)
+                raise first
+            if filename == names[1]:
+                raise second
+            await trio.sleep(0.01)
+            return filename
+
+        monkeypatch.setattr(fetcher.pypi, 'get_wheel', get_wheel)
+        with pytest.raises(httpx2.ReadError) as e:
+            fetch_all(fetcher, DOWNLOAD_MODE_ALL)
+
+        assert e.value is first
+        # the transfers of the other wheels of the page are not cancelled: a
+        # page reloaded by the caller finds the files of this round on the disk
+        assert sorted(called) == names
 
 
 class TestCreateClient:
