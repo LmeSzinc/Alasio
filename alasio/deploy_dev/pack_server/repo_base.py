@@ -73,8 +73,7 @@ from alasio.ext import env
 from alasio.ext.cache import cached_property
 from alasio.ext.path.atomic import file_remove, folder_rmtree_empty
 from alasio.ext.path.calc import subpath_to, to_posix
-from alasio.ext.path.iter import iter_entry
-from alasio.ext.path.validate import validate_filename
+from alasio.ext.path.validate import validate_filename, validate_filepath
 from alasio.logger import logger
 
 # folder of the repos in the run directory, see PackRepoModel
@@ -353,18 +352,46 @@ class RepoBase:
         Args:
             file (str): Absolute path of the file, below the workspace or
                 below a folder it names, e.g. the cache folder of a version
+
+        Raises:
+            ValueError: If the path is not a file of the workspace: the
+                workspace itself, a path of another tree, a relative path, or a
+                name the path rules of the project refuse (a '..' segment, a
+                reserved name of another system, a character a mirror or a
+                filesystem cannot carry). The check is
+                validate_filepath() of alasio.ext.path, the rule the rest of the
+                project validates a path with. A step that names such a path is
+                broken, and the record of it would either keep a folder of the
+                tree whole (the workspace itself is the preserved path of
+                everything) or carry an entry the manifest of the run cannot
+                answer (a mirror resolves the entries relative to the
+                workspace, '../other/x' would name a key outside the prefix of
+                the channel). The error is raised rather than logged so the
+                defect is fixed where it is introduced: the cleanup of the next
+                run would otherwise hide it
         """
         # the paths of the flow are normalized ('/'), subpath_to() answers the
         # part below the workspace and None for a path that is not below it
         path = to_posix(str(file))
         relative = subpath_to(path, to_posix(str(self.workspace)))
-        if relative is None:
-            # a file outside the workspace is not one this run may keep: the
-            # record would never match a file of the tree, the cleanup would
-            # remove the file the step meant to keep
-            logger.warning(
-                f'Touched a file outside the workspace of "{self.workspace.name}": "{path}"')
-            relative = path
+        # None: not below the workspace. '': the workspace itself, which would
+        # preserve every file of the tree from the cleanup. Neither is a file
+        # of the run
+        if not relative:
+            raise ValueError(
+                f'Touched path is not a file of the workspace of "{self.workspace.name}": '
+                f'"{path}"'
+            )
+        # a string prefix is not enough: '../other/x' is below the workspace
+        # by prefix and resolves outside of it, and a name a filesystem of
+        # another system cannot carry has no key of its own on a mirror
+        try:
+            validate_filepath(relative)
+        except ValueError as e:
+            raise ValueError(
+                f'Touched path is not a file of the workspace of "{self.workspace.name}": '
+                f'"{path}": {e}'
+            ) from e
         self._touched.add(relative)
 
     def repo_manifest(self):
@@ -405,38 +432,46 @@ class RepoBase:
         The removal runs once, after the version is published, so a failed run
         never deletes a file a client still needs. The workspace is the only
         tree of the run the flow writes: the log folder lives in the run
-        directory, next to the config, and is never part of it. A removal that
-        fails is logged and retried by the next run.
+        directory, next to the config, and is never part of it.
+
+        The removal never raises: the version is published by the time it runs,
+        so an entry the file system refuses to remove is a leftover of the
+        workspace, not a failed publication. Such an entry is logged as a
+        warning and left to the next run, see _remove_stale_entry.
 
         Returns:
-            int: Number of files and folders removed
+            int: Number of files and folders removed. An entry that was already
+                gone counts as removed: the target of the removal is that the
+                path does not exist any more, whatever removed it
         """
         cleaner = CleanupByPreserved()
         # the tree first, then what the run preserves, see CleanupByPreserved:
         # a preserved path drops the registered entries of its own name
-        files, folders = _read_tree(self.workspace)
+        files, folders, blocked = _read_tree(self.workspace)
         cleaner.register_file(files)
         cleaner.register_folder(folders)
+        # a folder the walk could not list is preserved with its content: the
+        # cleanup knows nothing about what it holds, and a folder that can not
+        # be read is not a folder the run stopped using
+        cleaner.register_preserved_folder(blocked)
         cleaner.register_preserved(
             {self.workspace.joinpath(path) for path in self._touched})
         removed = 0
+        failed = 0
         # the answer is the deepest first, a file before its folder: the
         # removal runs in its order, a folder that still holds a file is kept
         for path, is_dir in cleaner.get_cleanup_entries():
-            if is_dir:
-                logger.info(f'Removing stale folder: "{path}"')
-                if not folder_rmtree_empty(path):
-                    logger.warning(f'Failed to remove stale folder "{path}"')
-                    continue
+            logger.info(f'Removing stale {"folder" if is_dir else "file"}: "{path}"')
+            if _remove_stale_entry(path, is_dir):
+                removed += 1
             else:
-                logger.info(f'Removing stale file: "{path}"')
-                if not file_remove(path):
-                    logger.warning(f'Failed to remove stale file "{path}"')
-                    continue
-            removed += 1
-        logger.info(
+                failed += 1
+        summary = (
             f'Cleaned up "{self.workspace.name}": '
             f'{len(self._touched)} files kept, {removed} removed')
+        if failed:
+            summary += f', {failed} left to the next run'
+        logger.info(summary)
         return removed
 
     @cached_property
@@ -612,32 +647,141 @@ class RepoBase:
         return deps
 
 
+def _remove_stale_entry(path, is_dir):
+    """
+    Remove one entry of the cleanup plan, without raising.
+
+    The cleanup runs after the version is published, so a removal that fails
+    must not fail the run: the pack of the new version is already on the disk
+    and latest.pack serves it, the entry is a leftover of the workspace that
+    the next run retries. The filesystem is the one source of failures here:
+    Windows refuses to unlink a file another process opened (WinError 32, a
+    local server reading the pack, an antivirus, an editor), a folder may be
+    filled by a concurrent writer after the scan, a mount may disappear.
+
+    An entry that is already gone is not a failure: the target of the removal
+    is that the path does not exist any more, not that this call is the one
+    that unlinked it. That is the difference between the two `False` answers
+    the helpers of alasio.ext.path.atomic give — `folder_rmtree_empty()`
+    answers False both for a folder that is not empty and for one it could not
+    remove — so the entry is looked up once after a `False`.
+
+    Args:
+        path (str): Absolute path of the entry
+        is_dir (bool): True to remove an empty folder, False for a file
+
+    Returns:
+        bool: True when the path is gone, False when it is still there, which
+            is logged as a warning and left to the next run
+    """
+    kind = 'folder' if is_dir else 'file'
+    try:
+        if is_dir:
+            removed = folder_rmtree_empty(path)
+        else:
+            removed = file_remove(path)
+    except FileNotFoundError:
+        # the entry vanished between the scan and the removal: the target of
+        # the removal is reached, whoever removed it
+        return True
+    except OSError as e:
+        # a file a process of Windows still holds open, a folder that does not
+        # allow the removal, a broken mount
+        logger.warning(f'Failed to remove stale {kind} "{path}": {e}')
+        return False
+    if removed:
+        return True
+    # False means "nothing was removed", not "the path is still there": the
+    # entry is either gone (a concurrent writer removed it) or it was kept (a
+    # folder a concurrent writer filled, a removal the filesystem refused)
+    if _is_missing(path):
+        return True
+    logger.warning(f'Failed to remove stale {kind} "{path}"')
+    return False
+
+
+def _is_missing(path):
+    """
+    Whether a path has no entry any more, after a removal answered False.
+
+    lstat() is used rather than stat(): the question is whether the directory
+    entry exists, not whether the file it points to does. A path that cannot be
+    looked up at all is reported as present, so the caller logs the removal as
+    a failure and the next run retries it.
+
+    Args:
+        path (str): Absolute path
+
+    Returns:
+        bool: True when the path is gone
+    """
+    try:
+        os.lstat(path)
+    except (FileNotFoundError, NotADirectoryError):
+        return True
+    except OSError:
+        return False
+    return False
+
+
 def _read_tree(root):
     """
     Read the paths of the files and of the folders of a tree, in one walk.
 
     The paths are absolute and '/'-separated, the form CleanupByPreserved
-    registers and answers. The walk is iter_entry(), one os.scandir per folder
-    with the DirEntry objects it already carries, so the kind of an entry costs
-    no call of its own.
+    registers and answers. One os.scandir per folder, with the DirEntry objects
+    it already carries, so the kind of an entry costs no call of its own.
+
+    The walk never raises: it runs after the version is published, so a folder
+    the file system refuses to list (an access control list, a scanner holding
+    the folder, a network mount that went away) must not undo the publication.
+    The folders to read are a stack rather than a recursion, so the failure of
+    one folder is answered where it happens and the other folders are still
+    read: an error inside a generator like iter_entry() unwinds the whole walk
+    with it.
 
     Args:
         root (str): Root folder of the tree
 
     Returns:
-        tuple[list[str], list[str]]: Absolute paths of the files and of the
-            folders
+        tuple[list[str], list[str], list[str]]: Absolute paths of the files, of
+            the folders, and of the folders that could not be listed. The
+            content of a blocked folder is unknown: the caller keeps the folder
+            with everything below it
     """
     files = []
     folders = []
-    for entry in iter_entry(root, recursive=True):
-        path = entry.path.replace(os.sep, '/')
+    blocked = []
+    pending = [str(root)]
+    while pending:
+        folder = pending.pop()
         try:
-            is_dir = entry.is_dir(follow_symlinks=False)
-        except OSError:
+            entries = os.scandir(folder)
+        except (FileNotFoundError, NotADirectoryError):
+            # the folder vanished between its listing and this walk, or the
+            # entry is not a folder any more: nothing of it is left to read. A
+            # vanished folder is the tree of a previous run, and its parent is
+            # removed if the removal left it empty
             continue
-        if is_dir:
-            folders.append(path)
-        else:
-            files.append(path)
-    return files, folders
+        except OSError as e:
+            logger.warning(f'Failed to list the folder of the workspace "{folder}": {e}')
+            blocked.append(folder.replace(os.sep, '/'))
+            continue
+        # os.scandir() holds an OS level directory handle, close it before the
+        # next folder is read
+        with entries:
+            for entry in entries:
+                path = entry.path.replace(os.sep, '/')
+                try:
+                    is_dir = entry.is_dir(follow_symlinks=False)
+                except OSError:
+                    # the entry vanished, or its kind cannot be read: it is not
+                    # a file of the tree this run knows, and a path that cannot
+                    # be read is not a path the removal can act on
+                    continue
+                if is_dir:
+                    folders.append(path)
+                    pending.append(entry.path)
+                else:
+                    files.append(path)
+    return files, folders, blocked

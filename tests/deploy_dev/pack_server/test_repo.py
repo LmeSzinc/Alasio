@@ -816,21 +816,195 @@ class TestCleanup:
         assert not join_path(run_dir, WORKSPACE, 'wheel', 'demo').exists()
 
     def test_removal_is_best_effort(self, fs, run_dir, mirror, monkeypatch):
-        """A file that cannot be removed does not fail the flow, the next run retries."""
+        """A file the filesystem refuses to remove is logged and left, the flow goes on."""
         register_wheels(mirror)
         stale = pack_file(run_dir, '0.26.0', 'full.pack')
         fs.create_file(stale, contents=b'stale')
 
         def fail(file):
+            # the answer of file_remove() for a path it did not remove: the
+            # caller looks the path up to tell a refused removal from an entry
+            # another process removed
             return False
 
         monkeypatch.setattr(repo_base, 'file_remove', fail)
         with logger.mock_capture_writer() as capture:
             run_commit(make_repo(), make_config(), mirror.client)
 
-        assert f'WARNING | Failed to remove stale file "{stale}"\n' in capture.concat()
+        log = capture.concat()
+        assert f'WARNING | Failed to remove stale file "{stale}"\n' in log
+        assert 'left to the next run' in log
         assert stale.isfile()
+        # the version is published all the same: the cleanup runs after the
+        # barrier and never fails the run
         assert repo_file(run_dir, 'latest.pack').isfile()
+        assert join_path(run_dir, WORKSPACE, 'manifest.json').isfile()
+
+    def test_locked_file_does_not_fail_the_run(self, fs, run_dir, mirror, monkeypatch):
+        """A file a process still holds open is left to the next run, the run succeeds.
+
+        On Windows os.unlink() of a file another process opened raises
+        PermissionError (WinError 32), which file_remove() does not catch. The
+        cleanup runs after latest.pack is written, so the failure must not
+        undo the publication: the entry is logged and the next run retries it.
+        """
+        register_wheels(mirror)
+        stale = pack_file(run_dir, '0.26.0', 'full.pack')
+        fs.create_file(stale, contents=b'stale')
+        original = repo_base.file_remove
+
+        def locked(file):
+            if str(file) == str(stale):
+                raise PermissionError(13, 'The process cannot access the file', str(file))
+            return original(file)
+
+        monkeypatch.setattr(repo_base, 'file_remove', locked)
+        with logger.mock_capture_writer() as capture:
+            gen = Repo(make_repo(), make_config(), client=mirror.client)
+            gen.run()
+            # no PermissionError escapes the commit
+            gen.commit()
+
+        log = capture.concat()
+        assert (f'WARNING | Failed to remove stale file "{stale}": '
+                f"[Errno 13] The process cannot access the file: '{stale}'\n") in log
+        assert stale.isfile()
+        # the publication is complete: the barrier and the manifest name the
+        # version of this run
+        assert repo_file(run_dir, 'latest.pack').isfile()
+        assert join_path(run_dir, WORKSPACE, 'manifest.json').isfile()
+        assert Manifest.from_file(
+            join_path(run_dir, WORKSPACE, 'manifest.json')).version == 'c3'
+
+    def test_locked_folder_does_not_fail_the_run(self, fs, run_dir, mirror, monkeypatch):
+        """A folder the filesystem refuses to remove is left to the next run."""
+        register_wheels(mirror)
+        stale = repo_file(run_dir, 'c2')
+        fs.create_file(join_path(stale, 'full.pack'), contents=b'stale')
+        original = repo_base.folder_rmtree_empty
+
+        def locked(folder):
+            if str(folder) == str(stale):
+                raise PermissionError(13, 'The process cannot access the file', str(folder))
+            return original(folder)
+
+        monkeypatch.setattr(repo_base, 'folder_rmtree_empty', locked)
+        with logger.mock_capture_writer() as capture:
+            run_commit(make_repo(), make_config(), mirror.client)
+
+        assert f'WARNING | Failed to remove stale folder "{stale}": ' in capture.concat()
+        assert stale.isdir()
+        assert repo_file(run_dir, 'latest.pack').isfile()
+
+    def test_entry_gone_before_the_removal_is_not_a_failure(self, fs, run_dir, mirror, monkeypatch):
+        """An entry another process removed first is gone, not a failed removal.
+
+        folder_rmtree_empty() and file_remove() answer False both for "nothing
+        was removed" and for "the path is still there": the cleanup looks the
+        entry up once after a False, so a removal another process already did
+        is not reported as a failure.
+        """
+        register_wheels(mirror)
+        stale = pack_file(run_dir, '0.26.0', 'full.pack')
+        fs.create_file(stale, contents=b'stale')
+        original = repo_base.file_remove
+
+        def raced(file):
+            if str(file) == str(stale):
+                # another process removes the entry between the scan and the
+                # removal, the answer of the helper is False all the same
+                original(file)
+                return False
+            return original(file)
+
+        monkeypatch.setattr(repo_base, 'file_remove', raced)
+        with logger.mock_capture_writer() as capture:
+            run_commit(make_repo(), make_config(), mirror.client)
+
+        log = capture.concat()
+        assert 'Failed to remove stale' not in log
+        assert 'left to the next run' not in log
+        assert not stale.exists()
+
+    def test_unlistable_folder_is_kept_whole(self, fs, run_dir, mirror, monkeypatch):
+        """A folder the walk cannot list is kept with its content, the run goes on.
+
+        The walk of the workspace runs after latest.pack is written: a folder an
+        access control list (or a scanner) denies must not fail the publication,
+        and the cleanup knows nothing about what it holds, so it keeps it. The
+        entries of the other folders are removed as usual in the same run.
+        """
+        register_wheels(mirror)
+        blocked = repo_file(run_dir, 'c2')
+        fs.create_file(join_path(blocked, 'full.pack'), contents=b'stale')
+        fs.create_file(join_path(blocked, 'notes.bin'), contents=b'stale')
+        stale_file = pack_file(run_dir, '0.26.0', 'full.pack')
+        fs.create_file(stale_file, contents=b'stale')
+        original = repo_base.os.scandir
+
+        def denied(folder):
+            if str(folder).replace('\\', '/') == str(blocked):
+                raise PermissionError(13, 'Access is denied', str(folder))
+            return original(folder)
+
+        monkeypatch.setattr(repo_base.os, 'scandir', denied)
+        with logger.mock_capture_writer() as capture:
+            run_commit(make_repo(), make_config(), mirror.client)
+
+        log = capture.concat()
+        assert f'WARNING | Failed to list the folder of the workspace "{blocked}"' in log
+        # the unknown folder keeps its content, and nothing of it is planned
+        assert join_path(blocked, 'full.pack').isfile()
+        assert join_path(blocked, 'notes.bin').isfile()
+        assert f'Removing stale folder: "{blocked}"' not in log
+        # the walk went on: the stale file of another folder is removed
+        assert not stale_file.exists()
+        # and the publication is complete
+        assert repo_file(run_dir, 'latest.pack').isfile()
+        assert join_path(run_dir, WORKSPACE, 'manifest.json').isfile()
+
+    def test_clean_workspace_removes_nothing(self, fs, run_dir, mirror):
+        """A second commit over the workspace of the first one removes no entry."""
+        register_wheels(mirror)
+        repo = make_repo()
+        config = make_config()
+        run_commit(repo, config, mirror.client)
+
+        with logger.mock_capture_writer() as capture:
+            run_commit(repo, config, mirror.client)
+
+        log = capture.concat()
+        assert 'INFO | Cleaned up "Author_Repo_master": ' in log
+        assert ', 0 removed' in log
+        assert 'Failed to remove stale' not in log
+        assert 'left to the next run' not in log
+
+    def test_cache_survives_a_new_commit(self, fs, run_dir, mirror):
+        """The cache of the window is kept across commits, the wheels are not fetched again."""
+        register_wheels(mirror)
+        repo = make_repo()
+        run_commit(repo, make_config(), mirror.client)
+        requests = list(mirror.requests)
+
+        # a new commit of the repo without a dependency change, published over
+        # the workspace of the previous one
+        repo.register_file('c4', 'requirements.txt', REQUIREMENTS['c3'].encode('utf-8'))
+        repo.register_file('c4', MOD_ENTRY_PATH, DEFAULT_ENTRY.encode('utf-8'))
+        repo.register_commit(
+            'c4', parents=['c3'], author_name='Author', author_time=3, message='commit c4')
+        repo.register_branch('master', 'c4')
+        repo.register_head('c4')
+
+        run_commit(repo, make_config(), mirror.client)
+
+        # nothing is downloaded again: every version of the window was in the
+        # cache and the cleanup of the previous commit kept it
+        assert mirror.requests == requests
+        for version in ('0.27.7', '0.27.8', '0.28.1'):
+            assert cache_file(run_dir, version).isfile()
+        # the new version is published
+        assert Manifest.from_file(
+            join_path(run_dir, WORKSPACE, 'manifest.json')).version == 'c4'
 
 
 class TestWheelCache:
