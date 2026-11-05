@@ -12,183 +12,207 @@ a dependency that has no update is validated all the same. The second
 dependency of the scenario keeps its version across the tree update and is
 validated in place.
 
+The channels are the output of the pack server itself: the ``Repo`` flow packs
+the mock git repo of the scenario, the wheels of the distributions come from
+the mock pypi mirror of the fetch tests, and the workspace it writes is
+published with the names and the folder layout the generator wrote. No pack
+and no dependency snapshot is built by the test, so a file the client reads
+that the generator does not write is a 404 of the mock backend.
+
 The environment the dependencies land in is the site-packages of the process,
 which a test must not touch: ``local_site_packages`` of the step layer is
 patched to a folder of the in-memory filesystem, everything else is the real
 code (the real channels, the real deploy job of the install).
 """
-from types import SimpleNamespace
-
 import pytest
 import trio
 
 from alasio.backend.app.restart import restart_step as step_module
-from alasio.deploy.pack.decode_base import PackDecodeBase
+from alasio.config.entry.mod_entry import MOD_ENTRY_PATH
 from alasio.deploy.pack.job_unpack import UnpackJob
-from alasio.deploy_dev.pack.pack_full import PackFull
-from alasio.deploy_dev.pack.pack_update import PackUpdate
-from alasio.deploy_dev.pack.pack_wheel import PackWheel
-from alasio.deploy_dev.pack.pack_wheel_update import PackWheelUpdate
+from alasio.deploy_dev.pack_server.model import LookbackConfig, PackRepoModel, RepoConfig
+from alasio.deploy_dev.pack_server.repo import Repo
 from alasio.ext import env
 from alasio.ext.path import PathStr
 from alasio.ext.path.atomic import file_read_bytes, file_write
+from alasio.git.mock.mock_repo import MockGitRepo
 from alasio.logger import logger
 from alasio.testing.filesystem import fs  # noqa: F401
 from tests.deploy.simple_pip.conftest import build_wheel, list_folders, site_packages
-from tests.deploy_dev.pack.conftest import make_repo
+from tests.deploy_dev.pack_server.conftest import join_path
+from tests.deploy_dev.pack_server.test_fetch_wheel import MockMirror
 
-from .conftest import UPDATE_HOST, assert_logs, at
+from .conftest import GENERATED_HOST, assert_logs, at
 
-# The tree of the scenario: its requirements file is part of it, so an update
-# of the tree brings the pins of its dependencies. t1 pins demo 1.0, t2 pins
-# demo 2.0; stable stays at 1.0 in both versions.
-REPO = make_repo({
+# The mod of the scenario: the repo the pack server packs is its tree
+MOD = 'DepsMod'
+
+# The index the pins of the dependency file are resolved from: the mock pypi
+# mirror of the run. The '# from' annotation is the one a compiled dependency
+# file carries, and it is the index the pack server fetches the wheel from
+PIN_INDEX = 'http://mirror'
+
+
+def requirement(pin):
+    """
+    A pin line and the '# from' annotation of a compiled dependency file.
+
+    Args:
+        pin (str): Pin as written in the file, e.g. 'demo==1.0'
+
+    Returns:
+        str: The pin and its annotation, each on a line of its own
+    """
+    return f'{pin}\n    # from {PIN_INDEX}\n'
+
+
+# The trees of the scenario: the requirements file is part of the tree, so an
+# update of the tree brings the pins of its dependencies. t1 pins demo 1.0,
+# t2 pins demo 2.0; stable stays at 1.0 in both versions.
+TREE = {
     't1': {
         'module/main.py': b'print("t1")\n',
-        'requirements.txt': b'demo==1.0\nstable==1.0\n',
+        'requirements.txt': (requirement('demo==1.0') + requirement('stable==1.0')).encode(),
     },
     't2': {
         'module/main.py': b'print("t2")\n',
-        'requirements.txt': b'demo==2.0\nstable==1.0\n',
+        'requirements.txt': (requirement('demo==2.0') + requirement('stable==1.0')).encode(),
     },
-})
-# The content of the builtin .gitattributes, read before the fake filesystem
-# is active: the tree packs are built inside the tests, where the pack
-# encoder reads it from the fake filesystem like the real one
-GITATTRIBUTES = file_read_bytes(env.ALASIO_ROOT.joinpath('.gitattributes'))
+}
+# The mod entry of the tree: the pack server builds the channel of every name
+# the entry declares pack_deps of, from the pins of the requirements file above
+ENTRY = 'Mod:\n  name: DepsMod\nUpdate:\n  pack_deps:\n  - demo\n  - stable\n'
 
-# The path prefix of the deployment on the mock host, and the mirror of the
-# mod: the packrepo folder of its tree channel, the packdep folders of its
-# dependencies are derived from it
-CHANNEL = '/alas/LmeSzinc_Alasio_master'
-MIRROR = f'http://{UPDATE_HOST}{CHANNEL}/packrepo'
+# The config of the pack server run: the window is unlimited, the dependency
+# file and the pack names are declared by the mod entry of the repo
+CONFIG = PackRepoModel(
+    Repo=RepoConfig(
+        Remote='https://github.com/Author/Repo',
+        Author='Author',
+        Repo='Repo',
+        Branch='master',
+    ),
+    Lookback=LookbackConfig(MaxCommitDay=0),
+)
+# Folder of the workspace in the run directory, and the mirror of the mod: the
+# packrepo channel of the generated workspace, the packdep channels of its
+# dependencies are its siblings
+WORKSPACE = 'pack/Author_Repo_master'
+MIRROR = f'http://{GENERATED_HOST}/{WORKSPACE}/packrepo'
 # The dist-keys of the dependency channels (the PEP 503 normalized names)
 DEP = 'demo'
 STABLE = 'stable'
 
+# The content of the builtin .gitattributes, read before the fake filesystem
+# is active: the packs are built inside the tests, where the pack encoder reads
+# it from the fake filesystem like the real one
+GITATTRIBUTES = file_read_bytes(env.ALASIO_ROOT.joinpath('.gitattributes'))
 
-def publish(server, prefix, version, full, index):
+
+def build_repo(*commits):
     """
-    Publish a version of a channel (the layout of a pack deployment).
+    Build a mock repo of the scenario, its head is the last commit.
 
     Args:
-        server (MockUpdateServer): The mock server of the host
-        prefix (str): Path prefix of the channel below the host, e.g.
-            '/alas/LmeSzinc_Alasio_master/packrepo'
-        version (str): Version to publish, it becomes the latest one
-        full (bytes): Full pack of the version
-        index (bytes): Index pack of the version
-    """
-    checksum = bytes.fromhex(PackDecodeBase(index).index_checksum)
-    static = server.static
-    static.register_file(f'{prefix}/latest.pack', version.encode() + checksum)
-    static.register_file(f'{prefix}/{version}/full.pack', full)
-
-
-def publish_update(server, prefix, old, new, update):
-    """
-    Publish the update pack of a version pair of a channel.
-
-    Args:
-        server (MockUpdateServer): The mock server of the host
-        prefix (str): Path prefix of the channel below the host
-        old (str): Version the update applies to
-        new (str): Version the update installs
-        update (bytes): Update pack of the pair
-    """
-    server.static.register_file(f'{prefix}/{new}/update_{old}.pack', update)
-
-
-def dep_wheel(version, name=DEP):
-    """
-    Build the wheel of a dependency at a version (on the fake filesystem).
-
-    Args:
-        version (str): Version of the dependency
-        name (str): Distribution name. Defaults to DEP
+        *commits (str): Commits to register, the parent of a commit is the one
+            before it
 
     Returns:
-        str: Path of the .whl file
+        MockGitRepo: The repo, its branch master points at the last commit
     """
-    return build_wheel(
-        f'/w/{name}-{version}-py3-none-any.whl',
-        {
-            f'{name}/__init__.py': b'',
-            f'{name}/core.py': f"VERSION = '{version}'\n".encode(),
-        },
-        name=name,
-        version=version,
-    )
+    repo = MockGitRepo()
+    parent = None
+    for index, commit in enumerate(commits):
+        for path, content in TREE[commit].items():
+            repo.register_file(commit, path, content)
+        repo.register_file(commit, MOD_ENTRY_PATH, ENTRY.encode())
+        repo.register_commit(
+            commit, parents=[parent] if parent else None,
+            author_name='Author', author_time=index, message=f'commit {commit}')
+        parent = commit
+    repo.register_branch('master', parent)
+    repo.register_head(parent)
+    return repo
 
 
-def dep_pack(version, name=DEP):
+def register_wheels(mirror):
     """
-    The pack data of a dependency at a version.
+    Register the wheels of the distributions of the scenario in the mirror.
 
     Args:
-        version (str): Version of the dependency
-        name (str): Distribution name. Defaults to DEP
-
-    Returns:
-        tuple[bytes, bytes]: The full pack and the index pack
+        mirror (MockMirror): The pypi mirror the pack server fetches from
     """
-    pack = PackWheel(dep_wheel(version, name))
-    return b''.join(pack.iter_pack_data()), bytes(pack.index_pack)
+    for name, version in ((DEP, '1.0'), (DEP, '2.0'), (STABLE, '1.0')):
+        path = f'/w/{name}-{version}-py3-none-any.whl'
+        build_wheel(
+            path,
+            {
+                f'{name}/__init__.py': b'',
+                f'{name}/core.py': f"VERSION = '{version}'\n".encode(),
+            },
+            name=name, version=version,
+        )
+        mirror.register(name, version, content=file_read_bytes(path))
 
 
-def tree_pack(commit, snapshots=None):
+def generate(repo, mirror):
     """
-    The tree packs of a version and their packdep snapshots.
+    Run the pack server over a repo: the wheels, the packs and the publication.
+
+    The steps that fetch run on an event loop of their own (``RepoDep``), so
+    the flow runs on a worker thread of the test, away from the loop of the
+    backend.
 
     Args:
-        commit (str): Commit to pack
-        snapshots (dict[str, tuple[str, bytes]], optional): {name: (version,
-            20 bytes index checksum)} recorded in .pack/packdep.pack.
-            Defaults to None, a tree without packdep
+        repo (MockGitRepo): The repo to pack
+        mirror (MockMirror): The pypi mirror the wheels are fetched from
 
     Returns:
-        tuple[bytes, bytes, PackFull]: Full pack data, index pack data and
-            the PackFull that builds them (the new side of an update pack)
+        Repo: The flow that ran, its steps carry what was generated
     """
-    dep_gen = None
-    if snapshots is not None:
-        dep_gen = SimpleNamespace(published=snapshots)
-    pack = PackFull(REPO, commit=commit, dep_gen=dep_gen)
-    return b''.join(pack.iter_pack_data()), b''.join(pack.iter_packidx_data()), pack
+    gen = Repo(repo, CONFIG, client=mirror.client)
+    gen.run()
+    gen.commit()
+    return gen
 
 
-def dep_snapshots(demo_version, demo_index, stable_index):
+def publish(server, project):
     """
-    The packdep snapshots of a tree version.
+    Publish the generated workspace, the files exactly as they are on the disk.
+
+    A deployment serves the two channels of the workspace, packrepo and
+    packdep; the private wheel cache is not part of it. Nothing is renamed on
+    the way to the client, so a channel the generator does not write is a 404.
 
     Args:
-        demo_version (str): Version of demo the tree pins
-        demo_index (bytes): Index pack of that demo version
-        stable_index (bytes): Index pack of stable 1.0
-
-    Returns:
-        dict[str, tuple[str, bytes]]: Snapshot of every dependency
+        server (MockUpdateServer): The mock server of the generated host
+        project (Project): Project root of the run
     """
-    return {
-        DEP: (demo_version, bytes.fromhex(PackDecodeBase(demo_index).index_checksum)),
-        STABLE: ('1.0', bytes.fromhex(PackDecodeBase(stable_index).index_checksum)),
-    }
+    root = project.root.joinpath(WORKSPACE)
+    for folder in ('packrepo', 'packdep'):
+        server.register_folder(f'/{WORKSPACE}/{folder}', join_path(root, folder))
 
 
-def dep_update(old, new, name=DEP):
+async def install_previous(project, site, commit, pins):
     """
-    The update pack of a version pair of a dependency.
+    Install the state a previous process left: the tree and its dependencies.
+
+    Both are unpacked from the packs the generator wrote, so the state the
+    update starts from is the output of the pack server too.
 
     Args:
-        old (str): Version the update applies to
-        new (str): Version the update installs
-        name (str): Distribution name. Defaults to DEP
-
-    Returns:
-        bytes: Update pack of the pair
+        project (Project): Project root of the run
+        site (PathStr): Site-packages folder of the in-memory environment
+        commit (str): Commit of the tree to install
+        pins (dict[str, str]): {distribution: version} to install
     """
-    return b''.join(PackWheelUpdate(
-        PackWheel(dep_wheel(new, name)), PackWheel(dep_wheel(old, name))).iter_pack_data())
+    root = project.root.joinpath(WORKSPACE)
+    await project.install(MOD, pack=file_read_bytes(join_path(root, 'packrepo', commit, 'full.pack')))
+    for name, version in pins.items():
+        await UnpackJob(
+            file_read_bytes(join_path(root, 'packdep', name, version, 'full.pack')),
+            root=site, name=name,
+        ).run()
 
 
 @pytest.mark.trio
@@ -202,29 +226,39 @@ async def test_a_tree_update_brings_the_dependencies_of_its_new_requirements(
     process)
     """
     backend = make_backend(
-        mods={'DepsMod': MIRROR}, configs={}, pack_deps={'DepsMod': [DEP, STABLE]})
+        mods={MOD: MIRROR}, configs={}, pack_deps={MOD: [DEP, STABLE]})
     site = PathStr.new(site_packages(fs))
     monkeypatch.setattr(step_module, 'local_site_packages', lambda: site)
-    mod_root = project.mod_root('DepsMod')
-    # the tree and the dependencies of the process this one replaces; the
-    # tree predates packdep, the update brings the snapshot
+    mod_root = project.mod_root(MOD)
+    # the fake filesystem starts without the builtin attributes, the pack
+    # encoder reads them from env.ALASIO_ROOT like a real run
     fs.create_file(env.ALASIO_ROOT.joinpath('.gitattributes'), contents=GITATTRIBUTES)
-    full_t1, _, _ = tree_pack('t1')
-    await project.install('DepsMod', pack=full_t1)
-    dep_1_full, dep_1_index = dep_pack('1.0')
-    await UnpackJob(dep_1_full, root=site, name=DEP).run()
-    stable_full, stable_index = dep_pack('1.0', STABLE)
-    await UnpackJob(stable_full, root=site, name=STABLE).run()
-    dep_2_full, dep_2_index = dep_pack('2.0')
-    full_t2, index_t2, pack_t2 = tree_pack(
-        't2', dep_snapshots('2.0', dep_2_index, stable_index))
-    update_t1_t2 = b''.join(PackUpdate(pack_t2, 't1').iter_pack_data())
-    server = servers.servers[UPDATE_HOST]
-    publish(server, f'{CHANNEL}/packrepo', 't2', full_t2, index_t2)
-    publish_update(server, f'{CHANNEL}/packrepo', 't1', 't2', update_t1_t2)
-    publish(server, f'{CHANNEL}/packdep/{DEP}', '2.0', dep_2_full, dep_2_index)
-    publish_update(server, f'{CHANNEL}/packdep/{DEP}', '1.0', '2.0', dep_update('1.0', '2.0'))
-    publish(server, f'{CHANNEL}/packdep/{STABLE}', '1.0', stable_full, stable_index)
+    mirror = MockMirror()
+    register_wheels(mirror)
+    # the run that published the version the previous process runs: its tree
+    # and its dependencies are installed from the packs of that run
+    await trio.to_thread.run_sync(generate, build_repo('t1'), mirror)
+    await install_previous(project, site, 't1', {DEP: '1.0', STABLE: '1.0'})
+    # the next run of the pack server publishes t2: the tree update pack, the
+    # update pack of the dependency that moved, and the snapshot the tree
+    # carries for the client
+    await trio.to_thread.run_sync(generate, build_repo('t1', 't2'), mirror)
+    publish(servers.servers[GENERATED_HOST], project)
+    # the channel the client reads is exactly what the generator wrote: the
+    # packs of the version it publishes, and none of the version before it
+    # (the cleanup of the run removed the folder of t1, the client has it)
+    files = servers.servers[GENERATED_HOST].static.files
+    assert f'/{WORKSPACE}/packrepo/latest.pack' in files
+    assert f'/{WORKSPACE}/packrepo/t2/update_t1.pack' in files
+    assert f'/{WORKSPACE}/packrepo/t1/full.pack' not in files
+    # a dependency channel carries the version folder of its target only: the
+    # version a client installs is the packdep snapshot of the tree, never a
+    # per dependency latest.pack, see RepoDep
+    assert f'/{WORKSPACE}/packdep/{DEP}/2.0/update_1.0.pack' in files
+    assert not [
+        path for path in files
+        if path.startswith(f'/{WORKSPACE}/packdep/') and path.endswith('/latest.pack')
+    ]
 
     with logger.mock_capture_writer() as capture:
         async with trio.open_nursery() as nursery:
@@ -284,25 +318,21 @@ async def test_the_startup_check_verifies_a_dependency_without_an_update(
     update validate the whole environment, not only what moved
     """
     backend = make_backend(
-        mods={'DepsMod': MIRROR}, configs={}, pack_deps={'DepsMod': [DEP, STABLE]})
+        mods={MOD: MIRROR}, configs={}, pack_deps={MOD: [DEP, STABLE]})
     site = PathStr.new(site_packages(fs))
     monkeypatch.setattr(step_module, 'local_site_packages', lambda: site)
-    mod_root = project.mod_root('DepsMod')
-    dep_1_full, dep_1_index = dep_pack('1.0')
-    stable_full, stable_index = dep_pack('1.0', STABLE)
+    mod_root = project.mod_root(MOD)
     fs.create_file(env.ALASIO_ROOT.joinpath('.gitattributes'), contents=GITATTRIBUTES)
-    full_t1, index_t1, _ = tree_pack(
-        't1', dep_snapshots('1.0', dep_1_index, stable_index))
-    await project.install('DepsMod', pack=full_t1)
-    await UnpackJob(dep_1_full, root=site, name=DEP).run()
-    await UnpackJob(stable_full, root=site, name=STABLE).run()
+    mirror = MockMirror()
+    register_wheels(mirror)
+    # the channel of the version the process runs, generated by the pack
+    # server like the one of an update
+    await trio.to_thread.run_sync(generate, build_repo('t1'), mirror)
+    await install_previous(project, site, 't1', {DEP: '1.0', STABLE: '1.0'})
     # the file of the dependency is damaged after the install of the previous
     # process (nothing announces it: only the validation finds it)
     file_write(site.joinpath(f'{DEP}/core.py'), b'damaged\n')
-    server = servers.servers[UPDATE_HOST]
-    publish(server, f'{CHANNEL}/packrepo', 't1', full_t1, index_t1)
-    publish(server, f'{CHANNEL}/packdep/{DEP}', '1.0', dep_1_full, dep_1_index)
-    publish(server, f'{CHANNEL}/packdep/{STABLE}', '1.0', stable_full, stable_index)
+    publish(servers.servers[GENERATED_HOST], project)
 
     with logger.mock_capture_writer() as capture:
         async with trio.open_nursery() as nursery:
