@@ -7,8 +7,8 @@ those indexes are not reachable from every client: the repo serves the files
 itself. The step downloads every wheel of those pins to the private cache and
 syncs them to the folder a client reads:
 
-    {workspace}/_wheel_cache/{name}/{version}/index.html   the index page
-    {workspace}/_wheel_cache/{name}/{version}/{file}.whl    the cached wheels
+    {workspace}/.wheel_cache/{name}/{version}/index.html   the index page
+    {workspace}/.wheel_cache/{name}/{version}/{file}.whl    the cached wheels
     {workspace}/wheel/{name}/{version}/{file}.whl           the published wheels
 
 Every wheel of the version is fetched, not only the pure python one: a compiled

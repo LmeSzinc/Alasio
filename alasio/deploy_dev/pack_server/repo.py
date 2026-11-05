@@ -10,7 +10,7 @@ on the disk.
     1. the workspace, the folder of the repo, is pack/{Author}_{Repo}_{Branch}
        (see RepoBase)
     2. the wheels of the pins the repo provides are downloaded to the private
-       cache `_wheel_cache/{name}/{version}/` and synced to the pip index
+       cache `.wheel_cache/{name}/{version}/` and synced to the pip index
        `wheel/{name}/{version}/` (see repo_wheel), the files a client installs
        when it cannot reach the index the pin came from
     3. the pure python wheel of every version the dependency packs are built of

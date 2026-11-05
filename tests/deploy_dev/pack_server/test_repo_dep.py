@@ -45,7 +45,7 @@ from tests.deploy_dev.pack_server.test_repo import (
 WORKSPACE = 'pack/Author_Repo_master'
 
 # folder of the private cache of the workspace
-CACHE_ROOT = f'{WORKSPACE}/_wheel_cache'
+CACHE_ROOT = f'{WORKSPACE}/.wheel_cache'
 
 # folder of the channels of the dependencies
 CHANNEL_ROOT = f'{WORKSPACE}/packdep'
@@ -94,7 +94,7 @@ def cache_folder(run_dir, name, version):
     Folder of a version in the private cache of the workspace.
 
     Returns:
-        PathStr: {run}/pack/Author_Repo_master/_wheel_cache/{name}/{version}
+        PathStr: {run}/pack/Author_Repo_master/.wheel_cache/{name}/{version}
     """
     return join_path(run_dir, CACHE_ROOT, name, version)
 

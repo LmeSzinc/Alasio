@@ -16,7 +16,7 @@ once and updates with update packs afterwards, so a version of the window only
 needs an update path to the target.
 
 The input of the build is the pure python wheel of every version of the window:
-this step fetches them to the private cache first (`_wheel_cache/{name}/{version}/`,
+this step fetches them to the private cache first (`.wheel_cache/{name}/{version}/`,
 the index page of the version and its wheels, see fetch_wheel) and builds the
 packs from there. The cache folder is shared with repo_wheel, which fetches the
 wheels of the pins the repo provides: the two steps read the same kind of

@@ -11,7 +11,7 @@ The generation is the flow of PackRepoModel, one module per step:
 - repo_base (this module): the workspace and the declarations of the mod entry
   the steps read, nothing is written here;
 - repo_dep: steps 4.1 and 6, the pure python wheel of every version the
-  dependency packs are built of, downloaded to `_wheel_cache/{name}/{version}/`,
+  dependency packs are built of, downloaded to `.wheel_cache/{name}/{version}/`,
   and the packs of the dependencies to `packdep/{name}/{version}/`;
 - repo_wheel: steps 4.2 and 5, every wheel of the pins the repo provides,
   downloaded to the same cache and synced to `wheel/{name}/{version}/`, the
@@ -89,8 +89,9 @@ PACKDEP_FOLDER = 'packdep'
 WHEEL_FOLDER = 'wheel'
 
 # folder of the downloaded wheels, the input of the pack build, the subfolder of
-# the workspace. The leading '_' marks a private folder: a publication skips it
-WHEEL_CACHE_FOLDER = '_wheel_cache'
+# the workspace. The leading '.' marks a private folder: the workspace mirrors to
+# the server as it is, and a path segment that starts with '.' is not published
+WHEEL_CACHE_FOLDER = '.wheel_cache'
 
 # the index a pin without a source is fetched from: the official PyPI simple
 # index. The parser reads the official index as no source too (a pin resolved
@@ -261,11 +262,14 @@ class RepoBase:
     @cached_property
     def wheel_cache_folder(self):
         """
-        Folder of the downloaded wheels: {workspace}/_wheel_cache
+        Folder of the downloaded wheels: {workspace}/.wheel_cache
 
         The private cache and the input of the pack build, see repo_dep and
-        repo_wheel: the leading '_' marks the folder as private, a publication
-        skips it.
+        repo_wheel: the leading '.' marks the folder as private, the workspace
+        mirrors to the server as it is and a path segment that starts with '.'
+        is not published. The dot also hides the folder in the default view of
+        a file manager on linux, the cache is not a file of the run an operator
+        reads.
 
         Returns:
             PathStr: Absolute path of the folder
@@ -285,7 +289,7 @@ class RepoBase:
             version (str): Exact version of the distribution
 
         Returns:
-            PathStr: {workspace}/_wheel_cache/{name}/{version}
+            PathStr: {workspace}/.wheel_cache/{name}/{version}
         """
         return self.wheel_cache_folder.joinpath(name).joinpath(version)
 

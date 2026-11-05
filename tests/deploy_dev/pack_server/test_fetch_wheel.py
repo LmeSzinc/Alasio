@@ -34,7 +34,7 @@ from alasio.testing.filesystem import fs  # noqa: F401
 
 # folder of the downloaded wheels in the workspace of the tests, see
 # RepoBase.wheel_cache_folder
-CACHE_FOLDER = '_wheel_cache'
+CACHE_FOLDER = '.wheel_cache'
 
 # proxy url of the tests: nothing listens on the port, the client of the tests
 # only reads the route it was built with
@@ -46,7 +46,7 @@ def wheel_file(root, name, version, filename):
     Path of a wheel in the cache folder of the tests.
 
     Returns:
-        PathStr: {root}/_wheel_cache/{name}/{version}/{filename}
+        PathStr: {root}/.wheel_cache/{name}/{version}/{filename}
     """
     return root.joinpath(CACHE_FOLDER).joinpath(name).joinpath(version).joinpath(filename)
 
@@ -56,7 +56,7 @@ def index_file(root, name, version):
     Path of the snapshot of the index page of a version in the tests.
 
     Returns:
-        PathStr: {root}/_wheel_cache/{name}/{version}/index.html
+        PathStr: {root}/.wheel_cache/{name}/{version}/index.html
     """
     return root.joinpath(CACHE_FOLDER).joinpath(name).joinpath(version).joinpath(INDEX_FILE)
 

@@ -258,10 +258,10 @@ def cache_file(run_dir, version, name='httpx'):
     Path of the fetched wheel of a version in the cache of the workspace.
 
     Returns:
-        PathStr: {run}/pack/Author_Repo_master/_wheel_cache/httpx/{version}/...
+        PathStr: {run}/pack/Author_Repo_master/.wheel_cache/httpx/{version}/...
     """
     return join_path(
-        run_dir, WORKSPACE, '_wheel_cache', name, version,
+        run_dir, WORKSPACE, '.wheel_cache', name, version,
         f'{name}-{version}-py3-none-any.whl')
 
 
@@ -741,8 +741,8 @@ class TestCleanup:
         # folders, a name the entry does not declare, the packs of a replaced
         # version, and a file of another tool
         stale = [
-            join_path(run_dir, WORKSPACE, '_wheel_cache', 'httpx', '0.26.0', 'index.html'),
-            join_path(run_dir, WORKSPACE, '_wheel_cache', 'demo', '1.0',
+            join_path(run_dir, WORKSPACE, '.wheel_cache', 'httpx', '0.26.0', 'index.html'),
+            join_path(run_dir, WORKSPACE, '.wheel_cache', 'demo', '1.0',
                       'demo-1.0-py3-none-any.whl'),
             pack_file(run_dir, '0.26.0', 'full.pack'),
             join_path(run_dir, DEP_FOLDER, '0.28.1', 'update_0.26.0.pack'),
@@ -759,8 +759,8 @@ class TestCleanup:
         # a folder with no file of the run is removed as a whole, the files of
         # a version that slid out of the window are not walked one by one
         folders = (
-            join_path(run_dir, WORKSPACE, '_wheel_cache', 'httpx', '0.26.0'),
-            join_path(run_dir, WORKSPACE, '_wheel_cache', 'demo'),
+            join_path(run_dir, WORKSPACE, '.wheel_cache', 'httpx', '0.26.0'),
+            join_path(run_dir, WORKSPACE, '.wheel_cache', 'demo'),
             join_path(run_dir, DEP_FOLDER, '0.26.0'),
             repo_file(run_dir, 'c2'),
         )
@@ -781,7 +781,7 @@ class TestCleanup:
         assert repo_file(run_dir, 'c3', 'full.pack').isfile()
         assert repo_file(run_dir, 'latest.pack').isfile()
         # the folders the removal left empty are gone
-        assert not join_path(run_dir, WORKSPACE, '_wheel_cache', 'demo').exists()
+        assert not join_path(run_dir, WORKSPACE, '.wheel_cache', 'demo').exists()
         assert not join_path(run_dir, WORKSPACE, 'packdep', 'httpx', '0.26.0').exists()
         assert f'INFO | Cleaned up "Author_Repo_master":' in log
 
@@ -791,7 +791,7 @@ class TestCleanup:
         # a wheel of the same version that the run does not download: the folder
         # is used by this run, the file is not
         stale = join_path(
-            run_dir, WORKSPACE, '_wheel_cache', 'httpx', '0.28.1',
+            run_dir, WORKSPACE, '.wheel_cache', 'httpx', '0.28.1',
             'httpx-0.28.1-cp38-cp38-win_amd64.whl')
         fs.create_file(stale, contents=b'stale')
 
@@ -800,7 +800,7 @@ class TestCleanup:
         assert not stale.exists()
         assert cache_file(run_dir, '0.28.1').isfile()
         assert join_path(
-            run_dir, WORKSPACE, '_wheel_cache', 'httpx', '0.28.1', 'index.html').isfile()
+            run_dir, WORKSPACE, '.wheel_cache', 'httpx', '0.28.1', 'index.html').isfile()
 
     def test_nothing_provided_leaves_no_wheel(self, fs, run_dir, mirror):
         """A repo that provides no pin keeps no file of the pip index."""
@@ -847,7 +847,7 @@ class TestWheelCache:
         register_wheels(mirror)
         Repo(make_repo(), make_config(), client=mirror.client).run()
         folders = list(join_path(run_dir, WORKSPACE).iter_foldernames())
-        assert sorted(folders) == ['_wheel_cache', 'packdep', 'packrepo']
+        assert sorted(folders) == ['.wheel_cache', 'packdep', 'packrepo']
 
     def test_wheel_sync_is_idempotent(self, fs, run_dir, mirror):
         """A second run keeps the published wheels, the copies are not rewritten."""

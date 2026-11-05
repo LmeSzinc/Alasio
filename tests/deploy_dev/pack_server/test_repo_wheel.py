@@ -5,7 +5,7 @@ The step downloads every wheel of the pins whose index the mod entry declares
 in provide_wheel to the private cache, and syncs them to the
 folder a client installs from:
 
-    {workspace}/_wheel_cache/{name}/{version}/*.whl   the cache
+    {workspace}/.wheel_cache/{name}/{version}/*.whl   the cache
     {workspace}/wheel/{name}/{version}/*.whl          the pip index
 
 The tests run the step on its own, the way repo.Repo wires it. The mirror is
@@ -36,7 +36,7 @@ from tests.deploy_dev.pack_server.test_repo import (
 WORKSPACE = 'pack/Author_Repo_master'
 
 # folder of the private cache of the workspace
-CACHE_ROOT = f'{WORKSPACE}/_wheel_cache'
+CACHE_ROOT = f'{WORKSPACE}/.wheel_cache'
 
 # folder of the wheels a client installs with pip
 WHEEL_ROOT = f'{WORKSPACE}/wheel'
@@ -133,7 +133,7 @@ def cache_folder(run_dir, name, version):
     Folder of a version in the private cache of the workspace.
 
     Returns:
-        PathStr: {run}/pack/Author_Repo_master/_wheel_cache/{name}/{version}
+        PathStr: {run}/pack/Author_Repo_master/.wheel_cache/{name}/{version}
     """
     return join_path(run_dir, CACHE_ROOT, name, version)
 

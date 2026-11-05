@@ -98,8 +98,8 @@ class PackRepoModel(Struct):
       - [2.2] Generate update packs to: {workspace}/packrepo/{commit}/update_{old}.pack
         update packs will update from lookback commit to latest commit
     3. Download pypi dep index page https://.../{dep_name}/
-      to {workspace}/_wheel_cache/{dep_name}/{dep_version}/index.html
-    4. Download wheels to: {workspace}/_wheel_cache/{dep_name}/{dep_version}/*.whl
+      to {workspace}/.wheel_cache/{dep_name}/{dep_version}/index.html
+    4. Download wheels to: {workspace}/.wheel_cache/{dep_name}/{dep_version}/*.whl
       If wheels already exists, validate sha256 from {dep_name}/{dep_version}/index.html
       {dep_name}/{dep_version} comes from:
       - [4.1] deps that declared in `ModEntry.requirements_file` and its name hits `ModEntry.pack_deps`

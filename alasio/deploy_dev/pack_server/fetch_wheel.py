@@ -6,8 +6,8 @@ publishes the wheels of the provided ones, the wheels of a name are fetched for
 one of the two jobs only: this module downloads them from the PyPI simple
 index (PEP 503) of the pin into the cache folder of its version:
 
-    {workspace}/_wheel_cache/{distribution}/{version}/index.html   the index page
-    {workspace}/_wheel_cache/{distribution}/{version}/{filename}.whl   the wheels
+    {workspace}/.wheel_cache/{distribution}/{version}/index.html   the index page
+    {workspace}/.wheel_cache/{distribution}/{version}/{filename}.whl   the wheels
 
 The fetch is the shared wheel fetcher of the deploy domain,
 `alasio.deploy.pip_download.PypiFile` (the ported pip helpers parse the page,
@@ -58,7 +58,7 @@ Usage:
     from alasio.deploy_dev.pack_server.fetch_wheel import WheelFetcher
 
     folder = env.PROJECT_ROOT.joinpath('pack').joinpath('Author_Repo_master') \
-        .joinpath('_wheel_cache').joinpath('httpx').joinpath('0.28.1')
+        .joinpath('.wheel_cache').joinpath('httpx').joinpath('0.28.1')
     fetcher = WheelFetcher(folder, 'https://pypi.org/simple', 'httpx', '0.28.1')
     try:
         file = (await fetcher.fetch_async(DOWNLOAD_MODE_PY3_ANY))[0]
@@ -139,7 +139,7 @@ class WheelFetcher:
         """
         Args:
             folder (str): Folder of the version in the cache,
-                {workspace}/_wheel_cache/{name}/{version}: the index page and
+                {workspace}/.wheel_cache/{name}/{version}: the index page and
                 the wheels are written into it. The atomic writes create the
                 folder when it does not exist
             mirrors (Mirrors | str | dict): The PyPI simple index (PEP 503)
