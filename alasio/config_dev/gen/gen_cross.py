@@ -17,6 +17,15 @@ from alasio.logger import logger
 
 
 class CrossNavGenerator:
+    # The entry of the generator, published on the class of the instance by
+    # __init__, so a postprocess function can read it: a postprocess is called
+    # with the class resolved from its __qualname__ rather than with the
+    # instance, see alasio.config_dev.parse.postprocess.run_postprocess. It is
+    # published on the class of the instance instead of this class because a
+    # process runs several generators (the generator of the library is built
+    # while a mod is generated), and each one publishes its own entry
+    entry: ModEntry
+
     def __init__(self, entry: ModEntry):
         """
         维护带跨nav引用的数据
@@ -24,6 +33,7 @@ class CrossNavGenerator:
         {nav}_i18n.json
         """
         self.entry = entry
+        type(self).entry = entry
         self.root = PathStr.new(entry.root).abspath()
         self.path_config: PathStr = self.root.joinpath(entry.path_config)
 
