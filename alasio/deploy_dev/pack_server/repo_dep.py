@@ -2,7 +2,7 @@
 Generate the packs of the python dependencies of a repo (steps 4.1 and 6).
 
 A repo of the pack server serves the dependencies its latest commit declares in
-update_pack_deps as packs, the same job machine as the repo tree: a client
+pack_deps as packs, the same job machine as the repo tree: a client
 downloads a pack of a version once and updates with the update packs afterwards
 instead of installing the distribution with pip. Every dependency gets a
 channel of its own:

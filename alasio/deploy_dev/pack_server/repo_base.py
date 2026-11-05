@@ -36,8 +36,8 @@ writes to the workspace: the steps of the flow do.
 
 The mod entry of the latest commit declares what is generated, see
 ModEntry: the dependency file of the repo (requirements_file), the names
-that update by pack (update_pack_deps) and the indexes the repo provides
-(update_provide_pypi_mirrors). The declarations are read from the entry file
+that update by pack (pack_deps) and the indexes the repo provides
+(provide_wheel). The declarations are read from the entry file
 of the commit, never from the config of the run directory: the config is the
 same for every version of the repo, the entry is the version.
 
@@ -113,7 +113,7 @@ class DepBuildInfo(msgspec.Struct):
         lookbacks (Dict[str, DepInfo]): {version: pin} of the older versions of
             the window, the versions a client may still be on, the old side of
             the update packs
-        pack_dep (bool): True when the name is one of the update_pack_deps of
+        pack_dep (bool): True when the name is one of the pack_deps of
             the mod entry: the dependency packs are built of it
         provide_wheel (bool): True when the latest pin comes from an index the
             mod entry provides: every wheel of the version is published to the
@@ -150,7 +150,7 @@ def is_provided_source(source, provide_mirrors):
         source (str): Normalized base url of the index of a pin, '' when the
             pin has no source
         provide_mirrors (dict[str, str]): The provided indexes of the entry,
-            see RepoBase.update_provide_pypi_mirrors
+            see RepoBase.provide_wheel
 
     Returns:
         bool: True when the pin comes from a provided index, the ones the
@@ -460,11 +460,11 @@ class RepoBase:
         return self.wheel.repo_entry[self.latest_commit]
 
     @cached_property
-    def update_provide_pypi_mirrors(self):
+    def provide_wheel(self):
         """
         The indexes the mod entry provides with the update pack, normalized.
 
-        The update_provide_pypi_mirrors of the mod entry at the latest commit
+        The provide_wheel of the mod entry at the latest commit
         of the repo: the wheels of the dependencies whose dependency file
         annotates one of these indexes are the ones the repo provides, the
         ones a client cannot install from the index it installs the other
@@ -484,7 +484,7 @@ class RepoBase:
         """
         out = {}
         commit = self.latest_commit
-        for url in self.entry.update_provide_pypi_mirrors:
+        for url in self.entry.provide_wheel:
             normalized = normalize_index_url(url)
             if not normalized:
                 # the model refuses a url that is not http(s), this is the
@@ -496,7 +496,7 @@ class RepoBase:
                 continue
             out.setdefault(normalized, url)
         logger.debug(
-            f'Using update_provide_pypi_mirrors of {MOD_ENTRY_PATH} at commit '
+            f'Using provide_wheel of {MOD_ENTRY_PATH} at commit '
             f'{commit}: {", ".join(out)}')
         return out
 
@@ -505,7 +505,7 @@ class RepoBase:
         """
         The dependencies to build, and what each of them asks for.
 
-        The names of the mod entry update_pack_deps and the names whose latest
+        The names of the mod entry pack_deps and the names whose latest
         pin comes from an index the entry provides, see DepBuildInfo: the first
         ones get the dependency packs, the second ones get their wheels
         published to the pip index, a name of both gets both. A name is in the
@@ -524,14 +524,14 @@ class RepoBase:
                 cannot be read, or a dependency file of the window cannot be
                 read (see LookbackWheel)
         """
-        declared = self.entry.update_pack_deps
+        declared = self.entry.pack_deps
         commit = self.latest_commit
         if declared:
             logger.info(
-                f'Using update_pack_deps of {MOD_ENTRY_PATH} at {commit}: {", ".join(declared)}')
+                f'Using pack_deps of {MOD_ENTRY_PATH} at {commit}: {", ".join(declared)}')
         else:
             logger.info(
-                f'No update_pack_deps declared by {MOD_ENTRY_PATH} at {commit}, '
+                f'No pack_deps declared by {MOD_ENTRY_PATH} at {commit}, '
                 f'no dependency pack is built')
         # the names are matched PEP 503 normalized: the entry may write a name
         # the dependency file writes another way. A dict keeps the order of the
@@ -542,7 +542,7 @@ class RepoBase:
         # files of the commits, the same lookup the entry above comes from
         latest_deps = self.wheel.latest_deps
         lookback_deps = self.wheel.lookback_deps
-        provide_mirrors = self.update_provide_pypi_mirrors
+        provide_mirrors = self.provide_wheel
 
         deps = {}
         for name, pin in latest_deps.items():
@@ -574,7 +574,7 @@ class RepoBase:
             else:
                 logger.warning(
                     f'Dependency "{name}" is not pinned to a version in the lookback window, '
-                    f'nothing is built of it; a dependency of the mod entry update_pack_deps '
+                    f'nothing is built of it; a dependency of the mod entry pack_deps '
                     f'must be pinned with "==" in the dependency file of the repo')
         return deps
 

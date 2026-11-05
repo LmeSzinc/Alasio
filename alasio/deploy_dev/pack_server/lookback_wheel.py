@@ -22,7 +22,7 @@ source: an old dependency file may annotate an index of its own as well as the
 latest one does.
 
 latest_deps is not filtered, it is the pin set of the latest dependency file:
-the release side decides what is built (the update_pack_deps of the mod entry)
+the release side decides what is built (the pack_deps of the mod entry)
 and what is published (the pins whose source the entry provides).
 
 The file to read is the one the commit itself declares, the version of the mod
@@ -272,7 +272,7 @@ class LookbackWheel:
         client updates to. Its pins are the target: every one of them gets a
         full pack, and every version of lookback_deps gets an update path to
         them. The pin set is not filtered: the release side decides what is
-        built (the update_pack_deps of the mod entry) and what is published
+        built (the pack_deps of the mod entry) and what is published
         (the pins whose source the entry provides). A pin carries the index
         its '# from' annotation names, '' when the file annotates none.
 

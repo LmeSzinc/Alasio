@@ -82,7 +82,7 @@ REQUIREMENTS = {
 
 # entry of the mock repo: by default it declares the dependency the tests build
 # a pack channel of, see entry_source
-DEFAULT_ENTRY = "name: m\nupdate_pack_deps:\n  - httpx\n"
+DEFAULT_ENTRY = "Mod:\n  name: m\nUpdate:\n  pack_deps:\n  - httpx\n"
 
 # folder of the workspace of the config in the run directory
 WORKSPACE = 'pack/Author_Repo_master'
@@ -105,14 +105,14 @@ def _fresh_cache(monkeypatch):
 
 def entry_source(*names, provide=None, requirements_file=None):
     """
-    Build the declaration of a mod entry declaring update_pack_deps.
+    Build the declaration of a mod entry declaring pack_deps.
 
     Args:
         *names (str): Names to declare, none for a declaration that omits the
             key (an entry never declares the mirror the pack server fetches
             from: the pins of the dependency file do)
         provide (Iterable[str] | None): Value of the
-            update_provide_pypi_mirrors declaration, None for a declaration
+            provide_wheel declaration, None for a declaration
             that omits the key (the default of ModEntry)
         requirements_file (str | None): Value of the requirements_file
             declaration, None for a declaration that omits the key
@@ -120,15 +120,19 @@ def entry_source(*names, provide=None, requirements_file=None):
     Returns:
         str: Content of the mod entry file
     """
-    lines = ['name: m']
+    lines = ['Mod:', '  name: m', 'Update:']
     if names:
-        lines.append('update_pack_deps:')
+        lines.append('  pack_deps:')
         lines.extend(f'  - {name}' for name in names)
+    else:
+        # the declaration updates nothing by pack: an omitted key would mean
+        # the default, the library itself
+        lines.append('  pack_deps: []')
     if provide is not None:
-        lines.append('update_provide_pypi_mirrors:')
+        lines.append('  provide_wheel:')
         lines.extend(f'  - {url!r}' for url in provide)
     if requirements_file is not None:
-        lines.append(f'requirements_file: {requirements_file!r}')
+        lines.append(f'  requirements_file: {requirements_file!r}')
     return '\n'.join(lines) + '\n'
 
 
@@ -362,8 +366,8 @@ class TestDeps:
             gen = Repo(make_repo(entry=entry_source('requests')), make_config())
             assert gen.base.deps == {}
         assert capture.concat() == """\
-INFO | Using update_pack_deps of module/config/_index/mod_entry.yaml at c3: requests
-WARNING | Dependency "requests" is not pinned to a version in the lookback window, nothing is built of it; a dependency of the mod entry update_pack_deps must be pinned with "==" in the dependency file of the repo
+INFO | Using pack_deps of module/config/_index/mod_entry.yaml at c3: requests
+WARNING | Dependency "requests" is not pinned to a version in the lookback window, nothing is built of it; a dependency of the mod entry pack_deps must be pinned with "==" in the dependency file of the repo
 """
 
     def test_name_is_normalized(self, fs, run_dir, mirror):
@@ -374,23 +378,24 @@ WARNING | Dependency "requests" is not pinned to a version in the lookback windo
         assert list(deps) == ['ruamel-yaml']
         assert deps['ruamel-yaml'].latest.version == '0.18.6'
 
-    def test_entry_without_update_pack_deps(self, fs, run_dir, mirror):
-        """An entry without update_pack_deps declares no dependency."""
+    def test_entry_without_pack_deps(self, fs, run_dir, mirror):
+        """An entry without pack_deps declares no dependency."""
         gen = Repo(make_repo(entry=entry_source()), make_config())
         assert gen.base.deps == {}
 
     def test_entry_missing(self, fs, run_dir, mirror):
-        """A repo without an entry builds no dependency, the reason is logged."""
+        """A repo without an entry gets the defaults: the library updated by pack."""
         with logger.mock_capture_writer() as capture:
             gen = Repo(make_repo(entry=None), make_config())
             assert gen.base.deps == {}
         assert capture.concat() == """\
-INFO | No update_pack_deps declared by module/config/_index/mod_entry.yaml at c3, no dependency pack is built
+INFO | Using pack_deps of module/config/_index/mod_entry.yaml at c3: alasio
+WARNING | Dependency "alasio" is not pinned to a version in the lookback window, nothing is built of it; a dependency of the mod entry pack_deps must be pinned with "==" in the dependency file of the repo
 """
 
     def test_entry_broken(self, fs, run_dir, mirror):
         """A declaration that cannot be read fails the sample, nothing is silently dropped."""
-        entry = 'name: m\nupdate_pack_deps: [unclosed\n'
+        entry = 'Mod:\n  name: m\nUpdate:\n  pack_deps: [unclosed\n'
         gen = Repo(make_repo(entry=entry), make_config())
         with pytest.raises(ValueError, match='invalid yaml'):
             _ = gen.base.deps
@@ -405,7 +410,7 @@ INFO | No update_pack_deps declared by module/config/_index/mod_entry.yaml at c3
         with logger.mock_capture_writer() as capture:
             assert gen.base.deps == {}
         assert capture.concat() == """\
-INFO | Using update_pack_deps of module/config/_index/mod_entry.yaml at c2: httpx
+INFO | Using pack_deps of module/config/_index/mod_entry.yaml at c2: httpx
 WARNING | Dependency "httpx" is not pinned by the latest commit, no pack is built of it, its historical packs are kept
 """
 
@@ -449,22 +454,22 @@ class TestFetchIndex:
 class TestProvidedPins:
     """The pins whose index the repo provides, and the index they are fetched from."""
 
-    def test_update_provide_pypi_mirrors_default(self, fs, run_dir):
+    def test_provide_wheel_default(self, fs, run_dir):
         """An entry that declares no provided index keeps the default of ModEntry."""
         from alasio.config.entry.mod_entry import DEFAULT_UPDATE_PROVIDE_PYPI_MIRRORS
 
         gen = Repo(make_repo(), make_config())
         url = DEFAULT_UPDATE_PROVIDE_PYPI_MIRRORS[0]
-        assert gen.base.update_provide_pypi_mirrors == {url.rstrip('/'): url}
+        assert gen.base.provide_wheel == {url.rstrip('/'): url}
 
-    def test_update_provide_pypi_mirrors_normalized(self, fs, run_dir):
+    def test_provide_wheel_normalized(self, fs, run_dir):
         """The declared indexes are normalized, the repeated one is kept once."""
         entry = entry_source('httpx', provide=(
             'http://Deps.Example:80/simple/',
             'http://deps.example/simple',
         ))
         gen = Repo(make_repo(entry=entry), make_config())
-        assert gen.base.update_provide_pypi_mirrors == {
+        assert gen.base.provide_wheel == {
             'http://deps.example/simple': 'http://Deps.Example:80/simple/',
         }
 
@@ -566,12 +571,13 @@ class TestRun:
         assert not join_path(run_dir, WORKSPACE, 'wheel').exists()
 
     def test_no_dependency(self, fs, run_dir, mirror):
-        """A repo whose entry declares no dependency still publishes the tree packs."""
+        """A repo whose entry declares no pin still publishes the tree packs."""
         with logger.mock_capture_writer() as capture:
             gen = Repo(make_repo(entry=None), make_config())
             assert gen.run() is None
         assert capture.concat() == """\
-INFO | No update_pack_deps declared by module/config/_index/mod_entry.yaml at c3, no dependency pack is built
+INFO | Using pack_deps of module/config/_index/mod_entry.yaml at c3: alasio
+WARNING | Dependency "alasio" is not pinned to a version in the lookback window, nothing is built of it; a dependency of the mod entry pack_deps must be pinned with "==" in the dependency file of the repo
 INFO | No dependency to build of "Author_Repo_master", skipped
 INFO | Generating packs of "Author_Repo_master": 3 versions, latest=c3
 INFO | Writing full pack: "{run_dir}/pack/Author_Repo_master/packrepo/c3/full.pack"

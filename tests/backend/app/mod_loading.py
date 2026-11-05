@@ -81,8 +81,8 @@ def collect_mod(mod):
         'path_config': str(mod.path_config),
         'path_assets': str(mod.path_assets),
         'exist': bool(entry.exist()),
-        'path_main': entry.data.path_main,
-        'path_main_exists': bool(os.path.isfile(mod.root.joinpath(entry.data.path_main))),
+        'path_main': entry.path_main,
+        'path_main_exists': bool(os.path.isfile(mod.root.joinpath(entry.path_main))),
         'nav_names': sorted(mod.nav_index_data().keys()),
         'config_names': sorted(mod.config_index_data().keys()),
         'task_count': len(mod.task_index_data()),
@@ -93,7 +93,7 @@ def collect_mod(mod):
         'worker_start_args': {
             'project_root': str(env.PROJECT_ROOT),
             'mod_root': str(mod.root),
-            'path_main': entry.data.path_main,
+            'path_main': entry.path_main,
         },
     }
 

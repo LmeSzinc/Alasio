@@ -33,7 +33,7 @@ def build(fs, entry=None):
         GenModEntry:
     """
     if entry is None:
-        entry = ModEntry(fs.root_dir.path, data=ModEntryModel(name='test'))
+        entry = ModEntry(fs.root_dir.path, data=ModEntryModel.build(name='test'))
     return GenModEntry(entry)
 
 
@@ -63,10 +63,10 @@ class TestGenerateModEntry:
         """The written declaration reads back to the entry it was written from."""
         entry = ModEntry(
             fs.root_dir.path,
-            data=ModEntryModel(
+            data=ModEntryModel.build(
                 name='test',
                 gui_language=['zh-CN', 'ja-JP'],
-                update_pack_deps=['httpx'],
+                pack_deps=['httpx'],
                 scheduler_priority='A > B > C',
             ),
         )
@@ -86,19 +86,19 @@ class TestGenerateModEntry:
     def test_missing_key_is_added_with_the_default(self, fs):
         """A declaration of some keys only is completed with the model defaults."""
         gen = build(fs)
-        fs.create_file(gen.mod_entry_file, contents='name: test\n')
+        fs.create_file(gen.mod_entry_file, contents='Mod:\n  name: test\n')
 
         gen.generate_mod_entry()
 
         entry = ModEntry(fs.root_dir.path)
         assert entry.name == 'test'
         assert entry.path_main == 'module/main.py'
-        assert entry.update_pack_deps == ()
+        assert entry.pack_deps == ('alasio',)
 
     def test_declared_value_is_kept(self, fs):
         """A value the file declares survives the generation."""
-        gen = build(fs, ModEntry(fs.root_dir.path, data=ModEntryModel(name='test', path_assets='res')))
-        fs.create_file(gen.mod_entry_file, contents='name: test\npath_assets: res\n')
+        gen = build(fs, ModEntry(fs.root_dir.path, data=ModEntryModel.build(name='test', path_assets='res')))
+        fs.create_file(gen.mod_entry_file, contents='Mod:\n  name: test\n  path_assets: res\n')
 
         gen.generate_mod_entry()
 
@@ -107,7 +107,7 @@ class TestGenerateModEntry:
     def test_unknown_key_is_dropped(self, fs):
         """A key the model does not know is not written back."""
         gen = build(fs)
-        fs.create_file(gen.mod_entry_file, contents='name: test\nfuture_key: 1\n')
+        fs.create_file(gen.mod_entry_file, contents='Mod:\n  name: test\nfuture_key: 1\n')
 
         gen.generate_mod_entry()
 
@@ -200,25 +200,25 @@ class TestModEntryBlockScalar:
         """A multi-line order is written as a block scalar, not escaped."""
         entry = ModEntry(
             fs.root_dir.path,
-            data=ModEntryModel(name='test', scheduler_priority='A > B\n> C'),
+            data=ModEntryModel.build(name='test', scheduler_priority='A > B\n> C'),
         )
         gen = build(fs, entry)
 
         gen.generate_mod_entry()
 
         text = open(gen.mod_entry_file, encoding='utf-8').read()
-        assert 'scheduler_priority: |-\n  A > B\n  > C\n' in text
+        assert '  scheduler_priority: |-\n    A > B\n    > C\n' in text
         assert ModEntry(fs.root_dir.path).scheduler_priority == 'A > B\n> C'
 
     def test_single_line_priority_is_plain(self, fs):
         """A single-line order is a plain scalar, the file stays readable."""
         entry = ModEntry(
             fs.root_dir.path,
-            data=ModEntryModel(name='test', scheduler_priority='A > B'),
+            data=ModEntryModel.build(name='test', scheduler_priority='A > B'),
         )
         gen = build(fs, entry)
 
         gen.generate_mod_entry()
 
         text = open(gen.mod_entry_file, encoding='utf-8').read()
-        assert 'scheduler_priority: A > B\n' in text
+        assert '  scheduler_priority: A > B\n' in text

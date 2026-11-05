@@ -48,7 +48,7 @@ Usage:
 
 import os
 from copy import deepcopy
-from typing import Dict, List, Union
+from typing import Dict, List, Tuple, Union
 
 import msgspec
 import yaml
@@ -126,8 +126,17 @@ MOD_ENTRY_PATH = f'{MOD_CONFIG}/{MOD_ENTRY_SUBPATH}'
 MOD_ENTRY_NAME = 'MOD_ENTRY'
 
 # Default dependency file of a mod, relative to the mod root, see
-# ModEntryModel.requirements_file
+# UpdateModel.requirements_file
 DEFAULT_REQUIREMENTS_FILE = 'requirements.txt'
+
+# Distributions a mod updates from the pack channel by default: the library
+# itself is distributed to a mod as a pack, see UpdateModel.pack_deps
+DEFAULT_PACK_DEPS = ('alasio',)
+
+# The fields of a declaration that are a fixed set rather than an ordered list,
+# see UpdateModel: they are tuples in the model, and the code that builds a
+# declaration names them as a list or a tuple
+TUPLE_FIELDS = ('provide_wheel', 'pack_deps')
 
 # Modules of the library that live next to it, relative to PROJECT_ROOT, the
 # mods the backend loads besides the project root itself. A folder without a
@@ -156,22 +165,12 @@ class ModEntryError(ValueError):
     """
 
 
-class ModEntryModel(Struct):
+class ModModel(Struct):
     """
-    The yaml model of ``mod_entry.yaml``, the declaration of a mod.
+    The ``Mod`` section: what the mod is called and where its code lives.
 
-    The field names are the keys of the file, like the deploy config, and the
-    ``help`` annotation of every field is the comment written above the key:
-    the declaration is written from this model, so the file follows it as the
-    model evolves, and a reader never writes it.
-
-    The collections are lists, the order is meaningful (the asset languages
-    are tried in the declared order), and a value may repeat: the ordered sets
-    and tuples the runtime uses are the views of :class:`ModEntry`.
-
-    ``root`` and ``path_config`` are not fields: they are facts of the
-    location, owned by :class:`ModEntry`. A file that declares them is read
-    without them, msgspec ignores the keys the model does not know.
+    The field names are the keys of the file, and the ``help`` annotation of
+    every field is the comment written above the key, see ModEntryModel.
     """
     # The name is required in a declaration, the default exists so the model
     # is default constructible for the writer, a read rejects the empty name
@@ -198,10 +197,33 @@ class ModEntryModel(Struct):
         "Languages of the GUI, the generated i18n files carry these",
         "Use the tags of the frontend, e.g. 'zh-CN', 'en-US', 'ja-JP', 'zh-TW', 'es-ES'",
     ]})] = field(default_factory=lambda: ['zh-CN', 'en-US'])
+
+
+class SchedulerModel(Struct):
+    """
+    The ``Scheduler`` section: what the scheduler of the mod reads and runs.
+
+    The field names are the keys of the file, and the ``help`` annotation of
+    every field is the comment written above the key, see ModEntryModel.
+    """
     task_entry_folders: Annotated[List[str], Meta(extra={"help": [
         "Folders scanned for task entry functions, relative to the mod root",
         "Every .py file under them is parsed for task entries",
     ]})] = field(default_factory=lambda: ['module', 'tasks'])
+    scheduler_priority: Annotated[str, Meta(extra={"help": [
+        "Task order of the scheduler, a task runs before the tasks after it",
+        "The DSL of alasio.base.filter: 'A > B > C', a line starting with '>'",
+        "continues the order of the line above it",
+    ]})] = DEFAULT_SCHEDULER_PRIORITY
+
+
+class UpdateModel(Struct):
+    """
+    The ``Update`` section: where the mod comes from and how it is installed.
+
+    The field names are the keys of the file, and the ``help`` annotation of
+    every field is the comment written above the key, see ModEntryModel.
+    """
     mirrors: Annotated[ModMirrorInput, Meta(extra={"help": [
         "Update source of the mod, the mirrors of its update server",
         "A single url, name to url, group to mirrors, or the flat/nested mix",
@@ -211,26 +233,91 @@ class ModEntryModel(Struct):
         "Mirrors of the PyPI simple index the distributions are downloaded from",
         "The same forms as 'mirrors'; remove the key to use the default mirrors",
     ]})] = field(default_factory=lambda: deepcopy(DEFAULT_PYPI_MIRRORS))
-    update_provide_pypi_mirrors: Annotated[List[ModProvideIndex], Meta(extra={"help": [
+    provide_wheel: Annotated[Tuple[ModProvideIndex, ...], Meta(extra={"help": [
         "PyPI indexes the update packs of the mod provide",
         "The wheels of the dependencies that a dependency file annotates with",
         "one of these indexes are published with the update pack",
         "Use an empty list to provide no index",
-    ]})] = field(default_factory=lambda: list(DEFAULT_UPDATE_PROVIDE_PYPI_MIRRORS))
+    ]})] = DEFAULT_UPDATE_PROVIDE_PYPI_MIRRORS
+    pack_deps: Annotated[Tuple[str, ...], Meta(extra={"help": [
+        "Distributions updated from the pack channel instead of pip",
+        "Any case and separator style, the compare is on the PEP 503 name",
+        "A distribution not declared here installs with pip",
+    ]})] = DEFAULT_PACK_DEPS
     requirements_file: Annotated[str, Meta(extra={"help": [
         "Relative path from the mod root to the requirements file of the mod",
         "Every distribution in it is pinned to an exact version",
     ]})] = DEFAULT_REQUIREMENTS_FILE
-    update_pack_deps: Annotated[List[str], Meta(extra={"help": [
-        "Distributions updated from the pack channel instead of pip",
-        "Any case and separator style, the compare is on the PEP 503 name",
-        "A distribution not declared here installs with pip",
-    ]})] = field(default_factory=list)
-    scheduler_priority: Annotated[str, Meta(extra={"help": [
-        "Task order of the scheduler, a task runs before the tasks after it",
-        "The DSL of alasio.base.filter: 'A > B > C', a line starting with '>'",
-        "continues the order of the line above it",
-    ]})] = DEFAULT_SCHEDULER_PRIORITY
+
+
+class ModEntryModel(Struct):
+    """
+    The yaml model of ``mod_entry.yaml``, the declaration of a mod.
+
+    The field names are the keys of the file, like the deploy config, and the
+    ``help`` annotation of every field is the comment written above it: the
+    declaration is written from this model, so the file follows it as the
+    model evolves, and a reader never writes it.
+
+    The declaration is grouped in the sections the framework reads it for:
+    ``Mod`` (what the mod is), ``Scheduler`` (what it runs) and ``Update``
+    (where it comes from), see the section models.
+
+    The collections are lists, the order is meaningful (the asset languages
+    are tried in the declared order), and a value may repeat: the ordered sets
+    the runtime uses are the views of :class:`ModEntry`. The two update lists
+    that the framework reads as a fixed set, ``provide_wheel`` and
+    ``pack_deps``, are tuples: a mod may write them as a yaml list, and the
+    model answers a tuple either way.
+
+    ``root`` and ``path_config`` are not fields: they are facts of the
+    location, owned by :class:`ModEntry`. A file that declares them is read
+    without them, msgspec ignores the keys the model does not know.
+    """
+    Mod: Annotated[ModModel, Meta(extra={"help": [
+        "What the mod is: its name, its code and the language of its GUI",
+    ]})] = field(default_factory=ModModel)
+    Scheduler: Annotated[SchedulerModel, Meta(extra={"help": [
+        "What the scheduler of the mod runs",
+    ]})] = field(default_factory=SchedulerModel)
+    Update: Annotated[UpdateModel, Meta(extra={"help": [
+        "Where the mod comes from and how its dependencies are installed",
+    ]})] = field(default_factory=UpdateModel)
+
+    @classmethod
+    def build(cls, **fields):
+        """
+        Build a declaration from the fields of its sections.
+
+        The file groups the fields in sections, the code that holds the values
+        names them directly, the section is resolved from the field:
+        ``ModEntryModel.build(name='m', pack_deps=['httpx'])`` is
+        ``ModEntryModel(Mod=ModModel(name='m'), Update=UpdateModel(pack_deps=('httpx',)))``.
+        The collections a declaration reads as tuples, ``provide_wheel`` and
+        ``pack_deps``, are converted: a list and a tuple name the same set, and
+        the value a caller builds is the value a file reads back.
+
+        Args:
+            **fields: The declared fields, of any section
+
+        Returns:
+            ModEntryModel: The declaration
+
+        Raises:
+            TypeError: If a field belongs to no section
+        """
+        sections = {'Mod': {}, 'Scheduler': {}, 'Update': {}}
+        models = {'Mod': ModModel, 'Scheduler': SchedulerModel, 'Update': UpdateModel}
+        for key, value in fields.items():
+            for name, model in models.items():
+                if key in model.__struct_fields__:
+                    if key in TUPLE_FIELDS and value is not None:
+                        value = tuple(value)
+                    sections[name][key] = value
+                    break
+            else:
+                raise TypeError(f'No section of the entry declares "{key}"')
+        return cls(**{name: model(**sections[name]) for name, model in models.items()})
 
 
 def _parse(source, source_name=''):
@@ -264,9 +351,9 @@ def _parse(source, source_name=''):
         model = msgspec.convert(content, type=ModEntryModel, strict=True)
     except msgspec.ValidationError as e:
         raise ModEntryError(f'{prefix}invalid entry value: {e}') from None
-    if not model.name:
+    if not model.Mod.name:
         raise ModEntryError(
-            f'{prefix}name is required, a declaration names the mod it declares')
+            f'{prefix}Mod.name is required, a declaration names the mod it declares')
     return model
 
 
@@ -357,7 +444,7 @@ class ModEntry:
         Returns:
             str: Name of the mod
         """
-        return self.data.name
+        return self.data.Mod.name
 
     @cached_property
     def path_main(self):
@@ -365,7 +452,7 @@ class ModEntry:
         Returns:
             str: Relative path from the mod root to the scheduler
         """
-        return self.data.path_main
+        return self.data.Mod.path_main
 
     @cached_property
     def path_assets(self):
@@ -373,7 +460,7 @@ class ModEntry:
         Returns:
             str: Relative path from the mod root to the assets folder
         """
-        return self.data.path_assets
+        return self.data.Mod.path_assets
 
     @cached_property
     def asset_ext(self):
@@ -381,7 +468,7 @@ class ModEntry:
         Returns:
             dict[str, None]: Valid file extensions of the assets
         """
-        return dict.fromkeys(self.data.asset_ext)
+        return dict.fromkeys(self.data.Mod.asset_ext)
 
     @cached_property
     def asset_lang(self):
@@ -389,7 +476,7 @@ class ModEntry:
         Returns:
             dict[str, None]: Valid languages of the assets, in the tried order
         """
-        return dict.fromkeys(self.data.asset_lang)
+        return dict.fromkeys(self.data.Mod.asset_lang)
 
     @cached_property
     def gui_language(self):
@@ -397,7 +484,7 @@ class ModEntry:
         Returns:
             dict[str, None]: Languages of the GUI
         """
-        return dict.fromkeys(self.data.gui_language)
+        return dict.fromkeys(self.data.Mod.gui_language)
 
     @cached_property
     def task_entry_folders(self):
@@ -405,7 +492,7 @@ class ModEntry:
         Returns:
             dict[str, None]: Folders scanned for task entry functions
         """
-        return dict.fromkeys(self.data.task_entry_folders)
+        return dict.fromkeys(self.data.Scheduler.task_entry_folders)
 
     @cached_property
     def mirrors(self):
@@ -420,7 +507,7 @@ class ModEntry:
             Mirrors | None: The update source, None when the mod declares none
                 or when the declaration is malformed
         """
-        return self._read_mirrors(self.data.mirrors, 'update source')
+        return self._read_mirrors(self.data.Update.mirrors, 'update source')
 
     @cached_property
     def pypi_mirrors(self):
@@ -434,7 +521,7 @@ class ModEntry:
             Mirrors | None: The mirror structure, None when neither the
                 declaration nor the default can be read
         """
-        return self._read_mirrors(self.data.pypi_mirrors, 'pypi mirrors')
+        return self._read_mirrors(self.data.Update.pypi_mirrors, 'pypi mirrors')
 
     def _read_mirrors(self, value, label):
         """
@@ -461,12 +548,12 @@ class ModEntry:
             return None
 
     @cached_property
-    def update_provide_pypi_mirrors(self):
+    def provide_wheel(self):
         """
         Returns:
             tuple[str, ...]: PyPI indexes the update packs of the mod provide
         """
-        return tuple(dict.fromkeys(self.data.update_provide_pypi_mirrors))
+        return tuple(dict.fromkeys(self.data.Update.provide_wheel))
 
     @cached_property
     def requirements_file(self):
@@ -474,15 +561,15 @@ class ModEntry:
         Returns:
             str: Relative path from the mod root to the requirements file
         """
-        return self.data.requirements_file
+        return self.data.Update.requirements_file
 
     @cached_property
-    def update_pack_deps(self):
+    def pack_deps(self):
         """
         Returns:
             tuple[str, ...]: Distributions updated from the pack channel
         """
-        return tuple(dict.fromkeys(self.data.update_pack_deps))
+        return tuple(dict.fromkeys(self.data.Update.pack_deps))
 
     @cached_property
     def scheduler_priority(self):
@@ -496,7 +583,7 @@ class ModEntry:
         Returns:
             str: The declared order
         """
-        return self.data.scheduler_priority.strip()
+        return self.data.Scheduler.scheduler_priority.strip()
 
     def iter_asset_lang(self):
         """
@@ -645,8 +732,10 @@ class ModEntry:
             root=env.ALASIO_ROOT,
             path_config=ALASIO_CONFIG,
             data=ModEntryModel(
-                name='alasio',
-                gui_language=['zh-CN', 'en-US', 'ja-JP', 'zh-TW', 'en-ES'],
+                Mod=ModModel(
+                    name='alasio',
+                    gui_language=['zh-CN', 'en-US', 'ja-JP', 'zh-TW', 'en-ES'],
+                ),
             ),
         )
 

@@ -66,7 +66,7 @@ class GenTaskEntry(CrossNavGenerator):
 
     def _iter_task_entry_files(self):
         """
-        Iter .py files under entry.data.task_entry_folders,
+        Iter .py files under entry.task_entry_folders,
         skipping path segments that start with "_" (e.g. __pycache__, _index)
 
         Yields:

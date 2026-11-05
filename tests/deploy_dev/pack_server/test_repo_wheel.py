@@ -2,7 +2,7 @@
 Tests for the wheels of the provided pins of a repo: repo_wheel.RepoWheel.
 
 The step downloads every wheel of the pins whose index the mod entry declares
-in update_provide_pypi_mirrors to the private cache, and syncs them to the
+in provide_wheel to the private cache, and syncs them to the
 folder a client installs from:
 
     {workspace}/_wheel_cache/{name}/{version}/*.whl   the cache
@@ -182,7 +182,7 @@ class TestFetch:
         cache = cache_folder(run_dir, 'msgspec', '0.22.0')
         published = published_folder(run_dir, 'msgspec', '0.22.0')
         assert capture.concat() == f"""\
-INFO | No update_pack_deps declared by module/config/_index/mod_entry.yaml at c3, no dependency pack is built
+INFO | No pack_deps declared by module/config/_index/mod_entry.yaml at c3, no dependency pack is built
 INFO | [1/1] Fetching wheels of "msgspec==0.22.0", index="http://provided.example/simple"
 INFO | Download index page: "http://provided.example/simple/msgspec/"
 INFO | Download wheel: "http://provided.example/packages/msgspec-0.22.0-cp38-cp38-manylinux_2_17_x86_64.whl" -> "{cache}/msgspec-0.22.0-cp38-cp38-manylinux_2_17_x86_64.whl"
@@ -252,7 +252,7 @@ INFO | Copy wheel: "{cache}/msgspec-0.22.0-cp38-cp38-win_amd64.whl" -> "{publish
         with logger.mock_capture_writer() as capture:
             gen.generate()
         assert capture.concat() == """\
-INFO | No update_pack_deps declared by module/config/_index/mod_entry.yaml at c3, no dependency pack is built
+INFO | No pack_deps declared by module/config/_index/mod_entry.yaml at c3, no dependency pack is built
 """
         assert mirror.requests == []
         assert gen.wheel.publish_files == {}
@@ -306,7 +306,7 @@ class TestProxy:
         cache = cache_folder(run_dir, 'msgspec', '0.22.0')
         published = published_folder(run_dir, 'msgspec', '0.22.0')
         assert capture.concat() == f"""\
-INFO | No update_pack_deps declared by module/config/_index/mod_entry.yaml at c3, no dependency pack is built
+INFO | No pack_deps declared by module/config/_index/mod_entry.yaml at c3, no dependency pack is built
 INFO | Downloading the wheels through the proxy "{PROXY}"
 INFO | [1/1] Fetching wheels of "msgspec==0.22.0", index="http://provided.example/simple"
 INFO | Download index page: "http://provided.example/simple/msgspec/"
@@ -368,7 +368,7 @@ class TestSync:
             WheelFlow(repo, client=mirror.client).generate()
 
         assert capture.concat() == f"""\
-INFO | No update_pack_deps declared by module/config/_index/mod_entry.yaml at c3, no dependency pack is built
+INFO | No pack_deps declared by module/config/_index/mod_entry.yaml at c3, no dependency pack is built
 INFO | [1/1] Fetching wheels of "msgspec==0.22.0", index="http://provided.example/simple"
 INFO | Wheel exists, skipped: "{cache_folder(run_dir, 'msgspec', '0.22.0')}/msgspec-0.22.0-cp38-cp38-manylinux_2_17_x86_64.whl"
 INFO | Wheel exists, skipped: "{cache_folder(run_dir, 'msgspec', '0.22.0')}/msgspec-0.22.0-cp38-cp38-win_amd64.whl"

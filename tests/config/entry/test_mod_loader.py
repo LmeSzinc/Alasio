@@ -47,7 +47,7 @@ def write_mod(fs, root, folder, name):
         PathStr: The root of the mod
     """
     mod_root = root.joinpath(folder)
-    fs.create_file(mod_root.joinpath(MOD_ENTRY_FILE), contents=f'name: {name}\n')
+    fs.create_file(mod_root.joinpath(MOD_ENTRY_FILE), contents=f'Mod:\n  name: {name}\n')
     return mod_root
 
 
@@ -70,7 +70,7 @@ class TestDictMod:
         monkeypatch.setattr(env, 'PROJECT_ROOT', root)
         write_mod(fs, root, 'mod_a', 'a')
         fs.create_file(
-            root.joinpath('mod_b').joinpath(MOD_ENTRY_FILE), contents='name: [unclosed\n')
+            root.joinpath('mod_b').joinpath(MOD_ENTRY_FILE), contents='Mod:\n  name: [unclosed\n')
         loader = ModLoader(root, mod_folders=('mod_a', 'mod_b'))
 
         with logger.mock_capture_writer() as capture:
@@ -113,7 +113,7 @@ class TestSelfMod:
     def test_declared(self, fs):
         """A project root that declares a mod is the self mod."""
         root = make_root(fs)
-        fs.create_file(root.joinpath(MOD_ENTRY_FILE), contents='name: self_mod\n')
+        fs.create_file(root.joinpath(MOD_ENTRY_FILE), contents='Mod:\n  name: self_mod\n')
         loader = ModLoader(root, mod_folders=())
 
         assert loader.self_mod.name == 'self_mod'
@@ -122,7 +122,7 @@ class TestSelfMod:
     def test_broken_declaration_raises(self, fs):
         """A broken declaration of the project root fails the loader, not silently."""
         root = make_root(fs)
-        fs.create_file(root.joinpath(MOD_ENTRY_FILE), contents='name: [unclosed\n')
+        fs.create_file(root.joinpath(MOD_ENTRY_FILE), contents='Mod:\n  name: [unclosed\n')
         loader = ModLoader(root, mod_folders=())
 
         with pytest.raises(ValueError, match='invalid yaml'):

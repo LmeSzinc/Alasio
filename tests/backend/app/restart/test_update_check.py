@@ -22,7 +22,7 @@ from alasio.logger import logger
 
 def FakeEntry(name='fake', mirrors=None):
     """A mod entry of the fake mods, the declaration only."""
-    return ModEntry(data=ModEntryModel(name=name, mirrors=mirrors if mirrors is not None else ''))
+    return ModEntry(data=ModEntryModel.build(name=name, mirrors=mirrors if mirrors is not None else ''))
 
 
 class FakeMod:

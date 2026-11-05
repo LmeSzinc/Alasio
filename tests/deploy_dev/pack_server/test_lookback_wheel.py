@@ -49,7 +49,7 @@ def entry_source(requirements_file='requirements.txt'):
     Returns:
         str: Content of the mod entry file
     """
-    return f'name: m\nrequirements_file: {requirements_file!r}\n'
+    return f'Mod:\n  name: m\nUpdate:\n  requirements_file: {requirements_file!r}\n'
 
 
 def _make_chain(times):
@@ -358,7 +358,7 @@ class TestLookbackWheelEntry:
     def test_entry_broken(self):
         """An entry of any commit of the window that cannot be parsed fails the sample."""
         repo = _make_chain([100, 200])
-        _register(repo, 'c0', MOD_ENTRY_PATH, 'name: m\nrequirements_file: [unclosed\n')
+        _register(repo, 'c0', MOD_ENTRY_PATH, 'Mod:\n  name: m\nUpdate:\n  requirements_file: [unclosed\n')
         _register_entry(repo, 'c1')
         _register(repo, 'c1', 'requirements.txt', 'httpx==0.28.1\n')
         wheel = LookbackWheel(repo, _make_config())

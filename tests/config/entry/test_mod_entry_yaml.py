@@ -25,22 +25,25 @@ from alasio.testing.filesystem import fs  # noqa: F401
 
 # A complete declaration, every key the model accepts
 FULL_ENTRY = """\
-name: mod_a
-path_main: module/entry.py
-path_assets: res
-asset_ext: [.png, .webp]
-asset_lang: [cn, jp]
-gui_language: [zh-CN, ja-JP]
-task_entry_folders: [module, jobs]
-mirrors: https://mirror.example/alas
-pypi_mirrors:
-  cn:
-    self: https://pypi.example/simple
-update_provide_pypi_mirrors: [https://a.example/simple/]
-requirements_file: deps/requirements.txt
-update_pack_deps: [httpx, ruamel.yaml]
-scheduler_priority: |
-  RestartDevice > RestartGame
+Mod:
+  name: mod_a
+  path_main: module/entry.py
+  path_assets: res
+  asset_ext: [.png, .webp]
+  asset_lang: [cn, jp]
+  gui_language: [zh-CN, ja-JP]
+Scheduler:
+  task_entry_folders: [module, jobs]
+  scheduler_priority: |
+    RestartDevice > RestartGame
+Update:
+  mirrors: https://mirror.example/alas
+  pypi_mirrors:
+    cn:
+      self: https://pypi.example/simple
+  provide_wheel: [https://a.example/simple/]
+  pack_deps: [httpx, ruamel.yaml]
+  requirements_file: deps/requirements.txt
 """
 
 # The priority of the example mod as the python declaration of the mod wrote
@@ -127,19 +130,19 @@ class TestFromSource:
         """Every key of the declaration reaches the model."""
         model = ModEntry.from_source(FULL_ENTRY).data
 
-        assert model.name == 'mod_a'
-        assert model.path_main == 'module/entry.py'
-        assert model.path_assets == 'res'
-        assert model.asset_ext == ['.png', '.webp']
-        assert model.asset_lang == ['cn', 'jp']
-        assert model.gui_language == ['zh-CN', 'ja-JP']
-        assert model.task_entry_folders == ['module', 'jobs']
-        assert model.mirrors == 'https://mirror.example/alas'
-        assert model.pypi_mirrors == {'cn': {'self': 'https://pypi.example/simple'}}
-        assert model.update_provide_pypi_mirrors == ['https://a.example/simple/']
-        assert model.requirements_file == 'deps/requirements.txt'
-        assert model.update_pack_deps == ['httpx', 'ruamel.yaml']
-        assert tuple(parse_filter(model.scheduler_priority)) == ('RestartDevice', 'RestartGame')
+        assert model.Mod.name == 'mod_a'
+        assert model.Mod.path_main == 'module/entry.py'
+        assert model.Mod.path_assets == 'res'
+        assert model.Mod.asset_ext == ['.png', '.webp']
+        assert model.Mod.asset_lang == ['cn', 'jp']
+        assert model.Mod.gui_language == ['zh-CN', 'ja-JP']
+        assert model.Scheduler.task_entry_folders == ['module', 'jobs']
+        assert model.Update.mirrors == 'https://mirror.example/alas'
+        assert model.Update.pypi_mirrors == {'cn': {'self': 'https://pypi.example/simple'}}
+        assert model.Update.provide_wheel == ('https://a.example/simple/',)
+        assert model.Update.requirements_file == 'deps/requirements.txt'
+        assert model.Update.pack_deps == ('httpx', 'ruamel.yaml')
+        assert tuple(parse_filter(model.Scheduler.scheduler_priority)) == ('RestartDevice', 'RestartGame')
 
     def test_no_root(self):
         """A source has no location: the entry carries the declaration only."""
@@ -147,12 +150,12 @@ class TestFromSource:
 
     def test_defaults(self):
         """A declaration of the name only keeps every default of the model."""
-        assert ModEntry.from_source('name: m\n').data == ModEntryModel(name='m')
+        assert ModEntry.from_source('Mod:\n  name: m\n').data == ModEntryModel.build(name='m')
 
     def test_name_is_required(self):
         """A declaration without a name names no mod."""
         with pytest.raises(ModEntryError, match='name is required'):
-            ModEntry.from_source('path_main: module/entry.py\n')
+            ModEntry.from_source('Mod:\n  path_main: module/entry.py\n')
 
     def test_empty_file(self):
         """An empty declaration has no name either."""
@@ -167,32 +170,32 @@ class TestFromSource:
     def test_invalid_yaml(self):
         """A broken document is reported as a yaml error."""
         with pytest.raises(ModEntryError, match='invalid yaml'):
-            ModEntry.from_source('name: [unclosed\n')
+            ModEntry.from_source('Mod:\n  name: [unclosed\n')
 
     def test_wrong_type(self):
         """A value of the wrong type is refused instead of coerced."""
         with pytest.raises(ModEntryError, match='invalid entry value'):
-            ModEntry.from_source('name: 123\n')
+            ModEntry.from_source('Mod:\n  name: 123\n')
 
     def test_wrong_type_of_a_list(self):
         """The collections are lists in the file, a string is not one."""
         with pytest.raises(ModEntryError, match='invalid entry value'):
-            ModEntry.from_source('name: m\nasset_lang: cn\n')
+            ModEntry.from_source('Mod:\n  name: m\n  asset_lang: cn\n')
 
     def test_unknown_key_is_ignored(self):
         """A key the model does not know is ignored, msgspec drops it."""
-        assert ModEntry.from_source('name: m\nfuture_key: 1\n').name == 'm'
+        assert ModEntry.from_source('Mod:\n  name: m\nfuture_key: 1\n').name == 'm'
 
     @pytest.mark.parametrize('url', ['ftp://a.example/simple', 'a.example/simple', 'https://'])
     def test_provided_index_must_be_http(self, url):
         """An index the pack server cannot request is refused, not silently skipped."""
         with pytest.raises(ModEntryError, match='invalid entry value'):
-            ModEntry.from_source(f'name: m\nupdate_provide_pypi_mirrors: ["{url}"]\n')
+            ModEntry.from_source(f'Mod:\n  name: m\nUpdate:\n  provide_wheel: ["{url}"]\n')
 
     @pytest.mark.parametrize('key', ['root', 'path_config'])
     def test_location_keys_are_ignored(self, key):
         """The location belongs to ModEntry, a file that declares it is ignored."""
-        entry = ModEntry.from_source(f'name: m\n{key}: somewhere\n')
+        entry = ModEntry.from_source(f'Mod:\n  name: m\n{key}: somewhere\n')
 
         assert entry.name == 'm'
         assert entry.root == ''
@@ -201,16 +204,16 @@ class TestFromSource:
     def test_source_name_in_the_error(self):
         """The caller may name the source, e.g. a commit of a repo."""
         with pytest.raises(ModEntryError, match=r'mod_entry\.yaml at commit c3: invalid entry value'):
-            ModEntry.from_source('name: 123\n', source_name='mod_entry.yaml at commit c3')
+            ModEntry.from_source('Mod:\n  name: 123\n', source_name='mod_entry.yaml at commit c3')
 
     def test_scheduler_priority_dsl(self):
         """The priority is the DSL of alasio.base.filter, comment lines included."""
         entry = ModEntry.from_source(
-            'name: m\n'
-            'scheduler_priority: |\n'
-            '  RestartDevice > RestartGame\n'
-            '  # a comment\n'
-            '  > Commission > Exercise\n'
+            'Mod:\n  name: m\n'
+            'Scheduler:\n  scheduler_priority: |\n'
+            '    RestartDevice > RestartGame\n'
+            '    # a comment\n'
+            '    > Commission > Exercise\n'
         )
 
         assert tuple(parse_filter(entry.scheduler_priority)) == (
@@ -218,30 +221,32 @@ class TestFromSource:
 
     def test_scheduler_priority_edges_are_normalized(self):
         """A block scalar and a plain scalar declare the same order."""
-        block = ModEntry.from_source('name: m\nscheduler_priority: |\n  A > B\n')
-        plain = ModEntry.from_source('name: m\nscheduler_priority: A > B\n')
-        indented = ModEntry.from_source('name: m\nscheduler_priority: "  A > B  "\n')
+        block = ModEntry.from_source('Mod:\n  name: m\nScheduler:\n  scheduler_priority: |\n    A > B\n')
+        plain = ModEntry.from_source('Mod:\n  name: m\nScheduler:\n  scheduler_priority: A > B\n')
+        indented = ModEntry.from_source('Mod:\n  name: m\nScheduler:\n  scheduler_priority: "  A > B  "\n')
 
         assert block.scheduler_priority == 'A > B'
         assert block.scheduler_priority == plain.scheduler_priority == indented.scheduler_priority
 
     @pytest.mark.parametrize('declared, expected', [
         # a single url: only one candidate
-        ('mirrors: https://only.example/simple\n',
+        ('  mirrors: https://only.example/simple\n',
          {'default': 'https://only.example/simple'}),
         # name to url: each mirror is a group of its own
-        ('mirrors:\n  cn: https://cn.example/simple\n  global: https://global.example/simple\n',
+        ('  mirrors:\n    cn: https://cn.example/simple\n    global: https://global.example/simple\n',
          {'cn': 'https://cn.example/simple', 'global': 'https://global.example/simple'}),
         # group to mirrors: the members of a group are tried in order
-        ('mirrors:\n  cn:\n    self: https://self.example/simple\n    other: https://other.example/simple\n',
+        ('  mirrors:\n    cn:\n      self: https://self.example/simple\n'
+         '      other: https://other.example/simple\n',
          {'self': 'https://self.example/simple', 'other': 'https://other.example/simple'}),
         # the flat and the nested form mixed per group
-        ('mirrors:\n  cn:\n    self: https://self.example/simple\n  global: https://global.example/simple\n',
+        ('  mirrors:\n    cn:\n      self: https://self.example/simple\n'
+         '    global: https://global.example/simple\n',
          {'self': 'https://self.example/simple', 'global': 'https://global.example/simple'}),
     ])
     def test_mirror_forms(self, declared, expected):
         """The mirrors keep the input forms of Mirrors.from_input()."""
-        entry = ModEntry.from_source('name: m\n' + declared)
+        entry = ModEntry.from_source('Mod:\n  name: m\nUpdate:\n' + declared)
 
         assert Mirrors.from_input(entry.mirrors).urls == expected
 
@@ -252,33 +257,31 @@ class TestViews:
     def test_ordered_sets(self):
         """The declared languages are dicts, a repeat is kept at its first place."""
         entry = ModEntry.from_source(
-            'name: m\n'
-            'asset_lang: [cn, en, cn]\n'
-            'gui_language: [zh-CN]\n'
+            'Mod:\n  name: m\n  asset_lang: [cn, en, cn]\n  gui_language: [zh-CN]\n'
         )
 
         assert entry.asset_lang == {'cn': None, 'en': None}
         assert entry.gui_language == {'zh-CN': None}
         # the model keeps the file as it is written
-        assert entry.data.asset_lang == ['cn', 'en', 'cn']
+        assert entry.data.Mod.asset_lang == ['cn', 'en', 'cn']
 
     def test_ordered_tuples(self):
         """The declared lists are tuples, a repeat is kept once."""
         entry = ModEntry.from_source(
-            'name: m\n'
-            'update_pack_deps: [httpx, ruamel.yaml, httpx]\n'
-            'update_provide_pypi_mirrors: [https://a.example/simple/, https://a.example/simple/]\n'
+            'Mod:\n  name: m\nUpdate:\n'
+            '  pack_deps: [httpx, ruamel.yaml, httpx]\n'
+            '  provide_wheel: [https://a.example/simple/, https://a.example/simple/]\n'
         )
 
-        assert entry.update_pack_deps == ('httpx', 'ruamel.yaml')
-        assert entry.update_provide_pypi_mirrors == ('https://a.example/simple/',)
+        assert entry.pack_deps == ('httpx', 'ruamel.yaml')
+        assert entry.provide_wheel == ('https://a.example/simple/',)
 
     def test_empty_lists(self):
         """An empty list is an empty collection, not the default."""
-        entry = ModEntry.from_source('name: m\nupdate_pack_deps: []\nupdate_provide_pypi_mirrors: []\n')
+        entry = ModEntry.from_source('Mod:\n  name: m\nUpdate:\n  pack_deps: []\n  provide_wheel: []\n')
 
-        assert entry.update_pack_deps == ()
-        assert entry.update_provide_pypi_mirrors == ()
+        assert entry.pack_deps == ()
+        assert entry.provide_wheel == ()
 
     def test_scalars(self):
         """The scalar fields are the model values."""
@@ -293,17 +296,17 @@ class TestViews:
 
     def test_iter_asset_lang(self):
         """The shared assets are tried first, then the declared languages."""
-        entry = ModEntry.from_source('name: m\nasset_lang: [cn, jp]\n')
+        entry = ModEntry.from_source('Mod:\n  name: m\n  asset_lang: [cn, jp]\n')
 
         assert list(entry.iter_asset_lang()) == ['', 'cn', 'jp']
 
     def test_defaults(self):
         """The views of a declaration of the name only are the defaults."""
-        entry = ModEntry.from_source('name: m\n')
+        entry = ModEntry.from_source('Mod:\n  name: m\n')
 
         assert entry.path_main == 'module/main.py'
         assert entry.asset_ext == {'.png': None, '.gif': None}
-        assert entry.update_provide_pypi_mirrors == DEFAULT_UPDATE_PROVIDE_PYPI_MIRRORS
+        assert entry.provide_wheel == DEFAULT_UPDATE_PROVIDE_PYPI_MIRRORS
         assert entry.scheduler_priority == 'RestartDevice > RestartGame'
         # no update source declared, the mod is unmanaged
         assert entry.mirrors is None
@@ -316,13 +319,13 @@ class TestViews:
 
     def test_pypi_mirrors_are_a_copy(self):
         """The default pypi mirrors of two entries never share one structure."""
-        first = ModEntry.from_source('name: a\n')
-        second = ModEntry.from_source('name: b\n')
+        first = ModEntry.from_source('Mod:\n  name: a\n')
+        second = ModEntry.from_source('Mod:\n  name: b\n')
 
-        first.data.pypi_mirrors['cn'].pop('tsinghua')
+        first.data.Update.pypi_mirrors['cn'].pop('tsinghua')
 
-        assert 'tsinghua' in second.data.pypi_mirrors['cn']
-        assert 'tsinghua' in ModEntry.from_source('name: c\n').data.pypi_mirrors['cn']
+        assert 'tsinghua' in second.data.Update.pypi_mirrors['cn']
+        assert 'tsinghua' in ModEntry.from_source('Mod:\n  name: c\n').data.Update.pypi_mirrors['cn']
 
 
 class TestData:
@@ -330,26 +333,26 @@ class TestData:
 
     def test_given_data(self):
         """A caller that holds a declaration does not touch the filesystem."""
-        model = ModEntryModel(name='m')
+        model = ModEntryModel.build(name='m')
 
         assert ModEntry(data=model).data is model
 
     def test_read_from_the_location(self, fs):
         """The declaration is read from the config folder of the root."""
-        write_entry(fs, '/mod', 'name: m\n')
+        write_entry(fs, '/mod', 'Mod:\n  name: m\n')
 
-        assert ModEntry('/mod').data.name == 'm'
+        assert ModEntry('/mod').data.Mod.name == 'm'
 
     def test_data_is_cached(self, fs):
         """The file is read once, a later edit is not seen."""
-        file = write_entry(fs, '/mod', 'name: m\n')
+        file = write_entry(fs, '/mod', 'Mod:\n  name: m\n')
         entry = ModEntry('/mod')
-        assert entry.data.name == 'm'
+        assert entry.data.Mod.name == 'm'
 
         with open(file, 'w', encoding='utf-8') as f:
             f.write('name: changed\n')
 
-        assert entry.data.name == 'm'
+        assert entry.data.Mod.name == 'm'
 
     def test_missing_declaration(self, fs):
         """A folder that declares no entry answers no data."""
@@ -360,7 +363,7 @@ class TestData:
 
     def test_error_names_the_file(self, fs):
         """The error of a broken declaration names the file to fix."""
-        file = write_entry(fs, '/mod', 'name: 1\n')
+        file = write_entry(fs, '/mod', 'Mod:\n  name: 1\n')
 
         with pytest.raises(ModEntryError, match=file):
             _ = ModEntry('/mod').data
@@ -371,7 +374,7 @@ class TestIsMod:
 
     def test_entry(self, fs):
         """The declaration makes the folder a mod."""
-        write_entry(fs, '/mod', 'name: m\n')
+        write_entry(fs, '/mod', 'Mod:\n  name: m\n')
 
         assert ModEntry.is_mod('/mod') is True
 
@@ -401,34 +404,34 @@ class TestCreate:
 
     def test_from_the_root(self, fs):
         """A folder at the depth 0 is the root itself."""
-        write_entry(fs, '/mod', 'name: m\n')
+        write_entry(fs, '/mod', 'Mod:\n  name: m\n')
 
         assert ModEntry.create('/mod', uppath=0).root == PathStr.new('/mod')
 
     def test_from_a_folder(self, fs):
         """A folder resolves to the root the stated levels above it."""
-        write_entry(fs, '/mod', 'name: m\n')
+        write_entry(fs, '/mod', 'Mod:\n  name: m\n')
 
         assert ModEntry.create('/mod/module', uppath=1).root == PathStr.new('/mod')
         assert ModEntry.create('/mod/module/config', uppath=2).root == PathStr.new('/mod')
 
     def test_from_a_file(self, fs):
         """A file resolves to the root, the usual call is from __file__."""
-        write_entry(fs, '/mod', 'name: m\n')
+        write_entry(fs, '/mod', 'Mod:\n  name: m\n')
         fs.create_file('/mod/module/map/map.py', contents='')
 
         assert ModEntry.create('/mod/module/map/map.py', uppath=3).root == PathStr.new('/mod')
 
     def test_the_declaration_is_read(self, fs):
         """The entry answers the declaration of the root it computed."""
-        write_entry(fs, '/mod', 'name: m\n')
+        write_entry(fs, '/mod', 'Mod:\n  name: m\n')
         fs.create_file('/mod/module/map/map.py', contents='')
 
-        assert ModEntry.create('/mod/module/map/map.py', uppath=3).data.name == 'm'
+        assert ModEntry.create('/mod/module/map/map.py', uppath=3).data.Mod.name == 'm'
 
     def test_no_walk_up(self, fs):
         """A depth that lands between the root and the file is not searched up."""
-        write_entry(fs, '/mod', 'name: m\n')
+        write_entry(fs, '/mod', 'Mod:\n  name: m\n')
         fs.create_file('/mod/module/map/map.py', contents='')
 
         entry = ModEntry.create('/mod/module/map/map.py', uppath=1)
@@ -439,11 +442,11 @@ class TestCreate:
 
     def test_nested_mod(self, fs):
         """A nested mod is its own mod, the root is the one stated, not the nearest."""
-        write_entry(fs, '/mod', 'name: outer\n')
-        write_entry(fs, '/mod/sub', 'name: inner\n')
+        write_entry(fs, '/mod', 'Mod:\n  name: outer\n')
+        write_entry(fs, '/mod/sub', 'Mod:\n  name: inner\n')
 
-        assert ModEntry.create('/mod/sub/module/config', uppath=2).data.name == 'inner'
-        assert ModEntry.create('/mod/module/config', uppath=2).data.name == 'outer'
+        assert ModEntry.create('/mod/sub/module/config', uppath=2).data.Mod.name == 'inner'
+        assert ModEntry.create('/mod/module/config', uppath=2).data.Mod.name == 'outer'
 
     def test_no_mod(self, fs):
         """A folder without a declaration creates an entry that has nothing to read."""
@@ -466,20 +469,20 @@ class TestCreate:
     ])
     def test_only_the_mod_layout(self, fs, file):
         """Only the fixed relative path of a mod is read."""
-        fs.create_file(f'/work/{file}', contents='name: m\n')
+        fs.create_file(f'/work/{file}', contents='Mod:\n  name: m\n')
 
         with pytest.raises(FileNotFoundError):
             _ = ModEntry.create('/work', uppath=0).data
 
     def test_relative_path(self, fs):
         """A relative path is resolved against the working folder."""
-        write_entry(fs, '/mod', 'name: m\n')
+        write_entry(fs, '/mod', 'Mod:\n  name: m\n')
         fs.chdir('/mod')
 
         root = ModEntry.create('module/config', uppath=2).root
 
         assert PathStr.new(root).name == 'mod'
-        assert ModEntry(root).data.name == 'm'
+        assert ModEntry(root).data.Mod.name == 'm'
 
 
 class TestValidate:
@@ -487,7 +490,7 @@ class TestValidate:
 
     def test_valid(self, fs):
         """A readable declaration validates, and is cached by the check."""
-        write_entry(fs, '/mod', 'name: m\n')
+        write_entry(fs, '/mod', 'Mod:\n  name: m\n')
         entry = ModEntry('/mod')
 
         assert entry.validate() is True
@@ -501,7 +504,7 @@ class TestValidate:
 
     def test_invalid_declaration(self, fs):
         """A broken declaration is not valid, and the reason is reported."""
-        write_entry(fs, '/mod', 'name: [unclosed\n')
+        write_entry(fs, '/mod', 'Mod:\n  name: [unclosed\n')
         entry = ModEntry('/mod')
 
         with logger.mock_capture_writer() as capture:
@@ -510,7 +513,7 @@ class TestValidate:
 
     def test_a_name_is_required(self, fs):
         """A declaration that names no mod is not valid."""
-        write_entry(fs, '/mod', 'path_main: module/entry.py\n')
+        write_entry(fs, '/mod', 'Mod:\n  path_main: module/entry.py\n')
 
         with logger.mock_capture_writer() as capture:
             assert ModEntry('/mod').validate() is False
@@ -522,7 +525,7 @@ class TestWrite:
 
     def test_writes_every_key_of_the_model(self, fs):
         """A mod without a declaration gets one, with every key of the model."""
-        entry = ModEntry('/mod', data=ModEntryModel(name='test'))
+        entry = ModEntry('/mod', data=ModEntryModel.build(name='test'))
 
         assert entry.write() is True
 
@@ -533,7 +536,7 @@ class TestWrite:
 
     def test_comments_come_from_the_model(self, fs):
         """The help annotation of the model is the comment of the key."""
-        entry = ModEntry('/mod', data=ModEntryModel(name='test'))
+        entry = ModEntry('/mod', data=ModEntryModel.build(name='test'))
 
         entry.write()
 
@@ -551,25 +554,25 @@ class TestWrite:
 
     def test_second_write_touches_nothing(self, fs):
         """The write is skipped when the file already holds the content."""
-        entry = ModEntry('/mod', data=ModEntryModel(name='test'))
+        entry = ModEntry('/mod', data=ModEntryModel.build(name='test'))
         assert entry.write() is True
 
         assert entry.write() is False
 
     def test_missing_key_is_added_with_the_default(self, fs):
         """A declaration of some keys only is completed with the model defaults."""
-        write_entry(fs, '/mod', 'name: test\n')
+        write_entry(fs, '/mod', 'Mod:\n  name: test\n')
 
         ModEntry('/mod').write()
 
         entry = ModEntry('/mod')
         assert entry.name == 'test'
         assert entry.path_main == 'module/main.py'
-        assert entry.update_pack_deps == ()
+        assert entry.pack_deps == ('alasio',)
 
     def test_declared_value_is_kept(self, fs):
         """A value the file declares survives the generation."""
-        write_entry(fs, '/mod', 'name: test\npath_assets: res\n')
+        write_entry(fs, '/mod', 'Mod:\n  name: test\n  path_assets: res\n')
 
         ModEntry('/mod').write()
 
@@ -577,7 +580,7 @@ class TestWrite:
 
     def test_unknown_key_is_dropped(self, fs):
         """A key the model does not know is not written back."""
-        write_entry(fs, '/mod', 'name: test\nfuture_key: 1\n')
+        write_entry(fs, '/mod', 'Mod:\n  name: test\nfuture_key: 1\n')
 
         ModEntry('/mod').write()
 
@@ -585,7 +588,7 @@ class TestWrite:
 
     def test_stages_the_file(self, fs):
         """A changed file is staged, an unchanged one is not."""
-        entry = ModEntry('/mod', data=ModEntryModel(name='test'))
+        entry = ModEntry('/mod', data=ModEntryModel.build(name='test'))
         staged = []
 
         entry.write(gitadd=type('G', (), {'stage_add': lambda self, f: staged.append(f)})())
@@ -611,7 +614,7 @@ class TestModel:
 
     def test_model_is_default_constructible(self):
         """The writer builds a template of the model; a read refuses the empty name."""
-        assert ModEntryModel().name == ''
+        assert ModEntryModel().Mod.name == ''
         with pytest.raises(ModEntryError, match='name is required'):
             ModEntry.from_source('')
 

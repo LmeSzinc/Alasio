@@ -129,7 +129,7 @@ class FakeMod:
 
     def __init__(self, name='alas', mirrors=MIRROR):
         self.name = name
-        self.entry = ModEntry(data=ModEntryModel(name=name, mirrors=mirrors))
+        self.entry = ModEntry(data=ModEntryModel.build(name=name, mirrors=mirrors))
 
 
 def patch_server(monkeypatch, server, channel, expected_name):

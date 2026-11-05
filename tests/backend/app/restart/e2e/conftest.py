@@ -546,7 +546,7 @@ class Backend:
                 'cfg_a' on the default mod
             pack_deps (dict[str, Iterable[str]]): {mod name: the names the
                 entry declares for pack updates}, see
-                ModEntry.update_pack_deps. Defaults to None, every mod
+                ModEntry.pack_deps. Defaults to None, every mod
                 declares none
             monkeypatch: The pytest monkeypatch fixture (the manager spawn is
                 watched through it)
@@ -559,8 +559,8 @@ class Backend:
         self.mods = {
             name: Mod(ModEntry(
                 root=str(project.mod_root(name)),
-                data=ModEntryModel(
-                    name=name, mirrors=mirrors, update_pack_deps=list(pack_deps.get(name, ())),
+                data=ModEntryModel.build(
+                    name=name, mirrors=mirrors, pack_deps=tuple(pack_deps.get(name, ())),
                 )))
             for name, mirrors in mods.items()
         }

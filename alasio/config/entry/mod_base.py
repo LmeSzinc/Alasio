@@ -23,11 +23,10 @@ class ModBase:
             entry (ModEntry): Location and declaration of the mod
         """
         self.entry = entry
-        data = entry.data
-        self.name = data.name
+        self.name = entry.name
         self.root = PathStr.new(entry.root)
         self.path_config = self.root.joinpath(entry.path_config)
-        self.path_assets = self.root.joinpath(data.path_assets)
+        self.path_assets = self.root.joinpath(entry.path_assets)
         self.path_alasio_config = env.ALASIO_ROOT.joinpath(ALASIO_CONFIG)
 
     def __str__(self):

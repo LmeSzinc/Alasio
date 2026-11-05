@@ -128,7 +128,7 @@ class PipList:
         - pip_list() is the raw scan: one entry per metadata entry, a
           distribution with several entries is listed several times
         - pack_list() is the version of every distribution the mod updates
-          by pack (mod.entry.update_pack_deps), read from its pack ledger
+          by pack (mod.entry.pack_deps), read from its pack ledger
         - list() is the aggregate: one distribution per normalized name,
           keyed by it, the trusted version and the conflicts logged, see
           its docstring
@@ -168,7 +168,7 @@ class PipList:
         site_packages (PathStr): Normalized path of the directory, posix
             style, e.g. the site-packages of an environment
         mod (Mod | None): The mounted mod whose entry declares the pack
-            updated distributions (entry.update_pack_deps) that
+            updated distributions (entry.pack_deps) that
             pack_list() reads the pack ledgers of, None to read no ledger
     """
 
@@ -180,7 +180,7 @@ class PipList:
                 that does not exist is not an error, list() reports no
                 distribution of it
             mod (Mod, optional): The mounted mod whose entry declares the
-                pack updated distributions (entry.update_pack_deps) that
+                pack updated distributions (entry.pack_deps) that
                 pack_list() reads the pack ledgers of, e.g. the mod the
                 dependencies of the directory belong to. Defaults to None,
                 no pack ledger is read
@@ -285,7 +285,7 @@ class PipList:
         """
         List the distributions the pack ledgers of the mod record.
 
-        The names come from mod.entry.update_pack_deps, the distributions
+        The names come from mod.entry.pack_deps, the distributions
         the mod updates from its pack channels instead of pip. The ledger
         folder of a name is {site_packages}/.pack/{dist-key} (the PEP 503
         normalized name, the key of the channel and the ledger folder of
@@ -313,7 +313,7 @@ class PipList:
         if self.mod is None:
             return []
         names = {}
-        for name in self.mod.entry.update_pack_deps:
+        for name in self.mod.entry.pack_deps:
             names.setdefault(normalize_name(name), name)
         out = []
         for dist_key, name in names.items():

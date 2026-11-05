@@ -22,9 +22,9 @@ def make_gen(fs, folders=None):
         GenTaskEntry:
     """
     root = fs.root_dir.path
-    model = ModEntryModel(name='test')
+    model = ModEntryModel.build(name='test')
     if folders is not None:
-        model.task_entry_folders = list(folders)
+        model.Scheduler.task_entry_folders = list(folders)
     return GenTaskEntry(ModEntry(root=root, data=model))
 
 

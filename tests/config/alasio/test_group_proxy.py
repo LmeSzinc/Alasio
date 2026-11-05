@@ -315,7 +315,7 @@ class TestModelProxyBatchSet:
             root = '.'
             path_config = '.'
             path_assets = '.'
-            data = ModEntryModel(name=name, path_main='main.py', path_assets='assets')
+            data = ModEntryModel.build(name=name, path_main='main.py', path_assets='assets')
 
             @staticmethod
             def alasio():
@@ -618,7 +618,7 @@ class TestDashboardExpire:
             root = '.'
             path_config = '.'
             path_assets = '.'
-            data = ModEntryModel(name=name, path_main='main.py', path_assets='assets')
+            data = ModEntryModel.build(name=name, path_main='main.py', path_assets='assets')
 
             @staticmethod
             def alasio():

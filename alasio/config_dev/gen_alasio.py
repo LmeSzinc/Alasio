@@ -6,7 +6,7 @@ from alasio.ext.deep import deep_get, deep_keys_depth1, deep_set
 from alasio.logger import logger
 
 # The GUI languages of the library, declared by its own entry
-GUI_LANGUAGE = ModEntry.alasio.data.gui_language
+GUI_LANGUAGE = ModEntry.alasio.data.Mod.gui_language
 
 
 class Generator(IndexGenerator):

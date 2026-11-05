@@ -2,7 +2,7 @@
 Publish the wheels of the indexes a repo provides (steps 4.2 and 5).
 
 A client installs the dependencies of the pins whose source is one of the
-indexes the mod entry declares in update_provide_pypi_mirrors with pip, and
+indexes the mod entry declares in provide_wheel with pip, and
 those indexes are not reachable from every client: the repo serves the files
 itself. The step downloads every wheel of those pins to the private cache and
 syncs them to the folder a client reads:

@@ -38,7 +38,7 @@ def make_mod():
     Returns:
         ModBase:
     """
-    return ModBase(ModEntry(root=PathStr.new('ExampleMod'), data=ModEntryModel(name='example_mod')))
+    return ModBase(ModEntry(root=PathStr.new('ExampleMod'), data=ModEntryModel.build(name='example_mod')))
 
 
 @pytest.fixture
@@ -75,7 +75,7 @@ class TestPackageName:
 
     def test_entry_outside_a_package(self):
         """An entry file at the mod root has no package to import from."""
-        mod = ModBase(ModEntry(root=PathStr.new('ExampleMod'), data=ModEntryModel(name='example_mod', path_main='main.py')))
+        mod = ModBase(ModEntry(root=PathStr.new('ExampleMod'), data=ModEntryModel.build(name='example_mod', path_main='main.py')))
         assert mod.package_name == ''
 
 

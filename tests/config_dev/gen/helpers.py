@@ -45,7 +45,7 @@ def make_entry(fs, name='test', languages=('zh-CN', 'en-US')):
     """
     return ModEntry(
         root=fs.root_dir.path,
-        data=ModEntryModel(name=name, gui_language=list(languages)),
+        data=ModEntryModel.build(name=name, gui_language=list(languages)),
     )
 
 

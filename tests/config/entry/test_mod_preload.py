@@ -61,7 +61,7 @@ def make_mod():
     Returns:
         ModBase: A mod whose root is the fake filesystem
     """
-    return ModBase(ModEntry(root=PathStr.new(ROOT), data=ModEntryModel(name='test_mod')))
+    return ModBase(ModEntry(root=PathStr.new(ROOT), data=ModEntryModel.build(name='test_mod')))
 
 
 def write(path, content):
