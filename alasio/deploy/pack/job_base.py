@@ -1,5 +1,7 @@
 import os
+import stat
 from hashlib import sha1
+from itertools import chain
 from typing import Optional
 
 import trio
@@ -13,9 +15,9 @@ from alasio.ext import env
 from alasio.ext.cache import InstanceCacheOperation, cached_property
 from alasio.ext.path import PathStr
 from alasio.ext.path.atomic import (
-    atomic_open, atomic_read_bytes, atomic_remove, atomic_replace, atomic_rmtree, folder_rmtree_empty
+    atomic_open, atomic_read_bytes, atomic_remove, atomic_replace, atomic_rmtree, file_remove, folder_rmtree_empty
 )
-from alasio.ext.path.makedir import batch_makedirs
+from alasio.ext.path.makedir import _get_parent_folder, batch_makedirs
 from alasio.logger import logger
 
 
@@ -434,12 +436,15 @@ class JobBase(DeployTarget):
         first, the deletions after every write.
 
         Every tmp file is moved to the target path atomically and the
-        deleted markers are removed. The two groups of paths are
-        disjoint (a deletion removes a file the new version does not
-        have, a write targets a file it has), so applying every write
-        before every deletion is safe, whatever the order of the
-        pending list is: an interruption leaves the old files in place
-        instead of half-deleted. The target is chmod-ed when
+        deleted markers are removed. A deleted path that is a folder by
+        now (the new version replaced the file with a folder of the same
+        name) is kept when the new version records a file inside it, and
+        removed with its content otherwise, see _remove_deleted(). The
+        two groups of paths are disjoint (a deletion removes a file the
+        new version does not have, a write targets a file it has), so
+        applying every write before every deletion is safe, whatever the
+        order of the pending list is: an interruption leaves the old files
+        in place instead of half-deleted. The target is chmod-ed when
         pending.mode is set, the mode decision is made by the job that
         prepared the pending list. The folders left empty by the
         deletions are removed, see cleanup_empty_folders(). The
@@ -463,11 +468,125 @@ class JobBase(DeployTarget):
             if pending.mode is not None:
                 os.chmod(target, pending.mode)
 
+        # the folders the new version occupies, built in one pass over each
+        # source: a deleted path is answered by a lookup instead of a scan of
+        # every record. new_fileinfo is the record set of the version (a record
+        # whose target already matches is not written, so it is not in
+        # applies), the applies of the run cover the jobs whose record set is
+        # the update pack only
+        occupied = self.occupied_folders(chain(
+            (path for path, info in self.new_fileinfo.items() if info.edit != 2),
+            (pending.info.path for pending in applies),
+        ))
         for pending in deletes:
             # deleted marker, the file should not exist
-            self.changed |= atomic_remove(self.root.joinpath(pending.info.path))
+            self.changed |= self._remove_deleted(pending.info.path, occupied)
 
         self.cleanup_empty_folders()
+
+    @staticmethod
+    def occupied_folders(paths):
+        """
+        The folders the files of a version occupy.
+
+        A pack records files only: a folder is the prefix of the paths below
+        it. The prefixes come from _get_parent_folder(), the helper
+        batch_makedirs() reads the folders of the writes from: the set can
+        never disagree with the folders that were created, and a folder is
+        answered by a lookup instead of a scan of every record.
+
+        Args:
+            paths (Iterable[str]): Paths of the files, '/'-separated and
+                relative to the root of the target
+
+        Returns:
+            set[str]: Every folder that holds a file, relative to the root of
+                the target, the root itself excluded
+        """
+        return set(_get_parent_folder(paths))
+
+    def _remove_deleted(self, path, occupied):
+        """
+        Apply one deleted marker to the working tree.
+
+        The path of a deleted record is a file of the old version, and the new
+        version does not have it. The path is treated as the file it was
+        (unlink, no lookup of its kind first: one file operation in the common
+        case), and only a failure that does not name the kind of the path opens
+        the question of what is at the path now.
+
+        The path may be a folder, because the new version replaced the file
+        with a folder of the same name (e.g. "pkg/mod.py" became
+        "pkg/mod/__init__.py"): the writes of replace_data() run before the
+        deletions and batch_makedirs() removes a file in the way of a folder,
+        so the folder exists when this record is applied. A folder is never
+        unlinked as a file (an error on every platform, an 8 attempt retry on
+        Windows), it is decided by its role in the new version:
+
+        - the ledger folder of the target, and a folder that holds it, is
+          never removed: the index pack and the workspace of the job are
+          there, whatever the record says;
+        - a folder that holds a file of the new version is kept: it is the
+          folder the new version wants, and the deletion of the record is
+          already satisfied (no file of the old version is left at the path);
+        - every other folder is a leftover of an interrupted run, or something
+          the user placed on the path a file of the old version had: the path
+          must not exist any more, so the folder goes with its content.
+
+        A path that is a file the file system refuses to remove (a file held
+        open by another process on Windows) keeps the retrying removal of
+        atomic_remove(): the failure is not about the kind of the path.
+
+        Args:
+            path (str): Path of the deleted record, relative to the root of
+                the target
+            occupied (set[str]): Folders the writes of this run occupy, see
+                occupied_folders(): a folder in the set is a folder of the new
+                version, a folder outside of it is a leftover
+
+        Returns:
+            bool: True when a file or a folder was removed
+
+        Raises:
+            OSError: If a file of the path cannot be removed
+        """
+        ledger = self.ledger_rel
+        # the empty path is the root of the target, the prefix of every ledger
+        prefix = f'{path}/' if path else ''
+        if path == ledger or ledger.startswith(prefix):
+            logger.warning(
+                f'Skipped the deletion of "{path}": the ledger folder of the target is inside it')
+            return False
+        target = self.root.joinpath(path)
+        try:
+            return file_remove(target)
+        except NotADirectoryError:
+            # a parent of the path is a file, there is no entry to remove (a
+            # job that does not create the parent folders is a caller of its
+            # own)
+            return False
+        except IsADirectoryError:
+            # POSIX names the kind in the failure itself: the path is a folder,
+            # no lookup needed
+            pass
+        except PermissionError:
+            # Windows refuses the unlink of a folder with the same error as a
+            # file held open by another process: the kind of the path is what
+            # tells the two apart
+            try:
+                st = os.lstat(target)
+            except (FileNotFoundError, NotADirectoryError):
+                # the entry vanished under the removal
+                return False
+            if not stat.S_ISDIR(st.st_mode):
+                # a file after all: the removal has to retry on the lock of
+                # the file, and it raises when it gives up
+                return atomic_remove(target)
+        if path in occupied:
+            logger.info(f'Skipped the deletion of "{path}": the new version has a folder there')
+            return False
+        logger.info(f'Removing the folder of a deleted path: "{target}"')
+        return atomic_rmtree(target)
 
     def replace_index(self):
         """
@@ -663,7 +782,9 @@ class JobBase(DeployTarget):
             with atomic_open(file, 'rb') as f:
                 data = f.read()
                 mode = os.fstat(f.fileno()).st_mode
-        except FileNotFoundError:
+        except (FileNotFoundError, NotADirectoryError):
+            # no file of its own at the path: it is missing, or a parent of it
+            # is a file, which the batch of the writes turns into a folder
             return CurrentFile(exist=False, data=b'', mode=0)
         return CurrentFile(exist=True, data=data, mode=mode)
 

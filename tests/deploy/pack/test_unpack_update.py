@@ -574,13 +574,23 @@ class TestUpdateRoundtrip:
         the next run converges."""
         await setup_app()
         import alasio.deploy.pack.job_base as job_base
+        original_file_remove = job_base.file_remove
         original_remove = job_base.atomic_remove
 
         def _fail(path):
             if str(path).replace('\\', '/').endswith('scripts/run.sh'):
                 raise PermissionError('interrupted')
+            return original_file_remove(path)
+
+        def _fail_retry(path):
+            # the retrying removal of a file the file system refuses: the
+            # injected failure is not about the kind of the path, it must not
+            # wait for the retries
+            if str(path).replace('\\', '/').endswith('scripts/run.sh'):
+                raise PermissionError('interrupted')
             return original_remove(path)
-        monkeypatch.setattr(job_base, 'atomic_remove', _fail)
+        monkeypatch.setattr(job_base, 'file_remove', _fail)
+        monkeypatch.setattr(job_base, 'atomic_remove', _fail_retry)
         job = UpdateJob(UPDATE, server=SERVER)
         with logger.mock_capture_writer() as capture:
             assert not await job.run()
@@ -594,6 +604,7 @@ ERROR | Failed to replace file: interrupted, keeping the workspace for the next 
         assert file_read_bytes(env.PROJECT_ROOT / 'scripts/runner.sh') == NEW['scripts/runner.sh']
         assert file_read_bytes(env.PROJECT_ROOT / 'scripts/run.sh') == OLD['scripts/run.sh']
         # the next run removes the leftover source and converges
+        monkeypatch.setattr(job_base, 'file_remove', original_file_remove)
         monkeypatch.setattr(job_base, 'atomic_remove', original_remove)
         assert await UpdateJob(UPDATE, server=SERVER).run()
         assert not os.path.exists(env.PROJECT_ROOT / 'scripts/run.sh')
@@ -607,7 +618,7 @@ ERROR | Failed to replace file: interrupted, keeping the workspace for the next 
         await setup_app()
         import alasio.deploy.pack.job_base as job_base
         original_replace = job_base.atomic_replace
-        original_remove = job_base.atomic_remove
+        original_remove = job_base.file_remove
         calls = []
 
         def _replace(tmp, target):
@@ -618,7 +629,9 @@ ERROR | Failed to replace file: interrupted, keeping the workspace for the next 
             calls.append(('remove', str(target).replace('\\', '/')))
             return original_remove(target)
         monkeypatch.setattr(job_base, 'atomic_replace', _replace)
-        monkeypatch.setattr(job_base, 'atomic_remove', _remove)
+        # the optimistic unlink is the deletion of the common case: the
+        # ordering of the two groups is what this test is about
+        monkeypatch.setattr(job_base, 'file_remove', _remove)
         assert await UpdateJob(UPDATE, server=SERVER).run()
         kinds = [kind for kind, target in calls]
         first_remove = kinds.index('remove')
