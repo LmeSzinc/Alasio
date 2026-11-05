@@ -247,7 +247,7 @@ class TestModEntryModelDependencies:
         """By default a mod reads requirements.txt and updates the library by pack."""
         model = ModEntryModel.build(name='m')
         assert model.Update.requirements_file == 'requirements.txt'
-        assert model.Update.pack_deps == ('alasio',)
+        assert model.Update.pack_deps == ('alasio', 'msgspecerror')
 
     def test_declared(self):
         """The declared names and the requirements path are kept."""

@@ -63,6 +63,7 @@ Update:
   # A distribution not declared here installs with pip
   pack_deps:
   - alasio
+  - msgspecerror
   # Relative path from the mod root to the requirements file of the mod
   # Every distribution in it is pinned to an exact version
   requirements_file: requirements.txt

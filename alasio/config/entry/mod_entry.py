@@ -129,9 +129,10 @@ MOD_ENTRY_NAME = 'MOD_ENTRY'
 # UpdateModel.requirements_file
 DEFAULT_REQUIREMENTS_FILE = 'requirements.txt'
 
-# Distributions a mod updates from the pack channel by default: the library
-# itself is distributed to a mod as a pack, see UpdateModel.pack_deps
-DEFAULT_PACK_DEPS = ('alasio',)
+# Distributions a mod updates from the pack channel by default: the
+# distributions the project maintains itself and ships to a mod, the library
+# and the msgspec helpers of it, see UpdateModel.pack_deps
+DEFAULT_PACK_DEPS = ('alasio', 'msgspecerror')
 
 # The fields of a declaration that are a fixed set rather than an ordered list,
 # see UpdateModel: they are tuples in the model, and the code that builds a

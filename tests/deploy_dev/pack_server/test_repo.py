@@ -391,8 +391,9 @@ WARNING | Dependency "requests" is not pinned to a version in the lookback windo
             gen = Repo(make_repo(entry=None), make_config())
             assert gen.base.deps == {}
         assert capture.concat() == """\
-INFO | Using pack_deps of module/config/_index/mod_entry.yaml at c3: alasio
+INFO | Using pack_deps of module/config/_index/mod_entry.yaml at c3: alasio, msgspecerror
 WARNING | Dependency "alasio" is not pinned to a version in the lookback window, nothing is built of it; a dependency of the mod entry pack_deps must be pinned with "==" in the dependency file of the repo
+WARNING | Dependency "msgspecerror" is not pinned to a version in the lookback window, nothing is built of it; a dependency of the mod entry pack_deps must be pinned with "==" in the dependency file of the repo
 """
 
     def test_entry_broken(self, fs, run_dir, mirror):
@@ -579,8 +580,9 @@ class TestRun:
             gen = Repo(make_repo(entry=None), make_config())
             assert gen.run() is None
         assert capture.concat() == """\
-INFO | Using pack_deps of module/config/_index/mod_entry.yaml at c3: alasio
+INFO | Using pack_deps of module/config/_index/mod_entry.yaml at c3: alasio, msgspecerror
 WARNING | Dependency "alasio" is not pinned to a version in the lookback window, nothing is built of it; a dependency of the mod entry pack_deps must be pinned with "==" in the dependency file of the repo
+WARNING | Dependency "msgspecerror" is not pinned to a version in the lookback window, nothing is built of it; a dependency of the mod entry pack_deps must be pinned with "==" in the dependency file of the repo
 INFO | No dependency to build of "Author_Repo_master", skipped
 INFO | Generating packs of "Author_Repo_master": 3 versions, latest=c3
 INFO | Writing full pack: "{run_dir}/pack/Author_Repo_master/packrepo/c3/full.pack"

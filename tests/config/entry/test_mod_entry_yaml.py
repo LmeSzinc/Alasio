@@ -571,7 +571,7 @@ class TestWrite:
         entry = ModEntry('/mod')
         assert entry.name == 'test'
         assert entry.path_main == 'module/main.py'
-        assert entry.pack_deps == ('alasio',)
+        assert entry.pack_deps == ('alasio', 'msgspecerror')
 
     def test_declared_value_is_kept(self, fs):
         """A value the file declares survives the generation."""

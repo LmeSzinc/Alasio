@@ -270,8 +270,9 @@ INFO | Dependency packs of "Author_Repo_master" generated
         with logger.mock_capture_writer() as capture:
             gen.run()
         assert capture.concat() == """\
-INFO | Using pack_deps of module/config/_index/mod_entry.yaml at c3: alasio
+INFO | Using pack_deps of module/config/_index/mod_entry.yaml at c3: alasio, msgspecerror
 WARNING | Dependency "alasio" is not pinned to a version in the lookback window, nothing is built of it; a dependency of the mod entry pack_deps must be pinned with "==" in the dependency file of the repo
+WARNING | Dependency "msgspecerror" is not pinned to a version in the lookback window, nothing is built of it; a dependency of the mod entry pack_deps must be pinned with "==" in the dependency file of the repo
 INFO | No dependency to build of "Author_Repo_master", skipped
 """
         assert mirror.requests == []
