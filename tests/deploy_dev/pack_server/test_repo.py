@@ -19,10 +19,12 @@ from alasio.config.entry.mod_entry import MOD_ENTRY_PATH
 from alasio.deploy.pack.decode_base import PackDecodeBase
 from alasio.deploy.pack.job_unpack import UnpackJob
 from alasio.deploy.pack.packdep import PACKDEP_PATH, decode_packdep
+from alasio.deploy.pack.server_file import LatestInfo
 from alasio.deploy_dev.pack import pack_wheel
 from alasio.deploy_dev.pack._pack_cache import PackCache
 from alasio.deploy_dev.pack_server import repo_base, repo_dep
 from alasio.deploy_dev.pack_server.fetch_wheel import WheelNotFoundError
+from alasio.deploy_dev.pack_server.manifest import Manifest
 from alasio.deploy_dev.pack_server.model import LookbackConfig, PackRepoModel, RepoConfig
 from alasio.deploy_dev.pack_server.repo import Repo
 from alasio.deploy_dev.pack_server.repo_base import DEFAULT_INDEX
@@ -843,7 +845,7 @@ class TestWheelCache:
         assert not join_path(run_dir, WORKSPACE, 'wheel').exists()
 
     def test_cache_is_not_published(self, fs, run_dir, mirror):
-        """The cache folder is private: the name starts with '_'."""
+        """The cache folder is private: the name starts with '.'."""
         register_wheels(mirror)
         Repo(make_repo(), make_config(), client=mirror.client).run()
         folders = list(join_path(run_dir, WORKSPACE).iter_foldernames())
@@ -888,3 +890,103 @@ class TestWheelCache:
 
         assert f'Copy wheel: "{cache_file(run_dir, "0.28.1")}"' in capture.concat()
         assert file.atomic_read_bytes() == content
+
+
+class TestManifest:
+    """The manifest of the generation: what it publishes and what it keeps."""
+
+    def manifest_file(self, run_dir):
+        """
+        Path of the manifest of the workspace.
+
+        Returns:
+            PathStr: {run}/pack/Author_Repo_master/manifest.json
+        """
+        return join_path(run_dir, WORKSPACE, 'manifest.json')
+
+    def test_manifest_records_the_generation(self, fs, run_dir, mirror):
+        """The manifest names the barrier and both halves of the workspace."""
+        register_wheels(mirror)
+        run_commit(make_repo(), make_config(), mirror.client)
+
+        manifest = Manifest.from_file(self.manifest_file(run_dir))
+        barrier = LatestInfo.parse(repo_file(run_dir, 'latest.pack').atomic_read_bytes())
+
+        assert manifest.schema == 1
+        assert manifest.channel == 'Author_Repo_master'
+        assert manifest.version == barrier.version
+        assert manifest.checksum == barrier.checksum
+        # the barrier, the packs of the version and the packs of the
+        # dependencies are published
+        assert 'packrepo/latest.pack' in manifest.files
+        assert f'packrepo/{barrier.version}/full.pack' in manifest.files
+        assert f'packrepo/{barrier.version}/update_c2.pack' in manifest.files
+        assert 'packdep/httpx/0.28.1/full.pack' in manifest.files
+        # the wheel cache is private, one entry for every version of the
+        # lookback window: the cache is not kept beyond the window
+        for version in ('0.27.7', '0.27.8', '0.28.1'):
+            assert f'.wheel_cache/httpx/{version}/index.html' in manifest.private
+            assert f'.wheel_cache/httpx/{version}/httpx-{version}-py3-none-any.whl' in manifest.private
+        # the two halves do not overlap, and neither carries the manifest or a
+        # tmp file of an interrupted write
+        assert set(manifest.files).isdisjoint(manifest.private)
+        paths = manifest.files + manifest.private
+        assert 'manifest.json' not in paths
+        assert not [path for path in paths if path.endswith('.tmp')]
+        # every entry is a file of the workspace, and every published entry is
+        # in one of the three folders a client derives an url from
+        for path in paths:
+            assert join_path(run_dir, WORKSPACE, *path.split('/')).isfile()
+        # every published entry is in one of the three folders a client
+        # derives an url from
+        assert {path.split('/')[0] for path in manifest.files} <= {
+            'packdep', 'packrepo', 'wheel'}
+
+    def test_run_without_commit_writes_no_manifest(self, fs, run_dir, mirror):
+        """A run that was not committed publishes nothing, the manifest included."""
+        register_wheels(mirror)
+        Repo(make_repo(), make_config(), client=mirror.client).run()
+        assert not self.manifest_file(run_dir).exists()
+
+    def test_manifest_is_kept_by_the_cleanup(self, fs, run_dir, mirror):
+        """The manifest is a file of the run, the cleanup of the version keeps it."""
+        register_wheels(mirror)
+        with logger.mock_capture_writer() as capture:
+            run_commit(make_repo(), make_config(), mirror.client)
+        log = capture.concat()
+        assert 'INFO | Manifest of "Author_Repo_master": version=' in log
+        assert 'INFO | Write manifest: ' in log
+        assert f'INFO | Cleaned up "Author_Repo_master":' in log
+        assert self.manifest_file(run_dir).isfile()
+
+    def test_second_run_writes_nothing(self, fs, run_dir, mirror):
+        """A run over the same repo writes the same manifest and keeps its bytes."""
+        register_wheels(mirror)
+        repo = make_repo()
+        config = make_config()
+        run_commit(repo, config, mirror.client)
+        file = self.manifest_file(run_dir)
+        first = file.atomic_read_bytes()
+        generated_at = Manifest.from_file(file).generated_at
+
+        with logger.mock_capture_writer() as capture:
+            run_commit(repo, config, mirror.client)
+
+        assert 'INFO | Manifest exists, skipped' in capture.concat()
+        assert file.atomic_read_bytes() == first
+        assert Manifest.from_file(file).generated_at == generated_at
+
+    def test_stale_cache_entry_is_removed_and_not_listed(self, fs, run_dir, mirror):
+        """A cache entry outside the window leaves the disk and the manifest."""
+        register_wheels(mirror)
+        stale = join_path(
+            run_dir, WORKSPACE, '.wheel_cache', 'httpx', '0.26.0', 'index.html')
+        fs.create_file(stale, contents=b'stale')
+
+        run_commit(make_repo(), make_config(), mirror.client)
+
+        manifest = Manifest.from_file(self.manifest_file(run_dir))
+        assert not stale.exists()
+        assert not [path for path in manifest.private if '/0.26.0/' in path]
+        # the cache of the version of the window stays
+        assert cache_file(run_dir, '0.28.1').isfile()

@@ -31,8 +31,12 @@ Usage:
     latest.run()
 """
 
+from alasio.deploy.pack.server_file import LatestInfo
 from alasio.ext.path.atomic import atomic_write
 from alasio.logger import logger
+
+# the name of the barrier in the packrepo folder of the workspace
+LATEST_FILE = 'latest.pack'
 
 
 class RepoLatest:
@@ -42,6 +46,8 @@ class RepoLatest:
     Usage:
         latest = RepoLatest(base, pack)
         latest.run()
+        latest.info   # the version and checksum the file carries
+        latest.file   # the file that was written
     """
 
     def __init__(self, base, pack):
@@ -53,6 +59,10 @@ class RepoLatest:
         """
         self.base = base
         self.pack = pack
+        # the barrier of the last run(), the input of repo_manifest: the
+        # manifest names the version a client reads, without reading the file
+        # back. None until then.
+        self.info = None
 
     def run(self):
         """
@@ -62,6 +72,14 @@ class RepoLatest:
         the published version from. A run that kept the full pack of an earlier
         run passes the checksum of the kept file, see RepoPack.run().
 
+        The info of the file is read back from the bytes just written, not from
+        the encoder: latest_pack() takes its checksum from the encoder or from
+        the kept file, and the manifest of the run must name exactly what a
+        client reads.
+
+        Returns:
+            LatestInfo: The version and the index pack checksum the file carries
+
         Raises:
             RuntimeError: If the repo tree packs were not generated
             OSError: If latest.pack cannot be written
@@ -69,7 +87,10 @@ class RepoLatest:
         pack = self.pack.pack
         if pack is None:
             raise RuntimeError('RepoPack.run() must be called before RepoLatest.run()')
-        file = self.base.packrepo_folder.joinpath('latest.pack')
+        file = self.base.packrepo_folder.joinpath(LATEST_FILE)
+        data = pack.latest_pack(self.pack.kept_checksum)
         self.base.touch(file)
         logger.info(f'Writing latest info: version={pack.current_version}, "{file}"')
-        atomic_write(file, pack.latest_pack(self.pack.kept_checksum))
+        atomic_write(file, data)
+        self.info = LatestInfo.parse(data)
+        return self.info

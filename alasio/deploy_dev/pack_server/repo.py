@@ -28,7 +28,10 @@ on the disk.
     6. latest.pack is written (see repo_latest), the version a client reads:
        the barrier of the run, a client that reads it finds every pack of the
        version on the disk
-    7. every file of the workspace the run did not touch is removed
+    7. the manifest of the generation is written (see repo_manifest): the
+       version of the barrier, the files the run publishes and the files it
+       keeps private, e.g. the wheel cache
+    8. every file of the workspace the run did not touch is removed
        (RepoBase.cleanup()), after the barrier, so a client that still runs the
        previous version keeps working until its next check
 
@@ -56,6 +59,7 @@ from alasio.deploy_dev.pack_server.gate import check_run_dir
 from alasio.deploy_dev.pack_server.repo_base import RepoBase
 from alasio.deploy_dev.pack_server.repo_dep import RepoDep
 from alasio.deploy_dev.pack_server.repo_latest import RepoLatest
+from alasio.deploy_dev.pack_server.repo_manifest import RepoManifest
 from alasio.deploy_dev.pack_server.repo_pack import RepoPack
 from alasio.deploy_dev.pack_server.repo_pypi import RepoPypi
 from alasio.deploy_dev.pack_server.repo_wheel import RepoWheel
@@ -106,6 +110,7 @@ class Repo:
         self.dep = RepoDep(self.base)
         self.pack = RepoPack(self.base, self.dep)
         self.latest = RepoLatest(self.base, self.pack)
+        self.manifest = RepoManifest(self.base, self.latest)
         # whether run() completed, the precondition of commit(): a failed run
         # must not publish a version whose packs are incomplete
         self._generated = False
@@ -169,13 +174,15 @@ class Repo:
         point leaves both as they were, and the client keeps installing the
         version it runs.
 
-        Only after them are the leftover packs and wheels removed, so a client
-        that still runs the previous version keeps working until its next
-        check.
+        The manifest comes after the barrier: it names the version a client
+        reads from latest.pack and the files of the run, which is exactly what
+        a mirror mirrors and what the cleanup below keeps. Only after it are
+        the leftover packs and wheels removed, so a client that still runs the
+        previous version keeps working until its next check.
 
         Raises:
             RuntimeError: If run() was not called
-            OSError: If a page or latest.pack cannot be written
+            OSError: If a page, latest.pack or the manifest cannot be written
         """
         if not self._generated:
             raise RuntimeError('Repo.run() must be called before commit()')
@@ -183,6 +190,9 @@ class Repo:
         # a client that reads the new latest.pack finds the index of it too
         self.pypi.run()
         self.latest.run()
+        # the manifest of the generation, after the barrier it names and before
+        # the cleanup it is the record of
+        self.manifest.run()
         self.base.cleanup()
         self._generated = False
         logger.info(f'Repo "{self.base.workspace.name}" committed')

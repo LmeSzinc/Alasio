@@ -67,6 +67,7 @@ from alasio.deploy.simple_pip.cleanup_folder import CleanupByPreserved
 from alasio.deploy.simple_pip.parse_req import DepInfo, normalize_index_url
 from alasio.deploy_dev.pack_server.fetch_wheel import create_client
 from alasio.deploy_dev.pack_server.lookback_wheel import LookbackWheel
+from alasio.deploy_dev.pack_server.manifest import split_paths
 from alasio.deploy_dev.pack_server.parse_dep import normalize_name
 from alasio.ext import env
 from alasio.ext.cache import cached_property
@@ -204,8 +205,8 @@ class RepoBase:
         # latest commit first, see LookbackWheel
         self.wheel = LookbackWheel(repo, config)
         # the files this run uses, relative to the workspace: the steps touch
-        # what they read or write, see cleanup()
-        self._manifest = set()
+        # what they read or write, see cleanup() and repo_manifest()
+        self._touched = set()
         # the folder name is checked before anything is written, see workspace
         _ = self.workspace
 
@@ -364,18 +365,41 @@ class RepoBase:
             logger.warning(
                 f'Touched a file outside the workspace of "{self.workspace.name}": "{path}"')
             relative = path
-        self._manifest.add(relative)
+        self._touched.add(relative)
+
+    def repo_manifest(self):
+        """
+        The entries of the run, split into the published and the private ones.
+
+        The set touch() fills is the whole truth of a run: every file a step
+        read or wrote. This accessor hands it out in the form the manifest of
+        the workspace records (see manifest.split_paths): the tmp files of an
+        interrupted run and the manifest itself are not entries of it, and a
+        path with a '.' or '_' segment is private.
+
+        The split is computed here and nowhere else: the manifest of the
+        workspace records it, and the cleanup of the run keeps the whole set the
+        two halves come from, plus the manifest file itself. No other module
+        classifies a path of the workspace.
+
+        Returns:
+            tuple[list[str], list[str]]: (files, private), '/'-separated paths
+                relative to the workspace, both sorted. The files are the ones
+                a mirror publishes, the private ones stay on the disk of the
+                generator, e.g. the wheel cache
+        """
+        return split_paths(self._touched)
 
     def cleanup(self):
         """
         Remove every file and folder of the workspace this run did not touch.
 
-        The manifest is the whole truth of a run: a version that slid out of
-        the lookback window, a wheel of a pin that left the provided set, the
-        folder of a pack renamed away, the page of a version no step reads
-        anymore. A folder that holds no file of the manifest is removed as a
-        whole, without walking it, see CleanupByPreserved: the parts of the
-        cache and of the published folders the run did not use cost one
+        The set of touched files is the whole truth of a run: a version that
+        slid out of the lookback window, a wheel of a pin that left the
+        provided set, the folder of a pack renamed away, the page of a version
+        no step reads anymore. A folder that holds no touched file is removed
+        as a whole, without walking it, see CleanupByPreserved: the parts of
+        the cache and of the published folders the run did not use cost one
         removal and no per file IO.
 
         The removal runs once, after the version is published, so a failed run
@@ -394,7 +418,7 @@ class RepoBase:
         cleaner.register_file(files)
         cleaner.register_folder(folders)
         cleaner.register_preserved(
-            {self.workspace.joinpath(path) for path in self._manifest})
+            {self.workspace.joinpath(path) for path in self._touched})
         removed = 0
         # the answer is the deepest first, a file before its folder: the
         # removal runs in its order, a folder that still holds a file is kept
@@ -412,7 +436,7 @@ class RepoBase:
             removed += 1
         logger.info(
             f'Cleaned up "{self.workspace.name}": '
-            f'{len(self._manifest)} files kept, {removed} removed')
+            f'{len(self._touched)} files kept, {removed} removed')
         return removed
 
     @cached_property

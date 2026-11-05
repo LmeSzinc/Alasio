@@ -506,6 +506,15 @@ INFO | Packs of "Author_Repo_master" generated, latest=c3
         # the checksum of the index pack, the bytes the clients hold in
         # .pack/index.pack after unpacking the full pack
         assert data == b'c3' + bytes(full.extract_index_pack())[-20:]
+        # the step hands the info out, repo_manifest names the version with it
+        assert gen.latest.info == info
+
+    def test_run_without_pack_fails(self, fs, run_dir):
+        """The barrier is not written from packs that were not generated."""
+        gen = PackFlow(make_repo(VERSIONS))
+        with pytest.raises(RuntimeError, match='RepoPack.run\\(\\) must be called'):
+            gen.latest.run()
+        assert gen.latest.info is None
 
     def test_commit_requires_run(self, fs, run_dir):
         """commit() before run() cannot publish a stale or partial version."""
