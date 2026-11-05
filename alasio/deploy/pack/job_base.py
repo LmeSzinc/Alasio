@@ -17,7 +17,7 @@ from alasio.ext.path import PathStr
 from alasio.ext.path.atomic import (
     atomic_open, atomic_read_bytes, atomic_remove, atomic_replace, atomic_rmtree, file_remove, folder_rmtree_empty
 )
-from alasio.ext.path.makedir import _get_parent_folder, batch_makedirs
+from alasio.ext.path.makedir import BatchMakedirs
 from alasio.logger import logger
 
 
@@ -456,10 +456,10 @@ class JobBase(DeployTarget):
         deletes = [pending for pending in self.pending if pending.info.edit == 2]
 
         # create the parent folders of all targets in one batch
-        batch_makedirs([
+        BatchMakedirs(
             self.root.joinpath(pending.info.path)
             for pending in applies
-        ])
+        ).run()
 
         for pending in applies:
             target = self.root.joinpath(pending.info.path)
@@ -490,10 +490,10 @@ class JobBase(DeployTarget):
         The folders the files of a version occupy.
 
         A pack records files only: a folder is the prefix of the paths below
-        it. The prefixes come from _get_parent_folder(), the helper
-        batch_makedirs() reads the folders of the writes from: the set can
-        never disagree with the folders that were created, and a folder is
-        answered by a lookup instead of a scan of every record.
+        it. The prefixes come from BatchMakedirs.parent_folders_of(), the rule
+        the parent folders of the writes are read with: the set can never
+        disagree with the folders that were created, and a folder is answered
+        by a lookup instead of a scan of every record.
 
         Args:
             paths (Iterable[str]): Paths of the files, '/'-separated and
@@ -503,7 +503,7 @@ class JobBase(DeployTarget):
             set[str]: Every folder that holds a file, relative to the root of
                 the target, the root itself excluded
         """
-        return set(_get_parent_folder(paths))
+        return set(BatchMakedirs.parent_folders_of(paths))
 
     def _remove_deleted(self, path, occupied):
         """
@@ -518,7 +518,7 @@ class JobBase(DeployTarget):
         The path may be a folder, because the new version replaced the file
         with a folder of the same name (e.g. "pkg/mod.py" became
         "pkg/mod/__init__.py"): the writes of replace_data() run before the
-        deletions and batch_makedirs() removes a file in the way of a folder,
+        deletions and BatchMakedirs removes a file in the way of a folder,
         so the folder exists when this record is applied. A folder is never
         unlinked as a file (an error on every platform, an 8 attempt retry on
         Windows), it is decided by its role in the new version:
@@ -606,7 +606,7 @@ class JobBase(DeployTarget):
         # job, it exists by now; the batch keeps the replace below
         # working when it does not (a target updated without a
         # workspace, e.g. a direct job call)
-        batch_makedirs([target])
+        BatchMakedirs([target]).run()
         atomic_replace(pending.tmp, target)
         if pending.mode is not None:
             os.chmod(target, pending.mode)

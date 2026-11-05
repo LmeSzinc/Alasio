@@ -5,13 +5,13 @@ A pack record only names files: a folder is the prefix of a record path, never
 a record of its own. Two conflicts can only be decided on the client then:
 
 - a deleted record (D) whose path is a folder by the time the deletion runs.
-  The writes of replace_data() run before the deletions and batch_makedirs()
+  The writes of replace_data() run before the deletions and BatchMakedirs
   removes a file in the way of a folder, so a new version that replaces
   "x" (a file) with "x/y.py" leaves a folder at the deleted path. The folder
   is kept when the new version records a file inside it, and removed
   otherwise, see JobBase._remove_deleted();
 - a record that writes a file whose parent is a file, e.g. "x/y.py" while "x"
-  is the file of the old version: batch_makedirs() removes the file in the
+  is the file of the old version: BatchMakedirs removes the file in the
   way, and _read_current() answers "no file" for the path instead of failing
   on the missing parent folder.
 
@@ -385,7 +385,7 @@ class TestReadCurrent:
 
     def test_parent_is_a_file(self, app_folder, monkeypatch):
         """A path below a file has no file of its own: the answer is "missing",
-        not an error, so the record can be applied after batch_makedirs()
+        not an error, so the record can be applied after BatchMakedirs
         removed the file in the way."""
         def raiser(file, mode='r', **kwargs):
             # the POSIX answer for "x" being a file, open("x/y.py") raises

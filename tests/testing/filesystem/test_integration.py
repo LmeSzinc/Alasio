@@ -2,7 +2,7 @@
 Integration tests: the alasio/ext/path stack on the fake filesystem.
 
 These tests verify that PathStr, the atomic read/write functions,
-batch_makedirs and folder iteration work against the in-memory fake
+BatchMakedirs and folder iteration work against the in-memory fake
 filesystem without changes.
 """
 import os
@@ -15,7 +15,7 @@ from alasio.ext.path.atomic import (
     file_read_bytes_stream, file_read_text, file_read_text_stream, file_remove, file_touch, file_write,
     file_write_stream, folder_rmtree, is_empty_folder
 )
-from alasio.ext.path.makedir import batch_makedirs
+from alasio.ext.path.makedir import BatchMakedirs
 from alasio.testing.filesystem import fs  # noqa: F401
 from tests.testing.filesystem.conftest import join
 
@@ -394,20 +394,20 @@ class TestPathStr:
 
 
 class TestBatchMakedirs:
-    """batch_makedirs() against the fake filesystem."""
+    """BatchMakedirs against the fake filesystem."""
 
     def test_batch_makedirs(self, fs):
-        """batch_makedirs() should create all parent folders."""
+        """run() should create all parent folders."""
         root = PathStr.new(fs.root_dir.path)
-        batch_makedirs([root.joinpath('a/b/c.txt'), root.joinpath('a/d.txt')])
+        BatchMakedirs([root.joinpath('a/b/c.txt'), root.joinpath('a/d.txt')]).run()
         assert os.path.isdir(root.joinpath('a/b'))
         assert os.path.isdir(root.joinpath('a'))
 
     def test_batch_makedirs_existing(self, fs):
-        """batch_makedirs() should not fail on existing folders."""
+        """run() should not fail on existing folders."""
         root = PathStr.new(fs.root_dir.path)
         os.makedirs(root.joinpath('a'), exist_ok=True)
-        batch_makedirs([root.joinpath('a/b.txt')])
+        BatchMakedirs([root.joinpath('a/b.txt')]).run()
         assert os.path.isdir(root.joinpath('a'))
 
     def test_batch_makedirs_file_in_way(self, fs):
@@ -415,7 +415,7 @@ class TestBatchMakedirs:
         root = PathStr.new(fs.root_dir.path)
         os.makedirs(root.joinpath('a'), exist_ok=True)
         file_write(root.joinpath('a/b'), 'x')
-        batch_makedirs([root.joinpath('a/b/c.txt')])
+        BatchMakedirs([root.joinpath('a/b/c.txt')]).run()
         assert os.path.isdir(root.joinpath('a/b'))
         assert not os.path.isfile(root.joinpath('a/b'))
 
