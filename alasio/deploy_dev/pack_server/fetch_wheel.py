@@ -2,9 +2,9 @@
 Fetch the wheels of a distribution version from a PyPI simple index.
 
 A repo of the pack server builds the packs of its python dependencies and
-publishes the wheels of the provided ones, the wheels of both jobs are the same
-files: this module downloads them from the PyPI simple index (PEP 503) of the
-pin into the cache folder of its version:
+publishes the wheels of the provided ones, the wheels of a name are fetched for
+one of the two jobs only: this module downloads them from the PyPI simple
+index (PEP 503) of the pin into the cache folder of its version:
 
     {workspace}/_wheel_cache/{distribution}/{version}/index.html   the index page
     {workspace}/_wheel_cache/{distribution}/{version}/{filename}.whl   the wheels

@@ -103,8 +103,8 @@ class DepBuildInfo(msgspec.Struct):
     One dependency of the window, and what the repo asks to build of it.
 
     A dependency is in the mapping of RepoBase.deps once, with its versions and
-    its objectives on one object: a dependency may be a pack channel, a set of
-    provided wheels, or both.
+    its objectives on one object: a dependency is a pack channel or a set of
+    provided wheels, never both, see RepoBase.deps.
 
     Attributes:
         name (str): PEP 503 normalized distribution name
@@ -116,8 +116,8 @@ class DepBuildInfo(msgspec.Struct):
         pack_dep (bool): True when the name is one of the pack_deps of
             the mod entry: the dependency packs are built of it
         provide_wheel (bool): True when the latest pin comes from an index the
-            mod entry provides: every wheel of the version is published to the
-            pip index
+            mod entry provides and the name is not a pack dep: every wheel of
+            the version is published to the pip index
     """
 
     name: str
@@ -508,9 +508,12 @@ class RepoBase:
         The names of the mod entry pack_deps and the names whose latest
         pin comes from an index the entry provides, see DepBuildInfo: the first
         ones get the dependency packs, the second ones get their wheels
-        published to the pip index, a name of both gets both. A name is in the
-        mapping once, with the versions of the window and the two objectives
-        on one object.
+        published to the pip index. The two objectives never apply to the same
+        name: a name that updates by pack is already served by its pack
+        channel, publishing its wheels too would be the same version served
+        twice, so a pack dep is never provided, whatever index its pin comes
+        from. A name is in the mapping once, with the versions of the window
+        and the objectives on one object.
 
         A name the latest commit does not pin is not in the mapping: it has no
         version a client updates to, so nothing is built of it this run.
@@ -547,7 +550,9 @@ class RepoBase:
         deps = {}
         for name, pin in latest_deps.items():
             pack_dep = name in pack_names
-            provide_wheel = is_provided_source(pin.source, provide_mirrors)
+            # a name of both objectives is served by its pack channel alone:
+            # the wheels of the same version are not published a second time
+            provide_wheel = not pack_dep and is_provided_source(pin.source, provide_mirrors)
             if not (pack_dep or provide_wheel):
                 # neither a pack channel nor a provided wheel of this repo
                 continue

@@ -259,8 +259,8 @@ INFO | No pack_deps declared by module/config/_index/mod_entry.yaml at c3, no de
         assert not join_path(run_dir, CACHE_ROOT).exists()
         assert not join_path(run_dir, WHEEL_ROOT).exists()
 
-    def test_pack_channel_wheel_is_reused(self, fs, run_dir, mirror):
-        """A version the pack step fetched is answered by the cache, no request."""
+    def test_pack_channel_is_not_published(self, fs, run_dir, mirror):
+        """A version the pack step fetched is not published again as a wheel."""
         register_wheels(mirror)
         mirror.alias(PROVIDED_URL)
         requirements = {
@@ -268,8 +268,8 @@ INFO | No pack_deps declared by module/config/_index/mod_entry.yaml at c3, no de
             'c2': requirement('httpx==0.27.8'),
             'c3': requirement('httpx==0.28.1', f'{PROVIDED_URL}/'),
         }
-        # the entry declares httpx as a pack channel and provides its index: the
-        # two steps read the same version
+        # the entry declares httpx as a pack channel and provides its index:
+        # the pack serves the version, the wheel of it is not published
         entry = entry_source('httpx', provide=(PROVIDED_URL,))
         base = RepoBase(make_repo(requirements, entry=entry), make_config(), mirror.client)
         RepoDep(base).run()
@@ -278,11 +278,9 @@ INFO | No pack_deps declared by module/config/_index/mod_entry.yaml at c3, no de
         wheel = RepoWheel(base)
         wheel.run()
 
-        # the page and the pure wheel of the version are in the cache, and the
-        # version has no other wheel: the second step reads nothing
+        # the pack step already fetched the wheel, the second step asks for none
         assert mirror.requests == requests
-        assert [wheel_info.file.name for wheel_info in wheel.publish_files[('httpx', '0.28.1')]] == [
-            'httpx-0.28.1-py3-none-any.whl']
+        assert wheel.publish_files == {}
 
 
 class TestProxy:

@@ -18,9 +18,9 @@ dependencies of the version it updated to, and an old version keeps the wheels
 of the run that published it.
 
 The packs of the dependencies fetch their own wheels (repo_dep): the two steps
-share the cache folder, and a version that both fetch is downloaded by the
-first of them and answered by the local files of the second, see fetch_wheel.
-Neither step depends on the order of the other.
+share the cache folder and the fetcher, but a name belongs to one of them only,
+a pack dep is never a provided wheel (RepoBase.deps), so neither step depends
+on the order of the other.
 
 A published wheel is verified against the cached one: a file that is already
 there with the sha256 of its cache file is kept as it is, a file that is

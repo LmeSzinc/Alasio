@@ -487,10 +487,11 @@ class TestProvidedPins:
         gen = Repo(make_repo(requirements, entry=entry), make_config())
         deps = gen.base.deps
         assert list(deps) == ['httpx', 'demo']
-        # httpx is declared by the entry, so it is a pack channel too
+        # httpx is declared by the entry, so it is a pack channel, and a pack
+        # channel is not provided too: the pack already serves the version
         assert deps['httpx'].latest.version == '0.28.1'
-        assert deps['httpx'].provide_wheel is True
         assert deps['httpx'].pack_dep is True
+        assert deps['httpx'].provide_wheel is False
         # demo is not declared, it is provided anyway: the client installs it
         # with pip
         assert deps['demo'].latest.version == '1.0'
@@ -665,8 +666,8 @@ class TestProvidedIndex:
         # the fetch of the provided pin used its own index
         assert f'{PROVIDED_URL}/msgspec/' in mirror.requests
 
-    def test_provided_pin_fetched_from_its_index(self, fs, run_dir, mirror):
-        """A provided pin of the pack channel is fetched from its own index, once."""
+    def test_pack_channel_pin_is_not_published(self, fs, run_dir, mirror):
+        """A provided pin of a pack channel is fetched as pack input, never published."""
         mirror.alias(PROVIDED_URL)
         register_wheels(mirror)
         requirements = {
@@ -679,14 +680,10 @@ class TestProvidedIndex:
 
         assert f'{PROVIDED_URL}/httpx/' in mirror.requests
         assert 'http://mirror/httpx/' in mirror.requests
-        # it is both a pack input and a published wheel, and the two jobs of
-        # the version share one fetcher: the page of its index and the pure
-        # wheel are downloaded once
-        wheel_url = 'http://provided.example/packages/httpx-0.28.1-py3-none-any.whl'
-        assert mirror.requests.count(wheel_url) == 1
-        assert mirror.requests.count(f'{PROVIDED_URL}/httpx/') == 1
+        # the pin is the target of a pack channel: its wheel is the pack input,
+        # and the same version is not published to the pip index a second time
         assert cache_file(run_dir, '0.28.1').isfile()
-        assert wheel_file(run_dir, '0.28.1').isfile()
+        assert not wheel_file(run_dir, '0.28.1').isfile()
 
     def test_unprovided_pin_not_published(self, fs, run_dir, mirror):
         """A pin of an index the repo does not provide is fetched, not published."""
@@ -859,7 +856,7 @@ class TestWheelCache:
         requirements = {
             'c1': f'httpx==0.28.1\n    # from {PROVIDED_URL}/\n',
         }
-        entry = entry_source('httpx', provide=(PROVIDED_URL,))
+        entry = entry_source(provide=(PROVIDED_URL,))
         repo = make_repo(requirements, entry=entry)
         run_commit(repo, make_config(), mirror.client)
         file = wheel_file(run_dir, '0.28.1')
@@ -877,7 +874,7 @@ class TestWheelCache:
         requirements = {
             'c1': f'httpx==0.28.1\n    # from {PROVIDED_URL}/\n',
         }
-        entry = entry_source('httpx', provide=(PROVIDED_URL,))
+        entry = entry_source(provide=(PROVIDED_URL,))
         repo = make_repo(requirements, entry=entry)
         run_commit(repo, make_config(), mirror.client)
         file = wheel_file(run_dir, '0.28.1')

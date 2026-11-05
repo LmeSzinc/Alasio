@@ -19,8 +19,9 @@ The input of the build is the pure python wheel of every version of the window:
 this step fetches them to the private cache first (`_wheel_cache/{name}/{version}/`,
 the index page of the version and its wheels, see fetch_wheel) and builds the
 packs from there. The cache folder is shared with repo_wheel, which fetches the
-wheels of the pins the repo provides: a version both steps fetch is downloaded
-by the first of them and answered by the local files of the second.
+wheels of the pins the repo provides: the two steps read the same kind of
+files, though a name is fetched by one of them only, a pack dep is never a
+provided wheel, see RepoBase.deps.
 
 The bytes of a pack only depend on the wheel of its version, so the pack of an
 earlier run is kept as it is: the identity of the file is read back (kept_pack)
