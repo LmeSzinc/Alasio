@@ -178,8 +178,14 @@ class TestSupervisor:
             proc.wait_for_output("startup successful", timeout=10)
             proc.wait_for_output("waiting for step:restart", timeout=10)
             # The startup is already confirmed and the request is still
-            # withheld: the test releases it *after* the confirmation
-            assert proc.has_output("Unknown command from backend: b'ok'")
+            # withheld: the test releases it *after* the confirmation. The
+            # confirmation message is not a known command, so the supervisor
+            # logs the warning right after the confirmation line; waiting for
+            # the warning is what proves the confirmation was handled while the
+            # request is still withheld. Asserting the warning is already
+            # collected would depend on how far the output collector of this
+            # process got, which is not the contract of the supervisor.
+            proc.wait_for_output("Unknown command from backend: b'ok'", timeout=10)
             assert not proc.has_output("Backend requested restart")
             proc.send_command("command:step:restart")
             proc.wait_for_output("Backend requested restart", timeout=10)
@@ -213,8 +219,10 @@ class TestSupervisor:
         with create_supervisor_process("stop_late") as proc:
             proc.wait_for_output("startup successful", timeout=10)
             proc.wait_for_output("waiting for step:stop", timeout=10)
-            # Same as case 2: confirmation first, stop request released after
-            assert proc.has_output("Unknown command from backend: b'ok'")
+            # Same as case 2: the confirmation is not a known command, so the
+            # warning line is the event that proves it was handled while the
+            # stop request is still withheld
+            proc.wait_for_output("Unknown command from backend: b'ok'", timeout=10)
             assert not proc.has_output("Backend requested stop")
             proc.send_command("command:step:stop")
             proc.wait_for_output("Backend requested stop", timeout=10)
