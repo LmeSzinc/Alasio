@@ -2,8 +2,9 @@ import pytest
 
 import alasio.assets_dev.extract as extract_module
 from alasio.assets_dev.extract import AssetsExtractor
-from alasio.ext.file.watchdog import PathEvent
+from alasio.ext.file.watcher import WatchEvent
 from alasio.ext.path import PathStr
+from alasio.ext.path.calc import normpath
 from alasio.logger import logger
 from alasio.testing.filesystem import fs  # noqa: F401
 from tests.assets_dev.helpers import project_root, write_png
@@ -304,9 +305,9 @@ class TestGenerateOnChange:
     def test_module_of_events(self, generated):
         project, extractor, calls = generated
         events = [
-            PathEvent('M', str(project.joinpath('assets/cn/combat/X.png')), 'F', 0),
-            PathEvent('M', str(project.joinpath('assets/cn/combat/interact/X.2.png')), 'F', 0),
-            PathEvent('M', str(project.joinpath('assets/en/combat/X.png')), 'F', 0),
+            WatchEvent('M', str(project.joinpath('assets/cn/combat/X.png')), 'F', 0),
+            WatchEvent('M', str(project.joinpath('assets/cn/combat/interact/X.2.png')), 'F', 0),
+            WatchEvent('M', str(project.joinpath('assets/en/combat/X.png')), 'F', 0),
         ]
         extractor.generate_on_change(events)
         # the modules of all events, generated once
@@ -315,8 +316,8 @@ class TestGenerateOnChange:
     def test_ignores_not_assets(self, generated):
         project, extractor, calls = generated
         events = [
-            PathEvent('M', str(project.joinpath('assets/cn/combat/notes.txt')), 'F', 0),
-            PathEvent('M', str(project.joinpath('assets/cn/combat/Screenshot_20250520-212905.png')), 'F', 0),
+            WatchEvent('M', str(project.joinpath('assets/cn/combat/notes.txt')), 'F', 0),
+            WatchEvent('M', str(project.joinpath('assets/cn/combat/Screenshot_20250520-212905.png')), 'F', 0),
         ]
         extractor.generate_on_change(events)
         assert calls == []
@@ -329,7 +330,7 @@ class TestGenerateOnChange:
     def test_gitadd(self, generated):
         project, extractor, calls = generated
         gitadd = object()
-        events = [PathEvent('M', str(project.joinpath('assets/cn/a/X.png')), 'F', 0)]
+        events = [WatchEvent('M', str(project.joinpath('assets/cn/a/X.png')), 'F', 0)]
         extractor.generate_on_change(events, gitadd=gitadd)
         assert calls == [({'a'}, gitadd)]
 
@@ -339,7 +340,7 @@ class TestImageFixup:
 
     @staticmethod
     def event(file):
-        return PathEvent('M', str(file), 'F', 0)
+        return WatchEvent('M', str(file), 'F', 0)
 
     def test_fixup(self, fs):
         project = project_root(fs)
@@ -404,15 +405,15 @@ class TestWatchFiles:
         project = project_root(fs)
         extractor = AssetsExtractor(project)
 
-        class FakeWatchdog:
+        class FakeWatcher:
             def __init__(self):
                 self.marked = []
 
-            def watch_files(self, include_existing=False, interval=2):
+            def update(self):
                 return events
 
-            def mark_modified(self, event):
-                self.marked.append(event)
+            def mark_modified(self, path):
+                self.marked.append(path)
 
         class FakeGitAdd:
             def __init__(self, root):
@@ -428,15 +429,15 @@ class TestWatchFiles:
             def stage_add(self, file):
                 self.added.append(PathStr.new(file))
 
-        watchdog = FakeWatchdog()
-        monkeypatch.setattr(extractor, 'watchdog', watchdog)
+        watcher = FakeWatcher()
+        monkeypatch.setattr(extractor, 'watcher', watcher)
         monkeypatch.setattr(extract_module, 'GitAdd', FakeGitAdd)
         created['generated'] = []
         monkeypatch.setattr(
             extractor, 'generate_on_change',
             lambda events, gitadd=None: created['generated'].append((events, gitadd)),
         )
-        return project, extractor, watchdog
+        return project, extractor, watcher
 
     def test_watch_files(self, fs, monkeypatch):
         created = {}
@@ -446,26 +447,114 @@ class TestWatchFiles:
         write_png(fs, asset, compress=0)
         fs.create_file(notes, contents='')
         events = [
-            PathEvent('A', str(asset), 'F', 0),
-            PathEvent('A', str(notes), 'F', 0),
+            WatchEvent('A', str(asset), 'F', 0),
+            WatchEvent('A', str(notes), 'F', 0),
         ]
-        project, extractor, watchdog = self.prepare(fs, monkeypatch, events, created)
+        project, extractor, watcher = self.prepare(fs, monkeypatch, events, created)
 
-        extractor.watch_files()
+        extractor.watch_files(interval=0)
 
         # only the asset is staged
         assert created['gitadd'].added == [asset]
         # the fixed up asset is marked as modified by us
-        assert watchdog.marked == [events[0]]
+        assert watcher.marked == [events[0].path]
         # all the events are passed to the generator, it filters them itself
         assert created['generated'] == [(events, created['gitadd'])]
 
     def test_no_events(self, fs, monkeypatch):
         created = {}
-        project, extractor, watchdog = self.prepare(fs, monkeypatch, [], created)
+        project, extractor, watcher = self.prepare(fs, monkeypatch, [], created)
 
-        extractor.watch_files()
+        extractor.watch_files(interval=0)
 
         # no event, no git and no generation
         assert 'gitadd' not in created
         assert created['generated'] == []
+
+
+class TestWatcher:
+    """watcher property subscribes the language folders and drops the baseline"""
+
+    def test_existing_assets_are_not_changes(self, fs):
+        project = project_root(fs)
+        write_png(fs, project.joinpath('assets/cn/a/X.png'))
+        write_png(fs, project.joinpath('assets/en/a/X.png'))
+
+        watcher = AssetsExtractor(project).watcher
+
+        # the baseline is taken once and dropped, existing assets are never
+        # reported as new files
+        assert watcher.update() == []
+
+    def test_new_assets_are_reported(self, fs):
+        project = project_root(fs)
+        watcher = AssetsExtractor(project).watcher
+        folder = project.joinpath('assets/cn/a')
+        asset = folder.joinpath('X.png')
+        notes = folder.joinpath('notes.txt')
+        write_png(fs, asset)
+        fs.create_file(notes, contents='')
+
+        events = watcher.update()
+
+        assert [(event.event, event.path, event.type) for event in events] == [
+            ('A', normpath(str(project.joinpath('assets/cn'))), 'D'),
+            ('A', normpath(str(folder)), 'D'),
+            ('A', normpath(str(asset)), 'F'),
+            ('A', normpath(str(notes)), 'F'),
+        ]
+
+
+class TestWatchFilesWithWatcher:
+    """watch_files() polls a real PathWatcher, the baseline is never handled"""
+
+    class NoopGitAdd:
+        """Ignore the staging of the generated files"""
+
+        def __init__(self, root):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc_val, exc_tb):
+            pass
+
+        def stage_add(self, file):
+            pass
+
+    @staticmethod
+    def prepare(fs, monkeypatch):
+        project = project_root(fs)
+        extractor = AssetsExtractor(project)
+        calls = []
+        monkeypatch.setattr(extractor, 'generate', lambda modules=None, gitadd=None: calls.append(modules))
+        monkeypatch.setattr(extract_module, 'GitAdd', TestWatchFilesWithWatcher.NoopGitAdd)
+        return extractor, calls
+
+    def test_existing_assets_are_baseline(self, fs, monkeypatch):
+        write_png(fs, project_root(fs).joinpath('assets/cn/a/X.png'), compress=0)
+        extractor, calls = self.prepare(fs, monkeypatch)
+
+        extractor.watch_files(interval=0)
+
+        # assets that exist before the watcher is built are not changes
+        assert calls == []
+
+    def test_fixup_is_not_reported_again(self, fs, monkeypatch):
+        project = project_root(fs)
+        asset = project.joinpath('assets/cn/a/X.png')
+        write_png(fs, asset, compress=0)
+        extractor, calls = self.prepare(fs, monkeypatch)
+        extractor.watch_files(interval=0)
+
+        # an external write is one change, a new file record guarantees a
+        # different (mtime, size, inode) signature
+        fs.remove(asset)
+        write_png(fs, asset, compress=0, rgb=(255, 0, 0))
+        extractor.watch_files(interval=0)
+        assert calls == [{'a'}]
+
+        # the png written back by the fixup is not reported again
+        extractor.watch_files(interval=0)
+        assert calls == [{'a'}]
