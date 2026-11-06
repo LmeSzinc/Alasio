@@ -308,10 +308,18 @@ class TestFixedPool:
     def test_the_pool_does_not_depend_on_marks(self, suite):
         """A folder run gets the pool even when every remaining test is unmarked."""
         logs = run_suite(suite, args=('-k', 'serial'))
-        assert sorted(logs) == ['gw0'], f'expected the pool to exist, got {sorted(logs)}'
+        # Every remaining test shares one group, so exactly one worker executes
+        # the run, but which worker of the pool gets it is xdist's decision: the
+        # scheduler hands the group to the first worker that reports ready, and
+        # the spawn order of the workers is not fixed (a loaded Windows runner
+        # can bring up gw1 before gw0). Only "a pool worker, not an in process
+        # run" is asserted here.
+        assert len(logs) == 1, f'expected a single worker, got {sorted(logs)}'
+        worker, names = next(iter(logs.items()))
+        assert worker != 'master', 'expected the pool to exist, got an in process run'
         # The order inside a group is the collection order of the running pytest,
         # which differs between pytest versions, so only the set is asserted here
-        assert sorted(logs['gw0']) == sorted(SERIAL_ORDER)
+        assert sorted(names) == sorted(SERIAL_ORDER)
 
 
 class TestWithoutThePlugin:
