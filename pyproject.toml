@@ -96,6 +96,8 @@ test = [
     "pytest>=8.3.4",
     # 0.8.0 is the latest version, pytest-trio is unchanged since 2022
     "pytest-trio>=0.8.0",
+    # 3.6.1 is the version the parallel plugin is developed and tested against
+    "pytest-xdist>=3.6.1",
     # just to ensure not too old
     "ruff>=0.16.0",
     # alasio/codegen/ruff/ruff_format.py requires isort>=5.2.0
@@ -115,7 +117,15 @@ packages = ["alasio"]
 # The screenshot golden test harness is a pytest plugin too, it is loaded by
 # module path instead of an installed entry point, so a plain checkout runs the
 # tests without installing the package, see alasio/testing/screenshot.py.
-addopts = ["-p", "no:fakefs", "-p", "no:tmpdir", "-p", "alasio.testing.screenshot"]
+# The parallel plugin owns the worker pool and the scheduler of the run, so the
+# command line of a test run never carries -n or --dist, see
+# alasio/testing/pytest_parallel.py.
+addopts = [
+    "-p", "no:fakefs",
+    "-p", "no:tmpdir",
+    "-p", "alasio.testing.screenshot",
+    "-p", "alasio.testing.pytest_parallel",
+]
 # Add the repository root to sys.path, so the plugin loaded above and the tests
 # import alasio and ExampleMod from a plain checkout.
 pythonpath = ["."]
@@ -124,4 +134,5 @@ tmp_path_retention_policy = "failed"
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "network: marks tests that require external network access (skip with '--run-network' unset)",
+    "parallel: the file is safe to run in parallel with other marked files",
 ]
