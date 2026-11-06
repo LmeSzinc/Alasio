@@ -436,14 +436,17 @@ class JobBase(DeployTarget):
         first, the deletions after every write.
 
         Every tmp file is moved to the target path atomically and the
-        deleted markers are removed. A deleted path that is a folder by
-        now (the new version replaced the file with a folder of the same
-        name) is kept when the new version records a file inside it, and
-        removed with its content otherwise, see _remove_deleted(). The
-        two groups of paths are disjoint (a deletion removes a file the
-        new version does not have, a write targets a file it has), so
-        applying every write before every deletion is safe, whatever the
-        order of the pending list is: an interruption leaves the old files
+        deleted markers are removed. The sources of the R / RM records in the
+        batch are removed with them, after every write: they are the files the
+        writes move, so they are deleted only when their target was really
+        written (a record left in error is not in the batch). A deleted path
+        that is a folder by now (the new version replaced the file with a
+        folder of the same name) is kept when the new version records a file
+        inside it, and removed with its content otherwise, see
+        _remove_deleted(). The two groups of paths are disjoint (a deletion
+        removes a file the new version does not have, a write targets a file it
+        has), so applying every write before every deletion is safe, whatever
+        the order of the pending list is: an interruption leaves the old files
         in place instead of half-deleted. The target is chmod-ed when
         pending.mode is set, the mode decision is made by the job that
         prepared the pending list. The folders left empty by the
@@ -454,6 +457,17 @@ class JobBase(DeployTarget):
         """
         applies = [pending for pending in self.pending if pending.info.edit != 2]
         deletes = [pending for pending in self.pending if pending.info.edit == 2]
+        # The source of an R / RM record is a file of the old version the write
+        # moves: it is deleted after its target is written, whatever prepared
+        # the record (the unpack of the pack, or the download of a record whose
+        # source was unusable). Deriving it here from the writes keeps the two
+        # in one place: a record that stayed in error is not in applies, so its
+        # source is never deleted, and no caller has to remember the rule.
+        moved = [
+            PendingFile(info=IdxInfo(path=pending.info.source_path, edit=2), tmp='')
+            for pending in applies
+            if pending.info.edit == 3 and pending.info.source_path
+        ]
 
         # create the parent folders of all targets in one batch
         BatchMakedirs(
@@ -478,7 +492,7 @@ class JobBase(DeployTarget):
             (path for path, info in self.new_fileinfo.items() if info.edit != 2),
             (pending.info.path for pending in applies),
         ))
-        for pending in deletes:
+        for pending in deletes + moved:
             # deleted marker, the file should not exist
             self.changed |= self._remove_deleted(pending.info.path, occupied)
 

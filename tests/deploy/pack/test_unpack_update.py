@@ -427,10 +427,11 @@ class TestUnpack:
         deleted = pending['backend/legacy.py']
         assert deleted.info.edit == 2
         assert deleted.tmp == ''
-        # the R / RM source files are moved: their deletion is scheduled
-        # as deleted markers, applied after every write by replace_data()
-        assert pending['scripts/run.sh'].info.edit == 2
-        assert pending['scripts/old_tool.py'].info.edit == 2
+        # the R / RM source files are moved: their deletion is derived by
+        # replace_data() from the writes of the batch, so it is applied after
+        # every write without a pending entry of its own
+        assert 'scripts/run.sh' not in pending
+        assert 'scripts/old_tool.py' not in pending
         # the index pack is the commit record, not a pending data file:
         # it is prepared to pending_index, replace_index() commits it
         assert '.pack/index.pack' not in pending
@@ -1204,6 +1205,30 @@ class TestSourceDownload:
         await setup_app()
         os.remove(env.PROJECT_ROOT / 'scripts/old_tool.py')
         await run_update()
+
+    @pytest.mark.trio
+    async def test_damaged_rename_source_removed(self, app_folder):
+        """A source of an R / RM record that fails the size + sha1 check is
+        downloaded from the full pack, and the damaged source is removed with
+        the move: the new version has no file at that path.
+
+        The record stays in error until download() fetches it, so the deletion
+        can not be scheduled by unpack(): it follows the write of the target,
+        and a target that was never written leaves its source alone.
+        """
+        await setup_app()
+        with open(env.PROJECT_ROOT / 'scripts/run.sh', 'wb') as f:
+            f.write(b'the user edited this file\n')
+        with open(env.PROJECT_ROOT / 'scripts/old_tool.py', 'wb') as f:
+            f.write(b'the user edited this one too\n')
+
+        job = UpdateJob(UPDATE, server=SERVER)
+        assert await job.run()
+
+        assert job.error == []
+        assert not os.path.exists(env.PROJECT_ROOT / 'scripts/run.sh')
+        assert not os.path.exists(env.PROJECT_ROOT / 'scripts/old_tool.py')
+        assert read_tree() == NEW_TREE
 
     @pytest.mark.trio
     async def test_eol_mismatch_source_fixed_without_download(self, app_folder, monkeypatch):

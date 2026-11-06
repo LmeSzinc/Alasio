@@ -412,17 +412,17 @@ class UpdateJob(JobBase):
                 # deleted marker, its target is removed in replace()
                 pending.append(PendingFile(info=info, tmp=''))
                 continue
-            # R / RM records move the source file: its deletion is
-            # scheduled here as a deleted marker and applied by
-            # replace_data() after every write of the batch (the
-            # pending order does not matter)
-            deleted = info.source_path if info.edit == 3 else ''
+            # the source of an R / RM record is removed by replace_data() after
+            # the target of the record is written, see JobBase.replace_data()
             current = self._read_current(target)
             result = self._matches(info, current)
             if result.match:
                 # the target file exists and passes the size + sha1 check
-                if deleted:
-                    self._append_deleted(pending, deleted)
+                if info.edit == 3 and info.source_path:
+                    # the record writes nothing, so replace_data() cannot derive
+                    # the move from the batch: its source is scheduled here
+                    pending.append(PendingFile(
+                        info=IdxInfo(path=info.source_path, edit=2), tmp=''))
                 if result.mode_matched:
                     # the content and the mode are verified, the record
                     # needs no tmp file and applies for no tmp name
@@ -442,8 +442,6 @@ class UpdateJob(JobBase):
                 # to the tmp file without reading the sources
                 tmp = self.tmp_file(path, info)
                 file_write(tmp, result.match_data)
-                if deleted:
-                    self._append_deleted(pending, deleted)
                 self.register_tmp(path, info, tmp)
                 pending.append(PendingFile(
                     info=info, tmp=tmp, mode=info.mode_decoded if info.mode == 1 else None))
@@ -464,8 +462,6 @@ class UpdateJob(JobBase):
             if not self._matches(info, self._read_current(tmp)).match:
                 # decompress and write to the tmp file
                 file_write(tmp, content)
-            if deleted:
-                self._append_deleted(pending, deleted)
             self.register_tmp(path, info, tmp)
             # the file is written by python with the default mode 666,
             # a 755 record is chmod-ed in replace()
@@ -901,20 +897,3 @@ class UpdateJob(JobBase):
         if eol == 1:
             return content.replace(b'\r\n', b'\n')
         return content
-
-    @staticmethod
-    def _append_deleted(pending, path):
-        """
-        Schedule the deletion of a renamed source file.
-
-        replace_data() applies the deletion only after every write of
-        the batch (the pending order does not matter): the target of
-        the rename is written before its source is removed, so an
-        interruption never loses the file (a leftover source is
-        removed by the next run, which finds the target in place).
-
-        Args:
-            pending (list[PendingFile]): Pending list to append to
-            path (str): Path of the renamed source
-        """
-        pending.append(PendingFile(info=IdxInfo(path=path, edit=2), tmp=''))
