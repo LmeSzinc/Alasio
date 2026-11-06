@@ -175,7 +175,15 @@ class PipPack:
             client=self.client,
         )
         try:
-            job = DeployJob(root=self.site_packages, name=dist_key, server=server)
+            job = DeployJob(
+                root=self.site_packages, name=dist_key, server=server,
+                # The mod took the distribution over from the pip channel: a
+                # target that has no ledger yet may still be the installation
+                # pip wrote, and its RECORD is then the old side of this
+                # install. The caller declares it, the flow never goes
+                # looking for an installation on its own
+                scene='pypi',
+            )
             logger.info(f'Installing "{name}=={version}" to "{self.site_packages}"')
             ok = await job.update(version=version, latest_info=latest_info)
         finally:

@@ -11,6 +11,8 @@ from alasio.deploy.pack.job_rebuild import RebuildJob
 from alasio.deploy.pack.job_reset import ResetJob
 from alasio.deploy.pack.job_unpack import UnpackJob
 from alasio.deploy.pack.job_update import UpdateJob
+from alasio.deploy.pack.local_index import LocalIndex
+from alasio.deploy.pack.local_side import LocalSide, create_local_side
 from alasio.deploy.pack.server_file import LatestInfo, ServerFileWithLatestInfo
 from alasio.ext.file.filelock import SQLiteFileLock
 from alasio.ext.path.atomic import atomic_read_bytes
@@ -93,7 +95,7 @@ class DeployJob(DeployTarget):
     (the index pack, the failed records) use it.
     """
 
-    def __init__(self, root=None, name='', server=None):
+    def __init__(self, root=None, name='', server=None, scene='repo'):
         """
         Args:
             root (str, optional): Folder to update. Defaults to None,
@@ -102,9 +104,24 @@ class DeployJob(DeployTarget):
                 '', the project tree target
             server (ServerFile, optional): Server to check and download
                 from, used by update(). Defaults to None.
+            scene (str): Scene of the channel the target is served from, the
+                same name the mirror probes of the framework use: 'repo' for
+                a mod tree, 'pypi' for a python distribution. It names the
+                local side of the target (see alasio.deploy.pack.local_side):
+                a target served from a 'pypi' channel may hold a distribution
+                installed by pip, whose RECORD is the only record of its
+                files until a pack flow writes a ledger. A target is never
+                guessed from the disk -- a site-packages folder holds the
+                leftovers of every tool that wrote to it -- so a caller that
+                took a distribution over from pip says so here. Defaults to
+                'repo', the target is its own tree and its ledger
         """
         super().__init__(root=root, name=name)
         self.server = server
+        # the files of the target that are not the working tree file of the
+        # same path, see scene: nothing is read here, the facts are cached
+        # properties of the side
+        self.local_side: LocalSide = create_local_side(scene, self.root, self.name)
         # whether the last flow of this instance changed real files
         # (writes, deletions or mode changes; a committed index alone
         # does not count): the startup round restarts the backend only
@@ -244,24 +261,10 @@ class DeployJob(DeployTarget):
             # the unpack re-derives everything from the new pack and
             # cleans the workspace up at the end
             job = UnpackJob(data, root=self.root, name=self.name)
+            job.local_side = self.local_side
             await self._run_job(job)
 
-    def _local_version(self):
-        """
-        The version of the local index pack (index.pack in the ledger
-        folder of the target).
-
-        Returns:
-            str: The version of the local index pack, '' when it is
-                missing or malformed
-        """
-        try:
-            decoder = PackDecodeBase(atomic_read_bytes(self.index_file))
-        except (FileNotFoundError, PackDecodeError):
-            return ''
-        return decoder.current_version
-
-    async def check(self, version='', server=None):
+    async def check(self, version='', server=None, index=None):
         """
         Check the local version of this target against the server of the
         instance (self.server, set in __init__), or the server given by the
@@ -271,9 +274,11 @@ class DeployJob(DeployTarget):
             check = await DeployJob(server=server).check(version='0.28.1')
 
         Read-only: the local version comes from the local index pack
-        (index.pack in the ledger folder of the target), the target comes
-        from latest.pack on the server, or from the snapshot of a
-        ServerFileWithLatestInfo. Nothing is written and no lock
+        (index.pack in the ledger folder of the target), or from the local
+        side of a target that has none (see
+        alasio.deploy.pack.local_side); the target comes from latest.pack on the
+        server, or from the snapshot of a ServerFileWithLatestInfo. Nothing
+        is written and no lock
         is taken - a check never conflicts with an update of the same
         target (the index pack of a target being updated is read
         atomically, it is never seen half written). The version pair is
@@ -297,6 +302,9 @@ class DeployJob(DeployTarget):
             server (ServerFile, optional): Server to check, defaults to the
                 server of the instance. The update flow passes the snapshot
                 wrapper here
+            index (LocalIndex, optional): The local index pack the caller
+                already read, e.g. the update flow that read it to choose the
+                path of the flow. Defaults to None, the check reads it itself
 
         Returns:
             DeployCheck: The local version and the latest info of the
@@ -313,7 +321,14 @@ class DeployJob(DeployTarget):
             server = self.server
         if server is None:
             raise ValueError('Failed to check: no server provided')
-        local = await trio.to_thread.run_sync(self._local_version)
+        if index is None:
+            index = await trio.to_thread.run_sync(LocalIndex.read, self)
+        local = index.version
+        if not local and index.missing:
+            # the target has no ledger: the version the local files record is
+            # its version (a distribution installed by pip, see scene), so the
+            # update pack of the server is asked for it
+            local = self.local_side.version
         logger.attr('CurrentVersion', local)
         info = await server.get_latest_info()
         logger.attr('LatestVersion', info.version)
@@ -542,26 +557,46 @@ class DeployJob(DeployTarget):
             # the first request, see _job_phase
             await self._job_phase(on_job_phase, 'checking')
 
-            check = await self.check(version, server=server)
+            # the index pack is read once for the whole flow: the version
+            # check, the choice of the path below and the deletion base of the
+            # job of it all read the same object (one open of index.pack,
+            # where the check and the job of an update used to open it twice)
+            index = await trio.to_thread.run_sync(LocalIndex.read, self)
+            check = await self.check(version, server=server, index=index)
             local = check.local
             info = check.info
 
             if local and local == info.version:
-                # the same version: check the index and the files, the local
-                # repair path (nothing to download, no version to compare)
+                if index.exists:
+                    # the same version: check the index and the files, the local
+                    # repair path (nothing to download, no version to compare)
+                    await self._job_phase(on_job_phase, 'updating')
+                    job = ResetJob(server, root=self.root, name=self.name)
+                    job._latest_info = info
+                    job.local_side = self.local_side
+                    return await self._run_job(job)
+                # the version is the latest one but the target records no file
+                # of it (it is an installation the caller declared, see
+                # DeployJob): the records of a pack flow are unknown, so the
+                # target is rebuilt from the index of the version, which
+                # converges every file and commits the ledger
+                logger.warning(
+                    f'The target has no ledger of {local}, rebuilding from the latest index '
+                    f'to record its files')
                 await self._job_phase(on_job_phase, 'updating')
-                job = ResetJob(server, root=self.root, name=self.name)
+                job = RebuildJob(server, root=self.root, name=self.name)
                 job._latest_info = info
+                job.local_side = self.local_side
                 return await self._run_job(job)
             if not local:
-                # the local index is missing or malformed, the version is
-                # unknown: rebuild from the latest index. There is no version
-                # to compare and no update pack to download, the rebuild is one
-                # apply (its own index download happens inside it)
+                # the local version is unknown: there is nothing to compare
+                # and no update pack to download, the target is rebuilt from
+                # the latest index, see the class docstring
                 logger.warning('Failed to read the local version, rebuilding from the latest index')
                 await self._job_phase(on_job_phase, 'updating')
                 job = RebuildJob(server, root=self.root, name=self.name)
                 job._latest_info = info
+                job.local_side = self.local_side
                 return await self._run_job(job)
 
             # the main branch: the version mismatches, apply the update pack
@@ -585,6 +620,7 @@ class DeployJob(DeployTarget):
                 await self._job_phase(on_job_phase, 'updating')
                 job = RebuildJob(server, root=self.root, name=self.name)
                 job._latest_info = info
+                job.local_side = self.local_side
                 return await self._run_job(job)
             # the download is over, the local changes start: the workers are
             # stopped before them (the manager phase)
@@ -594,6 +630,8 @@ class DeployJob(DeployTarget):
                 # the pack is of the pair the server was asked for, the
                 # internal versions are checked before any target file changes
                 expected_old_version=local, expected_new_version=info.version)
+            job.local_side = self.local_side
+            job.local_index = index
             # the index fallback download of the job must converge to the
             # checksum of this flow, not to another index of the version
             job.index_checksum = info.checksum
@@ -608,4 +646,5 @@ class DeployJob(DeployTarget):
             logger.warning('Failed to apply the update pack, rebuilding from the latest index')
             job = RebuildJob(server, root=self.root, name=self.name)
             job._latest_info = info
+            job.local_side = self.local_side
             return await self._run_job(job)

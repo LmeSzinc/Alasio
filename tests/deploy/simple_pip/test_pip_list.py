@@ -651,6 +651,72 @@ class TestMinimalIo:
         assert opened == [f'{SITE}/demo-1.0.dist-info/METADATA']
 
 
+class TestFind:
+    """The lookup of one distribution by its normalized name."""
+
+    def test_dist_info(self, fs):
+        """The installation of the name is found."""
+        create_dist_info(fs, 'demo-1.0.dist-info', metadata('demo', '1.0'))
+        dist = PipList(SITE).find('demo')
+        assert (dist.name, dist.version, dist.dist_key) == ('demo', '1.0', 'demo')
+
+    @pytest.mark.parametrize('name', ['ruamel.yaml', 'ruamel_yaml', 'Ruamel.Yaml'])
+    def test_name_style(self, fs, name):
+        """The name is a dist-key, any case and separator style is the same lookup."""
+        create_dist_info(
+            fs, 'ruamel_yaml-0.18.6.dist-info', metadata('ruamel.yaml', '0.18.6'))
+        assert PipList(SITE).find(normalize_name(name)).version == '0.18.6'
+
+    def test_egg_info(self, fs):
+        """A legacy installation is found by the name of its entry."""
+        create_egg_info(fs, 'alasio.egg-info', metadata('alasio', '0.0.1'))
+        assert PipList(SITE).find('alasio').version == '0.0.1'
+
+    def test_missing(self, fs):
+        """A name the directory holds no entry of is None."""
+        create_dist_info(fs, 'demo-1.0.dist-info', metadata('demo', '1.0'))
+        assert PipList(SITE).find('httpx') is None
+
+    def test_missing_directory(self, fs):
+        """A directory that does not exist holds nothing, no error."""
+        assert PipList(SITE).find('demo') is None
+
+    def test_lowest_path_of_several_entries(self, fs):
+        """The entry list() keeps is the one find() answers: the lowest path."""
+        create_dist_info(fs, 'demo-2.0.dist-info', metadata('demo', '2.0'))
+        create_dist_info(fs, 'demo-1.0.dist-info', metadata('demo', '1.0'))
+        assert PipList(SITE).find('demo').version == '1.0'
+
+    def test_a_name_that_extends_the_lookup_is_not_matched(self, fs):
+        """The separator of the entry name decides the match, a distribution
+        whose name starts with the same letters is another one."""
+        create_dist_info(fs, 'demo_pkg-1.0.dist-info', metadata('demo_pkg', '1.0'))
+        create_dist_info(fs, 'demo2-1.0.dist-info', metadata('demo2', '1.0'))
+        assert PipList(SITE).find('demo') is None
+
+    def test_an_entry_of_another_name_is_not_found(self, fs):
+        """The metadata names the distribution of an entry, the same rule as
+        the listing."""
+        create_dist_info(fs, 'demo-1.0.dist-info', metadata('other', '1.0'))
+        assert PipList(SITE).find('demo') is None
+
+    def test_opens_the_metadata_of_the_match_only(self, fs, monkeypatch):
+        """The metadata of the other installations is never read."""
+        create_dist_info(fs, 'demo-1.0.dist-info', metadata('demo', '1.0'))
+        create_dist_info(fs, 'alasio-0.0.1.dist-info', metadata('alasio', '0.0.1'))
+        opened = []
+        real_open = builtins.open
+
+        def open_record(file, *args, **kwargs):
+            if isinstance(file, str) and file.startswith(SITE):
+                opened.append(file)
+            return real_open(file, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, 'open', open_record)
+        assert PipList(SITE).find('demo').version == '1.0'
+        assert opened == [f'{SITE}/demo-1.0.dist-info/METADATA']
+
+
 class TestLogging:
     def test_silent_on_a_healthy_directory(self, fs):
         """A listing of a healthy directory logs nothing."""

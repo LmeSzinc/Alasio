@@ -8,6 +8,8 @@ import trio
 from msgspec import Struct
 
 from alasio.deploy.pack.decode_base import PackDecodeBase, PackDecodeError
+from alasio.deploy.pack.local_index import LocalIndex
+from alasio.deploy.pack.local_side import LocalSide, LocalSideRepo
 from alasio.deploy.pack.pack_model import IdxInfo
 from alasio.deploy.pack.tmp_manager import TmpManager
 from alasio.deploy.simple_pip.cleanup_folder import CleanupFolder
@@ -135,6 +137,111 @@ class DeployTarget:
         # a lock on it would not survive the flow), see
         # DeployJob.locked()
         self.lock_file = self.ledger.joinpath('lock')
+        # the files of the target that are not the working tree file of the
+        # same path, by the scene of the caller (see DeployJob): an empty
+        # side for a repository target, the files of a python distribution
+        # for one a mod took over from pip. The jobs ask it for every fact
+        # they would otherwise read from the disk, so nothing of this layer
+        # knows what a RECORD or a wheel is
+        self.local_side: LocalSide = LocalSideRepo()
+
+    @cached_property
+    def local_index(self):
+        """
+        The local index pack of the target, the record of its own files.
+
+        Read on first use, or seeded by the caller that already read it
+        (DeployJob.update() reads it once and hands the same object to the
+        job of the flow).
+
+        Returns:
+            LocalIndex: The index pack, or the reason the target has none
+        """
+        return LocalIndex.read(self)
+
+    def local_path(self, path):
+        """
+        Map a path of the pack format to the local path of the target.
+
+        The canonical pack area .pack/... of the packs is mapped into
+        the ledger folder of the target: .pack/index.pack becomes
+        .pack/{name}/index.pack, .pack/history.pack becomes
+        .pack/{name}/history.pack, and so on. Every other path is
+        returned unchanged. The mapping is the identity when name is
+        empty: the ledger folder is .pack itself then.
+
+        The pack area folder itself is never a file of a pack, the pack
+        builder rejects it (it must be a folder): a path equal to it is
+        rejected here too, instead of being mapped to the ledger folder.
+
+        Args:
+            path (str): Path of the pack format, relative to the root
+
+        Returns:
+            str: Local path of the target
+
+        Raises:
+            ValueError: If the path is the pack area folder itself
+        """
+        if path == self.PACK_AREA_DIR:
+            raise ValueError(
+                f'Pack path is the pack area itself, it must be a folder: {path!r}'
+            )
+        if not self.name or not path.startswith(self.PACK_AREA):
+            return path
+        # replace the pack area prefix with the ledger folder
+        return self.ledger_rel + path[len(self.PACK_AREA_DIR):]
+
+    def localize(self, decoder):
+        """
+        Rewrite the pack area paths of a decoded pack to the local
+        namespace of the target, see local_path().
+
+        The rewrite covers the three views of the decoder: idx_info
+        (the record list, rewritten in place), fileinfo and refinfo
+        (cached dicts of the same records, keyed by the path at build
+        time and rebuilt here so the keys follow the rewritten paths).
+        It must run right after decoding and before any comparison or
+        file operation: the paths of the pack (e.g. the index pack
+        record .pack/index.pack) and the local paths of the target
+        must never be mixed. Nothing to do when name is empty, the
+        mapping is the identity then.
+
+        It is not idempotent: a second pass turns .pack/{name}/x into
+        .pack/{name}/{name}/x. Every decode of a pack is rewritten once,
+        by the owner of the decoder, before any other reader sees it (the
+        jobs localize the pack they decode, the ledger side localizes the
+        index pack it reads, see alasio.deploy.pack.source).
+
+        The bytes of the index pack itself always stay canonical (it
+        is written to the ledger folder from the pack bytes): the
+        rewrite only affects the decoded views, so every reader of the
+        ledger gets the same canonical records and localizes them the
+        same way.
+
+        Args:
+            decoder (PackDecodeBase): Decoder of the pack to rewrite
+
+        Returns:
+            PackDecodeBase: The decoder, for call chaining
+        """
+        if not self.name:
+            return decoder
+        for info in decoder.idx_info:
+            info.path = self.local_path(info.path)
+            if info.source_path:
+                info.source_path = self.local_path(info.source_path)
+        # fileinfo / refinfo share the records with idx_info: rebuild
+        # the cached dicts so their keys follow the rewritten paths.
+        # The access builds the cache first when it was not built yet,
+        # then the set() replaces it with the re-keyed dict.
+        InstanceCacheOperation.set(decoder, 'refinfo', {
+            info.path: info for info in decoder.refinfo.values()
+        })
+        InstanceCacheOperation.set(decoder, 'fileinfo', {
+            info.path: info for info in decoder.fileinfo.values()
+        })
+        return decoder
 
     @cached_property
     def described_target(self):
@@ -316,84 +423,6 @@ class JobBase(DeployTarget):
             raise RuntimeError('The tmp manager of the job was not created: '
                                'tmp_manager_init() was not awaited')
         manager.register(info.size, info.sha1, tmp)
-
-    def local_path(self, path):
-        """
-        Map a path of the pack format to the local path of the target.
-
-        The canonical pack area .pack/... of the packs is mapped into
-        the ledger folder of the target: .pack/index.pack becomes
-        .pack/{name}/index.pack, .pack/history.pack becomes
-        .pack/{name}/history.pack, and so on. Every other path is
-        returned unchanged. The mapping is the identity when name is
-        empty: the ledger folder is .pack itself then.
-
-        The pack area folder itself is never a file of a pack, the pack
-        builder rejects it (it must be a folder): a path equal to it is
-        rejected here too, instead of being mapped to the ledger folder.
-
-        Args:
-            path (str): Path of the pack format, relative to the root
-
-        Returns:
-            str: Local path of the target
-
-        Raises:
-            ValueError: If the path is the pack area folder itself
-        """
-        if path == self.PACK_AREA_DIR:
-            raise ValueError(
-                f'Pack path is the pack area itself, it must be a folder: {path!r}'
-            )
-        if not self.name or not path.startswith(self.PACK_AREA):
-            return path
-        # replace the pack area prefix with the ledger folder
-        return self.ledger_rel + path[len(self.PACK_AREA_DIR):]
-
-    def localize(self, decoder):
-        """
-        Rewrite the pack area paths of a decoded pack to the local
-        namespace of the target, see local_path().
-
-        The rewrite covers the three views of the decoder: idx_info
-        (the record list, rewritten in place), fileinfo and refinfo
-        (cached dicts of the same records, keyed by the path at build
-        time and rebuilt here so the keys follow the rewritten paths).
-        It must run right after decoding and before any comparison or
-        file operation: the paths of the pack (e.g. the index pack
-        record .pack/index.pack) and the local paths of the target
-        must never be mixed. Nothing to do when name is empty, the
-        mapping is the identity then.
-
-        The bytes of the index pack itself always stay canonical (it
-        is written to the ledger folder from the pack bytes): the
-        rewrite only affects the decoded views, so every reader of the
-        ledger gets the same canonical records and localizes them the
-        same way.
-
-        Args:
-            decoder (PackDecodeBase): Decoder of the pack to rewrite
-
-        Returns:
-            PackDecodeBase: The decoder, for call chaining
-        """
-        if not self.name:
-            return decoder
-        for info in decoder.idx_info:
-            info.path = self.local_path(info.path)
-            if info.source_path:
-                info.source_path = self.local_path(info.source_path)
-        # fileinfo / refinfo share the records with idx_info: rebuild
-        # the cached dicts so their keys follow the rewritten paths.
-        # The access builds the cache first when it was not built yet,
-        # then the set() replaces it with the re-keyed dict.
-        InstanceCacheOperation.set(decoder, 'refinfo', {
-            info.path: info for info in decoder.refinfo.values()
-        })
-        InstanceCacheOperation.set(decoder, 'fileinfo', {
-            info.path: info for info in decoder.fileinfo.values()
-        })
-        return decoder
 
     async def run(self):
         """
@@ -675,34 +704,73 @@ class JobBase(DeployTarget):
         """
         atomic_rmtree(self.workspace)
 
-    def _old_fileinfo_from_index(self):
+    @cached_property
+    def old_fileinfo(self):
         """
-        Read the fileinfo of the local index pack, the leftover
-        deletion base of a rebuild.
+        The records of the old version, the deletion base of the flow.
 
-        The index is read from the ledger folder of the target and
-        rewritten to the local namespace like every decoded pack, see
-        localize(). Deleted markers (edit == 2) are excluded: they
-        describe files that should not exist, not files that exist. A
-        missing, malformed or checksum-failed index pack degrades to
-        {}: the leftover cleanup is skipped, the rebuild still
-        converges for every file of the new index.
+        The records of the local index pack when the target has one, the
+        extra records of the local side otherwise (a python distribution the
+        caller declared), {} when neither. It sits next to residue_fileinfo()
+        and is merged with it the same way, both being the records the flow
+        must read before the run replaces what they describe.
+
+        Reading it is blocking IO when the target has no ledger (the first
+        access of the local side), so it is warmed in a worker thread before
+        the flow uses it, see _warm_old_fileinfo() and _warm_residue(). The
+        members that already run in a worker thread use it directly, see
+        UnpackJob.unpack().
 
         Returns:
-            dict[str, IdxInfo]: Fileinfo of the old local index pack,
-                {} when it is missing or malformed
+            dict[str, IdxInfo]: Records keyed by the path relative to the
+                root of the target
         """
-        try:
-            decoder = PackDecodeBase(atomic_read_bytes(self.index_file))
-            decoder.validate_index()
-        except (FileNotFoundError, PackDecodeError) as e:
-            logger.warning(f'Failed to read the old index pack: {e}')
-            return {}
-        self.localize(decoder)
-        return {
-            path: info for path, info in decoder.fileinfo.items()
-            if info.edit != 2
-        }
+        index = self.local_index
+        if index.exists:
+            return index.fileinfo()
+        side = self.local_side
+        if side.fileinfo:
+            logger.info(
+                f'Using the local files of the target as the old version: '
+                f'{self.described_target}, {side.version or "no version"}')
+            return side.fileinfo
+        # nothing names the files of the target: the flow runs without a
+        # deletion base, and this is the only report of why
+        logger.warning(f'Failed to read the old index pack: {index.reason}')
+        return {}
+
+    def _warm_old_fileinfo(self):
+        """
+        Read the old fileinfo in the worker thread that calls this.
+
+        The property opens the records of the target on its first access,
+        which is blocking IO for a target whose files come from a local side:
+        the flows hand this method to trio.to_thread.run_sync instead of
+        touching the attribute on the event loop thread, the same way
+        _warm_residue() warms the records of a previous run.
+
+        Returns:
+            dict[str, IdxInfo]: Records of the old version, see old_fileinfo
+        """
+        return self.old_fileinfo
+
+    def _local_side_data(self, path):
+        """
+        The content of a file of the target that is not the working tree file
+        of the same path.
+
+        Only the files a local side supplies answer: a repository target
+        supplies none, so the working tree is its old side.
+
+        Args:
+            path (str): Path relative to the root, in the local namespace of
+                the target
+
+        Returns:
+            bytes | None: Content to use as the old file, None to read the
+                working tree
+        """
+        return self.local_side.filedata.get(path)
 
     @staticmethod
     def _leftover_deletions(old_fileinfo, new_fileinfo):

@@ -82,7 +82,7 @@ class RebuildJob(ResetJob):
         # {path: IdxInfo} of the old local index pack plus the records of
         # the job file of a previous run, the deletion base of the
         # leftover cleanup, {} when both are empty/missing
-        self._old_fileinfo: "dict[str, IdxInfo]" = {}
+        self._deletion_base: "dict[str, IdxInfo]" = {}
 
     @cached_property
     def full_pack_file(self):
@@ -140,8 +140,8 @@ class RebuildJob(ResetJob):
                 # so a file that only an intermediate version has is
                 # removed too. The full pack path builds the same base in
                 # its unpack stage, see download_full_pack()
-                old_fileinfo = await trio.to_thread.run_sync(self._old_fileinfo_from_index)
-                self._old_fileinfo = {**old_fileinfo, **self.residue_fileinfo}
+                old_fileinfo = await trio.to_thread.run_sync(self._warm_old_fileinfo)
+                self._deletion_base = {**old_fileinfo, **self.residue_fileinfo}
                 await trio.to_thread.run_sync(self.validate_files)
                 await self.download()
                 # the new index records every file of the new version, the
@@ -227,6 +227,10 @@ class RebuildJob(ResetJob):
         # job read before write() replaced the job file
         unpack = UnpackJob(full, root=self.root, name=self.name)
         unpack.tmp_manager = self.tmp_manager
+        # the deletion base of the flow is the one of this job, the
+        # installation of a declared target included
+        unpack.local_side = self.local_side
+        unpack.local_index = self.local_index
         InstanceCacheOperation.set(unpack, 'residue_fileinfo', self.residue_fileinfo)
         await trio.to_thread.run_sync(unpack.unpack)
         # the pending changes and the index commit record of the flow: the
@@ -297,5 +301,5 @@ class RebuildJob(ResetJob):
         # the leftover files are deleted, not downloaded: they go to
         # self.pending directly, self.error stays the download list
         self.pending += self._leftover_deletions(
-            self._old_fileinfo, self._index_pack.fileinfo)
+            self._deletion_base, self._index_pack.fileinfo)
         return not self.error

@@ -250,6 +250,63 @@ class PipList:
             out[dist_key] = dist
         return dict(sorted(out.items()))
 
+    def find(self, dist_key):
+        """
+        Find the installation of one distribution, the lookup of a name.
+
+        The entries of the directory are filtered by their name before any
+        of them is read: the name of a metadata entry starts with the
+        escaped name of its distribution (PEP 427), so the metadata of the
+        installations of the other distributions is never opened. The
+        lookup is the cheap read of one distribution, pip_list() is the
+        listing of the directory.
+
+        Only the metadata entries whose name is the one of the
+        distribution are read, an entry that records another name (an
+        installation whose directory was renamed by hand, PEP 503
+        matches it through the header) is not found: use list() for a
+        listing that resolves every entry.
+
+        Args:
+            dist_key (str): PEP 503 normalized name of the distribution,
+                e.g. "ruamel-yaml"
+
+        Returns:
+            Distribution | None: The installation of the distribution, the
+                lowest path when the directory holds several entries of
+                it (the entry list() keeps), None when the directory holds
+                no entry of the name
+        """
+        # The escaped name of a metadata entry, PEP 427: a run of "-", "_"
+        # and "." became "_", e.g. "ruamel.yaml" -> "ruamel_yaml". The
+        # version is appended to it with a "-", e.g. "ruamel_yaml-0.18.6",
+        # and the entry of a legacy installation carries the name only
+        escaped = dist_key.replace('-', '_')
+        prefix = f'{escaped}-'
+        found = []
+        try:
+            entries = os.scandir(self.site_packages)
+        except (FileNotFoundError, NotADirectoryError):
+            return None
+        with entries:
+            for entry in entries:
+                entry_name = entry.name
+                if entry_name.endswith(DIST_INFO_SUFFIX):
+                    entry_dist = removesuffix(entry_name, DIST_INFO_SUFFIX)
+                elif entry_name.endswith(EGG_INFO_SUFFIX):
+                    entry_dist = removesuffix(entry_name, EGG_INFO_SUFFIX)
+                else:
+                    continue
+                if entry_dist != escaped and not entry_dist.startswith(prefix):
+                    continue
+                dist = self._read_entry(entry)
+                if dist is not None and dist.dist_key == dist_key:
+                    found.append(dist)
+        if not found:
+            return None
+        # the entry list() keeps for the name, see its docstring
+        return min(found, key=lambda dist: dist.info)
+
     def pip_list(self):
         """
         List the metadata entries of the directory, the raw scan.

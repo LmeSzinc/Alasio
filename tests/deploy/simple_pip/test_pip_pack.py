@@ -22,8 +22,10 @@ import pytest
 from alasio.config.entry.mod_entry import ModEntry, ModEntryModel
 from alasio.deploy.pack.decode_base import PackDecodeBase
 from alasio.deploy.pack.job_unpack import UnpackJob
+from alasio.deploy.pack.server_file import LatestInfo
 from alasio.deploy.simple_pip import pip_pack
 from alasio.deploy.simple_pip.pip_pack import PipPack
+from alasio.deploy.simple_pip.whl_record import RecordManager
 from alasio.deploy_dev.pack.pack_wheel import PackWheel
 from alasio.deploy_dev.pack.pack_wheel_update import PackWheelUpdate
 from alasio.ext.path.atomic import file_read_bytes, file_write
@@ -104,6 +106,38 @@ def tree_of(pack_data):
         for path, info in decoder.fileinfo.items()
         if info.edit != 2 and not path.startswith('.pack/')
     }
+
+
+def install_pip(fs, site, full_pack, version, extra=()):
+    """
+    Install the tree of a full pack the way pip installs a wheel.
+
+    The files land as the pack records them and the RECORD is the one of an
+    installation: the rows of the files of the distribution, plus a row of
+    the bytecode compiled at install time, a file the pack of the same
+    version does not record, plus the files of extra.
+
+    Args:
+        fs (FakeFilesystem): Filesystem of the test
+        site (str): Site-packages folder of the installation
+        full_pack (bytes): Full pack of the version to install
+        version (str): Version of the distribution
+        extra (Iterable[str]): Paths of files the installation holds but the
+            pack of the version does not, e.g. the REQUESTED marker pip
+            leaves. Defaults to (), the installation is the tree of the pack
+    """
+    tree = tree_of(full_pack)
+    dist_info = f'demo-{version}.dist-info'
+    for path, content in tree.items():
+        fs.create_file(f'{site}/{path}', contents=content)
+    record = RecordManager()
+    record.load_bytes(tree[f'{dist_info}/RECORD'])
+    record.add_content(f'{dist_info}/__pycache__/core.cpython-38.pyc', None)
+    file_write(f'{site}/{dist_info}/__pycache__/core.cpython-38.pyc', b'')
+    for path in extra:
+        file_write(f'{site}/{path}', b'')
+        record.add_content(path, None)
+    file_write(f'{site}/{dist_info}/RECORD', record.dump_bytes())
 
 
 def read_tree(root):
@@ -354,3 +388,125 @@ class TestInstall:
             await pip.install('demo', '')
         with pytest.raises(ValueError, match='should not contain character'):
             await pip.install('demo', '../1.0')
+
+
+class TestInstalledByPip:
+    """A distribution installed by pip, updated from the pack channel."""
+
+    @pytest.mark.trio
+    async def test_upgrade_takes_the_update_pack(self, fs, app_folder, monkeypatch):
+        """The version and the files of the installation are the old side:
+        the flow applies the update pack of the pair, and the full pack
+        supplies the index of the new version only, the record of the index
+        has no old index pack to be patched from."""
+        site = site_packages(fs)
+        fs.create_dir(site)
+        pack1, full1, _ = build_dist('1.0')
+        pack2, full2, index2 = build_dist('2.0')
+        update = b''.join(PackWheelUpdate(pack2, pack1).iter_pack_data())
+        install_pip(fs, site, full1, '1.0')
+
+        server = MockServerFile(dep_channel('demo'))
+        server.register_version('2.0', full2, index2)
+        server.register_update('1.0', '2.0', update)
+        patch_server(monkeypatch, server, dep_channel('demo'), 'alas')
+
+        # the snapshot a packed tree records of the channel, see RepoDep
+        latest = LatestInfo('2.0', PackDecodeBase(full2).index_checksum)
+        with logger.mock_capture_writer() as capture:
+            assert await PipPack(FakeMod(), site).install('demo', '2.0', latest_info=latest)
+
+        # the tree of the new version: the metadata of the old one, the
+        # bytecode of the installation and the RECORD of pip are gone
+        assert read_tree(site) == tree_of(full2)
+        assert file_read_bytes(f'{site}/.pack/demo/index.pack') == index2
+        assert capture.fd.any_contains('Using the local files of the target as the old version')
+        # two urls: the update pack, and the two ranges of the index section
+        # of the full pack. No latest.pack (the snapshot is passed), and no
+        # record of the update pack is downloaded from the full pack
+        assert server.requests == [
+            f'{dep_channel("demo")}/2.0/update_1.0.pack',
+            f'{dep_channel("demo")}/2.0/full.pack',
+            f'{dep_channel("demo")}/2.0/full.pack',
+        ]
+
+    @pytest.mark.trio
+    async def test_an_unmatched_record_is_downloaded(
+            self, fs, app_folder, monkeypatch):
+        """The RECORD of an installation is not always the RECORD the pack of
+        the version records (pip leaves a REQUESTED marker behind): the
+        update pack still applies every other file, and the one record whose
+        source the installation can not supply is downloaded from the full
+        pack. A single unmatched file never rebuilds the whole target."""
+        site = site_packages(fs)
+        fs.create_dir(site)
+        pack1, full1, _ = build_dist('1.0')
+        pack2, full2, index2 = build_dist('2.0')
+        update = b''.join(PackWheelUpdate(pack2, pack1).iter_pack_data())
+        install_pip(fs, site, full1, '1.0', extra=['demo-1.0.dist-info/REQUESTED'])
+
+        server = MockServerFile(dep_channel('demo'))
+        server.register_version('2.0', full2, index2)
+        server.register_update('1.0', '2.0', update)
+        patch_server(monkeypatch, server, dep_channel('demo'), 'alas')
+
+        latest = LatestInfo('2.0', PackDecodeBase(full2).index_checksum)
+        with logger.mock_capture_writer() as capture:
+            assert await PipPack(FakeMod(), site).install('demo', '2.0', latest_info=latest)
+
+        # the tree of the new version: the metadata of the old one, the
+        # bytecode and the marker of the installation are gone
+        assert read_tree(site) == tree_of(full2), capture.concat()
+        assert capture.fd.any_contains(
+            'The local side does not supply the old file')
+        assert not capture.fd.any_contains('rebuilding from the latest index')
+        # the update pack, the two ranges of the index section, and one range
+        # for the RECORD record alone: every other file was applied from the
+        # update pack
+        assert server.requests == [
+            f'{dep_channel("demo")}/2.0/update_1.0.pack',
+            f'{dep_channel("demo")}/2.0/full.pack',
+            f'{dep_channel("demo")}/2.0/full.pack',
+            f'{dep_channel("demo")}/2.0/full.pack',
+        ]
+
+    @pytest.mark.trio
+    async def test_same_version_writes_the_ledger(
+            self, fs, app_folder, monkeypatch):
+        """An installation that is already at the version is rebuilt from
+        the index of the channel: the rebuild converges the tree and commits
+        the ledger, the flow of the next run is a normal one."""
+        site = site_packages(fs)
+        fs.create_dir(site)
+        _, full, index = build_dist('1.0')
+        install_pip(fs, site, full, '1.0')
+
+        server = MockServerFile(dep_channel('demo'))
+        server.register_version('1.0', full, index)
+        patch_server(monkeypatch, server, dep_channel('demo'), 'alas')
+
+        latest = LatestInfo('1.0', PackDecodeBase(full).index_checksum)
+        with logger.mock_capture_writer() as capture:
+            assert await PipPack(FakeMod(), site).install('demo', '1.0', latest_info=latest)
+
+        assert read_tree(site) == tree_of(full)
+        assert file_read_bytes(f'{site}/.pack/demo/index.pack') == index
+        assert capture.concat() == f"""\
+INFO | Installing "demo==1.0" to "{site}"
+INFO | [CurrentVersion] 1.0
+INFO | [LatestVersion] 1.0
+INFO | Already up to date: 1.0
+WARNING | The target has no ledger of 1.0, rebuilding from the latest index to record its files
+INFO | Rebuilding files to "{site}", name="demo"
+INFO | Using the local files of the target as the old version: "{site}", name="demo", 1.0
+INFO | Rebuild done
+INFO | Installed "demo==1.0"
+"""
+        # the index section of the full pack, then the record of the RECORD
+        # alone: it is the one file of the version the installation writes
+        # differently
+        assert server.requests == [
+            f'{dep_channel("demo")}/1.0/full.pack',
+            f'{dep_channel("demo")}/1.0/full.pack',
+            f'{dep_channel("demo")}/1.0/full.pack',
+        ]

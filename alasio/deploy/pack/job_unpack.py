@@ -184,7 +184,7 @@ class UnpackJob(JobBase):
         # and it joins the records of the job file of a previous run
         # (read before this run replaced it): a file that only an
         # intermediate version has is in neither base alone
-        old_fileinfo = {**self._old_fileinfo_from_index(), **self.residue_fileinfo}
+        old_fileinfo = {**self.old_fileinfo, **self.residue_fileinfo}
 
         # unpack index
         index_tmp = self.workspace.joinpath(self.NEW_INDEX)

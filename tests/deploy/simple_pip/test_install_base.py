@@ -655,10 +655,10 @@ class TestInstallPackAllDeclared:
         assert list_folders(site) == ['demo-1.0.dist-info']
 
     @pytest.mark.trio
-    async def test_the_cleanup_removes_the_metadata_of_another_version(
+    async def test_the_old_version_metadata_is_removed_by_the_install(
             self, fs, app_folder, monkeypatch):
-        """The install leaves the metadata directories alone; the separate
-        cleanup removes the residue after the pins are in place."""
+        """The flow reads the version of the installation it finds, so the
+        metadata of that version goes with the files of the install."""
         site = site_packages(fs)
         fs.create_dir(site)
         # the residue of an installation of another version (pip leaves the
@@ -671,16 +671,17 @@ class TestInstallPackAllDeclared:
         patch_packdep(monkeypatch, demo=snapshot('1.0', index))
 
         assert await InstallBase(mod, site).install_pack() == {'demo': True}
-        # the install itself does not touch the metadata of the old version
-        assert 'demo-0.9.dist-info' in list_folders(site)
-
-        install = InstallBase(mod, site)
-        with logger.mock_capture_writer() as capture:
-            assert await install.cleanup_dist_info() == [f'{site}/demo-0.9.dist-info']
-        assert capture.fd.any_contains('Removed the metadata directory of "demo" "0.9"')
+        # the residue is the installation the flow reads the version of, so it
+        # is the old version of the target and the flow removes it with the
+        # other files of that version: the cleanup finds nothing left
         folders = list_folders(site)
         assert 'demo-1.0.dist-info' in folders
         assert 'demo-0.9.dist-info' not in folders
+
+        install = InstallBase(mod, site)
+        with logger.mock_capture_writer() as capture:
+            assert await install.cleanup_dist_info() == []
+        assert not capture.fd.any_contains('Removed the metadata directory of "demo"')
 
 
 class TestCleanupDistInfo:
