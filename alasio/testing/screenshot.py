@@ -54,7 +54,9 @@ plain checkout runs the tests without installing the package first.
 The project root of a test is the nearest ancestor of the test file declaring a
 mod entry (`module/config/_index/mod_entry.yaml`), which covers both layouts of
 a mod: a mod inside the Alasio repository (`<repo>/ExampleMod`) and a mod that
-is the repository itself (`<repo>` as a whole).
+is the repository itself (`<repo>` as a whole). The rule and the `collection`
+folder live in alasio.testing.project, so the backend resolves the screenshots
+of a mod with the very rule of this plugin.
 """
 import inspect
 from typing import get_type_hints
@@ -63,14 +65,11 @@ import pytest
 from msgspecerror import get_class_annotation
 
 from alasio.config.base import AlasioConfigBase
-from alasio.config.entry.mod_entry import MOD_ENTRY_PATH, ModEntry
-from alasio.ext.path import PathStr
+from alasio.testing.project import COLLECTION, PROJECT_ROOT_MANAGER
 from alasio.testing.screenshot_device import ScreenshotDevice, ScreenshotTestError
 
 # Attribute of the test function holding the screenshot of the `image` decorator
 ATTR_SCREENSHOT = '__screenshot__'
-# Folder of the collected screenshots, relative to the project root
-COLLECTION = 'collection'
 # Config name of the tests: a template config, which is read only and never
 # touches the database, every group falls back to its default values
 CONFIG_NAME = 'template'
@@ -120,102 +119,6 @@ def image(path):
     return decorator
 
 
-class ProjectRootManager:
-    """
-    The project roots of the mods of the running session.
-
-    A project root is a folder declaring a mod entry (`module/config/_index/mod_entry.yaml`).
-    A real mod has many test files and they all live under the one root of the
-    mod, so a root is discovered once and reused: resolving a test file under a
-    known root walks no folder, it is a sub-path check.
-
-    Attributes:
-        roots (list[PathStr]): The project roots discovered so far
-    """
-
-    def __init__(self):
-        self.roots = []
-
-    def get_project_root(self, test_file):
-        """
-        Get the project root of a test file, which is the nearest ancestor of the
-        test file declaring a mod entry
-
-        Args:
-            test_file (str): Path of the test file, absolute like the path pytest
-                reports, the result of a relative path depends on the working folder
-
-        Returns:
-            PathStr:
-
-        Raises:
-            ScreenshotTestError: If no project root is found
-        """
-        path = PathStr.new(test_file).abspath()
-
-        # The test file belongs to a mod discovered by an earlier test file
-        root = self.get_known_root(path)
-        if root is not None:
-            return root
-
-        # First test file of this mod: walk up once and remember the root
-        root = self.find_root(path, test_file)
-        self.roots.append(root)
-        return root
-
-    def get_known_root(self, path):
-        """
-        Get the known project root holding a path, the deepest one if several do
-
-        Args:
-            path (str): Normalized absolute path
-
-        Returns:
-            PathStr | None: The root, None if no known root holds the path
-        """
-        path = PathStr.new(path)
-        matched = None
-        for root in self.roots:
-            if path.subpath_to(root) is None:
-                continue
-            if matched is None or len(root) > len(matched):
-                matched = root
-        return matched
-
-    @staticmethod
-    def find_root(path, test_file=None):
-        """
-        Walk up from a path to the nearest folder declaring a mod entry
-
-        Args:
-            path (str): Normalized absolute path
-            test_file (str): Path to report in the error, `path` if not given
-
-        Returns:
-            PathStr:
-
-        Raises:
-            ScreenshotTestError: If no project root is found
-        """
-        folder = PathStr.new(path)
-        while folder:
-            if ModEntry.is_mod(folder):
-                return folder
-            parent = folder.uppath(1)
-            if parent == folder:
-                break
-            folder = parent
-
-        raise ScreenshotTestError(
-            f'No project root above the test file "{test_file or path}", a project root is '
-            f'a folder declaring "{MOD_ENTRY_PATH}"'
-        )
-
-
-# The project roots of the mods of the running session
-PROJECT_ROOT_MANAGER = ProjectRootManager()
-
-
 def test_name(item):
     """
     The name of a test, from a pytest item or a fixture request
@@ -246,6 +149,7 @@ def screenshot_of(item):
         PathStr: Path of the screenshot
 
     Raises:
+        ProjectRootError: If the test file has no project root above it
         ScreenshotNotFound: If the test has no `image` decorator
     """
     path = getattr(item.function, ATTR_SCREENSHOT, None)
@@ -271,6 +175,7 @@ def load_screenshot(item):
         tuple[PathStr, np.ndarray]: Path of the screenshot, and the image
 
     Raises:
+        ProjectRootError: If the test file has no project root above it
         ScreenshotNotFound: If the test has no `image` decorator, or if the
             screenshot does not exist
     """

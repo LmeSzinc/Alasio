@@ -14,11 +14,9 @@ import pytest
 
 from alasio.config.base import AlasioConfigBase
 from alasio.ext import env
-from alasio.ext.path import PathStr
-from alasio.testing import screenshot as screenshot_module
 from alasio.testing.screenshot import (
-    ATTR_SCREENSHOT, CONFIG_NAME, PROJECT_ROOT_MANAGER, ProjectRootManager, ScreenshotNotFound, ScreenshotTestError,
-    build_main, config_of, image, load_screenshot, module_parameters, screenshot_of
+    ATTR_SCREENSHOT, CONFIG_NAME, ScreenshotNotFound, ScreenshotTestError, build_main, config_of, image,
+    load_screenshot, module_parameters, screenshot_of
 )
 from alasio.testing.screenshot_device import ScreenshotDevice, ScreenshotNotProvided
 from ExampleMod.module.config.config import Config
@@ -122,63 +120,6 @@ def check_no_database():
     yield
     assert set(SQLITE_POOL.all_pool) == before, \
         f'The test created a database: {set(SQLITE_POOL.all_pool) - before}'
-
-
-class TestProjectRootManager:
-    """
-    The project root of a test is the nearest ancestor of the test file declaring
-    a mod entry, `module/config/_index/mod_entry.yaml`
-    """
-
-    def test_project_root_of_a_test_inside_a_mod(self):
-        """A test inside ExampleMod resolves to ExampleMod, not to the repository."""
-        assert PROJECT_ROOT_MANAGER.get_project_root(TEST_FILE) == EXAMPLE_MOD
-
-    def test_project_root_of_a_mod_that_is_the_project_root(self):
-        """A mod that is the repository itself: its root is the repository root."""
-        assert PROJECT_ROOT_MANAGER.get_project_root(EXAMPLE_MOD.joinpath('tests/test_x.py')) == EXAMPLE_MOD
-
-    def test_no_project_root(self):
-        """A test outside of any mod has no project root, and no screenshot."""
-        with pytest.raises(ScreenshotTestError):
-            PROJECT_ROOT_MANAGER.get_project_root(env.ALASIO_ROOT.joinpath('alasio/testing/screenshot.py'))
-
-    def test_the_walk_runs_once_per_mod(self, monkeypatch):
-        """
-        Many test files of one mod share one walk of the folders: the root of a
-        mod is discovered once, not once per test file.
-        """
-        manager = ProjectRootManager()
-        monkeypatch.setattr(screenshot_module, 'PROJECT_ROOT_MANAGER', manager)
-        # A step of the walk is one existence check of the entry file of a mod
-        calls = []
-        original = screenshot_module.ModEntry.is_mod
-
-        def counting_is_mod(root):
-            calls.append(root)
-            return original(root)
-
-        monkeypatch.setattr(screenshot_module.ModEntry, 'is_mod', counting_is_mod)
-
-        manager.get_project_root(TEST_FILE)
-        walk = len(calls)
-        # Other test files of the same mod, in the same and in other folders
-        manager.get_project_root(EXAMPLE_MOD.joinpath('tests/map/test_other.py'))
-        manager.get_project_root(EXAMPLE_MOD.joinpath('tests/island/handler/test_order.py'))
-        manager.get_project_root(EXAMPLE_MOD.joinpath('tests/test_entry.py'))
-
-        assert walk > 0
-        assert len(calls) == walk
-
-    def test_known_root_prefers_the_longest_match(self):
-        """A mod nested in another mod resolves to the inner one, without IO."""
-        manager = ProjectRootManager()
-        manager.roots[:] = [PathStr.new('/a/mod'), PathStr.new('/a/mod/inner')]
-
-        assert manager.get_known_root('/a/mod/inner/tests/test_x.py') == PathStr.new('/a/mod/inner')
-        assert manager.get_known_root('/a/mod/tests/test_x.py') == PathStr.new('/a/mod')
-        # A prefix of the folder name is not a folder of the mod
-        assert manager.get_known_root('/a/modular/tests/test_x.py') is None
 
 
 class TestImageDecorator:
