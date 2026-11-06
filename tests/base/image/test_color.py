@@ -6,6 +6,10 @@ from alasio.base.image.color import (
     color_mask, color_similarity_2d, extract_letters, extract_white_letters, rgb2luma, rgb565_to_rgb888
 )
 
+pytestmark = [
+    pytest.mark.parallel,
+]
+
 
 def create_rgb888():
     """

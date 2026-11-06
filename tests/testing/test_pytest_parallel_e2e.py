@@ -24,7 +24,10 @@ from alasio.ext import env
 from alasio.ext.path import PathStr
 from alasio.testing import pytest_parallel
 
-pytestmark = pytest.mark.skipif(not env.CI, reason='the nested pytest runs are covered by the CI matrix')
+pytestmark = [
+    pytest.mark.skipif(not env.CI, reason='the nested pytest runs are covered by the CI matrix'),
+    pytest.mark.parallel,
+]
 
 SUITE = env.ALASIO_TEMP.joinpath('test_pytest_parallel_suite')
 # The mark as it is written in a test file, composed from the name of the mark so

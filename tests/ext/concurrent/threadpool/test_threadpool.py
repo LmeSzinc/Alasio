@@ -7,6 +7,10 @@ import pytest
 from alasio.ext.concurrent.cmd import CmdlineError, CmdlineResultStr
 from alasio.ext.concurrent.threadpool import THREAD_POOL, Error, Job, JobKill, JobTimeout, ThreadPool, remove_tb_frames
 
+pytestmark = [
+    pytest.mark.parallel,
+]
+
 # ---------------------------------------------------------------------------
 # Synchronisation helpers
 #

@@ -8,6 +8,10 @@ import pytest
 from alasio.ext import env
 from alasio.ext.concurrent.cmd import CmdlineError, CmdlineResultBytes, CmdlineResultStr, run_cmd
 
+pytestmark = [
+    pytest.mark.parallel,
+]
+
 PYTHON = sys.executable
 
 

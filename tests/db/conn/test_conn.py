@@ -14,6 +14,10 @@ from alasio.db.conn import SQLITE_POOL, ConnectionPool, SqlitePool
 from alasio.ext import env
 from tests.db.conn.conftest import TEST_DATA_DIR
 
+pytestmark = [
+    pytest.mark.parallel,
+]
+
 # ============================================================================
 # Test ConnectionPool.new_conn and set_conn_pragma
 # ============================================================================

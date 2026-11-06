@@ -17,6 +17,10 @@ from tests.backend.worker.const import *
 from tests.backend.worker.spawn_gate import SpawnGate
 from tests.backend.worker.test_worker_lifespan import assert_recv_thread_gone, assert_worker_gone
 
+pytestmark = [
+    pytest.mark.parallel,
+]
+
 
 @pytest.fixture
 def manager():

@@ -13,6 +13,10 @@ from alasio.backend.worker.manager import WorkerManager, WorkerState
 from alasio.testing.timeout import AssertTimeout
 from tests.backend.worker.const import *
 
+pytestmark = [
+    pytest.mark.parallel,
+]
+
 # ============================================================================
 # Fixtures
 # ============================================================================

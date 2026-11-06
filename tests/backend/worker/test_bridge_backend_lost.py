@@ -21,6 +21,10 @@ from alasio.backend.worker.bridge import BackendBridge
 from alasio.backend.worker.event import ConfigEvent
 from alasio.logger import logger
 
+pytestmark = [
+    pytest.mark.parallel,
+]
+
 
 class DeadThread:
     """Stands in for the scheduler thread after it unwound"""

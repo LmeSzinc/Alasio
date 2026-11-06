@@ -5,6 +5,10 @@ import pytest
 
 from alasio.ext.concurrent.prioritythreadpool import PriorityThreadPool
 
+pytestmark = [
+    pytest.mark.parallel,
+]
+
 
 # 辅助函数：模拟耗时任务
 def task_fn(n, duration=0.1):

@@ -19,6 +19,10 @@ from alasio.git.obj.obj import parse_objtype
 from alasio.git.repo import GitRepo
 from alasio.git.stage.hashobj import blob_hash
 
+pytestmark = [
+    pytest.mark.parallel,
+]
+
 
 def new_repo():
     """

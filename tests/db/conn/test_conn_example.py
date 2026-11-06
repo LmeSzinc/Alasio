@@ -15,6 +15,10 @@ import pytest
 
 from alasio.db.conn import SqlitePool
 
+pytestmark = [
+    pytest.mark.parallel,
+]
+
 # ============================================================================
 # Test directory setup
 # ============================================================================

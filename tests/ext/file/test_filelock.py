@@ -14,6 +14,10 @@ from alasio.ext import env
 from alasio.ext.file.filelock import FilelockTimeout, SQLiteFileLock
 from alasio.ext.path.atomic import folder_rmtree
 
+pytestmark = [
+    pytest.mark.parallel,
+]
+
 CHILD_HOLD = (
     "import os, sys, time\n"
     "from alasio.ext.file.filelock import SQLiteFileLock\n"

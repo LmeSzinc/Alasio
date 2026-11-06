@@ -8,6 +8,10 @@ import pytest
 
 from alasio.backend.supervisor import ParentProcessExited, Supervisor, mprint
 
+pytestmark = [
+    pytest.mark.parallel,
+]
+
 
 def wait_stdin_listener(supervisor, timeout=2.0):
     """

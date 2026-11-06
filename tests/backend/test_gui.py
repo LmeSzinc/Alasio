@@ -8,8 +8,14 @@ are covered by unit tests; this file only verifies the real startup and
 shutdown path, talking to the process through the stdin command channel
 exactly like the Electron webapp does.
 """
+import pytest
+
 from alasio.ext import env
 from alasio.testing.managed_process import ManagedProcess
+
+pytestmark = [
+    pytest.mark.parallel,
+]
 
 # gui.py sits at the project root
 GUI_PATH = env.ALASIO_ROOT.joinpath('gui.py')

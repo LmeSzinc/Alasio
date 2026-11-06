@@ -8,6 +8,10 @@ import pytest
 from alasio.ext.concurrent.processpool import ProcessPool
 from alasio.testing.timeout import AssertTimeout
 
+pytestmark = [
+    pytest.mark.parallel,
+]
+
 # ===========================
 # Helper Functions (Must be picklable)
 # ===========================

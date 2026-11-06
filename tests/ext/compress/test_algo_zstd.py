@@ -3,6 +3,10 @@ import zstandard as zstd
 
 from alasio.ext.compress.algo_zstd import zstd_compress, zstd_decompress
 
+pytestmark = [
+    pytest.mark.parallel,
+]
+
 
 class TestZstdCompress:
     """Tests for zstd_compress function."""

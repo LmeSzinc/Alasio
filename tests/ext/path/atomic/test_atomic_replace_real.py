@@ -30,8 +30,11 @@ import pytest
 from alasio.ext import env
 from alasio.ext.path.atomic import atomic_replace, file_read_text, file_replace, is_folder
 
-pytestmark = pytest.mark.skipif(
-    not env.CI, reason='the real disk is covered by the CI matrix, the local runs use the fake filesystem')
+pytestmark = [
+    pytest.mark.skipif(
+        not env.CI, reason='the real disk is covered by the CI matrix, the local runs use the fake filesystem'),
+    pytest.mark.parallel,
+]
 
 
 @pytest.fixture

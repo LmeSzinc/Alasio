@@ -28,8 +28,11 @@ from alasio.ext.path.atomic import (
 )
 from alasio.ext.path.calc import joinpath
 
-pytestmark = pytest.mark.skipif(
-    not env.CI, reason='the real disk is covered by the CI matrix, the local runs use the fake filesystem')
+pytestmark = [
+    pytest.mark.skipif(
+        not env.CI, reason='the real disk is covered by the CI matrix, the local runs use the fake filesystem'),
+    pytest.mark.parallel,
+]
 
 
 @pytest.fixture

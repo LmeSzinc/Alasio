@@ -12,6 +12,10 @@ from alasio.mcp.tool.exec_shell import (
 
 _PY = sys.executable
 
+pytestmark = [
+    pytest.mark.parallel,
+]
+
 
 class TestExecShell:
     """Tests for shell command execution tool."""

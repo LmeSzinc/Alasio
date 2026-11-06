@@ -26,6 +26,10 @@ import pytest
 from alasio.backend.worker.manager import WorkerManager
 from alasio.logger import logger
 
+pytestmark = [
+    pytest.mark.parallel,
+]
+
 # The workers sleep for worker_mods.WORKER_TEST_SLEEP_SECONDS (60s), waiting for
 # that is exactly the failure these tests look for
 WORKER_STOP_DEADLINE = 5.0

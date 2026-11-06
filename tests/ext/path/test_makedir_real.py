@@ -37,8 +37,11 @@ from alasio.ext import env
 from alasio.ext.path.calc import joinpath, normpath
 from alasio.ext.path.makedir import BatchMakedirs
 
-pytestmark = pytest.mark.skipif(
-    not env.CI, reason='the real disk is covered by the CI matrix, the local runs use the fake filesystem')
+pytestmark = [
+    pytest.mark.skipif(
+        not env.CI, reason='the real disk is covered by the CI matrix, the local runs use the fake filesystem'),
+    pytest.mark.parallel,
+]
 
 
 @pytest.fixture

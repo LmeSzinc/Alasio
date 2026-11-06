@@ -11,6 +11,10 @@ import yaml
 from alasio.ext import env
 from alasio.testing.managed_process import ManagedProcess
 
+pytestmark = [
+    pytest.mark.parallel,
+]
+
 # Initial config of the prefs tests. The prefs backend is a spawned process,
 # so the in-memory fake filesystem of the test process can't intercept its
 # writes; each test gets a disposable project root under temp/ instead of

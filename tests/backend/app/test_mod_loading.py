@@ -33,6 +33,10 @@ import pytest
 
 from alasio.ext.env import ALASIO_ROOT
 
+pytestmark = [
+    pytest.mark.parallel,
+]
+
 # the mod under test: <repo>/ExampleMod, declared as the mod "example_mod"
 MOD_NAME = 'example_mod'
 MOD_ROOT = ALASIO_ROOT.joinpath('ExampleMod')

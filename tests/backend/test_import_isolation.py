@@ -20,8 +20,14 @@ pickle target / args deserialization + entry body).
 """
 import importlib.util
 
+import pytest
+
 from alasio.ext import env
 from tests.backend.import_testing import HeavyImportTest
+
+pytestmark = [
+    pytest.mark.parallel,
+]
 
 # gui.py sits at the project root. A plain str, not the PathStr joinpath()
 # returns: importlib passes the path to compile(), a str subclass ends up in

@@ -25,6 +25,10 @@ from alasio.ext.path.atomic_trio import atomic_write_stream_async, file_write_st
 from alasio.testing.filesystem import fs  # noqa: F401
 from tests.ext.path.atomic.helpers import break_function, record_sleeps
 
+pytestmark = [
+    pytest.mark.parallel,
+]
+
 
 class SpyFile:
     """
