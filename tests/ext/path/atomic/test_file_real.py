@@ -282,13 +282,17 @@ class TestRemove:
         assert file_remove(path) is False
 
     def test_file_remove_folder(self, folder):
-        """A folder is never removed by file_remove(), the error names the
-        kind, and the folder keeps its content."""
+        """A folder is never removed by file_remove(), the platform raises its
+        own error, and the folder keeps its content."""
         path = joinpath(folder, 'dir')
         os.makedirs(path)
         file_write(joinpath(path, 'a.txt'), b'x')
 
-        with pytest.raises(IsADirectoryError if env.POSIX else PermissionError):
+        # os.unlink() refuses a folder on every platform, but the error is not
+        # the same one: Linux answers EISDIR, macOS answers EPERM and Windows
+        # answers EACCES. Only Linux names the kind in the error, the other two
+        # raise PermissionError, so the kind is what the caller looks up
+        with pytest.raises((IsADirectoryError, PermissionError)):
             file_remove(path)
         assert file_read_bytes(joinpath(path, 'a.txt')) == b'x'
 

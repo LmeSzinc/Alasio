@@ -357,6 +357,94 @@ class TestRemoveDeleted:
         assert job._remove_deleted('gone', set()) is True
         assert not exists('gone')
 
+    def test_macos_directory_is_looked_up(self, app_folder, monkeypatch):
+        """macOS answers EPERM for the unlink of a folder, which does not name
+        the kind of the path: the folder is decided by os.lstat() alone, and a
+        folder the new version occupies is kept."""
+        os.makedirs(env.PROJECT_ROOT.joinpath('x'))
+        file_write(env.PROJECT_ROOT.joinpath('x/y.py'), b'new\n')
+
+        def macos_unlink(path):
+            # the macOS answer of unlink() on a folder, the one the macos-15
+            # runner reported: PermissionError instead of IsADirectoryError
+            if os.path.isdir(path):
+                raise PermissionError(1, 'Operation not permitted', str(path))
+            raise FileNotFoundError(2, 'No such file or directory', str(path))
+
+        monkeypatch.setattr(job_base, 'file_remove', macos_unlink)
+        job = UpdateJob(b'')
+
+        with logger.mock_capture_writer() as capture:
+            assert job._remove_deleted('x', {'x'}) is False
+
+        assert is_folder('x')
+        assert read('x/y.py') == b'new\n'
+        assert ('INFO | Skipped the deletion of "x": the new version has a folder there\n'
+                in capture.concat())
+
+    def test_macos_unowned_folder_is_removed(self, app_folder, monkeypatch):
+        """The lookup of the macOS answer finds a folder the new version does
+        not occupy, which is removed with its content like on POSIX."""
+        os.makedirs(env.PROJECT_ROOT.joinpath('gone'))
+        file_write(env.PROJECT_ROOT.joinpath('gone/junk.txt'), b'leftover\n')
+
+        def macos_unlink(path):
+            if os.path.isdir(path):
+                raise PermissionError(1, 'Operation not permitted', str(path))
+            raise FileNotFoundError(2, 'No such file or directory', str(path))
+
+        monkeypatch.setattr(job_base, 'file_remove', macos_unlink)
+        job = UpdateJob(b'')
+
+        with logger.mock_capture_writer() as capture:
+            assert job._remove_deleted('gone', set()) is True
+
+        assert not exists('gone')
+        assert 'INFO | Removing the folder of a deleted path:' in capture.concat()
+
+    def test_locked_file_is_not_taken_for_a_folder(self, app_folder, monkeypatch):
+        """Windows answers PermissionError for the unlink of a folder and for a
+        file another process holds open: the lookup tells the two apart, and a
+        file goes through the retrying removal instead of the folder one.
+        atomic_rmtree() would remove a plain file too, but without the retry,
+        so the branch is what the test asserts."""
+        file_write(env.PROJECT_ROOT.joinpath('gone.py'), b'bye\n')
+
+        def windows_unlink(path):
+            raise PermissionError(13, 'Permission denied', str(path))
+
+        removed = []
+        real_remove = job_base.atomic_remove
+
+        def spy_remove(path):
+            removed.append(str(path))
+            return real_remove(path)
+
+        def no_rmtree(path):
+            raise AssertionError('a file must not be removed as a folder')
+
+        # only the first removal is refused: the retry that follows is the one
+        # of atomic_remove(), which is not patched here
+        monkeypatch.setattr(job_base, 'file_remove', windows_unlink)
+        monkeypatch.setattr(job_base, 'atomic_remove', spy_remove)
+        monkeypatch.setattr(job_base, 'atomic_rmtree', no_rmtree)
+        job = UpdateJob(b'')
+
+        assert job._remove_deleted('gone.py', set()) is True
+        assert removed == [str(job.root.joinpath('gone.py'))]
+        assert not exists('gone.py')
+
+    def test_entry_vanished_under_the_removal(self, app_folder, monkeypatch):
+        """A path another process removed between the refused unlink and the
+        lookup is not an error: the deletion is already satisfied."""
+        def vanished_unlink(path):
+            raise PermissionError(13, 'Permission denied', str(path))
+
+        monkeypatch.setattr(job_base, 'file_remove', vanished_unlink)
+        job = UpdateJob(b'')
+
+        assert job._remove_deleted('gone.py', set()) is False
+
     def test_ledger_folder_is_never_removed(self, app_folder):
         """A record that names the ledger folder must not remove it: the index
         pack and the workspace of the job live there."""

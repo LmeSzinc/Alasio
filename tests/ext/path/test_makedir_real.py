@@ -11,7 +11,10 @@ the answer of a folder operation differs between the platforms.
 - an existing name: os.mkdir answers FileExistsError on both, but the entry
   behind it is only decided by os.stat, which follows a link;
 - a file in the way of a folder: os.unlink removes the entry, and Windows
-  refuses to unlink a folder where POSIX answers EISDIR or EPERM.
+  refuses to unlink a folder where POSIX answers EISDIR or EPERM;
+- the temporary folder of macOS is reached through a symbolic link
+  (/var -> /private/var), so os.getcwd() reports another prefix than the one
+  tempfile.mkdtemp() returned.
 
 The paths of the instance are normalized to "/" on every platform (the project
 rule), so the assertions build their expectations with joinpath() of
@@ -31,7 +34,7 @@ import tempfile
 import pytest
 
 from alasio.ext import env
-from alasio.ext.path.calc import joinpath
+from alasio.ext.path.calc import joinpath, normpath
 from alasio.ext.path.makedir import BatchMakedirs
 
 pytestmark = pytest.mark.skipif(
@@ -138,14 +141,18 @@ class TestParentFoldersOnTheRealDisk:
         previous = os.getcwd()
         try:
             os.chdir(folder)
+            # os.getcwd() is the path the OS reports for the directory it was
+            # changed to, which resolves the symbolic links of it, e.g. the
+            # /var -> /private/var link of the macOS temporary folder
+            current = normpath(os.getcwd())
             maker = BatchMakedirs(['a/b/c.txt'])
             # the instance keeps the folders of the directory it was built in
             os.chdir(tempfile.gettempdir())
         finally:
             os.chdir(previous)
 
-        assert maker.filepaths == [joinpath(folder, 'a/b/c.txt')]
-        assert joinpath(folder, 'a/b') in maker.parent_folders
+        assert maker.filepaths == [joinpath(current, 'a/b/c.txt')]
+        assert joinpath(current, 'a/b') in maker.parent_folders
 
 
 class TestRunOnTheRealDisk:
