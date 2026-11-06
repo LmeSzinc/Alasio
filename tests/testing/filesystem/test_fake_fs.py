@@ -179,17 +179,15 @@ class TestOpenModes:
         """A parent path that is a file should raise like the real os."""
         fs.create_file(join(fs, 'a.txt'))
         # Windows reports a path through a file as a missing path
-        expected = FileNotFoundError if FS_IS_WINDOWS else NotADirectoryError
-        with pytest.raises(expected):
+        with pytest.raises(NotADirectoryError):
             open(join(fs, 'a.txt', 'b.txt'), 'w')
-        with pytest.raises(expected):
+        with pytest.raises(NotADirectoryError):
             open(join(fs, 'a.txt', 'b.txt'), 'x')
 
     def test_write_file_in_middle(self, fs):
         """A file in the middle of the path should raise like the real os."""
         fs.create_file(join(fs, 'a.txt'))
-        expected = FileNotFoundError if FS_IS_WINDOWS else NotADirectoryError
-        with pytest.raises(expected):
+        with pytest.raises(NotADirectoryError):
             open(join(fs, 'a.txt', 'missing', 'b.txt'), 'w')
 
     def test_write_truncates(self, fs):
@@ -387,8 +385,7 @@ class TestSymlink:
     def test_symlink_parent_is_file(self, fs):
         """os.symlink() through a file should raise like the real os."""
         fs.create_file(join(fs, 'a.txt'))
-        expected = FileNotFoundError if FS_IS_WINDOWS else NotADirectoryError
-        with pytest.raises(expected):
+        with pytest.raises(NotADirectoryError):
             os.symlink(join(fs, 'a.txt'), join(fs, 'a.txt', 'link'))
 
     def test_readlink_not_link(self, fs):
@@ -611,8 +608,7 @@ class TestOsDir:
     def test_makedirs_parent_is_file(self, fs):
         """os.makedirs() through a file should raise like the real os."""
         fs.create_file(join(fs, 'a.txt'))
-        expected = FileNotFoundError if FS_IS_WINDOWS else NotADirectoryError
-        with pytest.raises(expected):
+        with pytest.raises(NotADirectoryError):
             os.makedirs(join(fs, 'a.txt', 'b', 'c'))
 
     def test_mkdir(self, fs):
@@ -629,8 +625,7 @@ class TestOsDir:
     def test_mkdir_parent_is_file(self, fs):
         """os.mkdir() through a file should raise like the real os."""
         fs.create_file(join(fs, 'a.txt'))
-        expected = FileNotFoundError if FS_IS_WINDOWS else NotADirectoryError
-        with pytest.raises(expected):
+        with pytest.raises(NotADirectoryError):
             os.mkdir(join(fs, 'a.txt', 'b'))
 
     def test_mkdir_exists(self, fs):
@@ -867,8 +862,7 @@ class TestOsFd:
     def test_os_open_create_parent_is_file(self, fs):
         """os.open() with O_CREAT through a file should raise like the real os."""
         fs.create_file(join(fs, 'a.bin'))
-        expected = FileNotFoundError if FS_IS_WINDOWS else NotADirectoryError
-        with pytest.raises(expected):
+        with pytest.raises(NotADirectoryError):
             os.open(join(fs, 'a.bin', 'b.bin'), os.O_CREAT | os.O_WRONLY)
 
     def test_os_open_excl(self, fs):

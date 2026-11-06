@@ -26,7 +26,7 @@ from alasio.ext.path.atomic import (
     file_read_bytes, file_read_text, file_touch, file_write, file_write_stream, is_tmp_file, windows_attempt_delay
 )
 from alasio.testing.filesystem import fs  # noqa: F401
-from alasio.testing.filesystem.base import IS_WINDOWS as FS_IS_WINDOWS
+from alasio.testing.filesystem.base import IS_WINDOWS as FS_IS_WINDOWS  # noqa: F401
 from tests.ext.path.atomic.helpers import break_function, record_sleeps
 
 
@@ -122,18 +122,12 @@ class TestAtomicRename:
         assert not os.path.exists('/data/a.txt')
 
     def test_rename_over_existing(self, fs):
-        """os.rename() refuses an existing target on Windows, replaces it on the other platforms."""
+        """The fake filesystem is Linux: an existing target is replaced."""
         file_write('/data/a.txt', 'new')
         file_write('/data/b.txt', 'old')
-        if FS_IS_WINDOWS:
-            with pytest.raises(FileExistsError):
-                atomic_rename('/data/a.txt', '/data/b.txt')
-            assert file_read_text('/data/a.txt') == 'new'
-            assert file_read_text('/data/b.txt') == 'old'
-        else:
-            atomic_rename('/data/a.txt', '/data/b.txt')
-            assert file_read_text('/data/b.txt') == 'new'
-            assert not os.path.exists('/data/a.txt')
+        atomic_rename('/data/a.txt', '/data/b.txt')
+        assert file_read_text('/data/b.txt') == 'new'
+        assert not os.path.exists('/data/a.txt')
 
     @pytest.mark.parametrize('error', [FileNotFoundError(2, 'No such file or directory'), FileExistsError(17, 'File exists')])
     def test_rename_immediate_errors_on_windows(self, monkeypatch, error):

@@ -1,6 +1,14 @@
 """
 The FakeFilesystem class: an in-memory filesystem and the mock of the
 os / builtins file functions.
+
+The filesystem models Linux, on every host: a test that passes here passes
+against the POSIX semantics of the real disk, and the differences of Windows
+(a path through a file, a rename over an existing name, the errno of a kind
+change) are the subject of the tests that run on a real disk instead, see
+tests/ext/path/atomic/test_atomic_replace_real.py. IS_WINDOWS is still read
+for the shape of a path (a drive root, a backslash of a link target), never
+for the semantics of an operation.
 """
 import _io
 import builtins
@@ -248,9 +256,9 @@ class FakeFilesystem:
             NotADirectoryError: (POSIX) If a parent path is a file or a symlink
         """
         missing, conflict = self._missing_parents(path)
-        if conflict is not None and not IS_WINDOWS:
+        if conflict is not None:
             raise NotADirectoryError(errno.ENOTDIR, 'Not a directory', path)
-        if missing or conflict is not None:
+        if missing:
             raise FileNotFoundError(errno.ENOENT, 'No such file or directory', path)
 
     def _create_parents(self, path):
@@ -940,11 +948,7 @@ class FakeFilesystem:
         try:
             self._create_parents(path)
         except NotADirectoryError:
-            if not IS_WINDOWS:
-                raise
-            # The mkdir of Windows reports a path through a file as a
-            # missing path (ERROR_PATH_NOT_FOUND), like os.makedirs does
-            raise FileNotFoundError(errno.ENOENT, 'No such file or directory', path) from None
+            raise
         now = time.time()
         self._dirs[path] = FakeDir(
             path=path, mode=mode & 0o7777, ino=self._next_ino(), nlink=2,
@@ -1026,10 +1030,7 @@ class FakeFilesystem:
     @synchronized
     def rename(self, src, dst):
         """
-        Mock of os.rename().
-
-        On Windows renaming over an existing file raises, on POSIX the
-        file is replaced, like the real os.
+        Mock of os.rename(), the POSIX one: an existing target is replaced.
 
         Args:
             src (str): Source path
@@ -1037,14 +1038,24 @@ class FakeFilesystem:
 
         Raises:
             FileNotFoundError: If the source does not exist
-            FileExistsError: On Windows, if the target exists
+            IsADirectoryError: If the source is not a folder and the target is
+            NotADirectoryError: If the source is a folder and the target is not
+            OSError: If the source is a folder and the target is a folder that
+                holds an entry (ENOTEMPTY)
         """
-        self._move(src, dst, overwrite=not IS_WINDOWS)
+        self._move(src, dst, overwrite=True)
 
     @synchronized
     def replace(self, src, dst):
         """
-        Mock of os.replace(), the target is always replaced.
+        Mock of os.replace(), the target is replaced when the kinds allow it.
+
+        The kind of the two paths decides, with the POSIX answer on every host:
+        a file never replaces a folder (EISDIR), a folder never replaces a file
+        (ENOTDIR), and a folder only replaces an empty folder (ENOTEMPTY). The
+        real Windows API answers those cases with PermissionError (and replaces
+        a file with a folder, which POSIX refuses), see
+        alasio.ext.path.atomic.file_replace for the difference it hides.
 
         Args:
             src (str): Source path
@@ -1052,6 +1063,10 @@ class FakeFilesystem:
 
         Raises:
             FileNotFoundError: If the source does not exist
+            IsADirectoryError: If the source is not a folder and the target is
+            NotADirectoryError: If the source is a folder and the target is not
+            OSError: If the source is a folder and the target is a folder that
+                holds an entry (ENOTEMPTY)
         """
         self._move(src, dst, overwrite=True)
 

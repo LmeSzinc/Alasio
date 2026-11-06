@@ -22,6 +22,10 @@ ALASIO_ROOT = PathStr.new(__file__).uppath(3)
 # Disposable folder of the repository, tests put their temporary files here
 ALASIO_TEMP = ALASIO_ROOT.joinpath('temp')
 
+# Continuous integration: the runners of github actions and of most other
+# services set CI, the value differs (true, 1) so only the emptiness is trusted
+CI = os.environ.get('CI', '') not in ('', '0')
+
 
 def set_project_root(root, up=0):
     """
