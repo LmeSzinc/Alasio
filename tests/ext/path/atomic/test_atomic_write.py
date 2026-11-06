@@ -5,7 +5,7 @@ Covered: the file movers (atomic_replace, atomic_rename), the writers
 (file_write, file_write_stream, atomic_write, atomic_write_stream) and the
 file creators (file_ensure_exist, file_touch). The tmp file helpers
 (random_id, is_tmp_file, to_tmp_file, to_nontmp_file, windows_attempt_delay)
-and replace_tmp are covered in test_atomic_tmp.py, the trio variants
+and atomic_replace_tmp are covered in test_atomic_tmp.py, the trio variants
 file_write_stream_async() / atomic_write_stream_async() in test_atomic_trio.py.
 
 The tests run on the in-memory fake filesystem (the fs fixture), the

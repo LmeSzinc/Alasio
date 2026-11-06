@@ -17,7 +17,7 @@ from functools import partial
 import trio
 
 from alasio.ext.path.atomic import (
-    CHUNK_SIZE, _remove_tmp_on_failure, file_open, replace_tmp, stream_open_args, to_tmp_file
+    CHUNK_SIZE, _remove_tmp_on_failure, atomic_replace_tmp, file_open, stream_open_args, to_tmp_file
 )
 
 
@@ -137,7 +137,7 @@ async def atomic_write_stream_async(file, data_iter, mode=None):
             # The mode is set on the tmp file, not on the target, so a reader
             # never sees the target between two modes
             await trio.to_thread.run_sync(partial(os.chmod, tmp, mode))
-        await trio.to_thread.run_sync(replace_tmp, tmp, file)
+        await trio.to_thread.run_sync(atomic_replace_tmp, tmp, file)
     except BaseException:
         # The stream failed or the caller was cancelled: the target is not
         # touched yet, drop the tmp file. Shielded, a cancelled caller still

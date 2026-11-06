@@ -1,5 +1,6 @@
 import os
 import random
+import stat
 import string
 import time
 
@@ -95,69 +96,127 @@ def windows_attempt_delay(attempt):
     return delay
 
 
-def replace_tmp(tmp, file):
+def atomic_replace_tmp(tmp, file):
     """
-    Replace temp file to file
+    Replace temp file to file, with retry on Windows
+
+    A failed replace removes the tmp file: it was written for this target only,
+    so a failed write leaves no tmp file behind.
 
     Args:
         tmp (str): Temporary file path
         file (str): Target file path
 
+    Returns:
+        bool: True when an entry in the way had to be removed
+
     Raises:
         PermissionError: (Windows only) If another process is still reading the file and all retries failed
         FileNotFoundError: If tmp file gets deleted unexpectedly
     """
-    if IS_WINDOWS:
-        # PermissionError on Windows if another process is reading
-        last_error = None
-        for attempt in range(WINDOWS_MAX_ATTEMPT):
-            try:
-                # Atomic operation
-                os.replace(tmp, file)
-                # success
-                return
-            except PermissionError as e:
-                last_error = e
-                delay = windows_attempt_delay(attempt)
-                time.sleep(delay)
-                continue
-            except FileNotFoundError:
-                # tmp file gets deleted unexpectedly
-                raise
-            except Exception as e:
-                last_error = e
-                break
-    else:
-        # Linux and Mac allow existing reading
-        try:
-            # Atomic operation
-            os.replace(tmp, file)
-            # success
-            return
-        except FileNotFoundError:
-            raise
-        except Exception as e:
-            last_error = e
-
-    # Clean up tmp file on failure
     try:
-        os.unlink(tmp)
+        return atomic_replace(tmp, file)
     except FileNotFoundError:
-        # tmp file already get deleted
-        pass
-    except Exception:
-        pass
-    if last_error is not None:
-        raise last_error from None
+        # tmp file gets deleted unexpectedly
+        raise
+    except BaseException:
+        _remove_tmp_on_failure(tmp)
+        raise
 
 
-def atomic_replace(path_from, path_to):
+def is_folder(file):
+    """
+    Check whether a path is a folder, following a symbolic link.
+
+    Args:
+        file (str): Path to check
+
+    Returns:
+        bool: True for a folder, and for a link to a folder. False for a file,
+            a link to a file and a missing path
+    """
+    try:
+        return stat.S_ISDIR(os.stat(file).st_mode)
+    except OSError:
+        # missing, a parent that is not a folder, a path that cannot be read
+        return False
+
+
+def file_replace(path_from, path_to):
     """
     Replace file or directory
+
+    os.replace() refuses some kind changes, and what it does is not the same on
+    every platform: a folder is never replaced by a file (EISDIR on POSIX,
+    PermissionError on Windows), and a file is replaced by a folder on Windows
+    while POSIX refuses it (ENOTDIR). The entry in the way is removed here
+    first, so every platform ends with the same result:
+
+    - a folder at the target while the source is not a folder: the folder is
+      removed with its content;
+    - a file at the target while the source is a folder: the file is removed;
+    - the same kind on both sides: os.replace() keeps its own rule (a folder
+      replaces an empty folder).
+
+    The removal is what makes a kind change possible, so it is not atomic: an
+    interrupted run leaves the target missing instead of half replaced. The
+    removal is the bare folder_rmtree(), not atomic_rmtree(): the folder is
+    renamed to a tmp name by that one to survive an interruption, and it does
+    so with atomic_replace(), which comes back here. A file_* function never
+    calls an atomic_* one, so the two can not call each other.
 
     Args:
         path_from (str): Source file/directory path
         path_to (str): Target file/directory path
+
+    Returns:
+        bool: True when an entry in the way had to be removed
+
+    Raises:
+        FileNotFoundError: If the source does not exist
+        PermissionError: If the target is a file another process is still
+            using (the caller retries, see atomic_replace)
+        OSError: If the source cannot be moved, the folder in the way included
+    """
+    try:
+        os.replace(path_from, path_to)
+        return False
+    except FileNotFoundError:
+        raise
+    except OSError as e:
+        failure = e
+    # the kinds of the two paths decide whether the entry in the way is the
+    # reason of the failure, or whether it is a lock on a file of the same
+    # kind that a retry may outlast
+    target_folder = is_folder(path_to)
+    if target_folder == is_folder(path_from):
+        raise failure
+    if target_folder:
+        # a folder that still holds an entry cannot be removed, the move below
+        # then reports the failure with the paths of this call
+        folder_rmtree(path_to)
+    else:
+        file_remove(path_to)
+    os.replace(path_from, path_to)
+    return True
+
+
+def atomic_replace(path_from, path_to):
+    """
+    Replace file or directory, with retry on Windows
+
+    The retry handles a target file another process is still reading: Windows
+    refuses the move with PermissionError until the reader lets go. A kind
+    change does not wait, it is decided on the first attempt (see
+    file_replace): a folder at the target is removed at once instead of being
+    retried as if it were a lock.
+
+    Args:
+        path_from (str): Source file/directory path
+        path_to (str): Target file/directory path
+
+    Returns:
+        bool: True when an entry in the way had to be removed
 
     Raises:
         PermissionError: (Windows only) If another process is still reading the file and all retries failed
@@ -168,10 +227,7 @@ def atomic_replace(path_from, path_to):
         last_error = None
         for attempt in range(WINDOWS_MAX_ATTEMPT):
             try:
-                # Atomic operation
-                os.replace(path_from, path_to)
-                # success
-                return
+                return file_replace(path_from, path_to)
             except PermissionError as e:
                 last_error = e
                 delay = windows_attempt_delay(attempt)
@@ -179,14 +235,11 @@ def atomic_replace(path_from, path_to):
                 continue
             except FileNotFoundError:
                 raise
-            except Exception as e:
-                last_error = e
-                break
         if last_error is not None:
             raise last_error from None
     else:
         # Linux and Mac
-        os.replace(path_from, path_to)
+        return file_replace(path_from, path_to)
 
 
 def atomic_rename(path_from, path_to):
@@ -406,7 +459,7 @@ def atomic_write(file, data):
     except BaseException:
         _remove_tmp_on_failure(tmp)
         raise
-    replace_tmp(tmp, file)
+    atomic_replace_tmp(tmp, file)
 
 
 def atomic_write_stream(file, data_generator, mode=None):
@@ -433,7 +486,7 @@ def atomic_write_stream(file, data_generator, mode=None):
     except BaseException:
         _remove_tmp_on_failure(tmp)
         raise
-    replace_tmp(tmp, file)
+    atomic_replace_tmp(tmp, file)
 
 
 def file_read_text(file, encoding='utf-8', errors='strict'):
@@ -786,7 +839,7 @@ def atomic_copy(source, target, chunk_size=CHUNK_SIZE):
     except BaseException:
         _remove_tmp_on_failure(tmp)
         raise
-    replace_tmp(tmp, target)
+    atomic_replace_tmp(tmp, target)
 
 
 def file_ensure_exist(file, mode=0o666, default=b''):

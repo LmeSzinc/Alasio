@@ -4,7 +4,7 @@ import cv2
 import imageio
 
 from alasio.base.image.imfile import crop, image_channel
-from alasio.ext.path.atomic import replace_tmp, to_tmp_file
+from alasio.ext.path.atomic import atomic_replace_tmp, to_tmp_file
 from alasio.ext.path.calc import get_suffix
 
 
@@ -79,7 +79,7 @@ def gif_save_imageio(frames, file, fps=5):
     except FileNotFoundError:
         pass
     else:
-        replace_tmp(tmp, file)
+        atomic_replace_tmp(tmp, file)
         return
 
     # Create parent directory
@@ -88,4 +88,4 @@ def gif_save_imageio(frames, file, fps=5):
         os.makedirs(directory, exist_ok=True)
     # Write again
     mimsave(tmp, frames, format=ext, fps=fps)
-    replace_tmp(tmp, file)
+    atomic_replace_tmp(tmp, file)

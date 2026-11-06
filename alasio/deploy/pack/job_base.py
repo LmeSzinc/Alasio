@@ -771,6 +771,12 @@ class JobBase(DeployTarget):
         """
         Read a current file in the project, data and mode in one open.
 
+        A path that holds no file answers as missing instead of raising: the
+        zip of a path below a file (ENOTDIR), or a path the new version turned
+        from a folder into a file (EISDIR). Both are handled by the write that
+        follows: the parent folders are created, and an entry in the way is
+        removed.
+
         Args:
             file (str): File path to read
 
@@ -782,9 +788,9 @@ class JobBase(DeployTarget):
             with atomic_open(file, 'rb') as f:
                 data = f.read()
                 mode = os.fstat(f.fileno()).st_mode
-        except (FileNotFoundError, NotADirectoryError):
-            # no file of its own at the path: it is missing, or a parent of it
-            # is a file, which the batch of the writes turns into a folder
+        except (FileNotFoundError, NotADirectoryError, IsADirectoryError):
+            # no file of its own at the path: it is missing, a parent of it is
+            # a file, or the path is a folder the new version replaced
             return CurrentFile(exist=False, data=b'', mode=0)
         return CurrentFile(exist=True, data=data, mode=mode)
 

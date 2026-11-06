@@ -94,6 +94,13 @@ FILE_TO_FOLDER_NEW = {'x/y.py': b'the new folder\n', 'keep.py': b'keep\n'}
 F2D_OLD_PACK, F2D_NEW_PACK, F2D_UPDATE, F2D_SERVER, F2D_CHECKSUM = build_packs(
     FILE_TO_FOLDER_OLD, FILE_TO_FOLDER_NEW)
 
+# the other direction: "d" is a folder of the old version, the new version has a
+# file of the same name, the update pack carries "A d" and "D d/a.py"
+FOLDER_TO_FILE_OLD = {'d/a.py': b'the old folder\n', 'keep.py': b'keep\n'}
+FOLDER_TO_FILE_NEW = {'d': b'the new file\n', 'keep.py': b'keep\n'}
+D2F_OLD_PACK, D2F_NEW_PACK, D2F_UPDATE, D2F_SERVER, D2F_CHECKSUM = build_packs(
+    FOLDER_TO_FILE_OLD, FOLDER_TO_FILE_NEW)
+
 # "gone.py" is a file the new version removes, and the new version has no file
 # at or below "x": a folder at either path has no owner in the new version
 REMOVED_OLD = {'x': b'the old file\n', 'gone.py': b'bye\n', 'keep.py': b'keep\n'}
@@ -164,6 +171,53 @@ class TestDeletedPathIsFolder:
         assert is_folder('x')
         assert read('x/y.py') == FILE_TO_FOLDER_NEW['x/y.py']
         assert read('keep.py') == b'keep\n'
+
+    @pytest.mark.trio
+    async def test_folder_replaced_by_file(self, app_folder):
+        """The new version replaces a folder with a file of the same name: the
+        folder goes with its content and the file takes its place.
+
+        os.replace() never replaces a folder with a file (EISDIR on POSIX, an
+        access error on Windows), so the entry in the way is removed by
+        file_replace() before the write.
+        """
+        await UnpackJob(D2F_OLD_PACK).run()
+        assert is_folder('d')
+        assert read('d/a.py') == FOLDER_TO_FILE_OLD['d/a.py']
+
+        job = UpdateJob(D2F_UPDATE, server=D2F_SERVER)
+        job.index_checksum = D2F_CHECKSUM
+        with logger.mock_capture_writer() as capture:
+            assert await job.run()
+
+        assert not is_folder('d')
+        assert read('d') == FOLDER_TO_FILE_NEW['d']
+        assert read('keep.py') == b'keep\n'
+        assert 'INFO | Update done\n' in capture.concat()
+
+    @pytest.mark.trio
+    async def test_folder_replaced_by_file_full_pack(self, app_folder):
+        """The full pack of the new version applies to the old tree too."""
+        await UnpackJob(D2F_OLD_PACK).run()
+        assert await UnpackJob(D2F_NEW_PACK).run()
+
+        assert not is_folder('d')
+        assert read('d') == FOLDER_TO_FILE_NEW['d']
+        assert read('keep.py') == b'keep\n'
+
+    @pytest.mark.trio
+    async def test_folder_replaced_by_file_repairs_a_stray_file(self, app_folder):
+        """A file that appeared inside the folder does not survive: the folder
+        belongs to the old version and the new one has no folder there."""
+        await UnpackJob(D2F_OLD_PACK).run()
+        file_write(env.PROJECT_ROOT.joinpath('d/stray.txt'), b'the user put it here\n')
+
+        job = UpdateJob(D2F_UPDATE, server=D2F_SERVER)
+        job.index_checksum = D2F_CHECKSUM
+        with logger.mock_capture_writer():
+            assert await job.run()
+
+        assert read('d') == FOLDER_TO_FILE_NEW['d']
 
     @pytest.mark.trio
     async def test_folder_from_a_previous_run_is_kept(self, app_folder):

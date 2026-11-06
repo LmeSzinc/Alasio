@@ -5,7 +5,7 @@ import numpy as np
 from PIL import Image
 
 from alasio.base.image.imfile import ImageNotSupported, image_channel
-from alasio.ext.path.atomic import replace_tmp, to_tmp_file
+from alasio.ext.path.atomic import atomic_replace_tmp, to_tmp_file
 from alasio.ext.path.calc import get_suffix
 
 
@@ -75,7 +75,7 @@ def image_save_pillow(file, image):
     except FileNotFoundError:
         pass
     else:
-        replace_tmp(tmp, file)
+        atomic_replace_tmp(tmp, file)
         return True
 
     # Create parent directory
@@ -84,5 +84,5 @@ def image_save_pillow(file, image):
         os.makedirs(directory, exist_ok=True)
     # Write again
     im.save(tmp, format=ext)
-    replace_tmp(tmp, file)
+    atomic_replace_tmp(tmp, file)
     return True

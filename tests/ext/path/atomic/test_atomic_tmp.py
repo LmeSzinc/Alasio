@@ -2,7 +2,7 @@
 Tests for the tmp file machinery of alasio.ext.path.atomic.
 
 Covered: random_id(), is_tmp_file(), to_tmp_file(), to_nontmp_file(),
-windows_attempt_delay() and replace_tmp().
+windows_attempt_delay() and atomic_replace_tmp().
 
 The tests run on the in-memory fake filesystem (the fs fixture), the
 real disk is never touched. The Windows retry loops are tested on every
@@ -17,8 +17,8 @@ import pytest
 
 from alasio.ext.path import atomic
 from alasio.ext.path.atomic import (
-    WINDOWS_MAX_ATTEMPT, file_read_text, file_write, is_tmp_file, random_id, replace_tmp, to_nontmp_file, to_tmp_file,
-    windows_attempt_delay
+    WINDOWS_MAX_ATTEMPT, atomic_replace_tmp, file_read_text, file_write, is_tmp_file, random_id, to_nontmp_file,
+    to_tmp_file, windows_attempt_delay
 )
 from alasio.testing.filesystem import fs  # noqa: F401
 from tests.ext.path.atomic.helpers import break_function, record_sleeps
@@ -125,14 +125,14 @@ class TestWindowsAttemptDelay:
         assert windows_attempt_delay(100) == 1.0
 
 
-class TestReplaceTmp:
-    """Test cases for replace_tmp()."""
+class TestAtomicReplaceTmp:
+    """Test cases for atomic_replace_tmp()."""
 
     def test_replace(self, fs):
         """The tmp file should be moved to the target."""
         tmp = to_tmp_file('/data/a.txt')
         file_write(tmp, 'data')
-        replace_tmp(tmp, '/data/a.txt')
+        atomic_replace_tmp(tmp, '/data/a.txt')
         assert file_read_text('/data/a.txt') == 'data'
         assert not os.path.exists(tmp)
 
@@ -141,7 +141,7 @@ class TestReplaceTmp:
         tmp = to_tmp_file('/data/a.txt')
         file_write(tmp, 'new')
         file_write('/data/a.txt', 'old')
-        replace_tmp(tmp, '/data/a.txt')
+        atomic_replace_tmp(tmp, '/data/a.txt')
         assert file_read_text('/data/a.txt') == 'new'
 
     def test_replace_posix(self, fs, monkeypatch):
@@ -149,7 +149,7 @@ class TestReplaceTmp:
         monkeypatch.setattr(atomic, 'IS_WINDOWS', False)
         tmp = to_tmp_file('/data/a.txt')
         file_write(tmp, 'data')
-        replace_tmp(tmp, '/data/a.txt')
+        atomic_replace_tmp(tmp, '/data/a.txt')
         assert file_read_text('/data/a.txt') == 'data'
         assert not os.path.exists(tmp)
 
@@ -161,7 +161,7 @@ class TestReplaceTmp:
         file_write('/data/a.txt', 'old')
         calls = break_function(monkeypatch, os, 'replace', [])
         with pytest.raises(FileNotFoundError):
-            replace_tmp('/data/missing.ABC123.tmp', '/data/a.txt')
+            atomic_replace_tmp('/data/missing.ABC123.tmp', '/data/a.txt')
         assert len(calls) == 1
         assert sleeps.sleeps == []
         assert file_read_text('/data/a.txt') == 'old'
@@ -174,7 +174,7 @@ class TestReplaceTmp:
         tmp = to_tmp_file('/data/a.txt')
         file_write(tmp, 'data')
         calls = break_function(monkeypatch, os, 'replace', [error, error])
-        replace_tmp(tmp, '/data/a.txt')
+        atomic_replace_tmp(tmp, '/data/a.txt')
         assert file_read_text('/data/a.txt') == 'data'
         assert len(calls) == 3
         assert sleeps.sleeps == [windows_attempt_delay(0), windows_attempt_delay(1)]
@@ -188,7 +188,7 @@ class TestReplaceTmp:
         file_write(tmp, 'data')
         calls = break_function(monkeypatch, os, 'replace', [error] * WINDOWS_MAX_ATTEMPT)
         with pytest.raises(PermissionError) as e:
-            replace_tmp(tmp, '/data/a.txt')
+            atomic_replace_tmp(tmp, '/data/a.txt')
         assert e.value is error
         assert len(calls) == WINDOWS_MAX_ATTEMPT
         assert sleeps.sleeps == [windows_attempt_delay(attempt) for attempt in range(WINDOWS_MAX_ATTEMPT)]
@@ -204,7 +204,7 @@ class TestReplaceTmp:
         file_write(tmp, 'data')
         calls = break_function(monkeypatch, os, 'replace', [error])
         with pytest.raises(OSError) as e:
-            replace_tmp(tmp, '/data/a.txt')
+            atomic_replace_tmp(tmp, '/data/a.txt')
         assert e.value is error
         assert len(calls) == 1
         assert sleeps.sleeps == []
@@ -218,7 +218,7 @@ class TestReplaceTmp:
         file_write(tmp, 'data')
         calls = break_function(monkeypatch, os, 'replace', [error])
         with pytest.raises(type(error)) as e:
-            replace_tmp(tmp, '/data/a.txt')
+            atomic_replace_tmp(tmp, '/data/a.txt')
         assert e.value is error
         assert len(calls) == 1
         assert not os.path.exists(tmp)
@@ -236,5 +236,5 @@ class TestReplaceTmp:
         break_function(monkeypatch, os, 'replace', [error])
         break_function(monkeypatch, os, 'unlink', [unlink_error])
         with pytest.raises(OSError) as e:
-            replace_tmp(tmp, '/data/a.txt')
+            atomic_replace_tmp(tmp, '/data/a.txt')
         assert e.value is error
