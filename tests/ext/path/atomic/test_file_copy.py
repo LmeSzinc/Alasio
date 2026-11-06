@@ -79,14 +79,12 @@ class TestFileEnsureExist:
 
     def test_create(self, fs):
         """A missing file is created, the creation is reported."""
-        fs.create_dir('/data')
         assert file_ensure_exist('/data/a.txt') is True
         assert os.path.isfile('/data/a.txt')
         assert file_read_bytes('/data/a.txt') == b''
 
     def test_create_with_default(self, fs):
         """The default content is written into the new file."""
-        fs.create_dir('/data')
         assert file_ensure_exist('/data/a.txt', default=b'default') is True
         assert file_read_bytes('/data/a.txt') == b'default'
 
@@ -96,15 +94,14 @@ class TestFileEnsureExist:
         assert file_ensure_exist('/data/a.txt', default=b'default') is False
         assert file_read_bytes('/data/a.txt') == b'the content'
 
-    def test_missing_parent_is_not_created(self, fs):
-        """The parent folder is not created: a path through a missing folder is
-        a failure, and it is reported as False rather than raised."""
-        assert file_ensure_exist('/data/a/b.txt') is False
-        assert not os.path.exists('/data/a')
+    def test_missing_parent_is_created(self, fs):
+        """The parent folders are created: the caller does not prepare the
+        tree of a file it only ensures."""
+        assert file_ensure_exist('/data/a/b.txt', default=b'default') is True
+        assert file_read_bytes('/data/a/b.txt') == b'default'
 
     def test_mode(self, fs):
         """The mode of the caller is applied to the new file."""
-        fs.create_dir('/data')
         file_ensure_exist('/data/a.txt', mode=0o600)
         assert os.stat('/data/a.txt').st_mode & 0o777 == 0o600
 
@@ -114,10 +111,14 @@ class TestFileTouch:
 
     def test_create(self, fs):
         """A missing file is created empty."""
-        fs.create_dir('/data')
         file_touch('/data/a.txt')
         assert os.path.isfile('/data/a.txt')
         assert file_read_bytes('/data/a.txt') == b''
+
+    def test_create_missing_parent(self, fs):
+        """The parent folders are created with the file."""
+        file_touch('/data/a/b.txt')
+        assert os.path.isfile('/data/a/b.txt')
 
     def test_existing_keeps_content(self, fs):
         """An existing file keeps its content, only the time is bumped."""
@@ -131,9 +132,3 @@ class TestFileTouch:
         with pytest.raises(FileExistsError):
             file_touch('/data/a.txt', exist_ok=False)
         assert file_read_bytes('/data/a.txt') == b'the content'
-
-    def test_missing_parent_is_not_created(self, fs):
-        """The parent folder is not created."""
-        with pytest.raises(FileNotFoundError):
-            file_touch('/data/a/b.txt')
-        assert not os.path.exists('/data/a')

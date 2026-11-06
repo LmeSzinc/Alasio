@@ -842,10 +842,32 @@ def atomic_copy(source, target, chunk_size=CHUNK_SIZE):
     atomic_replace_tmp(tmp, target)
 
 
+def _makedir_of(file):
+    """
+    Create the parent folders of a file, the root of the path excluded.
+
+    Args:
+        file (str): Path of the file
+
+    Returns:
+        bool: True when the folders were created, False when the path has no
+            parent to create
+    """
+    directory = os.path.dirname(file)
+    if not directory:
+        return False
+    os.makedirs(directory, exist_ok=True)
+    return True
+
+
 def file_ensure_exist(file, mode=0o666, default=b''):
     """
     Ensure a file exists with minimal I/O operations using os.open.
     Uses O_EXCL flag to atomically check and create in one operation.
+
+    A missing parent folder is created on the failure of the first attempt, so
+    the common case (the file exists, or its folder does) costs one os.open
+    and nothing else.
 
     Args:
         file (str):
@@ -855,22 +877,34 @@ def file_ensure_exist(file, mode=0o666, default=b''):
     Returns:
         bool: True if file just created
     """
+    # O_CREAT | O_EXCL | O_WRONLY ensures atomic "create if not exists" operation
+    flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY
     try:
-        # Try to create file with O_EXCL flag - will fail if file exists
-        # O_CREAT | O_EXCL | O_WRONLY ensures atomic "create if not exists" operation
-        fd = os.open(file, os.O_CREAT | os.O_EXCL | os.O_WRONLY, mode)
-
-        # If we get here, the file was created successfully
-        if default:
-            os.write(fd, default)
-        os.close(fd)
-        return True
+        fd = os.open(file, flags, mode)
     except FileExistsError:
         # File already exists
         return False
+    except FileNotFoundError:
+        # The parent folder is missing, the only reason a create reports this
+        try:
+            if not _makedir_of(file):
+                return False
+            fd = os.open(file, flags, mode)
+        except FileExistsError:
+            # Another process created the file in between
+            return False
+        except OSError:
+            return False
     except OSError:
         # Other errors
         return False
+    # If we get here, the file was created successfully
+    try:
+        if default:
+            os.write(fd, default)
+    finally:
+        os.close(fd)
+    return True
 
 
 def file_touch(file, mode=0o666, exist_ok=True):
@@ -878,6 +912,9 @@ def file_touch(file, mode=0o666, exist_ok=True):
     Touch a file, copied from pathlib
     - If file not exist, create file
     - If file exist, set modify time to now
+
+    A missing parent folder is created, so the caller does not have to prepare
+    the tree of a file it only touches.
 
     Args:
         file (str):
@@ -898,7 +935,13 @@ def file_touch(file, mode=0o666, exist_ok=True):
     flags = os.O_CREAT | os.O_WRONLY
     if not exist_ok:
         flags |= os.O_EXCL
-    fd = os.open(file, flags, mode)
+    try:
+        fd = os.open(file, flags, mode)
+    except FileNotFoundError:
+        # The parent folder is missing, the only reason a create reports this
+        if not _makedir_of(file):
+            raise
+        fd = os.open(file, flags, mode)
     os.close(fd)
 
 

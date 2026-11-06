@@ -490,9 +490,9 @@ class TestFileEnsureExist:
         assert file_read_bytes('/data/a.txt') == b'data'
 
     def test_missing_parent(self, fs):
-        """A missing parent directory should be reported, nothing is created."""
-        assert file_ensure_exist('/data/a.txt') is False
-        assert not os.path.exists('/data')
+        """A missing parent directory is created with the file."""
+        assert file_ensure_exist('/data/a.txt') is True
+        assert file_read_bytes('/data/a.txt') == b''
 
     def test_exists(self, fs):
         """An existing file should be kept untouched."""
@@ -523,10 +523,9 @@ class TestFileTouch:
         assert os.path.getsize('/data/a.txt') == 0
 
     def test_touch_missing_parent(self, fs):
-        """A missing parent directory should raise, like the real os."""
-        with pytest.raises(FileNotFoundError):
-            file_touch('/data/a.txt')
-        assert not os.path.exists('/data')
+        """A missing parent directory is created with the file."""
+        file_touch('/data/a.txt')
+        assert file_read_bytes('/data/a.txt') == b''
 
     def test_touch_update(self, fs):
         """An existing file should keep its content and get a new modify time."""
