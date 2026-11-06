@@ -967,6 +967,10 @@ def atomic_remove(file):
     """
     Atomic file remove
 
+    A folder is never removed: the unlink of one is refused on every platform
+    and no wait makes it removable, so the error is raised on the first
+    attempt instead of being retried as if a lock held it.
+
     Args:
         file (str): File path to remove
 
@@ -981,6 +985,25 @@ def atomic_remove(file):
                 return file_remove(file)
             except PermissionError as e:
                 last_error = e
+                # Windows reports the same error for the unlink of a folder, of
+                # a file another process holds open, and of a file without the
+                # write attribute, so the error alone does not separate a wait
+                # from a hopeless call. One os.lstat() on the failure path
+                # answers it, the success path pays nothing.
+                try:
+                    st = os.lstat(file)
+                except (FileNotFoundError, NotADirectoryError):
+                    # another process removed the entry, or a parent of it
+                    # became a file: no file is left to remove
+                    return False
+                except OSError:
+                    # the kind of the path cannot be read (a parent without the
+                    # search permission, a link loop, a path too long): no wait
+                    # changes that
+                    st = None
+                if st is None or stat.S_ISDIR(st.st_mode):
+                    # unlink() never removes a folder, whatever the wait
+                    raise
                 delay = windows_attempt_delay(attempt)
                 time.sleep(delay)
                 continue

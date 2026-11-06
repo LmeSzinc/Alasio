@@ -10,6 +10,7 @@ The tests run on the in-memory fake filesystem (the fs fixture), the
 real disk is never touched.
 """
 import os
+import traceback
 
 import pytest
 
@@ -107,6 +108,79 @@ class TestAtomicRemove:
         assert e.value is error
         assert len(calls) == 1
         assert os.path.exists('/data/a.txt')
+
+    def test_remove_folder_no_retry(self, fs, monkeypatch):
+        """Windows answers the same PermissionError for a folder and for a
+        locked file, but a folder never goes away: the kind of the path is
+        looked up, and the removal gives up on the first attempt."""
+        monkeypatch.setattr(atomic, 'IS_WINDOWS', True)
+        sleeps = record_sleeps(monkeypatch)
+        fs.create_dir('/data/folder')
+        error = PermissionError(13, 'Permission denied')
+        calls = break_function(monkeypatch, os, 'unlink', [error] * WINDOWS_MAX_ATTEMPT)
+        with pytest.raises(PermissionError) as e:
+            atomic_remove('/data/folder')
+        assert e.value is error
+        assert len(calls) == 1
+        assert sleeps.sleeps == []
+        assert os.path.isdir('/data/folder')
+
+    def test_remove_folder_reraises_the_unlink(self, fs, monkeypatch):
+        """The error of the caller is the one of the unlink itself, re-raised
+        as it is: the frames of the removal are in the traceback, and the
+        removal is in it once, not once per re-raise."""
+        monkeypatch.setattr(atomic, 'IS_WINDOWS', True)
+        record_sleeps(monkeypatch)
+        fs.create_dir('/data/folder')
+        error = PermissionError(13, 'Permission denied')
+        break_function(monkeypatch, os, 'unlink', [error] * WINDOWS_MAX_ATTEMPT)
+        with pytest.raises(PermissionError) as e:
+            atomic_remove('/data/folder')
+        frames = [frame.name for frame in traceback.extract_tb(e.value.__traceback__)]
+        # the refused unlink is the last frame, file_remove() the one above it
+        assert frames[-2:] == ['file_remove', 'broken']
+        # a bare raise keeps the traceback as it is, `raise e` and
+        # `raise e from None` both put the removal in it a second time
+        assert frames.count('atomic_remove') == 1
+        assert e.value.__suppress_context__ is False
+
+    def test_remove_kind_unreadable_no_retry(self, fs, monkeypatch):
+        """A path whose kind cannot be read is not retried either: no wait
+        makes the lookup succeed, the error of the removal is what the caller
+        gets."""
+        monkeypatch.setattr(atomic, 'IS_WINDOWS', True)
+        sleeps = record_sleeps(monkeypatch)
+        fs.create_file('/data/a.txt', contents='data')
+        error = PermissionError(13, 'Permission denied')
+        calls = break_function(monkeypatch, os, 'unlink', [error] * WINDOWS_MAX_ATTEMPT)
+
+        def locked_lstat(path):
+            raise PermissionError(13, 'Permission denied', path)
+
+        monkeypatch.setattr(os, 'lstat', locked_lstat)
+        with pytest.raises(PermissionError) as e:
+            atomic_remove('/data/a.txt')
+        # the error of the lookup is not the one the caller sees
+        assert e.value is error
+        assert len(calls) == 1
+        assert sleeps.sleeps == []
+
+    def test_remove_entry_vanished_after_the_refusal(self, fs, monkeypatch):
+        """An entry another process removed between the refused unlink and the
+        lookup is not an error: the removal is already satisfied."""
+        monkeypatch.setattr(atomic, 'IS_WINDOWS', True)
+        sleeps = record_sleeps(monkeypatch)
+        fs.create_file('/data/a.txt', contents='data')
+        error = PermissionError(13, 'Permission denied')
+        calls = break_function(monkeypatch, os, 'unlink', [error] * WINDOWS_MAX_ATTEMPT)
+
+        def vanished_lstat(path):
+            raise FileNotFoundError(2, 'No such file or directory', path)
+
+        monkeypatch.setattr(os, 'lstat', vanished_lstat)
+        assert atomic_remove('/data/a.txt') is False
+        assert len(calls) == 1
+        assert sleeps.sleeps == []
 
 
 class TestFolderRmtree:
