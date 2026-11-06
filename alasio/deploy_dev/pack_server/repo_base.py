@@ -399,21 +399,23 @@ class RepoBase:
         The entries of the run, split into the published and the private ones.
 
         The set touch() fills is the whole truth of a run: every file a step
-        read or wrote. This accessor hands it out in the form the manifest of
-        the workspace records (see manifest.split_paths): the tmp files of an
-        interrupted run and the manifest itself are not entries of it, and a
-        path with a '.' or '_' segment is private.
+        read or wrote. This accessor hands it out in the form the record of the
+        workspace is written of (see manifest.split_paths): the tmp files of an
+        interrupted run and the two files of the record are not entries of it,
+        and a path with a '.' or '_' segment is private.
 
-        The split is computed here and nowhere else: the manifest of the
-        workspace records it, and the cleanup of the run keeps the whole set the
-        two halves come from, plus the manifest file itself. No other module
-        classifies a path of the workspace.
+        The split is computed here and nowhere else: the published contract of
+        the workspace records the files, the local record records the private
+        ones, and the cleanup of the run keeps the whole set the two halves come
+        from, plus the two files of the record. No other module classifies a
+        path of the workspace.
 
         Returns:
             tuple[list[str], list[str]]: (files, private), '/'-separated paths
                 relative to the workspace, both sorted. The files are the ones
-                a mirror publishes, the private ones stay on the disk of the
-                generator, e.g. the wheel cache
+                a mirror publishes, they are written to manifest.json; the
+                private ones stay on the disk of the generator, e.g. the wheel
+                cache, they are written to .manifest.json
         """
         return split_paths(self._touched)
 

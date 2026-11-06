@@ -28,9 +28,9 @@ on the disk.
     6. latest.pack is written (see repo_latest), the version a client reads:
        the barrier of the run, a client that reads it finds every pack of the
        version on the disk
-    7. the manifest of the generation is written (see repo_manifest): the
-       version of the barrier, the files the run publishes and the files it
-       keeps private, e.g. the wheel cache
+    7. the record of the generation is written (see repo_manifest): the
+       version of the barrier, the files the run publishes (manifest.json) and
+       the files it keeps private, e.g. the wheel cache (.manifest.json)
     8. every file of the workspace the run did not touch is removed
        (RepoBase.cleanup()), after the barrier, so a client that still runs the
        previous version keeps working until its next check
@@ -176,9 +176,11 @@ class Repo:
 
         The manifest comes after the barrier: it names the version a client
         reads from latest.pack and the files of the run, which is exactly what
-        a mirror mirrors and what the cleanup below keeps. Only after it are
-        the leftover packs and wheels removed, so a client that still runs the
-        previous version keeps working until its next check.
+        a mirror mirrors and what the cleanup below keeps. The local record is
+        written first, the published contract last, so the file a mirror serves
+        is the last file of a generation to land on the disk. Only after both
+        are the leftover packs and wheels removed, so a client that still runs
+        the previous version keeps working until its next check.
 
         Raises:
             RuntimeError: If run() was not called
@@ -190,8 +192,9 @@ class Repo:
         # a client that reads the new latest.pack finds the index of it too
         self.pypi.run()
         self.latest.run()
-        # the manifest of the generation, after the barrier it names and before
-        # the cleanup it is the record of
+        # the record of the generation, after the barrier it names and before
+        # the cleanup it is the record of: the local half first, the published
+        # contract last
         self.manifest.run()
         self.base.cleanup()
         self._generated = False

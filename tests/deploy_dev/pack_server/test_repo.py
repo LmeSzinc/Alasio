@@ -24,7 +24,7 @@ from alasio.deploy_dev.pack import pack_wheel
 from alasio.deploy_dev.pack._pack_cache import PackCache
 from alasio.deploy_dev.pack_server import repo_base, repo_dep
 from alasio.deploy_dev.pack_server.fetch_wheel import WheelNotFoundError
-from alasio.deploy_dev.pack_server.manifest import Manifest
+from alasio.deploy_dev.pack_server.manifest import LocalManifest, Manifest, is_private_path
 from alasio.deploy_dev.pack_server.model import LookbackConfig, PackRepoModel, RepoConfig
 from alasio.deploy_dev.pack_server.repo import Repo
 from alasio.deploy_dev.pack_server.repo_base import DEFAULT_INDEX
@@ -1069,29 +1069,44 @@ class TestWheelCache:
 
 
 class TestManifest:
-    """The manifest of the generation: what it publishes and what it keeps."""
+    """The record of the generation: what it publishes and what it keeps."""
 
     def manifest_file(self, run_dir):
         """
-        Path of the manifest of the workspace.
+        Path of the published contract of the workspace.
 
         Returns:
             PathStr: {run}/pack/Author_Repo_master/manifest.json
         """
         return join_path(run_dir, WORKSPACE, 'manifest.json')
 
+    def local_manifest_file(self, run_dir):
+        """
+        Path of the local record of the workspace.
+
+        Returns:
+            PathStr: {run}/pack/Author_Repo_master/.manifest.json
+        """
+        return join_path(run_dir, WORKSPACE, '.manifest.json')
+
     def test_manifest_records_the_generation(self, fs, run_dir, mirror):
-        """The manifest names the barrier and both halves of the workspace."""
+        """The two files name the barrier, one list each."""
         register_wheels(mirror)
         run_commit(make_repo(), make_config(), mirror.client)
 
         manifest = Manifest.from_file(self.manifest_file(run_dir))
+        local = LocalManifest.from_file(self.local_manifest_file(run_dir))
         barrier = LatestInfo.parse(repo_file(run_dir, 'latest.pack').atomic_read_bytes())
 
         assert manifest.schema == 1
         assert manifest.channel == 'Author_Repo_master'
         assert manifest.version == barrier.version
         assert manifest.checksum == barrier.checksum
+        # the local record names the same generation, so the pair of the two
+        # files is read without discarding a field of either
+        assert local.schema == 1
+        assert (local.channel, local.version, local.checksum) == (
+            manifest.channel, manifest.version, manifest.checksum)
         # the barrier, the packs of the version and the packs of the
         # dependencies are published
         assert 'packrepo/latest.pack' in manifest.files
@@ -1101,16 +1116,21 @@ class TestManifest:
         # the wheel cache is private, one entry for every version of the
         # lookback window: the cache is not kept beyond the window
         for version in ('0.27.7', '0.27.8', '0.28.1'):
-            assert f'.wheel_cache/httpx/{version}/index.html' in manifest.private
-            assert f'.wheel_cache/httpx/{version}/httpx-{version}-py3-none-any.whl' in manifest.private
-        # the two halves do not overlap, and neither carries the manifest or a
-        # tmp file of an interrupted write
-        assert set(manifest.files).isdisjoint(manifest.private)
-        paths = manifest.files + manifest.private
-        assert 'manifest.json' not in paths
+            assert f'.wheel_cache/httpx/{version}/index.html' in local.private
+            assert f'.wheel_cache/httpx/{version}/httpx-{version}-py3-none-any.whl' in local.private
+        # the published contract carries the published half only: a mirror
+        # serves the file as it is, there is no field to filter
+        content = self.manifest_file(run_dir).atomic_read_bytes()
+        assert b'"private"' not in content
+        assert b'.wheel_cache' not in content
+        assert not [path for path in manifest.files if is_private_path(path)]
+        # neither file of the record nor a tmp file of an interrupted write is
+        # an entry of a list
+        paths = manifest.files + local.private
+        for name in ('manifest.json', '.manifest.json'):
+            assert name not in paths
         assert not [path for path in paths if path.endswith('.tmp')]
-        # every entry is a file of the workspace, and every published entry is
-        # in one of the three folders a client derives an url from
+        # every entry is a file of the workspace
         for path in paths:
             assert join_path(run_dir, WORKSPACE, *path.split('/')).isfile()
         # every published entry is in one of the three folders a client
@@ -1119,41 +1139,46 @@ class TestManifest:
             'packdep', 'packrepo', 'wheel'}
 
     def test_run_without_commit_writes_no_manifest(self, fs, run_dir, mirror):
-        """A run that was not committed publishes nothing, the manifest included."""
+        """A run that was not committed publishes nothing, the record included."""
         register_wheels(mirror)
         Repo(make_repo(), make_config(), client=mirror.client).run()
         assert not self.manifest_file(run_dir).exists()
+        assert not self.local_manifest_file(run_dir).exists()
 
     def test_manifest_is_kept_by_the_cleanup(self, fs, run_dir, mirror):
-        """The manifest is a file of the run, the cleanup of the version keeps it."""
+        """The two files are files of the run, the cleanup of the version keeps them."""
         register_wheels(mirror)
         with logger.mock_capture_writer() as capture:
             run_commit(make_repo(), make_config(), mirror.client)
         log = capture.concat()
         assert 'INFO | Manifest of "Author_Repo_master": version=' in log
+        assert 'INFO | Write local manifest: ' in log
         assert 'INFO | Write manifest: ' in log
         assert f'INFO | Cleaned up "Author_Repo_master":' in log
         assert self.manifest_file(run_dir).isfile()
+        assert self.local_manifest_file(run_dir).isfile()
 
     def test_second_run_writes_nothing(self, fs, run_dir, mirror):
-        """A run over the same repo writes the same manifest and keeps its bytes."""
+        """A run over the same repo writes neither file and keeps their bytes."""
         register_wheels(mirror)
         repo = make_repo()
         config = make_config()
         run_commit(repo, config, mirror.client)
-        file = self.manifest_file(run_dir)
-        first = file.atomic_read_bytes()
-        generated_at = Manifest.from_file(file).generated_at
+        files = [self.manifest_file(run_dir), self.local_manifest_file(run_dir)]
+        first = [file.atomic_read_bytes() for file in files]
+        generated_at = Manifest.from_file(files[0]).generated_at
 
         with logger.mock_capture_writer() as capture:
             run_commit(repo, config, mirror.client)
 
-        assert 'INFO | Manifest exists, skipped' in capture.concat()
-        assert file.atomic_read_bytes() == first
-        assert Manifest.from_file(file).generated_at == generated_at
+        log = capture.concat()
+        assert 'INFO | Local manifest exists, skipped' in log
+        assert 'INFO | Manifest exists, skipped' in log
+        assert [file.atomic_read_bytes() for file in files] == first
+        assert Manifest.from_file(files[0]).generated_at == generated_at
 
     def test_stale_cache_entry_is_removed_and_not_listed(self, fs, run_dir, mirror):
-        """A cache entry outside the window leaves the disk and the manifest."""
+        """A cache entry outside the window leaves the disk and the local record."""
         register_wheels(mirror)
         stale = join_path(
             run_dir, WORKSPACE, '.wheel_cache', 'httpx', '0.26.0', 'index.html')
@@ -1161,8 +1186,8 @@ class TestManifest:
 
         run_commit(make_repo(), make_config(), mirror.client)
 
-        manifest = Manifest.from_file(self.manifest_file(run_dir))
+        local = LocalManifest.from_file(self.local_manifest_file(run_dir))
         assert not stale.exists()
-        assert not [path for path in manifest.private if '/0.26.0/' in path]
+        assert not [path for path in local.private if '/0.26.0/' in path]
         # the cache of the version of the window stays
         assert cache_file(run_dir, '0.28.1').isfile()
