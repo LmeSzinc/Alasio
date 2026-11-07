@@ -2,6 +2,7 @@ import os
 import sys
 
 from alasio.ext.path import PathStr
+from alasio.ext.path.calc import abspath
 
 # Operating System
 POSIX = os.name == "posix"
@@ -29,11 +30,17 @@ CI = os.environ.get('CI', '') not in ('', '0')
 
 def set_project_root(root, up=0):
     """
+    Set the project root, a relative root is resolved against the current
+    working directory
+
     Args:
-        root (str):
-        up (int):
+        root (str): Project root path, absolute or relative. A relative path
+            is what __file__ holds when the interpreter is started with a
+            relative script path, e.g. `python module/main.py`.
+        up (int): Directory upward levels to apply after the root is
+            resolved. Defaults to 0.
     """
-    root = PathStr.new(root)
+    root = PathStr.new(abspath(root))
     if up:
         root = root.uppath(up)
     global PROJECT_ROOT
