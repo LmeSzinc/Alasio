@@ -5,6 +5,7 @@ import * as ConfigScan from "./ConfigScan";
 import * as Dashboard from "./Dashboard";
 import * as DevTool from "./DevTool";
 import * as Device from "./Device";
+import * as GoldenTest from "./GoldenTest";
 import * as Input from "./Input";
 import * as Language from "./Language";
 import * as Mod from "./Mod";
@@ -21,6 +22,7 @@ export const t = {
   Dashboard,
   DevTool,
   Device,
+  GoldenTest,
   Input,
   Language,
   Mod,

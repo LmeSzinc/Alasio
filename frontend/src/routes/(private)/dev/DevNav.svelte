@@ -24,6 +24,7 @@
   ]);
   const devNavItems = $derived([
     { path: "/dev/assets", name: t.AssetManager.AssetManager() },
+    { path: "/dev/golden-test", name: t.GoldenTest.Title() },
     { path: "/dev/compat", name: "Browser Compatibility" },
   ]);
   const debugNavItems = $derived(

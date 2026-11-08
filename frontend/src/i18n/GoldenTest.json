@@ -1,0 +1,100 @@
+{
+  "Title": {
+    "en-US": "Golden Test Review",
+    "zh-CN": "黄金测试审阅",
+    "ja-JP": "ゴールデンテストレビュー",
+    "zh-TW": "黃金測試審閱",
+    "es-ES": "Revisión de Pruebas Golden"
+  },
+  "ShowImages": {
+    "en-US": "Show images",
+    "zh-CN": "显示图片",
+    "ja-JP": "画像を表示",
+    "zh-TW": "顯示圖片",
+    "es-ES": "Mostrar imágenes"
+  },
+  "Refresh": {
+    "en-US": "Refresh",
+    "zh-CN": "刷新",
+    "ja-JP": "更新",
+    "zh-TW": "重新整理",
+    "es-ES": "Actualizar"
+  },
+  "DesktopOnly": {
+    "en-US": "Only available in the desktop app",
+    "zh-CN": "仅在桌面客户端可用",
+    "ja-JP": "デスクトップアプリでのみ利用できます",
+    "zh-TW": "僅在桌面用戶端可用",
+    "es-ES": "Solo disponible en la aplicación de escritorio"
+  },
+  "NoMod": {
+    "en-US": "No mod selected",
+    "zh-CN": "未选择模组",
+    "ja-JP": "Mod が選択されていません",
+    "zh-TW": "未選擇模組",
+    "es-ES": "Ningún mod seleccionado"
+  },
+  "SyntaxError": {
+    "en-US": "The file could not be read",
+    "zh-CN": "无法读取该文件",
+    "ja-JP": "ファイルを読み取れません",
+    "zh-TW": "無法讀取該檔案",
+    "es-ES": "No se pudo leer el archivo"
+  },
+  "NoSource": {
+    "en-US": "This file has no content",
+    "zh-CN": "该文件没有内容",
+    "ja-JP": "このファイルには内容がありません",
+    "zh-TW": "該檔案沒有內容",
+    "es-ES": "Este archivo no tiene contenido"
+  },
+  "NoFile": {
+    "en-US": "Select a test file",
+    "zh-CN": "选择测试文件",
+    "ja-JP": "テストファイルを選択してください",
+    "zh-TW": "選擇測試檔案",
+    "es-ES": "Selecciona un archivo de prueba"
+  },
+  "NoImage": {
+    "en-US": "No screenshot bound",
+    "zh-CN": "未绑定截图",
+    "ja-JP": "スクリーンショットがありません",
+    "zh-TW": "未綁定截圖",
+    "es-ES": "Sin captura asociada"
+  },
+  "MissingImage": {
+    "en-US": "Screenshot not found",
+    "zh-CN": "找不到截图",
+    "ja-JP": "スクリーンショットが見つかりません",
+    "zh-TW": "找不到截圖",
+    "es-ES": "Captura no encontrada"
+  },
+  "Fit": {
+    "en-US": "Fit",
+    "zh-CN": "适应窗口",
+    "ja-JP": "全体表示",
+    "zh-TW": "適應視窗",
+    "es-ES": "Ajustar"
+  },
+  "ActualSize": {
+    "en-US": "1:1",
+    "zh-CN": "原始大小",
+    "ja-JP": "等倍",
+    "zh-TW": "原始大小",
+    "es-ES": "Tamaño real"
+  },
+  "Close": {
+    "en-US": "Close",
+    "zh-CN": "Close",
+    "ja-JP": "Close",
+    "zh-TW": "Close",
+    "es-ES": "Close"
+  },
+  "FilterTests": {
+    "en-US": "Filter tests",
+    "zh-CN": "过滤测试",
+    "ja-JP": "テストを絞り込む",
+    "zh-TW": "過濾測試",
+    "es-ES": "Filtrar pruebas"
+  }
+}
