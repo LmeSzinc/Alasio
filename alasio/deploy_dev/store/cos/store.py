@@ -38,7 +38,8 @@ from yarl import URL
 
 from alasio.deploy.httpclient.client_async import AsyncHttpClient
 from alasio.deploy_dev.store import (
-    Capabilities, ObjectInfo, ObjectListing, ObjectNotFound, ObjectStore, StoreError, read_chunks
+    Capabilities, ObjectInfo, ObjectListing, ObjectNotFound, ObjectStore, StoreError, close_local, open_local,
+    read_chunks
 )
 from alasio.deploy_dev.store.cos.sign import CosSigner
 from alasio.logger import logger
@@ -318,9 +319,7 @@ class CosStore(ObjectStore):
     CAPABILITIES = Capabilities(
         etag_md5=True,
         content_md5=True,
-        atomic_put=True,
         dirs=False,
-        cleanable=True,
     )
 
     MAX_PUT_SIZE = MAX_PUT_SIZE
@@ -504,14 +503,18 @@ class CosStore(ObjectStore):
             # signature that has aged out
             url, signed = self._prepare('PUT', relative, None, headers)
             try:
-                with open(file, 'rb') as f:
+                # the open, the stat and the reads run in worker threads: the
+                # event loop must not wait for the disk while other transfers
+                # of the run are in flight
+                f = await open_local(file)
+                try:
                     # the size of the open file, not a stat of the path: one
                     # lookup instead of two, and the value cannot change
                     # between the check and the read (a file replaced in that
                     # window would be declared with one length and read with
                     # another, which the http stack reports as a broken
                     # transfer and the loop retries eight times)
-                    actual = os.fstat(f.fileno()).st_size
+                    actual = await trio.to_thread.run_sync(lambda: os.fstat(f.fileno()).st_size)
                     if actual != size:
                         raise ValueError(
                             f'Size of "{relative}" is declared {size} bytes, '
@@ -519,6 +522,8 @@ class CosStore(ObjectStore):
                     response = await self._client.request(
                         'PUT', url, headers=signed, content=read_chunks(f),
                         timeout=timeout, attempts=1)
+                finally:
+                    await close_local(f)
                 return await self._put_result(response, relative, size)
             except httpx2.HTTPStatusError as e:
                 raise self._cos_error(relative, e.response) from None

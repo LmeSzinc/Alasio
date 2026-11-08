@@ -492,6 +492,54 @@ class TestCosCapabilitiesReal:
         assert 0 <= listing.server_date - info.last_modified <= 300
 
     @pytest.mark.trio
+    async def test_one_listing_returns_the_whole_workspace(self, probe, make_file):
+        """One ListObjectsV2 of the workspace prefix returns every depth at once.
+
+        The uploader's cost baseline is a single LIST: `manifest.json` sits at the
+        root of the workspace while `packrepo/` and `wheel/` live below it, and
+        the same answer has to carry all of them. A listing that stopped at the
+        first level would return neither the deep keys nor, with a delimiter, the
+        root file.
+        """
+        keys = [
+            'manifest.json',
+            'packrepo/latest.pack',
+            'packrepo/aaaaaaaa/full.pack',
+            'wheel/msgspec/0.22.0/msgspec-0.22.0-py3-none-any.whl',
+        ]
+        for relative in keys:
+            await put(probe, make_file, relative, relative.encode())
+        # the default page of the store, not the one of the pagination test: the
+        # baseline is "one request", which only holds while a generation of a
+        # channel is smaller than a page
+        assert probe.PAGE_SIZE == 1000
+        listing = await probe.list()
+        assert sorted(listing.objects) == sorted(keys)
+        for relative in keys:
+            assert listing.objects[relative].size == len(relative.encode())
+
+    @pytest.mark.trio
+    async def test_the_listing_is_recursive_because_no_delimiter_is_sent(
+            self, probe, make_file):
+        """The contrast that makes the test above meaningful.
+
+        The same prefix asked with `delimiter=/` collapses the deep keys into
+        CommonPrefixes and answers only the root file. The store sends no
+        delimiter, which is exactly what makes its listing recursive; this test
+        pins the difference against the service instead of assuming it.
+        """
+        for relative in ('manifest.json', 'packrepo/aaaaaaaa/full.pack'):
+            await put(probe, make_file, relative, relative.encode())
+        response = await probe._call(
+            'GET', None,
+            params={'list-type': '2', 'prefix': probe.prefix, 'delimiter': '/'},
+        )
+        text = response.content.decode('utf-8')
+        assert '<Key>' in text and 'manifest.json' in text
+        assert 'full.pack' not in text
+        assert '<CommonPrefixes>' in text
+
+    @pytest.mark.trio
     async def test_object_headers_reach_the_bucket(self, probe, make_file):
         """Content-Type and Cache-Control are stored on the object.
 

@@ -9,14 +9,16 @@ the core flow are values of ObjectInfo / Capabilities, not branches of the core
 flow:
 
 - whether the ETag of an object is the MD5 of its content (etag_md5), which
-  decides whether a change is detected from the listing alone or needs the
-  local state record;
+  decides whether a change is detected from the listing alone or falls back to
+  the size;
 - whether a PUT is checked against Content-MD5 by the server (content_md5),
   which decides whether an upload is verified without reading the object back;
-- whether a reader can see half an object (atomic_put);
 - whether the store has collections that are removed when they are empty
-  (dirs);
-- whether the store can be a cleanup target at all (cleanable).
+  (dirs).
+
+A capability is a fact the core flow reads. A fact nobody reads does not belong
+here: it would be a second description that drifts from the code (a store that
+cannot serve a workspace is refused by the driver that builds it, not by a flag).
 
 A store instance is bound to a prefix, the keys it sees are relative to it. The
 core flow therefore never builds a key of a physical layout (a bucket prefix, a
@@ -102,9 +104,11 @@ class Capabilities(msgspec.Struct):
     """
     What a store can promise to the core flow.
 
-    The values are constants of a driver, not of an instance: they describe the
-    storage, not the configured bucket. The core flow reads them instead of
-    asking which driver it is talking to.
+    A field here is read by the flow, not merely declared: the value changes a
+    decision, and every one of them is pinned by a test against the real service
+    (tests/deploy_dev/store/cos/test_real.py). A fact the flow never reads does
+    not belong here - a store that cannot serve a workspace is refused by the
+    driver that builds it, not by a flag nobody checks.
 
     Attributes:
         etag_md5 (bool): The ETag of an object written by a single PUT is the
@@ -113,19 +117,13 @@ class Capabilities(msgspec.Struct):
         content_md5 (bool): The server compares Content-MD5 with the bytes it
             receives and refuses a mismatch, so a written object is known to be
             the bytes of the request
-        atomic_put (bool): A reader sees the old object or the new one, never a
-            half written object
         dirs (bool): The store has collections that outlive their objects, and
             remove_dirs() removes the empty ones
-        cleanable (bool): The store can list and delete, so it can be a cleanup
-            target
     """
 
     etag_md5: bool = False
     content_md5: bool = False
-    atomic_put: bool = False
     dirs: bool = False
-    cleanable: bool = False
 
 
 class ObjectStore:
@@ -299,3 +297,94 @@ async def read_chunks(file, chunk_size=1 << 20):
         if not chunk:
             return
         yield chunk
+
+
+async def open_local(path, mode='rb'):
+    """
+    Open a local file without blocking the loop.
+
+    `open()` is IO as well: it resolves the path and reads the inode of the
+    file, which on a network share or a slow disk can take milliseconds. An
+    async function that calls it inline stalls every other transfer of the run,
+    so the call goes to a worker thread like the reads of read_chunks().
+
+    Args:
+        path (str): Path of the file
+        mode (str): Mode of the open, 'rb' by default. Defaults to 'rb'
+
+    Returns:
+        IO: The open file, closed by close_local()
+
+    Raises:
+        OSError: If the file cannot be opened
+    """
+    import trio
+
+    return await trio.to_thread.run_sync(open, path, mode)
+
+
+async def close_local(file):
+    """
+    Close a file opened by open_local(), without blocking the loop.
+
+    Args:
+        file (IO): The open file
+    """
+    import trio
+
+    await trio.to_thread.run_sync(file.close)
+
+
+async def stat_local(path):
+    """
+    The os.stat of a local path, taken in a worker thread.
+
+    Args:
+        path (str): Path to look at
+
+    Returns:
+        os.stat_result: The stat of the path
+
+    Raises:
+        OSError: If the path cannot be stat'ed
+    """
+    import os
+
+    import trio
+
+    return await trio.to_thread.run_sync(os.stat, path)
+
+
+async def md5_local(path, chunk_size=1 << 20):
+    """
+    The size and the MD5 of a local file, computed in a worker thread.
+
+    The digest is taken by a single worker call rather than one call per chunk:
+    hashing costs CPU, and doing it on the event loop would stall the other
+    transfers of the run for as long as the disk can read. The file is never
+    held in memory.
+
+    Args:
+        path (str): Path of the file
+        chunk_size (int): Bytes per read inside the worker. Defaults to 1 << 20
+
+    Returns:
+        tuple[int, str]: (size in bytes, lowercase hex MD5)
+
+    Raises:
+        OSError: If the file cannot be read
+    """
+    import hashlib
+
+    import trio
+
+    def digest():
+        hasher = hashlib.md5()
+        size = 0
+        with open(path, 'rb') as f:
+            for chunk in iter(lambda: f.read(chunk_size), b''):
+                hasher.update(chunk)
+                size += len(chunk)
+        return size, hasher.hexdigest()
+
+    return await trio.to_thread.run_sync(digest)
