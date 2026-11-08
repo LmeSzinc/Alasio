@@ -339,9 +339,9 @@ class GoldenTestWatchSource(NoCachePush):
     (`_sync_paths`) and releases them when the last subscriber leaves
     (`_remove`), so a closed page stops the scanning.
 
-    The view state stays on the source: removing it from the registry would drop
-    the browsed mod and the expanded folders, and a reconnect would have to
-    select them again.
+    The view state belongs to the subscriber as well: the last unsubscribe
+    resets it (`reset_view`), so a page that comes back starts from the empty
+    view and subscribes only what it opens.
     """
 
     # The watcher of the review page, shared by both sources
@@ -379,14 +379,24 @@ class GoldenTestWatchSource(NoCachePush):
 
     def _remove(self):
         """
-        [Trio] The last subscriber left: release the paths, keep the view
+        [Trio] The last subscriber left: release the paths and reset the view
 
-        The scanning stops here; the state stays so the next subscriber -- a
-        reconnect -- subscribes the view that was open.
+        The page that left owned the view: the mod it browsed, the folders it
+        expanded and the file it selected. Keeping them would leave the backend
+        watching folders nobody has open (the page that comes back starts from
+        its own empty tree) and would show a file the next visitor never asked
+        for, so the state goes with the subscriber.
         """
         for path in self._paths:
             self.WATCHER.unsubscribe(path)
         self._paths = frozenset()
+        self.reset_view()
+
+    def reset_view(self):
+        """
+        [Trio] Drop the view, the next subscription starts from the empty one
+        """
+        raise NotImplementedError
 
     @classmethod
     async def scan(cls):
@@ -527,6 +537,16 @@ class GoldenTestTreeSource(GoldenTestWatchSource, GlobalSource):
             for rel in self.dirs
         }
         return list(self._abs_dirs)
+
+    def reset_view(self):
+        """
+        Drop the browsed mod and every folder expanded under it
+        """
+        self.mod_name = ''
+        self.dirs = {}
+        self._abs_dirs = {}
+        # The root belongs to the mod that was just dropped
+        InstanceCacheOperation.pop(self, 'tests_root')
 
     async def _build_full(self):
         """
@@ -767,6 +787,14 @@ class GoldenTestFileSource(GoldenTestWatchSource, GlobalSource):
 
     def watch_paths(self):
         return [self.abs_file] if self.abs_file else []
+
+    def reset_view(self):
+        """
+        Drop the selected file
+        """
+        self.mod_name = ''
+        self.file = ''
+        self.abs_file = ''
 
     async def _build_full(self):
         """

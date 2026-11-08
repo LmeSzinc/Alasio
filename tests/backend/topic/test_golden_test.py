@@ -434,12 +434,15 @@ class TestSharedWatcher:
 
         source.unsubscribe(sub)
 
-        # nothing is scanned any more, and the view is kept for the next
-        # subscriber
+        # nothing is scanned any more, and the view of the page that left is
+        # dropped with it
         assert source._paths == frozenset()
         assert watched() == set()
         assert GoldenTestTreeSource() is source
-        assert source.mod_name == MOD_NAME
+        assert source.mod_name == ''
+        assert source.dirs == {}
+        assert source._abs_dirs == {}
+        assert source.watch_paths() == []
 
     @pytest.mark.trio
     async def test_a_closed_page_stops_the_scanning(self, fs, tests_root):
@@ -462,6 +465,9 @@ class TestSharedWatcher:
         assert GoldenTestTreeSource()._paths == frozenset()
         assert GoldenTestFileSource()._paths == frozenset()
         assert watched() == set()
+        # the views went with the page: a page that comes back starts empty
+        assert GoldenTestTreeSource().mod_name == ''
+        assert GoldenTestFileSource().file == ''
 
     @pytest.mark.trio
     async def test_a_poll_without_a_subscriber_does_not_scan(self, fs, tests_root, monkeypatch):
@@ -479,8 +485,8 @@ class TestSharedWatcher:
         await golden_test_module.poll_once()
 
     @pytest.mark.trio
-    async def test_a_reconnect_resumes_the_view(self, fs, tests_root):
-        """The state is kept: the next subscriber gets the open view back"""
+    async def test_a_new_page_starts_from_the_empty_view(self, fs, tests_root):
+        """The page that left owned its view: the next subscriber gets none"""
         fs.create_file(tests_root.joinpath('map/test_a.py'))
         source, sub = await subscribe_tree()
         await source.set_mod(MOD_NAME)
@@ -489,10 +495,11 @@ class TestSharedWatcher:
 
         again, again_sub = await subscribe_tree()
 
+        # the one source of the process is reused, with a fresh view
         assert again is source
-        assert again_sub.full.v['mod_name'] == MOD_NAME
-        # the paths are taken again by the full build of the new subscription
-        assert str(tests_root) in watched()
+        assert again_sub.full.o == 'full'
+        assert again_sub.full.v == {}
+        assert watched() == set()
 
     @pytest.mark.trio
     async def test_an_empty_view_takes_no_path(self):
@@ -688,6 +695,23 @@ class TestTreeSource:
         assert source.tests_root == str(other_root.joinpath('tests'))
         assert entry_shape(source.dirs['']) == [('deep', True)]
         assert watched() == {str(other_root.joinpath('tests'))}
+
+    @pytest.mark.trio
+    async def test_browsing_a_mod_opens_no_file(self, fs, tests_root):
+        """A mod is browsed, no file is read: the page picks one"""
+        fs.create_file(tests_root.joinpath('map/test_a.py'), contents=TEST_SOURCE)
+        source, sub = await subscribe_tree()
+        selected, selected_sub = await subscribe_file()
+
+        await source.set_mod(MOD_NAME)
+        await settle()
+
+        # the root level is loaded, nothing below it and no file
+        assert entry_shape(source.dirs['']) == [('map', True)]
+        assert selected.file == ''
+        assert selected.abs_file == ''
+        assert selected_sub.full.v == {}
+        assert watched() == {str(tests_root)}
 
     @pytest.mark.trio
     async def test_set_mod_clears_the_selected_file(self, fs, tests_root):
