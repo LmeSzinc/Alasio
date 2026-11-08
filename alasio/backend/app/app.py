@@ -14,6 +14,7 @@ from alasio.backend.dev.assets import ImageStaticFiles
 from alasio.backend.middleware.gate import DeploymentGateMiddleware
 from alasio.backend.reactive.source import BaseSource
 from alasio.backend.topic._worker import BACKEND_WORKER_MANAGER
+from alasio.backend.topic.golden_test import watch_loop as golden_test_watch_loop
 from alasio.backend.topic.que import TASK_QUEUE_UPDATE_MANAGER
 from alasio.backend.topic.scan import ConfigScanSource
 from alasio.backend.ws import renew as ws_renew
@@ -205,6 +206,9 @@ async def lifespan(app):
         # becomes pending at its NextRun with no worker event involved
         # (alasio.backend.topic.que.TaskQueueUpdateManager)
         nursery.start_soon(TASK_QUEUE_UPDATE_MANAGER.run)
+        # the golden test review page: its two sources share one PathWatcher,
+        # this loop turns outside writes into pushes of their topics
+        nursery.start_soon(golden_test_watch_loop)
         # warmups
         nursery.start_soon(ConfigScanSource.create_default_config)
         # the frontend: one worker thread reads the manifest and every file in
