@@ -1,4 +1,4 @@
-from typing import List, Literal
+from typing import Dict, List, Literal, Union
 
 from msgspec import Meta, Struct, field
 from typing_extensions import Annotated
@@ -6,7 +6,7 @@ from typing_extensions import Annotated
 from alasio.deploy_dev.pack_server.gate import check_run_dir
 from alasio.ext import env
 from alasio.ext.file.yamlconfig import YamlConfig
-from alasio.ext.path.validate import validate_resolve_filepath
+from alasio.ext.path.validate import validate_filename, validate_resolve_filepath
 from alasio.logger import logger
 
 
@@ -89,6 +89,76 @@ class EnvConfig(Struct):
     ]})] = ""
 
 
+class RemoteBase(Struct, forbid_unknown_fields=True):
+    """
+    The publish settings every remote has, whatever its driver
+    """
+    Concurrency: Annotated[int, Meta(extra={"help": [
+        "Concurrent transfers in flight to this remote, 1 to 8",
+        "Past 8 the queue only moves into the connection pool, the uplink is the limit",
+    ]})] = 4
+    GraceSeconds: Annotated[int, Meta(extra={"help": [
+        "Retire grace of this remote in seconds",
+        "The cleaner deletes a retired key only after the barrier of THIS remote",
+        "has been in place for this long, and only if the key is older as well",
+        "Must cover the CDN TTL plus one full client update",
+    ]})] = 3600
+    EnvPrefix: Annotated[str, Meta(extra={"help": [
+        "Environment variable prefix of the credentials of this remote",
+        "'' for the default prefix of the driver: ALASIO_COS for 'cos'",
+        "'ALASIO_COS_BACKUP' -> ALASIO_COS_BACKUP_SECRET_ID / _SECRET_KEY",
+    ]})] = ""
+    TimeoutSeconds: Annotated[int, Meta(extra={"help": [
+        "Read/write timeout of one request",
+        "A 100 MB pack on a 10 Mbit/s uplink takes about 80 s",
+    ]})] = 120
+
+
+class CosRemote(RemoteBase, tag='cos', tag_field='Driver'):
+    """
+    A Tencent COS bucket; the Driver key of the file reads 'cos'
+    """
+    Bucket: Annotated[str, Meta(extra={"help": [
+        "COS bucket name with the APPID suffix, e.g. 'alasio-1250000000'",
+    ]})] = ""
+    Region: Annotated[str, Meta(extra={"help": [
+        "COS region, e.g. 'ap-guangzhou'",
+    ]})] = ""
+    Endpoint: Annotated[str, Meta(extra={"help": [
+        "Custom origin endpoint, '' for https://{Bucket}.cos.{Region}.myqcloud.com",
+        "A host only, never a CDN domain: the cleaner must read the origin",
+    ]})] = ""
+    Prefix: Annotated[str, Meta(extra={"help": [
+        "Key prefix inside the bucket, '' for no prefix",
+        "The object key is {Prefix}/{workspace}/{relative path}",
+    ]})] = ""
+
+
+class WebDavRemote(RemoteBase, tag='webdav', tag_field='Driver'):
+    """
+    A WebDAV collection; the Driver key of the file reads 'webdav'
+
+    The driver is not implemented yet: the entry is accepted by the model so a
+    config that mentions one is not rewritten with the entry dropped, and the
+    store factory refuses it with a message that says so.
+    """
+    BaseUrl: Annotated[str, Meta(extra={"help": [
+        "URL of the collection that holds the workspaces, no trailing slash",
+        "The object URL is {BaseUrl}/{workspace}/{relative path}",
+        "The origin, never a CDN domain: the cleaner must read the origin",
+        "Example: 'https://nas.example:5006/dav/pack'",
+    ]})] = ""
+    VerifyTls: Annotated[bool, Meta(extra={"help": [
+        "Verify the TLS certificate of the server",
+        "false only for a self-signed host in a network you trust",
+    ]})] = True
+
+
+# the discriminant is the Driver key: msgspec picks the variant from it and
+# writes it back, so the file keeps saying which driver a remote is
+RemoteConfig = Union[CosRemote, WebDavRemote]
+
+
 class PackRepoModel(Struct):
     """
     1. Workspace is always `pack/{Author}_{Repo}_{Branch}`
@@ -126,6 +196,42 @@ class PackRepoModel(Struct):
     Repo: RepoConfig = field(default_factory=RepoConfig)
     Lookback: LookbackConfig = field(default_factory=LookbackConfig)
     Env: EnvConfig = field(default_factory=EnvConfig)
+    Publish: Annotated[Dict[str, RemoteConfig], Meta(extra={"help": [
+        "Static hosts to publish this repo to, keyed by a name of your choice",
+        "Each key creates one independent mirror with its own settings",
+        "An empty map publishes nowhere, the run of the repo only generates packs",
+        "Driver picks the fields the remote has: 'cos' or 'webdav'",
+        "Credentials are read from the environment, never written here",
+        "Example:",
+        "  Publish:",
+        "    cos-main:",
+        "      Driver: 'cos'",
+        "      Bucket: 'alasio-1250000000'",
+        "      Region: 'ap-guangzhou'",
+        "      Prefix: 'pack'",
+        "      EnvPrefix: 'ALASIO_COS'",
+    ]})] = field(default_factory=dict)
+
+    @property
+    def workspace_name(self):
+        """
+        Name of the workspace of this repo: {Author}_{Repo}_{Branch}
+
+        Every step of the flow writes under ``pack/{workspace_name}``, and the
+        publication mirrors that folder, so the name must be a single path
+        component: a Branch like 'feature/x' would nest the folder of this repo
+        inside the folder of another config, and the cleanup of the stale
+        folders of that config could remove the packs of this one.
+
+        Returns:
+            str: E.g. 'LmeSzinc_AzurLaneAutoScript_master'
+
+        Raises:
+            ValueError: If the name is not a single safe path component
+        """
+        name = f'{self.Repo.Author}_{self.Repo.Repo}_{self.Repo.Branch}'
+        validate_filename(name)
+        return name
 
 
 class PackRepoConfig(YamlConfig):
@@ -150,7 +256,9 @@ class PackRepoConfig(YamlConfig):
     them again. A config with an empty one raises ValueError, the created or
     repaired file stays on the disk for the operator to fill. The proxy of the
     Env group is checked the same way: a value the http client cannot use would
-    fail every download of the run, long after the clone.
+    fail every download of the run, long after the clone. The values of the
+    Publish group that cannot be worked around, a negative grace or a timeout
+    of zero, are refused as well.
 
     Args:
         file (str): Name of the yaml file in the config folder, e.g.
@@ -160,6 +268,7 @@ class PackRepoConfig(YamlConfig):
         config = PackRepoConfig('LmeSzinc_AzurLaneAutoScript_master.yaml')
         config.data.Repo.Remote
         config.data.Lookback.MaxCommitDay
+        config.data.Publish['cos-main']
     """
 
     # folder of the config files, relative to the run directory
@@ -175,6 +284,28 @@ class PackRepoConfig(YamlConfig):
         super().__init__(file, model=PackRepoModel)
         self._check_repo()
         self._check_env()
+        self._check_publish()
+
+    @classmethod
+    def iter_files(cls):
+        """
+        Iter the config files of the run directory
+
+        The config files are the *.yaml files of the config folder, sorted by
+        name so a run follows the same order every time. The template is
+        skipped, it is the file the operator copies and fills, and a file that
+        is not a *.yaml file is not a config either, e.g. the tmp file of an
+        interrupted write (file.yaml.xxxxxxxx.tmp). A folder that does not
+        exist has no config.
+
+        Yields:
+            str: File name of a config in the config folder, e.g.
+                'LmeSzinc_AzurLaneAutoScript_master.yaml'
+        """
+        folder = env.PROJECT_ROOT.joinpath(cls.CONFIG_FOLDER)
+        for name in sorted(folder.iter_filenames(ext='.yaml')):
+            if name != cls.TEMPLATE_FILE:
+                yield name
 
     @classmethod
     def write_template(cls):
@@ -195,6 +326,23 @@ class PackRepoConfig(YamlConfig):
         file = env.PROJECT_ROOT.joinpath(cls.CONFIG_FOLDER).joinpath(cls.TEMPLATE_FILE)
         return YamlConfig(file, model=PackRepoModel).write(template=True)
 
+    def _invalid_values(self):
+        """
+        The values of the file the reader refused, for the message of a check
+
+        YamlConfig falls back to the default of a value that fails the
+        validation, and a value of a struct resets the whole model: the empty
+        field checks below would then report a missing Author while the real
+        cause is a typo of the file. The causes are appended to that message.
+
+        Returns:
+            str: ', the file holds invalid values: ...', '' when the file has none
+        """
+        reasons = [str(error) for error in self.errors if not isinstance(error, FileNotFoundError)]
+        if not reasons:
+            return ''
+        return ', the file holds invalid values: ' + '; '.join(reasons)
+
     def _check_repo(self):
         """
         Check the fields of the repo that every user of the config needs
@@ -210,14 +358,20 @@ class PackRepoConfig(YamlConfig):
         repo = self.data.Repo
         if not repo.Author:
             raise ValueError(
-                f'Empty Author in the pack config, cannot name the folder of the repo, file="{self.file}"')
+                f'Empty Author in the pack config, cannot name the folder of the repo, '
+                f'file="{self.file}"{self._invalid_values()}')
         if not repo.Repo:
             raise ValueError(
-                f'Empty Repo name in the pack config, cannot name the folder of the repo, file="{self.file}"')
+                f'Empty Repo name in the pack config, cannot name the folder of the repo, '
+                f'file="{self.file}"{self._invalid_values()}')
         if not repo.Remote:
-            raise ValueError(f'Empty Remote in the pack config, cannot clone the repo, file="{self.file}"')
+            raise ValueError(
+                f'Empty Remote in the pack config, cannot clone the repo, '
+                f'file="{self.file}"{self._invalid_values()}')
         if not repo.Branch:
-            raise ValueError(f'Empty Branch in the pack config, cannot know what to fetch, file="{self.file}"')
+            raise ValueError(
+                f'Empty Branch in the pack config, cannot know what to fetch, '
+                f'file="{self.file}"{self._invalid_values()}')
 
     def _check_env(self):
         """
@@ -248,6 +402,30 @@ class PackRepoConfig(YamlConfig):
             raise ValueError(
                 f'Invalid Env.Proxy of the pack config, the host is empty: {proxy!r}, '
                 f'file="{self.file}"')
+
+    def _check_publish(self):
+        """
+        Check the Publish group: the remotes must be usable
+
+        A negative grace would retire a generation before the clients saw it,
+        and a timeout of zero fails every request of a remote, so both are
+        refused here instead of failing the upload of the repo later. The
+        fields a driver needs (Bucket, Region, BaseUrl) are checked by the
+        driver itself, before the first request: the model does not know which
+        driver serves which variant. Concurrency is not checked here: the
+        flows clamp it to 1..8, a value outside is a preference, not an error.
+
+        Raises:
+            ValueError: If GraceSeconds is negative, or TimeoutSeconds is not
+                positive
+        """
+        for name, remote in self.data.Publish.items():
+            if remote.GraceSeconds < 0:
+                raise ValueError(
+                    f'Publish.{name}.GraceSeconds must be >= 0, file="{self.file}"')
+            if remote.TimeoutSeconds <= 0:
+                raise ValueError(
+                    f'Publish.{name}.TimeoutSeconds must be > 0, file="{self.file}"')
 
     def _log_errors(self, errors):
         """

@@ -73,7 +73,7 @@ from alasio.ext import env
 from alasio.ext.cache import cached_property
 from alasio.ext.path.atomic import file_remove, folder_rmtree_empty
 from alasio.ext.path.calc import subpath_to, to_posix
-from alasio.ext.path.validate import validate_filename, validate_filepath
+from alasio.ext.path.validate import validate_filepath
 from alasio.logger import logger
 
 # folder of the repos in the run directory, see PackRepoModel
@@ -215,17 +215,13 @@ class RepoBase:
         Folder of the repo in the pack folder: pack/{Author}_{Repo}_{Branch}
 
         Every step of the flow writes under this folder, and the publication
-        mirrors it to the server, so the name must be a single path component:
-        a Branch like 'feature/x' would nest the folder of this repo inside the
-        folder of another config, and the cleanup of the stale folders of that
-        config could remove the packs of this one. See validate_filename.
+        mirrors it to the server, so the name is a single path component, see
+        PackRepoModel.workspace_name.
 
         Returns:
             PathStr: Absolute path of the folder
         """
-        name = f'{self.config.Repo.Author}_{self.config.Repo.Repo}_{self.config.Repo.Branch}'
-        validate_filename(name)
-        return env.PROJECT_ROOT.joinpath(PACK_FOLDER).joinpath(name)
+        return env.PROJECT_ROOT.joinpath(PACK_FOLDER).joinpath(self.config.workspace_name)
 
     @cached_property
     def packrepo_folder(self):

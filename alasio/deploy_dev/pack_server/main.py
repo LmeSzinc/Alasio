@@ -73,27 +73,13 @@ class PackServer:
 
     def iter_config(self):
         """
-        Iter the config files of the run directory.
-
-        The config files are the *.yaml files of the config folder of the run
-        directory, sorted by name so a run follows the same order every time.
-        The template of a config file is skipped, it is the file the operator
-        copies and fills, see PackRepoConfig.write_template. A folder that
-        does not exist has no config, see run(). A file that is not a *.yaml
-        file is not a config either, e.g. the tmp file of an interrupted
-        write (file.yaml.xxxxxxxx.tmp), an incomplete config is never run.
+        Iter the config files of the run directory, see PackRepoConfig.iter_files
 
         Yields:
             str: File name of a config in the config folder, e.g.
                 'LmeSzinc_AzurLaneAutoScript_master.yaml'
         """
-        folder = env.PROJECT_ROOT.joinpath(PackRepoConfig.CONFIG_FOLDER)
-        for name in sorted(folder.iter_filenames(ext='.yaml')):
-            if name == PackRepoConfig.TEMPLATE_FILE:
-                # the template is not a config: the operator copies it to a
-                # config file and fills the values
-                continue
-            yield name
+        yield from PackRepoConfig.iter_files()
 
     def run_config(self, file):
         """
