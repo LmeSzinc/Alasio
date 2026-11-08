@@ -42,30 +42,14 @@ from alasio.backend.reactive.event import ResponseEvent, RpcValueError
 from alasio.backend.reactive.source import GlobalSource, NoCachePush
 from alasio.backend.ws.ws_topic import BaseTopic
 from alasio.config.entry.loader import MOD_LOADER
+from alasio.ext.cache import InstanceCacheOperation, cached_property
 from alasio.ext.file.watcher import PathWatcher, WatchEvent
 from alasio.ext.path import PathStr
 from alasio.ext.path.calc import joinnormpath
 from alasio.ext.path.validate import validate_filepath, validate_resolve_filepath
 from alasio.logger import logger
 from alasio.testing.preview.parse_unittest import ParsedUnittest, UnittestImage, parse_test_file
-
-__all__ = [
-    'GoldenTestEntry',
-    'GoldenTestFile',
-    'GoldenTestFileData',
-    'GoldenTestFileSource',
-    'GoldenTestPathError',
-    'GoldenTestPathWatcher',
-    'GoldenTestTree',
-    'GoldenTestTreeData',
-    'GoldenTestTreeSource',
-    'GoldenTestWatchSource',
-    'WATCH_INTERVAL',
-    'poll_once',
-    'resolve_test_file',
-    'snapshot_dirs',
-    'watch_loop',
-]
+from alasio.testing.project import COLLECTION
 
 # Folder of the tests, relative to the mod root
 TESTS = 'tests'
@@ -237,15 +221,15 @@ def snapshot_dirs(records, folders):
     return entries, missing
 
 
-def _tests_root(mod_name):
+def _mod_root(mod_name):
     """
-    Resolve the tests folder of a mod
+    Resolve the root of a mod, which is the project root of its tests
 
     Args:
         mod_name (str): Name of the mod
 
     Returns:
-        PathStr: Absolute path of `<mod root>/tests`
+        PathStr: Absolute path of the mod root
 
     Raises:
         GoldenTestPathError: If there is no such mod
@@ -254,7 +238,7 @@ def _tests_root(mod_name):
         mod = MOD_LOADER.dict_mod[mod_name]
     except KeyError:
         raise GoldenTestPathError(f'No such mod: "{mod_name}"') from None
-    return PathStr.new(mod.root).joinpath(TESTS)
+    return PathStr.new(mod.root)
 
 
 def resolve_test_file(mod_name, file):
@@ -279,8 +263,36 @@ def resolve_test_file(mod_name, file):
     if not is_test_file(file.rpartition('/')[2]):
         raise GoldenTestPathError(f'Not a test file: "{file}"')
     try:
-        tests_root = _tests_root(mod_name)
-        return validate_resolve_filepath(tests_root, file)
+        return validate_resolve_filepath(_mod_root(mod_name).joinpath(TESTS), file)
+    except ValueError as e:
+        raise GoldenTestPathError(str(e)) from None
+
+
+def resolve_collection_image(mod_name, image_path):
+    """
+    Resolve a screenshot of a mod to its absolute path
+
+    The path of the request is relative to `<mod root>/collection`, the folder
+    the `image` decorator of alasio.testing.screenshot reads a test screenshot
+    from, and validate_resolve_filepath() rejects an absolute path, a `..`
+    segment and a path that resolves outside the folder (through a symbolic
+    link as well).
+
+    Args:
+        mod_name (str): Name of the mod
+        image_path (str): Path relative to `<mod root>/collection`
+
+    Returns:
+        str: Safe absolute path of the screenshot, symbolic links resolved
+
+    Raises:
+        GoldenTestPathError: If the path is invalid or there is no such mod
+    """
+    if not image_path:
+        raise GoldenTestPathError('Image path cannot be empty')
+    collection = _mod_root(mod_name).joinpath(COLLECTION)
+    try:
+        return validate_resolve_filepath(collection, image_path)
     except ValueError as e:
         raise GoldenTestPathError(str(e)) from None
 
@@ -465,26 +477,25 @@ class GoldenTestTreeSource(GoldenTestWatchSource, GlobalSource):
     def __init__(self):
         super().__init__()
         self.mod_name = ''
-        # Absolute tests folder, resolved by the first access
-        self.tests_root = ''
         # Subscribed folders: path relative to tests/ -> immediate children
         self.dirs: Dict[str, List[GoldenTestEntry]] = {}
         # Absolute folder path -> relative path, built by _sync_paths()
         self._abs_dirs: Dict[str, str] = {}
 
-    def _root(self):
+    @cached_property
+    def tests_root(self):
         """
-        Resolve the tests folder of the mod, once
+        Absolute path of the tests folder of the browsed mod, resolved once
+
+        The cache is dropped by set_mod(): a source browses one mod at a time.
 
         Returns:
             str: Absolute path of `<mod root>/tests`
 
         Raises:
-            GoldenTestPathError: If there is no such mod
+            GoldenTestPathError: If no mod is browsed, or there is no such mod
         """
-        if not self.tests_root:
-            self.tests_root = str(_tests_root(self.mod_name))
-        return self.tests_root
+        return str(_mod_root(self.mod_name).joinpath(TESTS))
 
     def _abs(self, rel):
         """
@@ -497,16 +508,16 @@ class GoldenTestTreeSource(GoldenTestWatchSource, GlobalSource):
             str: Absolute path of the folder
 
         Raises:
-            GoldenTestPathError: If there is no such mod
+            GoldenTestPathError: If no mod is browsed, or there is no such mod
         """
-        root = self._root()
+        root = self.tests_root
         return joinnormpath(root, rel) if rel else root
 
     def watch_paths(self):
         if not self.mod_name:
             return []
         try:
-            root = self._root()
+            root = self.tests_root
         except GoldenTestPathError:
             return []
         # The absolute path of a folder is a join of the root and its relative
@@ -643,7 +654,8 @@ class GoldenTestTreeSource(GoldenTestWatchSource, GlobalSource):
             return
 
         self.mod_name = mod_name
-        self.tests_root = ''
+        # The root belongs to the mod that was just dropped
+        InstanceCacheOperation.pop(self, 'tests_root')
         self.dirs = {'': []} if mod_name else {}
         self._sync_paths()
         await self.reinit()

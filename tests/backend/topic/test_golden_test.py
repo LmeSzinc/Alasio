@@ -19,7 +19,7 @@ from alasio.backend.reactive.event import RpcValueError
 from alasio.backend.topic.golden_test import (
     WATCH_INTERVAL, GoldenTestEntry, GoldenTestFile, GoldenTestFileData, GoldenTestFileSource, GoldenTestPathError,
     GoldenTestPathWatcher, GoldenTestTree, GoldenTestTreeData, GoldenTestTreeSource, GoldenTestWatchSource,
-    resolve_test_file, snapshot_dirs
+    resolve_collection_image, resolve_test_file, snapshot_dirs
 )
 from alasio.config.entry.loader import MOD_LOADER
 from alasio.ext.path import PathStr
@@ -319,6 +319,51 @@ class TestResolveTestFile:
         assert 'outside the allowed directory' in e.value.message
 
 
+class TestResolveCollectionImage:
+    """resolve_collection_image() keeps every request inside the collection folder"""
+
+    def test_resolves_the_image(self, fs, project):
+        image = project.joinpath('collection/map/fleet_bar/not_expanded.webp')
+        fs.create_file(image)
+
+        assert resolve_collection_image(MOD_NAME, 'map/fleet_bar/not_expanded.webp') == str(image)
+
+    def test_image_that_does_not_exist(self, project):
+        """A missing image still resolves, the route reports the missing file"""
+        assert resolve_collection_image(MOD_NAME, 'missing.webp') == str(
+            project.joinpath('collection/missing.webp'))
+
+    def test_the_folder_is_next_to_the_tests(self, project):
+        """The collection folder of a test is `<mod root>/collection`"""
+        assert resolve_collection_image(MOD_NAME, 'a.webp') == str(project.joinpath('collection/a.webp'))
+
+    @pytest.mark.parametrize("image_path", [
+        '../tests/test_a.py',
+        'map/../../secret.webp',
+        '/etc/passwd.webp',
+        'C:/project/collection/a.webp',
+        '',
+    ])
+    def test_rejected_paths(self, project, image_path):
+        with pytest.raises(GoldenTestPathError):
+            resolve_collection_image(MOD_NAME, image_path)
+
+    def test_unknown_mod(self, project):
+        with pytest.raises(GoldenTestPathError) as e:
+            resolve_collection_image('no_such_mod', 'a.webp')
+        assert 'No such mod' in e.value.message
+
+    def test_symlink_escape(self, fs, project):
+        """A screenshot of the collection that links out of the folder is refused"""
+        outside = project.joinpath('outside/secret.webp')
+        fs.create_file(outside)
+        fs.create_symlink(project.joinpath('collection/secret.webp'), outside)
+
+        with pytest.raises(GoldenTestPathError) as e:
+            resolve_collection_image(MOD_NAME, 'secret.webp')
+        assert 'outside the allowed directory' in e.value.message
+
+
 class TestSharedWatcher:
     """The two sources share one watcher, and one poll serves both"""
 
@@ -573,7 +618,7 @@ class TestTreeSource:
         def fail(*args, **kwargs):
             pytest.fail('the empty view must not touch the filesystem')
 
-        monkeypatch.setattr(golden_test_module, '_tests_root', fail)
+        monkeypatch.setattr(golden_test_module, '_mod_root', fail)
         source = GoldenTestTreeSource()
 
         assert await source._build_full() == GoldenTestTreeData()
@@ -620,6 +665,29 @@ class TestTreeSource:
         assert list(source.dirs) == ['']
         assert entry_shape(source.dirs['']) == [('island', True), ('map', True)]
         assert source._paths == {str(tests_root)}
+
+    @pytest.mark.trio
+    async def test_set_mod_resolves_the_root_of_the_new_mod(self, fs, project, monkeypatch):
+        """The tests root is a cached property, and the mod switch drops it"""
+        other_root = project.joinpath('other_project')
+        fs.create_dir(other_root.joinpath('tests/deep'))
+        fs.create_file(other_root.joinpath('tests/deep/test_c.py'))
+        monkeypatch.setattr(MOD_LOADER, 'dict_mod', {
+            MOD_NAME: SimpleNamespace(root=project, name=MOD_NAME),
+            OTHER_MOD: SimpleNamespace(root=other_root, name=OTHER_MOD),
+        })
+        source, sub = await subscribe_tree()
+
+        await source.set_mod(MOD_NAME)
+        await settle()
+        first = source.tests_root
+        await source.set_mod(OTHER_MOD)
+        await settle()
+
+        assert first == str(project.joinpath('tests'))
+        assert source.tests_root == str(other_root.joinpath('tests'))
+        assert entry_shape(source.dirs['']) == [('deep', True)]
+        assert watched() == {str(other_root.joinpath('tests'))}
 
     @pytest.mark.trio
     async def test_set_mod_clears_the_selected_file(self, fs, tests_root):

@@ -10,6 +10,7 @@ from alasio.backend.app.restart.daily import DAILY
 from alasio.backend.app.restart.restart_manager import RESTART_MANAGER
 from alasio.backend.app.restart.update_check import UPDATE_CHECK
 from alasio.backend.auth import auth
+from alasio.backend.dev import golden_test
 from alasio.backend.dev.assets import ImageStaticFiles
 from alasio.backend.middleware.gate import DeploymentGateMiddleware
 from alasio.backend.reactive.source import BaseSource
@@ -318,6 +319,11 @@ def create_app():
         ImageStaticFiles.mount(
             assets_router, path, directory=joinnormpath(mod.entry.root, mod.entry.path_assets), check_dir=False)
     app.add_router('/api', assets_router)
+
+    # Screenshots of the golden test review page: GET /api/golden_test/image
+    # streams the collection folder of a mod (the topics of the page are in
+    # topic/golden_test.py, the route requires the electron token)
+    app.add_router('/api', golden_test.router)
 
     # Mount mod APIs
     pass
