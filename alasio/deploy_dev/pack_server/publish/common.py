@@ -90,6 +90,18 @@ class ConfigError(PublishError):
     """
 
 
+class IncompleteStore(PublishError):
+    """
+    Raised when a store cannot prove an object it holds or was sent.
+
+    The flow never downloads an object to find out what it contains: a store
+    whose answers carry no digest the flow can compare cannot be published to,
+    because every file would be written again on every run and no write could
+    be shown to have landed. The store is refused instead, either before the
+    first request or at the first object it cannot prove.
+    """
+
+
 class PublishRunError(PublishError):
     """
     Raised at the end of a run in which at least one channel or remote failed.
@@ -197,6 +209,33 @@ def require_valid(config):
     if errors:
         reasons = '; '.join(str(error) for error in errors)
         raise ConfigError(f'Cannot read "{config.file}": {reasons}')
+
+
+def require_capabilities(capabilities, where=''):
+    """
+    Refuse a store that cannot prove what it holds or what it was sent.
+
+    The flow compares the MD5 of a local file with the digest the mirror reports
+    for the same key: that is how a file is skipped and how a write is checked.
+    A store whose ETag is not the MD5 of the content reports no digest the flow
+    can compare, so every file would be written on every run and no run could
+    tell a stored object from the local one. Such a store is refused before the
+    first request instead of being published half way.
+
+    Args:
+        capabilities (Capabilities): What the store promises
+        where (str): The pair the refusal is about, for the message. Defaults
+            to ''
+
+    Raises:
+        IncompleteStore: If the store promises no MD5 shaped ETag
+    """
+    if capabilities.etag_md5:
+        return
+    raise IncompleteStore(
+        f'{where}: the store promises no MD5 ETag, so neither a stored object nor a '
+        f'written one can be proven without reading it back'
+    )
 
 
 def first_failure(group):

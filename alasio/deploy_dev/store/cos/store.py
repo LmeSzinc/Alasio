@@ -30,7 +30,6 @@ verification of a write is the one place that reads one object at a time.
 
 import base64
 import calendar
-import hashlib
 import os
 import re
 import time
@@ -69,7 +68,7 @@ PAGE_SIZE = 1000
 # takes minutes, and a transfer that is slow is not a stalled one
 CONNECT_TIMEOUT = 5.0
 PUT_TIMEOUT = 120.0
-# the read budget of a readback: a file is downloaded at the speed it was
+# the read budget of a download: a file is downloaded at the speed it was
 # written, so a transfer of a large object takes the same order of time
 READ_TIMEOUT = 120.0
 
@@ -81,12 +80,6 @@ READ_TIMEOUT = 120.0
 ATTEMPTS = 8
 BACKOFF = 0.5
 BACKOFF_MAX = 4.0
-
-# bytes of one read of a file body, and of one check of a Content-MD5 the store
-# computes itself. 1 MiB is large enough that the worker thread hop per chunk
-# costs nothing, and small enough that the other transfers of the run keep the
-# loop while a big file is being read
-CHUNK_SIZE = 1 << 20
 
 # the header of the CRC64 of an object, answered by PUT, HEAD and GET: the
 # digest of the content the server computed when it stored the object. A
@@ -456,66 +449,6 @@ class CosStore(ObjectStore):
             CosError: If the read fails
         """
         return (await self._call('GET', relative)).content
-
-    async def md5(self, relative):
-        """
-        The MD5 of the object, computed from a streamed read.
-
-        The readback of a write that no digest of the server can prove, see
-        ChannelUpload._verify. The object is never held in memory: the chunks
-        are hashed as they arrive, and the hash runs in a worker thread, so a
-        download of a few hundred MB neither sizes a buffer by the object nor
-        stalls the other transfers of the run.
-
-        Every attempt starts a new digest: a retried transfer reads the object
-        from the start, and the bytes of the failed attempt must not reach the
-        digest of the one that succeeds.
-
-        Args:
-            relative (str): Relative key of the object
-
-        Returns:
-            str: Lowercase hex MD5 of the content
-
-        Raises:
-            ObjectNotFound: If the object does not exist
-            CosError: If the read fails
-        """
-        import httpx2
-
-        timeout = httpx2.Timeout(
-            connect=CONNECT_TIMEOUT,
-            read=READ_TIMEOUT,
-            write=READ_TIMEOUT,
-            pool=CONNECT_TIMEOUT,
-        )
-        for attempt in range(1, self.ATTEMPTS + 1):
-            hasher = hashlib.md5()
-
-            async def consume(response, hasher=hasher):
-                """
-                Hash one response as it arrives.
-
-                Args:
-                    response (httpx2.Response): The open response
-                    hasher (hashlib.md5): The digest of this attempt
-                """
-                async for chunk in response.aiter_bytes(CHUNK_SIZE):
-                    await trio.to_thread.run_sync(hasher.update, chunk)
-
-            # signed per attempt: a retry after a long wait must not carry a
-            # signature that has aged out
-            url, signed = self._prepare('GET', relative)
-            try:
-                # attempts=1: the loop of this method owns the retry and the
-                # wait, and every attempt has a digest of its own
-                await self._client.stream(
-                    url, consume, headers=signed, timeout=timeout, attempts=1)
-                return hasher.hexdigest()
-            except httpx2.HTTPStatusError as e:
-                raise self._cos_error(relative, e.response) from None
-            except httpx2.TransportError as e:
-                await self._retry_or_raise('GET', relative, attempt, e)
 
     async def put(self, relative, file, size, md5, content_type=None, cache_control=None):
         """

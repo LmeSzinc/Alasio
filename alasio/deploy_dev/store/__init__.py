@@ -10,7 +10,7 @@ flow:
 
 - whether the ETag of an object is the MD5 of its content (etag_md5), which
   decides whether a written object is verified from the answer of its PUT or
-  has to be read back;
+  from the checksum of a HEAD;
 - whether the store has collections that are removed when they are empty
   (dirs).
 
@@ -237,31 +237,6 @@ class ObjectStore:
             return found[relative]
         except KeyError:
             raise ObjectNotFound(f'Object "{relative}" does not exist') from None
-
-    async def md5(self, relative):
-        """
-        The MD5 of one object, computed from a read of it.
-
-        The readback of a write that no digest of the store can prove: the
-        server reported neither an MD5 shaped ETag nor a Content-MD5 check, so
-        the only evidence left is the bytes the store serves, see
-        ChannelUpload._verify. The digest is of the whole object; a store whose
-        objects are large overrides this with a streamed read (see
-        CosStore.md5), the default holds the object in memory.
-
-        Args:
-            relative (str): Relative key of the object
-
-        Returns:
-            str: Lowercase hex MD5 of the content
-
-        Raises:
-            ObjectNotFound: If the object does not exist
-            StoreError: If the read fails
-        """
-        import hashlib
-
-        return hashlib.md5(await self.get(relative)).hexdigest()
 
     async def put(self, relative, file, size, md5, content_type=None, cache_control=None):
         """

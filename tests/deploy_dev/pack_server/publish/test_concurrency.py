@@ -19,7 +19,7 @@ import trio
 
 from alasio.deploy_dev.pack_server.publish.channel import STATUS_OK, ChannelUpload
 from alasio.deploy_dev.pack_server.publish.cleanup import ChannelCleanup
-from alasio.deploy_dev.pack_server.publish.common import MAX_CONCURRENCY
+from alasio.deploy_dev.pack_server.publish.common import BARRIER_KEY, MANIFEST_KEY, MAX_CONCURRENCY
 from alasio.deploy_dev.pack_server.publish.local import LocalGeneration
 from alasio.ext.path import PathStr
 from alasio.testing.filesystem import fs  # noqa: F401
@@ -27,6 +27,15 @@ from tests.deploy_dev.pack_server.publish.conftest import CHANNEL, REMOTE_PREFIX
 
 PREFIX = f'{REMOTE_PREFIX}/{CHANNEL}/'
 GRACE = 3600
+
+# every file of the fixture generation, the contract included
+ALL_FILES = (
+    BARRIER_KEY,
+    MANIFEST_KEY,
+    'packrepo/aaaaaaaa/full.pack',
+    'packrepo/aaaaaaaa/update_00000001.pack',
+    'wheel/msgspec/0.22.0/msgspec-0.22.0-py3-none-any.whl',
+)
 
 # the files a generation of this test holds: more than the cap, so a run that
 # serialises them is visible, and small, so the test stays fast
@@ -115,41 +124,45 @@ class TestUploadConcurrency:
     @pytest.mark.trio
     async def test_the_local_digest_and_the_listing_overlap(self, workspace, credentials_env,
                                                            monkeypatch):
-        """The disk and the mirror are asked at the same time.
+        """The record is validated before the first request, the content reads overlap it.
 
-        The digest of the first file waits for the listing to start, and the
-        listing answers only after that: a serial implementation (digest
-        everything, then ask the mirror) would wait for itself and fail the
-        timeout instead of passing.
+        The listing refuses to answer until a content file has started, and a
+        content file refuses to read until the listing has started: a serial
+        implementation (digest everything, then ask the mirror, or the reverse)
+        deadlocks here instead of passing. The record is on the disk before the
+        listing is sent, so a broken generation never reaches the remote.
         """
         remote = make_remote()
         store = make_store(remote, CHANNEL, credentials_env)
-        listing_started = trio.Event()
-        original_list = store.list
         local = LocalGeneration(workspace.workspace, MAX_CONCURRENCY)
         upload = ChannelUpload(local, store, remote_name='cos-main')
-        original_item = local._item
-        first = []
+        listing_started = trio.Event()
+        read_started = trio.Event()
+        original_list = store.list
+        original_read = local._read
 
         async def list_objects():
+            # the record is read and checked before the remote is asked anything
+            assert 'record' in local.__dict__
             listing_started.set()
+            with trio.fail_after(5):
+                await read_started.wait()
             return await original_list()
 
-        async def item(relative):
-            if not first:
-                first.append(relative)
+        async def read(relative):
+            if relative not in (BARRIER_KEY, MANIFEST_KEY):
+                read_started.set()
                 with trio.fail_after(5):
                     await listing_started.wait()
-            return await original_item(relative)
+            return await original_read(relative)
 
         monkeypatch.setattr(store, 'list', list_objects)
-        monkeypatch.setattr(local, '_item', item)
+        monkeypatch.setattr(local, '_read', read)
         try:
             result = await upload.run()
         finally:
             await store.aclose()
         assert result.status == STATUS_OK
-        assert first
 
 
 class TestCleanupConcurrency:
@@ -208,7 +221,7 @@ class TestLocalIo:
             return real_open(*args, **kwargs)
 
         monkeypatch.setattr(builtins, 'open', spy)
-        item = await LocalGeneration(workspace.workspace)._item(
+        item = await LocalGeneration(workspace.workspace)._read(
             'packrepo/aaaaaaaa/full.pack')
 
         assert item.size > 0
@@ -233,10 +246,13 @@ class TestLocalIo:
             return real_open(file, *args, **kwargs)
 
         local = LocalGeneration(workspace.workspace)
-        manifest = await local.record
+        # the record is read before the spy: the test is about the files of the
+        # generation, not about the two files that name it
+        await local.record
         monkeypatch.setattr(builtins, 'open', spy)
-        items = await local._digest(manifest)
+        async with local.warmup():
+            for relative in ALL_FILES:
+                await local.item(relative)
 
-        assert [item.relative for item in items] == list(manifest.files)
         assert sorted(opened) == sorted(
-            PathStr.new(relative).name for relative in manifest.files)
+            PathStr.new(relative).name for relative in ALL_FILES)

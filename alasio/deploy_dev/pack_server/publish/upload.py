@@ -57,7 +57,7 @@ class UploadRun:
         self.client = client
         self.concurrency = concurrency
         # the local generation, read once for every remote of the channel:
-        # the first mirror digests it, the others await the same result
+        # the first mirror reads it, the others find the slots already filled
         self.local = LocalGeneration(self.workspace)
 
     @cached_property

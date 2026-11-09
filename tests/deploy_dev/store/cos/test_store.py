@@ -230,59 +230,6 @@ class TestPutGet:
         assert fake_cos.get(PREFIX + 'v1/data.pack').content_type == 'application/octet-stream'
 
 
-class TestMd5:
-    """The digest of a readback, read in a stream."""
-
-    @pytest.mark.trio
-    async def test_md5_of_an_object(self, fs, store, uploader):
-        """The digest is the MD5 of the bytes the store serves."""
-        data = b'\x00a readback of the object' * 1000
-        await uploader.put(fs, store, 'v1/data.bin', data)
-        assert await store.md5('v1/data.bin') == hashlib.md5(data).hexdigest()
-
-    @pytest.mark.trio
-    async def test_md5_of_a_large_object(self, fs, store, uploader):
-        """An object larger than one chunk is hashed across the chunk boundary."""
-        data = bytes(range(256)) * 4096 * 3
-        await uploader.put(fs, store, 'v1/large.bin', data)
-        assert await store.md5('v1/large.bin') == hashlib.md5(data).hexdigest()
-
-    @pytest.mark.trio
-    async def test_head_reports_the_checksum_of_the_object(self, fs, store, uploader, fake_cos):
-        """A PUT and a HEAD of the same key report one checksum, a LIST none.
-
-        The uploader compares the two answers instead of reading the object
-        back, so the value has to be on both, and the listing has to leave it
-        empty: a listing is not why the flow reads one object at a time.
-        """
-        data = b'checksum me'
-        info = await uploader.put(fs, store, 'v1/data.bin', data)
-        assert info.checksum
-        head = await store.head('v1/data.bin')
-        assert head.checksum == info.checksum
-        assert (await store.list()).objects['v1/data.bin'].checksum == ''
-
-    @pytest.mark.trio
-    async def test_md5_of_a_missing_object(self, store):
-        """A missing key is ObjectNotFound, like a read of it."""
-        with pytest.raises(ObjectNotFound):
-            await store.md5('v1/missing.bin')
-
-    @pytest.mark.trio
-    async def test_md5_retries_a_dropped_read(self, fs, store, uploader, fake_cos,
-                                              autojump_clock):
-        """A dropped readback is retried, and the digest starts over.
-
-        The first attempt receives nothing: its bytes must not reach the digest
-        of the attempt that succeeds, or the file would read as corrupt.
-        """
-        data = b'a readback that is retried' * 1000
-        await uploader.put(fs, store, 'v1/data.bin', data)
-        fake_cos.fail_next_gets = 1
-        assert await store.md5('v1/data.bin') == hashlib.md5(data).hexdigest()
-        assert len([request for request in fake_cos.requests if request[0] == 'GET']) == 2
-
-
 class TestContentMd5:
     """Content-MD5 is what proves an upload to the server."""
 
@@ -454,6 +401,21 @@ class TestHead:
         """A missing object raises ObjectNotFound."""
         with pytest.raises(ObjectNotFound):
             await store.head('v1/missing.bin')
+
+    @pytest.mark.trio
+    async def test_head_reports_the_checksum_of_the_object(self, fs, store, uploader):
+        """A PUT and a HEAD of the same key report one checksum, a LIST none.
+
+        The uploader compares the two answers to prove the stored object, so
+        the value has to be on both, and the listing has to leave it empty: a
+        listing is not why the flow reads one object at a time.
+        """
+        data = b'checksum me'
+        info = await uploader.put(fs, store, 'v1/data.bin', data)
+        assert info.checksum
+        head = await store.head('v1/data.bin')
+        assert head.checksum == info.checksum
+        assert (await store.list()).objects['v1/data.bin'].checksum == ''
 
 
 class TestDelete:

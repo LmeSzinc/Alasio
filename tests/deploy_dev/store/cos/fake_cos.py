@@ -183,8 +183,6 @@ class FakeCos:
             request served, in order
         fail_next_puts (int): Number of PUTs to answer by raising a transport
             error after the body was received, for the retry test
-        fail_next_gets (int): Number of GETs to answer by raising a transport
-            error before the response is open, for the retry of a readback
         fail_next_requests (int): Number of requests to answer with 500
     """
 
@@ -199,7 +197,6 @@ class FakeCos:
         self.objects = {}
         self.requests = []
         self.fail_next_puts = 0
-        self.fail_next_gets = 0
         self.fail_next_requests = 0
         self._clients = []
         self.app = Starlette(routes=[
@@ -323,13 +320,6 @@ class FakeCos:
             # the body above was read first: the service dies after it received
             # the upload, like a peer that drops the connection mid-answer, so
             # the client sees a transport error and has to send the body again
-            raise httpx2.ReadTimeout('the fake service dropped the connection')
-
-        if (method == 'GET' and self.fail_next_gets
-                and request.query_params.get('list-type') != '2'):
-            self.fail_next_gets -= 1
-            # a readback of one object: the connection is dropped before an
-            # answer is opened, so the retry has to start the digest over
             raise httpx2.ReadTimeout('the fake service dropped the connection')
 
         problem = self._check_authorization(request, scope['path'])
