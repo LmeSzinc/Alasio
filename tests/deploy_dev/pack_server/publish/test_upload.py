@@ -37,11 +37,11 @@ pytestmark = [
 ]
 
 # the capabilities of the store of the tests: a single PUT writes an object
-# whose ETag is the MD5 of its content, and the server checks Content-MD5 first
-ETAG_MD5 = Capabilities(etag_md5=True, content_md5=True)
+# whose ETag is the MD5 of its content
+ETAG_MD5 = Capabilities(etag_md5=True)
 # the capabilities of a mirror whose ETag says nothing about the content, e.g. a
 # COS bucket with a KMS key, or a WebDAV server
-OPAQUE = Capabilities(etag_md5=False, content_md5=False)
+OPAQUE = Capabilities(etag_md5=False)
 
 PREFIX = f'{REMOTE_PREFIX}/{CHANNEL}/'
 
@@ -86,12 +86,16 @@ class OpaqueStore:
 
     CAPABILITIES = OPAQUE
 
-    def __init__(self, inner):
+    def __init__(self, inner, capabilities=None):
         """
         Args:
             inner (ObjectStore): The store that actually talks to the service
+            capabilities (Capabilities): What the store promises, OPAQUE by
+                default
         """
         self.inner = inner
+        if capabilities is not None:
+            self.CAPABILITIES = capabilities
 
     def __getattr__(self, name):
         """
@@ -592,6 +596,219 @@ class TestOpaqueMirror:
         assert result.uploaded == 1
         assert data_of(credentials_env, 'wheel/msgspec/0.22.0/msgspec-0.22.0-py3-none-any.whl') == (
             b'other wheel bytes')
+
+    @pytest.mark.trio
+    async def test_a_store_without_a_digest_reads_the_object_back(
+            self, workspace, credentials_env, monkeypatch):
+        """No ETag, no Content-MD5: the object comes back and is hashed.
+
+        The size alone is not evidence: an object of the right length can hold
+        other bytes, and publishing it silently is the bug the readback exists
+        for.
+        """
+        inner = make_store(make_remote(), CHANNEL, credentials_env)
+        store = OpaqueStore(inner)
+        readbacks = []
+        original = store.md5
+
+        async def md5(relative):
+            readbacks.append(relative)
+            return await original(relative)
+
+        monkeypatch.setattr(store, 'md5', md5)
+        try:
+            result = await make_upload(workspace, store).run()
+        finally:
+            await inner.aclose()
+        assert result.status == STATUS_OK
+        # every written file, the barrier and the contract included
+        assert len(readbacks) == result.uploaded
+        assert data_of(credentials_env, 'wheel/msgspec/0.22.0/msgspec-0.22.0-py3-none-any.whl') == (
+            b'wheel bytes')
+
+    @pytest.mark.trio
+    async def test_a_large_file_is_read_back_too(self, workspace, credentials_env, monkeypatch):
+        """A file above the old 1 MiB budget is hashed, not trusted by its size."""
+        large = b'x' * (2 << 20)
+        workspace.write(workspace.version, {
+            **workspace.files,
+            'wheel/big-1.0-py3-none-any.whl': large,
+        })
+        inner = make_store(make_remote(), CHANNEL, credentials_env)
+        store = OpaqueStore(inner)
+        readbacks = []
+        original = store.md5
+
+        async def md5(relative):
+            readbacks.append(relative)
+            return await original(relative)
+
+        monkeypatch.setattr(store, 'md5', md5)
+        try:
+            result = await make_upload(workspace, store).run()
+        finally:
+            await inner.aclose()
+        assert result.status == STATUS_OK
+        assert 'wheel/big-1.0-py3-none-any.whl' in readbacks
+
+    @pytest.mark.trio
+    async def test_a_readback_that_differs_fails_the_run(self, workspace, credentials_env,
+                                                         monkeypatch):
+        """The mirror serves other bytes than the ones that were sent."""
+        inner = make_store(make_remote(), CHANNEL, credentials_env)
+        store = OpaqueStore(inner)
+
+        async def md5(relative):
+            return '0' * 32
+
+        monkeypatch.setattr(store, 'md5', md5)
+        try:
+            with pytest.raises(PublishError, match='was written but the mirror reports'):
+                await make_upload(workspace, store).run()
+        finally:
+            await inner.aclose()
+
+
+class TestOpaqueEtag:
+    """A bucket whose ETag is no digest of the content."""
+
+    @pytest.mark.trio
+    async def test_a_kms_bucket_is_verified_by_a_head(self, workspace, credentials_env,
+                                                     monkeypatch):
+        """A 32 hex ETag that is not the local MD5 is not trusted as a digest.
+
+        A KMS encrypted bucket reports an ETag of the MD5 shape that is not the
+        MD5 of the content. The store declares that its ETag is no digest and
+        that a HEAD reports the checksum of the stored object, so the run reads
+        one HEAD per written object and compares the value with the one its PUT
+        reported — no object is downloaded.
+        """
+        inner = make_store(make_remote(), CHANNEL, credentials_env)
+        original = inner.put
+
+        async def put(relative, file, size, md5, **kwargs):
+            info = await original(relative, file, size, md5, **kwargs)
+            return ObjectInfo(
+                size=info.size, etag='f' * 32, last_modified=info.last_modified,
+                checksum=info.checksum)
+
+        monkeypatch.setattr(inner, 'put', put)
+        store = OpaqueStore(inner, Capabilities(etag_md5=False, head_checksum=True))
+        heads = []
+        gets = []
+        original_head = inner.head
+
+        async def head(relative):
+            heads.append(relative)
+            return await original_head(relative)
+
+        monkeypatch.setattr(inner, 'head', head)
+        monkeypatch.setattr(store, 'md5', lambda relative: gets.append(relative))
+        try:
+            result = await make_upload(workspace, store).run()
+        finally:
+            await inner.aclose()
+        assert result.status == STATUS_OK
+        # one HEAD per written object, the barrier and the contract included
+        assert len(heads) == result.uploaded
+        assert gets == []
+        assert data_of(credentials_env, 'wheel/msgspec/0.22.0/msgspec-0.22.0-py3-none-any.whl') == (
+            b'wheel bytes')
+
+    @pytest.mark.trio
+    async def test_a_checksum_that_changed_fails_the_run(self, workspace, credentials_env,
+                                                         monkeypatch):
+        """The object behind the key is not the one the PUT wrote."""
+        inner = make_store(make_remote(), CHANNEL, credentials_env)
+        store = OpaqueStore(inner, Capabilities(etag_md5=False, head_checksum=True))
+
+        async def head(relative):
+            return ObjectInfo(size=1, etag='opaque', last_modified=0.0, checksum='0000')
+
+        monkeypatch.setattr(store, 'head', head)
+        try:
+            with pytest.raises(PublishError, match='was written but the mirror reports'):
+                await make_upload(workspace, store).run()
+        finally:
+            await inner.aclose()
+
+    @pytest.mark.trio
+    async def test_a_store_without_any_digest_reads_the_object_back(
+            self, workspace, credentials_env, monkeypatch):
+        """No ETag digest and no checksum on a HEAD: the object is downloaded.
+
+        A store that reports neither has nothing to compare, so the bytes are
+        fetched and hashed — the size alone is not evidence.
+        """
+        inner = make_store(make_remote(), CHANNEL, credentials_env)
+        store = OpaqueStore(inner, Capabilities(etag_md5=False))
+        readbacks = []
+
+        async def md5(relative):
+            readbacks.append(relative)
+            return await inner.md5(relative)
+
+        monkeypatch.setattr(store, 'md5', md5)
+        try:
+            result = await make_upload(workspace, store).run()
+        finally:
+            await inner.aclose()
+        assert result.status == STATUS_OK
+        assert len(readbacks) == result.uploaded
+
+    @pytest.mark.trio
+    async def test_the_shape_of_an_etag_is_not_enough(self, workspace, credentials_env,
+                                                      monkeypatch):
+        """An MD5 shaped ETag is compared only when the store declares it is one.
+
+        The fake service answers the MD5 of the content, so a comparison that
+        trusted the shape would pass without reading anything. The store says
+        its ETag is no digest: the object is read back.
+        """
+        inner = make_store(make_remote(), CHANNEL, credentials_env)
+        store = OpaqueStore(inner, Capabilities(etag_md5=False))
+        readbacks = []
+
+        async def md5(relative):
+            readbacks.append(relative)
+            return await inner.md5(relative)
+
+        monkeypatch.setattr(store, 'md5', md5)
+        try:
+            result = await make_upload(workspace, store).run()
+        finally:
+            await inner.aclose()
+        assert result.status == STATUS_OK
+        assert len(readbacks) == result.uploaded
+
+
+class TestCosNoReadback:
+    """A COS bucket with an MD5 ETag costs one PUT per file and no second request."""
+
+    @pytest.mark.trio
+    async def test_an_upload_is_one_put_and_no_head(self, workspace, credentials_env):
+        """Every written file is proven by its ETag, never by a HEAD or a GET.
+
+        The downlink of the bucket is billed and the uploader runs on one PUT
+        per file: the ETag of a single PUT is the MD5, so the answer of the PUT
+        is the whole verification. A fallback to a per-object request would
+        show up here.
+        """
+        store = make_store(make_remote(), CHANNEL, credentials_env)
+        try:
+            result = await make_upload(workspace, store).run()
+        finally:
+            await store.aclose()
+        assert result.status == STATUS_OK
+        requests = requests_of(credentials_env)
+        assert [key for method, key in requests if method == 'PUT']
+        assert [key for method, key in requests if method == 'HEAD'] == []
+        # a listing is the only GET of the run, the readback would be another
+        reads = [
+            key for method, key in requests
+            if method == 'GET' and key and not key.startswith('?')
+        ]
+        assert reads == []
 
 
 class TestProgress:

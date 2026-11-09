@@ -22,11 +22,6 @@ from alasio.deploy_dev.pack_server.repo_latest import LATEST_FILE
 MANIFEST_KEY = MANIFEST_FILE
 BARRIER_KEY = f'packrepo/{LATEST_FILE}'
 
-# the largest file the uploader reads back to verify a write, for a store that
-# reports neither Content-MD5 nor an MD5 shaped ETag. The downlink is billed, so
-# a larger file is verified by its size only.
-READBACK_MAX = 1 << 20
-
 # the transfers (and local reads) one channel runs at once. A cap of the tool
 # rather than of the config: past it the queue only moves into the connection
 # pool, and the uplink of the publishing machine is the real limit

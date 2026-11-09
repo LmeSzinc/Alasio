@@ -24,7 +24,7 @@ What is deliberately not tested here: the retry schedule and the body of a
 retried PUT (a real service cannot be made to fail on demand, the offline suite
 pins both), the multipart limit, and the appearance of a just-written object in
 a listing (the listing is eventually consistent, so that assertion would be
-flaky by design; the cleaner never relies on it, see the plan §5.5).
+flaky by design; the cleaner never relies on it).
 
 Every test writes under tests/ of the bucket, in a prefix of its own: its name
 plus eight random hex characters, e.g.
@@ -455,12 +455,44 @@ class TestCosCapabilitiesReal:
         assert (await probe.stat(['v1/data.bin']))['v1/data.bin'].etag == expected
 
     @pytest.mark.trio
+    async def test_the_checksum_of_the_stored_object_is_reported(self, probe, make_file):
+        """PUT and HEAD report the same checksum of the content, a LIST does not.
+
+        The uploader verifies a write without downloading it: it compares the
+        checksum its PUT answered with the checksum a HEAD of the same key
+        reports. The comparison is what catches a key that was rewritten after
+        the write, so both answers must carry the value and they must be the
+        same value; a listing does not carry it at all.
+
+        The value of a known content is pinned: the header is the decimal
+        CRC-64/XZ of the object (0x53037ecdef2352da of 'hello world'), a digest
+        of the content that is not the MD5 the ETag carries.
+        """
+        data = b'the checksum of this object is what a head repeats'
+        info = await put(probe, make_file, 'v1/data.bin', data)
+        assert info.checksum.isdigit()
+        assert info.checksum != str(int(info.etag, 16))
+        head = await probe.head('v1/data.bin')
+        assert head.checksum == info.checksum
+        # another content is another checksum
+        other = await put(probe, make_file, 'v1/other.bin', data + b'!')
+        assert other.checksum != info.checksum
+        # the header of a content this module knows, so a change of the digest
+        # the service computes is noticed here and not in production
+        known = await put(probe, make_file, 'v1/known.bin', b'hello world')
+        assert known.checksum == '5981764153023615706'  # 0x53037ecdef2352da
+        # a listing reports the ETag only, which is why the verification reads
+        # one HEAD per written object
+        assert (await probe.list()).objects['v1/data.bin'].checksum == ''
+
+    @pytest.mark.trio
     async def test_content_md5_is_enforced_by_the_server(self, probe, make_file):
         """A wrong Content-MD5 is refused and the object is not stored.
 
-        This is the property the uploader relies on instead of reading every
-        object back: the server compares the header with the bytes it received
-        before it writes anything.
+        The store always sends Content-MD5, so a corrupted body never reaches
+        the bucket. It protects the transfer, not the object: the uploader does
+        not take it as proof that the key holds the bytes later, see
+        ChannelUpload._verify.
         """
         data = b'payload that is uploaded with a wrong digest'
         path = make_file('data.bin', data)
@@ -544,9 +576,9 @@ class TestCosCapabilitiesReal:
         """Content-Type and Cache-Control are stored on the object.
 
         The uploader sets them per path (manifest.json is json and no-cache, a
-        pack is an immutable octet stream, see the plan §6.6). A header the
-        store forgets to send is a cache that serves a stale manifest for a
-        year, so it is checked against the service and not only against the
+        pack is an immutable octet stream). A header the store forgets to send
+        is a cache that serves a stale manifest for a year, so it is checked
+        against the service and not only against the
         fake.
         """
         await put(

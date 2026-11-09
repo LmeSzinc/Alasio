@@ -3,16 +3,14 @@ The object stores a workspace is mirrored to.
 
 An uploader mirrors the files of a manifest to one or more static hosts and a
 cleaner removes what a later generation no longer serves. Neither of them knows
-what the host is: both work on the seven methods of ObjectStore, and the store
-of a host implements them. The differences between the hosts that do matter to
-the core flow are values of ObjectInfo / Capabilities, not branches of the core
+what the host is: both work on the methods of ObjectStore, and the store of a
+host implements them. The differences between the hosts that do matter to the
+core flow are values of ObjectInfo / Capabilities, not branches of the core
 flow:
 
 - whether the ETag of an object is the MD5 of its content (etag_md5), which
-  decides whether a change is detected from the listing alone or falls back to
-  the size;
-- whether a PUT is checked against Content-MD5 by the server (content_md5),
-  which decides whether an upload is verified without reading the object back;
+  decides whether a written object is verified from the answer of its PUT or
+  has to be read back;
 - whether the store has collections that are removed when they are empty
   (dirs).
 
@@ -73,11 +71,17 @@ class ObjectInfo(msgspec.Struct):
             core flow compares it, it never parses it
         last_modified (float): Unix time the object was last written, from the
             clock of the server
+        checksum (str): Digest of the content the server reports besides the
+            ETag, in the form the store chose (COS: the decimal CRC64 of
+            x-cos-hash-crc64ecma). '' when the server reports none, and for a
+            value a listing carries: only an answer about one object (a PUT or
+            a HEAD) reports it, see Capabilities.head_checksum
     """
 
     size: int
     etag: str
     last_modified: float
+    checksum: str = ''
 
 
 class ObjectListing(msgspec.Struct):
@@ -113,22 +117,24 @@ class Capabilities(msgspec.Struct):
     Attributes:
         etag_md5 (bool): The ETag of an object written by a single PUT is the
             MD5 of its content. False for a store whose ETag is opaque or is
-            computed over something else
-        content_md5 (bool): The server compares Content-MD5 with the bytes it
-            receives and refuses a mismatch, so a written object is known to be
-            the bytes of the request
+            computed over something else, and then a write is verified by the
+            checksum of a HEAD or by reading the object back
+        head_checksum (bool): A HEAD of an object reports ObjectInfo.checksum,
+            a digest of the content of the stored object, in the same form a
+            PUT reports it. The two answers prove the object a reader sees is
+            the one that was written, without downloading it
         dirs (bool): The store has collections that outlive their objects, and
             remove_dirs() removes the empty ones
     """
 
     etag_md5: bool = False
-    content_md5: bool = False
+    head_checksum: bool = False
     dirs: bool = False
 
 
 class ObjectStore:
     """
-    The seven operations a mirror of a workspace needs.
+    The operations a mirror of a workspace needs.
 
     An instance is bound to one prefix (a workspace of a bucket, a collection of
     a WebDAV server), and every key it takes or returns is relative to it. A
@@ -202,6 +208,60 @@ class ObjectStore:
             StoreError: If the read fails
         """
         raise NotImplementedError
+
+    async def head(self, relative):
+        """
+        The state of one object, without its content.
+
+        The verification of a write reads it when the store declares
+        head_checksum: the checksum of the stored object is compared with the
+        one the PUT answered, so the flow proves the object a reader sees is
+        the one that was written without downloading it. A store that reports
+        the checksum in a listing may answer this from stat().
+
+        The default implementation asks stat() for the key, so a store whose
+        listing carries every value of ObjectInfo needs nothing of its own.
+
+        Args:
+            relative (str): Relative key of the object
+
+        Returns:
+            ObjectInfo: What the store reports about the object
+
+        Raises:
+            ObjectNotFound: If the object does not exist
+            StoreError: If the lookup fails
+        """
+        found = await self.stat([relative])
+        try:
+            return found[relative]
+        except KeyError:
+            raise ObjectNotFound(f'Object "{relative}" does not exist') from None
+
+    async def md5(self, relative):
+        """
+        The MD5 of one object, computed from a read of it.
+
+        The readback of a write that no digest of the store can prove: the
+        server reported neither an MD5 shaped ETag nor a Content-MD5 check, so
+        the only evidence left is the bytes the store serves, see
+        ChannelUpload._verify. The digest is of the whole object; a store whose
+        objects are large overrides this with a streamed read (see
+        CosStore.md5), the default holds the object in memory.
+
+        Args:
+            relative (str): Relative key of the object
+
+        Returns:
+            str: Lowercase hex MD5 of the content
+
+        Raises:
+            ObjectNotFound: If the object does not exist
+            StoreError: If the read fails
+        """
+        import hashlib
+
+        return hashlib.md5(await self.get(relative)).hexdigest()
 
     async def put(self, relative, file, size, md5, content_type=None, cache_control=None):
         """

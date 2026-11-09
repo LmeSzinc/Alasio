@@ -1,30 +1,36 @@
 """
-The COS object store: five verbs of a bucket prefix over HttpClient.
+The COS object store: the verbs of a bucket prefix over HttpClient.
 
-COS speaks http, and the five requests this store sends are simple enough that
+COS speaks http, and the requests this store sends are simple enough that
 the official SDK is not worth its dependency floor: cos-python-sdk-v5 1.9.44
 declares certifi<=2021.10.8 and requests<=2.27.1, and installing it would roll
 the certificate store of the whole process back by years. The signature is the
-only subtle part and it is already compared byte for byte with the SDK, see
-sign.py and doc/2026-11-07_pack-server-publish-upload-cleanup.md §5.12.
+only subtle part, and it is compared byte for byte with the SDK (see sign.py).
 
 What this store does NOT do, on purpose: multipart upload, resumable transfer,
 presigned urls, lifecycle / CORS / ACL, CDN purge, versioning, copy and move.
 None of them is on the path of "the generator writes a manifest, the uploader
 mirrors it, the cleaner removes what the next generation no longer serves", and
-each one is larger than the five verbs together.
+each one is larger than the verbs together.
 
 The integrity of an upload rests on Content-MD5: COS compares the header with
 the bytes it received before it writes the object, and answers 400 BadDigest
-without storing anything when they differ. A successful PUT therefore proves
-that the object is the local file, and no read-back (the downlink is billed)
-and no second digest (a CRC64 would need a native dependency that does not load
-on Windows 7) is needed. For a single PUT the returned ETag is the MD5 of the
-content as well, which is the second, free check.
+without storing anything when they differ. That protects the transfer, not the
+object: it says the bytes arrived intact, never that the key still holds them
+when someone reads it later.
+
+The state of the stored object is read without downloading it: PUT, HEAD and GET
+answer x-cos-hash-crc64ecma, the CRC64 of the content the server computed when
+it stored the object. The uploader compares the value of the PUT with the value
+of a HEAD (see ChannelUpload._verify), so the object a reader sees is proven to
+be the one that was written, at the cost of one request and zero bytes. A
+listing does not carry the header (measured against the bucket), so the
+verification of a write is the one place that reads one object at a time.
 """
 
 import base64
 import calendar
+import hashlib
 import os
 import re
 import time
@@ -63,6 +69,9 @@ PAGE_SIZE = 1000
 # takes minutes, and a transfer that is slow is not a stalled one
 CONNECT_TIMEOUT = 5.0
 PUT_TIMEOUT = 120.0
+# the read budget of a readback: a file is downloaded at the speed it was
+# written, so a transfer of a large object takes the same order of time
+READ_TIMEOUT = 120.0
 
 # attempts of a request and the wait between them: 0.5 s, then doubled up to a
 # cap of 4 s, 8 attempts in total (0.5 + 1 + 2 + 4 + 4 + 4 + 4 = about 20 s of
@@ -78,6 +87,12 @@ BACKOFF_MAX = 4.0
 # costs nothing, and small enough that the other transfers of the run keep the
 # loop while a big file is being read
 CHUNK_SIZE = 1 << 20
+
+# the header of the CRC64 of an object, answered by PUT, HEAD and GET: the
+# digest of the content the server computed when it stored the object. A
+# listing does not carry it (measured against the bucket), which is why a check
+# of a written object costs one HEAD
+CRC64_HEADER = 'x-cos-hash-crc64ecma'
 
 # the shape of the LastModified of a listing: an ISO 8601 timestamp in UTC,
 # with optional fractional seconds, e.g. 2026-11-06T19:39:59.000Z
@@ -318,7 +333,7 @@ class CosStore(ObjectStore):
 
     CAPABILITIES = Capabilities(
         etag_md5=True,
-        content_md5=True,
+        head_checksum=True,
         dirs=False,
     )
 
@@ -384,7 +399,7 @@ class CosStore(ObjectStore):
         return self._base.raw_authority
 
     # ------------------------------------------------------------------
-    # the five verbs of ObjectStore
+    # the verbs of ObjectStore
     # ------------------------------------------------------------------
 
     async def list(self):
@@ -441,6 +456,66 @@ class CosStore(ObjectStore):
             CosError: If the read fails
         """
         return (await self._call('GET', relative)).content
+
+    async def md5(self, relative):
+        """
+        The MD5 of the object, computed from a streamed read.
+
+        The readback of a write that no digest of the server can prove, see
+        ChannelUpload._verify. The object is never held in memory: the chunks
+        are hashed as they arrive, and the hash runs in a worker thread, so a
+        download of a few hundred MB neither sizes a buffer by the object nor
+        stalls the other transfers of the run.
+
+        Every attempt starts a new digest: a retried transfer reads the object
+        from the start, and the bytes of the failed attempt must not reach the
+        digest of the one that succeeds.
+
+        Args:
+            relative (str): Relative key of the object
+
+        Returns:
+            str: Lowercase hex MD5 of the content
+
+        Raises:
+            ObjectNotFound: If the object does not exist
+            CosError: If the read fails
+        """
+        import httpx2
+
+        timeout = httpx2.Timeout(
+            connect=CONNECT_TIMEOUT,
+            read=READ_TIMEOUT,
+            write=READ_TIMEOUT,
+            pool=CONNECT_TIMEOUT,
+        )
+        for attempt in range(1, self.ATTEMPTS + 1):
+            hasher = hashlib.md5()
+
+            async def consume(response, hasher=hasher):
+                """
+                Hash one response as it arrives.
+
+                Args:
+                    response (httpx2.Response): The open response
+                    hasher (hashlib.md5): The digest of this attempt
+                """
+                async for chunk in response.aiter_bytes(CHUNK_SIZE):
+                    await trio.to_thread.run_sync(hasher.update, chunk)
+
+            # signed per attempt: a retry after a long wait must not carry a
+            # signature that has aged out
+            url, signed = self._prepare('GET', relative)
+            try:
+                # attempts=1: the loop of this method owns the retry and the
+                # wait, and every attempt has a digest of its own
+                await self._client.stream(
+                    url, consume, headers=signed, timeout=timeout, attempts=1)
+                return hasher.hexdigest()
+            except httpx2.HTTPStatusError as e:
+                raise self._cos_error(relative, e.response) from None
+            except httpx2.TransportError as e:
+                await self._retry_or_raise('GET', relative, attempt, e)
 
     async def put(self, relative, file, size, md5, content_type=None, cache_control=None):
         """
@@ -561,15 +636,17 @@ class CosStore(ObjectStore):
         """
         Read the metadata of one object with a single HEAD.
 
-        The core flow does not call this (it takes the state of every key from
-        one listing, see stat()), it is the cheap lookup of a test and of a
-        person debugging a bucket.
+        The verification of a write reads it: the CRC64 of the stored object is
+        compared with the one the PUT answered, so the flow proves the object
+        a reader sees is the one that was written without downloading it (see
+        ChannelUpload._verify). The state of a whole workspace is one listing
+        (see stat()), this is the one object request.
 
         Args:
             relative (str): Relative key of the object
 
         Returns:
-            ObjectInfo: Size, ETag and Last-Modified of the object
+            ObjectInfo: Size, ETag, Last-Modified and the CRC64 of the object
 
         Raises:
             ObjectNotFound: If the object does not exist
@@ -811,14 +888,25 @@ class CosStore(ObjectStore):
         """
         Read the Code and the Message of an error document.
 
+        A streamed request that fails was never read: its body is not available
+        here, and the status is the part of the answer that names the failure.
+
         Args:
             response (httpx2.Response): The refused response
 
         Returns:
             tuple[str, str]: (code, message), (None, None) when the response
-                carries no error document, e.g. the empty body of a HEAD
+                carries no error document, e.g. the empty body of a HEAD or the
+                closed stream of a readback
         """
-        content = response.content
+        import httpx2
+
+        try:
+            content = response.content
+        except httpx2.ResponseNotRead:
+            # the answer of a streamed request: the body was never read, and
+            # the stream is closed by the time the error is mapped
+            return None, None
         if not content:
             return None, None
         try:
@@ -924,6 +1012,7 @@ class CosStore(ObjectStore):
             size=int(size),
             etag=etag,
             last_modified=last_modified if last_modified is not None else time.time(),
+            checksum=response.headers.get(CRC64_HEADER, ''),
         )
 
     async def _put_result(self, response, relative, size):
@@ -947,7 +1036,7 @@ class CosStore(ObjectStore):
             size (int): Size of the file that was sent
 
         Returns:
-            ObjectInfo: Size, ETag and LastModified of the object
+            ObjectInfo: Size, ETag, LastModified and the CRC64 of the object
 
         Raises:
             CosError: If the answer carries no ETag and the HEAD fails
@@ -960,6 +1049,7 @@ class CosStore(ObjectStore):
             size=size,
             etag=etag,
             last_modified=last_modified if last_modified is not None else time.time(),
+            checksum=response.headers.get(CRC64_HEADER, ''),
         )
 
     def _relative(self, key):

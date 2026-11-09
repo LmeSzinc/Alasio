@@ -18,17 +18,14 @@ A client that reads the manifest therefore finds a complete generation, and the
 retire step runs only once the whole generation landed: a mirror that fails
 before step 3 keeps serving the previous generation, which is complete.
 
-The retire step reuses the listing the plan already needed (§6.10 of the
-design), so publishing costs one LIST plus the writes, and the keys of the
-previous generation go without a second pass over the mirror.
+The retire step reuses the listing the plan already needed, so publishing costs
+one LIST plus the writes, and the keys of the previous generation go without a
+second pass over the mirror.
 
 Every request carries a numbered line, `PUT 3/12 wheel/x.whl (1.18MB)`, so a long
 run reads as a progress report instead of a silence that ends in a summary.
-
-See doc/2026-11-07_pack-server-publish-upload-cleanup.md §6.
 """
 
-import hashlib
 from typing import List
 
 import msgspec
@@ -41,8 +38,8 @@ except NameError:  # python 3.8 / 3.9
 
 from alasio.base.pretty import pretty_size
 from alasio.deploy_dev.pack_server.publish.common import (
-    BARRIER_KEY, MANIFEST_KEY, MAX_CONCURRENCY, MD5_HEX, READBACK_MAX, PublishError, SkipChannel, cache_control,
-    content_type, find_skip, first_failure
+    BARRIER_KEY, MANIFEST_KEY, MAX_CONCURRENCY, MD5_HEX, PublishError, SkipChannel, cache_control, content_type,
+    find_skip, first_failure
 )
 from alasio.deploy_dev.pack_server.publish.local import UploadItem
 from alasio.deploy_dev.pack_server.publish.retire import DeletePlan, SkipRetire, build_delete_plan
@@ -206,8 +203,8 @@ class ChannelUpload:
 
     The instance owns the store bound to the channel and the local generation
     shared by every mirror of it: it does no local IO of its own, it awaits
-    `LocalGeneration.files` (§6.11), so three mirrors of one channel read and
-    digest the generation once.
+    `LocalGeneration.files`, so three mirrors of one channel read and digest the
+    generation once.
 
     Usage:
         local = LocalGeneration(workspace)
@@ -273,22 +270,28 @@ class ChannelUpload:
 
     async def _verify(self, info, item):
         """
-        Check that a write landed as it was sent.
+        Check that the object the mirror holds is the local file.
 
-        The order is the cost order, cheapest first (see the plan §5.6):
+        The evidence, cheapest first, and each kind is a statement about the
+        stored object rather than about the request that wrote it:
 
-        1. the ETag the mirror reports is the MD5 of the local file — free, and
-           it covers Content-MD5, which the server checked before it wrote
-           anything;
-        2. otherwise, for a small file, read it back and compare the MD5;
-        3. otherwise compare the size, which is all a mirror without a digest
-           can offer. The transport is TLS and the flow is ours: a silent
-           corruption at this size is not a realistic failure, and the downlink
-           is billed.
+        1. the ETag of a single PUT is the MD5 of the content, when the store
+           declares it (etag_md5). Comparing it costs nothing;
+        2. the store reports a digest of the stored object on a HEAD
+           (head_checksum), in the same form its PUT reported it. The value of
+           the PUT and the value of the HEAD are compared, so a key overwritten
+           after the write is caught without downloading the object and without
+           computing the digest here;
+        3. neither: the object is read back and its MD5 compared (see
+           ObjectStore.md5). This is the only path of a store that reports no
+           digest at all.
 
-        The read-back is a request of its own, which is why this is a method of
-        the uploader and not a free function: the GET goes on the same progress
-        log as the transfers.
+        The size alone is never accepted: an object of the right length can
+        hold other bytes.
+
+        The HEAD and the GET are requests of their own, which is why this is a
+        method of the uploader and not a free function: they go on the same
+        progress log as the transfers.
 
         Args:
             info (ObjectInfo): What the mirror reports about the written object
@@ -298,18 +301,20 @@ class ChannelUpload:
             bool: True when the object is the local file
 
         Raises:
-            StoreError: If the read-back fails
+            StoreError: If the HEAD or the read-back fails
         """
         capabilities = self.store.CAPABILITIES
-        if MD5_HEX.match(info.etag) and (capabilities.etag_md5 or capabilities.content_md5):
+        if capabilities.etag_md5 and MD5_HEX.match(info.etag):
             return info.etag == item.md5
-        if item.size <= READBACK_MAX:
+        if capabilities.head_checksum and info.checksum:
             self._step(
-                'GET', item.relative, pretty_size(item.size) + ', read back to verify',
-                index=False)
-            content = await self.store.get(item.relative)
-            return hashlib.md5(content).hexdigest() == item.md5
-        return info.size == item.size
+                'HEAD', item.relative, 'the checksum the mirror reports', index=False)
+            head = await self.store.head(item.relative)
+            return head.checksum == info.checksum
+        self._step(
+            'GET', item.relative, pretty_size(item.size) + ', read back to verify',
+            index=False)
+        return await self.store.md5(item.relative) == item.md5
 
     async def run(self, dry_run=False):
         """

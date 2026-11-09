@@ -152,6 +152,21 @@ class FakeObject:
         """
         return '"{}"'.format(hashlib.md5(self.data).hexdigest())
 
+    @property
+    def checksum(self):
+        """
+        Returns:
+            str: The value of x-cos-hash-crc64ecma of this content
+
+        The real service answers the CRC-64/XZ of the object, a digest this
+        fake does not compute (the flow never does either: it compares the value
+        of a PUT with the value of a HEAD). Any content-dependent token pins
+        that comparison, and the value of the real service is pinned by the
+        bucket test of test_real.py.
+        """
+        digest = hashlib.md5(self.data).digest()
+        return str(int.from_bytes(digest[:8], 'big'))
+
 
 class FakeCos:
     """
@@ -168,6 +183,8 @@ class FakeCos:
             request served, in order
         fail_next_puts (int): Number of PUTs to answer by raising a transport
             error after the body was received, for the retry test
+        fail_next_gets (int): Number of GETs to answer by raising a transport
+            error before the response is open, for the retry of a readback
         fail_next_requests (int): Number of requests to answer with 500
     """
 
@@ -182,6 +199,7 @@ class FakeCos:
         self.objects = {}
         self.requests = []
         self.fail_next_puts = 0
+        self.fail_next_gets = 0
         self.fail_next_requests = 0
         self._clients = []
         self.app = Starlette(routes=[
@@ -307,6 +325,13 @@ class FakeCos:
             # the client sees a transport error and has to send the body again
             raise httpx2.ReadTimeout('the fake service dropped the connection')
 
+        if (method == 'GET' and self.fail_next_gets
+                and request.query_params.get('list-type') != '2'):
+            self.fail_next_gets -= 1
+            # a readback of one object: the connection is dropped before an
+            # answer is opened, so the retry has to start the digest over
+            raise httpx2.ReadTimeout('the fake service dropped the connection')
+
         problem = self._check_authorization(request, scope['path'])
         if problem is not None:
             code, message = problem
@@ -364,7 +389,10 @@ class FakeCos:
             request.headers.get('content-type', 'application/octet-stream'),
             request.headers.get('cache-control'),
         )
-        return self._answer(200, b'', {'ETag': self.objects[key].etag})
+        return self._answer(200, b'', {
+            'ETag': self.objects[key].etag,
+            'x-cos-hash-crc64ecma': self.objects[key].checksum,
+        })
 
     def _get(self, key):
         """
@@ -511,6 +539,7 @@ class FakeCos:
             'ETag': obj.etag,
             'Last-Modified': self._http_date(obj.last_modified),
             'Content-Type': obj.content_type,
+            'x-cos-hash-crc64ecma': obj.checksum,
         }
         if obj.cache_control:
             headers['Cache-Control'] = obj.cache_control

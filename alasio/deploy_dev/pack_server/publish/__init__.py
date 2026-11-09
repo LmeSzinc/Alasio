@@ -18,14 +18,13 @@ repo names, and removes what a later generation no longer serves:
   lists it: the keep set and the age of the generation come from the same
   generation, and a half written one is never deleted.
 
-Neither of them knows what the host is: both work on the seven methods of
-``alasio.deploy_dev.store.ObjectStore``. See
-doc/2026-11-07_pack-server-publish-upload-cleanup.md for the design.
+Neither of them knows what the host is: both work on the methods of
+``alasio.deploy_dev.store.ObjectStore``.
 """
 
 from alasio.deploy_dev.pack_server.publish.common import (
-    BARRIER_KEY, MANIFEST_KEY, READBACK_MAX, ConfigError, PublishError, PublishRunError, ancestor_folders,
-    cache_control, content_type, is_no_cache
+    BARRIER_KEY, MANIFEST_KEY, ConfigError, PublishError, PublishRunError, ancestor_folders, cache_control,
+    content_type, is_no_cache
 )
 from alasio.deploy_dev.pack_server.publish.drivers import DRIVERS, Driver, create_store, driver_name, workspace_prefix
 from alasio.deploy_dev.pack_server.publish.env import env_value
@@ -36,7 +35,6 @@ __all__ = [
     'DRIVERS',
     'LOCK_FOLDER',
     'MANIFEST_KEY',
-    'READBACK_MAX',
     'ChannelBusy',
     'ChannelLock',
     'ConfigError',
