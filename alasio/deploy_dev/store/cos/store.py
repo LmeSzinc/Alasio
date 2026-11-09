@@ -43,8 +43,8 @@ from yarl import URL
 
 from alasio.deploy.httpclient.client_async import AsyncHttpClient
 from alasio.deploy_dev.store import (
-    Capabilities, ObjectInfo, ObjectListing, ObjectNotFound, ObjectStore, StoreError, close_local, open_local,
-    read_chunks
+    BucketNotFound, Capabilities, ObjectInfo, ObjectListing, ObjectNotFound, ObjectStore, StoreError, close_local,
+    open_local, read_chunks
 )
 from alasio.deploy_dev.store.cos.sign import CosSigner
 from alasio.logger import logger
@@ -788,21 +788,36 @@ class CosStore(ObjectStore):
 
         The error document of COS is an xml of <Error><Code>...</Code>
         <Message>...</Message></Error>; the code is the part a caller can act on
-        (a missing key, a denied policy, a signature of a clock that is off).
-        The body of a signature error also echoes the canonical string, which
-        holds no secret but is noise in a log: only Code and Message are read.
+        (a missing key, a missing bucket, a denied policy, a signature of a clock
+        that is off). The body of a signature error also echoes the canonical
+        string, which holds no secret but is noise in a log: only Code and
+        Message are read.
+
+        A missing bucket and a missing key are both a 404, and the code of the
+        error document is the only thing that tells them apart. The two are
+        reported differently because they ask for different actions: a bucket
+        that does not exist is a remote that has to be configured again, while a
+        key that does not exist is a file that has to be written. A 404 without
+        a code is the empty body of a HEAD, and is read as a missing key: a HEAD
+        cannot answer which of the two it was.
 
         Args:
             relative (str): Relative key of the request
             response (httpx2.Response): The refused response
 
         Returns:
-            StoreError: ObjectNotFound for a missing key, CosError otherwise
+            StoreError: BucketNotFound for a missing bucket, ObjectNotFound for
+                a missing key, CosError otherwise
         """
         status = response.status_code
         code, message = self._parse_error(response)
         name = self._describe(relative)
-        if status == 404 or code == 'NoSuchKey':
+        if code == 'NoSuchBucket':
+            return BucketNotFound(
+                f'bucket "{self.bucket}" in region "{self.region}" does not exist '
+                f'({message or "NoSuchBucket"}): check the Bucket and Region of the remote'
+            )
+        if code == 'NoSuchKey' or (status == 404 and code is None):
             return ObjectNotFound(f'Object "{name}" does not exist')
         detail = f'{status}'
         if code:

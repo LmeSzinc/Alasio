@@ -43,11 +43,11 @@ except NameError:  # python 3.8 / 3.9
 
 from alasio.base.pretty import pretty_size
 from alasio.deploy_dev.pack_server.publish.common import (
-    BARRIER_KEY, MANIFEST_KEY, MAX_CONCURRENCY, MD5_HEX, IncompleteStore, PublishError, SkipChannel, cache_control,
-    content_type, find_skip, first_failure, require_capabilities
+    BARRIER_KEY, MANIFEST_KEY, MAX_CONCURRENCY, MD5_HEX, ConfigError, IncompleteStore, PublishError, SkipChannel,
+    cache_control, content_type, find_skip, first_failure, require_capabilities
 )
 from alasio.deploy_dev.pack_server.publish.retire import DeletePlan, SkipRetire, build_delete_plan
-from alasio.deploy_dev.store import ObjectNotFound
+from alasio.deploy_dev.store import BucketNotFound, ObjectNotFound
 from alasio.ext.cache import cached_property_async_trio_lock
 from alasio.logger import logger
 
@@ -258,6 +258,8 @@ class ChannelUpload:
             ObjectListing: The objects and the clock of the server
 
         Raises:
+            ConfigError: If the bucket of the remote does not exist: a remote
+                that has to be configured again, not a mirror that is down
             PublishError: If the store cannot list the workspace. A store that
                 cannot list is not published to file by file: the failure is
                 the credential, the prefix or the network, and one request per
@@ -265,6 +267,8 @@ class ChannelUpload:
         """
         try:
             return await self.store.list()
+        except BucketNotFound as e:
+            raise ConfigError(f'{self._where()}: {e}') from None
         except Exception as e:  # noqa: BLE001 - one pair must not stop the run
             raise PublishError(
                 f'{self._where()}: cannot list the workspace: {e}') from None

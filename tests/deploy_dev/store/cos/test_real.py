@@ -51,7 +51,7 @@ import httpcore2  # noqa: F401
 import pytest
 import trio
 
-from alasio.deploy_dev.store import ObjectNotFound
+from alasio.deploy_dev.store import BucketNotFound, ObjectNotFound
 from alasio.deploy_dev.store.cos import CosError, CosStore
 
 ENV_PREFIX = 'ALAS2026_COS'
@@ -436,6 +436,33 @@ class TestCosClientReal:
             'SignatureDoesNotMatch', 'InvalidAccessKeyId', 'AccessDenied')
         for value in override.values():
             assert value not in str(caught.value)
+
+    @pytest.mark.trio
+    async def test_a_missing_bucket_is_not_a_missing_key(self, request):
+        """A Bucket that does not exist is refused as such, not as a missing key.
+
+        The cleaner reads a missing key as "this workspace was never published"
+        and a missing bucket as a remote that has to be configured again. The
+        two are both a 404, and only the code of the error document tells them
+        apart, so this is the fact the classification of the store rests on.
+
+        The bucket name is random and the endpoint is not overridden: a bucket
+        that never existed answers from the service itself, not from a proxy
+        configuration of the machine that runs the test.
+        """
+        store = make_store(
+            folder_of(request),
+            bucket=f'alasio-missing-{secrets.token_hex(4)}',
+            endpoint=None,
+        )
+        try:
+            with pytest.raises(BucketNotFound) as caught:
+                await store.list()
+        finally:
+            await store.aclose()
+        assert not isinstance(caught.value, ObjectNotFound)
+        assert 'does not exist' in str(caught.value)
+        assert 'Bucket' in str(caught.value)
 
 
 class TestCosCapabilitiesReal:

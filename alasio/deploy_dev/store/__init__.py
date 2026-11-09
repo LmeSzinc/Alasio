@@ -59,6 +59,18 @@ class ObjectNotFound(StoreError):
     """
 
 
+class BucketNotFound(StoreError):
+    """
+    Raised when the container of a store (a bucket, a collection) does not exist.
+
+    A different fact from a missing key: the key is asked for inside a workspace
+    that the store itself cannot reach, so no object of it exists and no run
+    against it can succeed. It is the configuration of the remote that has to be
+    corrected, not the mirror that has to be cleaned or filled, and a caller
+    reports it as a config error rather than as a failed request.
+    """
+
+
 class ObjectInfo(msgspec.Struct):
     """
     What a store reports about one object.

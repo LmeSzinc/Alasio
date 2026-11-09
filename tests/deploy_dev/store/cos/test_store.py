@@ -32,7 +32,7 @@ import pytest
 import trio
 
 from alasio.deploy.httpclient.client_async import AsyncHttpClient
-from alasio.deploy_dev.store import ObjectNotFound, read_chunks
+from alasio.deploy_dev.store import BucketNotFound, ObjectNotFound, read_chunks
 from alasio.deploy_dev.store.cos import CosError, CosStore
 from alasio.deploy_dev.store.cos.store import (
     normalize_etag, normalize_prefix, parse_endpoint, parse_http_date, parse_iso8601, validate_relative
@@ -518,6 +518,35 @@ class TestErrors:
         """A missing key on a read is ObjectNotFound."""
         with pytest.raises(ObjectNotFound):
             await store.get('v1/missing.bin')
+
+    @pytest.mark.trio
+    async def test_a_missing_bucket_is_not_a_missing_key(self, store, fake_cos):
+        """A wrong Bucket or Region is BucketNotFound, which no caller may skip.
+
+        Both are a 404; the code of the error document is what tells them apart,
+        and a cleanup that read a missing bucket as an unpublised workspace
+        would report success on a remote that has to be configured again.
+        """
+        fake_cos.bucket_missing = True
+        with pytest.raises(BucketNotFound) as caught:
+            await store.get('v1/data.bin')
+        assert 'does not exist' in str(caught.value)
+        assert 'Bucket' in str(caught.value)
+        assert not isinstance(caught.value, ObjectNotFound)
+
+    @pytest.mark.trio
+    async def test_a_missing_bucket_fails_the_listing(self, store, fake_cos):
+        """The listing of a bucket that does not exist is not an empty listing."""
+        fake_cos.bucket_missing = True
+        with pytest.raises(BucketNotFound):
+            await store.list()
+
+    @pytest.mark.trio
+    async def test_a_missing_bucket_fails_the_delete(self, store, fake_cos):
+        """A delete never swallows a missing bucket: only a missing key is idempotent."""
+        fake_cos.bucket_missing = True
+        with pytest.raises(BucketNotFound):
+            await store.delete('v1/data.bin')
 
     @pytest.mark.trio
     async def test_server_error(self, store, fake_cos):

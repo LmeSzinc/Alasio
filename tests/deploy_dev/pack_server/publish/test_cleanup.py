@@ -12,9 +12,9 @@ import time
 import pytest
 
 from alasio.deploy_dev.pack_server.publish.cleanup import (
-    STATUS_DRY_RUN, STATUS_OK, STATUS_SKIPPED, ChannelCleanup, CleanupRun, SkipCleanup, build_delete_plan
+    STATUS_DRY_RUN, STATUS_FAILED, STATUS_OK, STATUS_SKIPPED, ChannelCleanup, CleanupRun, SkipCleanup, build_delete_plan
 )
-from alasio.deploy_dev.pack_server.publish.common import BARRIER_KEY, MANIFEST_KEY
+from alasio.deploy_dev.pack_server.publish.common import BARRIER_KEY, MANIFEST_KEY, PublishRunError
 from alasio.deploy_dev.store import ObjectInfo, ObjectListing
 from alasio.logger import logger
 from alasio.testing.filesystem import fs  # noqa: F401
@@ -402,6 +402,38 @@ class TestDryRun:
         assert result.status == STATUS_DRY_RUN
         assert result.deleted == 1
         assert f'{PREFIX}old/full.pack' in credentials_env.objects
+
+
+class TestMissingBucket:
+    """A bucket that does not exist fails the clean; it never looks empty."""
+
+    @pytest.mark.trio
+    async def test_the_channel_fails_instead_of_skipping(self, workspace, credentials_env):
+        """A mirror that published yesterday and has no bucket today is an error.
+
+        Both facts are a 404 on the contract of the workspace; reporting the
+        second as "never published" would make the run exit 0.
+        """
+        await fill(workspace, credentials_env)
+        credentials_env.bucket_missing = True
+        store = make_store(make_remote(), CHANNEL, credentials_env)
+        cleanup = ChannelCleanup(CHANNEL, store, GRACE, remote_name='cos-main')
+        try:
+            result = await cleanup.run()
+        finally:
+            await store.aclose()
+        assert result.status == STATUS_FAILED
+        assert 'does not exist' in result.reason
+        assert 'Bucket' in result.reason
+
+    @pytest.mark.trio
+    async def test_the_run_reports_the_pair_as_failed(self, workspace, credentials_env, config):
+        """The config run fails the remote, it does not finish successfully."""
+        await fill(workspace, credentials_env)
+        credentials_env.bucket_missing = True
+        with pytest.raises(PublishRunError) as caught:
+            await CleanupRun(config, client=credentials_env.client()).run()
+        assert 'does not exist' in caught.value.failed[0][2]
 
 
 class TestRun:

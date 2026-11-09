@@ -184,6 +184,8 @@ class FakeCos:
         fail_next_puts (int): Number of PUTs to answer by raising a transport
             error after the body was received, for the retry test
         fail_next_requests (int): Number of requests to answer with 500
+        bucket_missing (bool): True to answer every request with the 404 of a
+            bucket that does not exist, as COS does for a wrong Bucket or Region
     """
 
     def __init__(self, secret_id='AKIDFAKE', secret_key='FAKESECRET'):
@@ -198,6 +200,7 @@ class FakeCos:
         self.requests = []
         self.fail_next_puts = 0
         self.fail_next_requests = 0
+        self.bucket_missing = False
         self._clients = []
         self.app = Starlette(routes=[
             Route('/{key:path}', self.handle, methods=['GET', 'HEAD', 'PUT', 'DELETE']),
@@ -314,6 +317,12 @@ class FakeCos:
         if self.fail_next_requests:
             self.fail_next_requests -= 1
             return self._error(500, 'InternalError', 'injected failure')
+
+        if self.bucket_missing:
+            # before the signature: a bucket that does not exist is refused
+            # before the credentials of the request can be checked
+            return self._error(
+                404, 'NoSuchBucket', 'The specified bucket does not exist')
 
         if method == 'PUT' and self.fail_next_puts:
             self.fail_next_puts -= 1

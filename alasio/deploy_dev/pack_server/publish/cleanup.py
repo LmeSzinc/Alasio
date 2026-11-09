@@ -36,7 +36,7 @@ from alasio.deploy_dev.pack_server.publish.common import (
 )
 from alasio.deploy_dev.pack_server.publish.drivers import create_store
 from alasio.deploy_dev.pack_server.publish.retire import SkipRetire as SkipCleanup, build_delete_plan
-from alasio.deploy_dev.store import ObjectNotFound
+from alasio.deploy_dev.store import BucketNotFound, ObjectNotFound
 from alasio.ext.path.validate import validate_filepath
 from alasio.logger import logger
 
@@ -180,6 +180,11 @@ class ChannelCleanup:
             return CleanupResult(
                 channel=self.workspace_name, remote=self.remote_name,
                 status=STATUS_SKIPPED, reason=str(e))
+        except BucketNotFound as e:
+            # no object of this workspace exists, because the bucket itself does
+            # not: the remote has to be configured, and it must not look like a
+            # workspace that was never published
+            return self._failed(f'[{self.remote_name}] {self.workspace_name}: {e}')
         except (PublishError, ObjectNotFound) as e:
             return self._failed(str(e))
 
@@ -248,6 +253,8 @@ class ChannelCleanup:
 
         Raises:
             SkipCleanup: If the mirror holds no complete generation
+            BucketNotFound: If the bucket of the remote does not exist, which
+                is a config error and never a workspace that was not published
             PublishError: If a read fails
         """
         found = {}

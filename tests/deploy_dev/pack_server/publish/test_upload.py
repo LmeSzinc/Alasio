@@ -19,7 +19,9 @@ from alasio.deploy_dev.pack_server.publish.channel import (
     COMPARE_SAME, COMPARE_UPLOAD, SOURCE_ABSENT, SOURCE_HEAD, SOURCE_LIST, STATUS_DRY_RUN, STATUS_OK, STATUS_SKIPPED,
     ChannelUpload, RemoteState, compare
 )
-from alasio.deploy_dev.pack_server.publish.common import BARRIER_KEY, MANIFEST_KEY, IncompleteStore, PublishError
+from alasio.deploy_dev.pack_server.publish.common import (
+    BARRIER_KEY, MANIFEST_KEY, ConfigError, IncompleteStore, PublishError
+)
 from alasio.deploy_dev.pack_server.publish.local import LocalGeneration, UploadItem
 from alasio.deploy_dev.pack_server.publish.upload import UploadRun
 from alasio.deploy_dev.store import Capabilities, ObjectInfo, ObjectListing
@@ -435,6 +437,39 @@ class TestCapabilities:
                 await make_upload(workspace, store).run()
         finally:
             await inner.aclose()
+
+
+class TestMissingBucket:
+    """A remote whose bucket does not exist is a config error, not an empty mirror."""
+
+    @pytest.mark.trio
+    async def test_the_run_is_a_config_error(self, workspace, credentials_env):
+        """The wrong Bucket or Region stops the pair before anything is written."""
+        credentials_env.bucket_missing = True
+        store = make_store(make_remote(), CHANNEL, credentials_env)
+        try:
+            with pytest.raises(ConfigError) as caught:
+                await make_upload(workspace, store).run()
+        finally:
+            await store.aclose()
+        assert 'does not exist' in str(caught.value)
+        assert 'Bucket' in str(caught.value)
+        assert [r for r in credentials_env.requests if r[0] == 'PUT'] == []
+
+    @pytest.mark.trio
+    async def test_the_pair_is_reported_as_failed(self, workspace, credentials_env, config):
+        """A run of the config fails the remote, it never reports success.
+
+        The reason names the bucket, so an operator reads "fix the config"
+        rather than "the workspace was never published".
+        """
+        from alasio.deploy_dev.pack_server.publish.common import PublishRunError
+        credentials_env.bucket_missing = True
+        with pytest.raises(PublishRunError) as caught:
+            await UploadRun(config, client=credentials_env.client()).run()
+        reason = caught.value.failed[0][2]
+        assert 'does not exist' in reason
+        assert 'skipped' not in reason.lower()
 
 
 class TestGuards:
