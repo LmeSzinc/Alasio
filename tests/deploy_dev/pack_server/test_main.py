@@ -14,10 +14,12 @@ import pytest
 from alasio.deploy_dev.pack_server import main
 from alasio.deploy_dev.pack_server.gate import RunDirError, check_run_dir
 from alasio.deploy_dev.pack_server.model import PackRepoConfig
+from alasio.deploy_dev.pack_server.publish.lock import ChannelLock
 from alasio.ext import env
 from alasio.ext.path import PathStr
 from alasio.logger import logger
 from alasio.testing.filesystem import fs  # noqa: F401
+from tests.deploy_dev.pack_server.conftest import use_memory_lock
 
 FILE = 'LmeSzinc_AzurLaneAutoScript_master.yaml'
 OTHER = 'LmeSzinc_StarRailCopilot_master.yaml'
@@ -29,12 +31,16 @@ def run_dir(fs, monkeypatch):
     """
     A run directory of the pack server, set as env.PROJECT_ROOT.
 
+    The lock of a channel is swapped for the in-memory lock of the tests, see
+    the conftest of the pack server.
+
     Returns:
         PathStr: Absolute path of the run directory
     """
     root = PathStr.new(fs.root_dir.path).joinpath('pack_server')
     fs.create_dir(root)
     monkeypatch.setattr(env, 'PROJECT_ROOT', root)
+    use_memory_lock(monkeypatch)
     return root
 
 
@@ -255,6 +261,30 @@ class TestRunConfig:
         with pytest.raises(ValueError, match='Empty Author'):
             main.PackServer().run_config(FILE)
         assert calls == []
+
+    def test_the_generation_holds_the_lock_of_the_channel(self, fs, run_dir, monkeypatch):
+        """The generation runs under the lock, and the lock is released after it.
+
+        A publication of the same workspace, e.g. the one of PackRun, must never
+        read it halfway through a run.
+        """
+        make_config(run_dir)
+        calls = []
+        held = []
+        repo_class = fake_repo(calls)
+        workspace = 'LmeSzinc_AzurLaneAutoScript_master'
+
+        class LockedRepo(repo_class):
+            def __init__(self, config):
+                super().__init__(config)
+                held.append(ChannelLock(workspace).is_locked)
+
+        monkeypatch.setattr(main, 'PackRepo', LockedRepo)
+        monkeypatch.setattr(main, 'Repo', fake_gen(calls))
+        main.PackServer().run_config(FILE)
+        assert held == [True]
+        assert [step for step, *_ in calls] == ['repo', 'gen', 'gen-commit']
+        assert not ChannelLock(workspace).is_locked
 
 
 class TestPackServerRun:

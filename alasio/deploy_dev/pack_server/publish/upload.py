@@ -32,9 +32,17 @@ class UploadRun:
     next one: an unreachable mirror must not stop the publication to the others.
     A pair that is skipped (a generation that is not complete) is not a failure.
 
+    The run takes no lock of the channel: the entry point that runs the whole
+    channel holds it, see publish/lock.py. PackRun keeps it across the
+    generation and this publication, which is the whole reason the lock exists;
+    a caller that publishes a workspace on its own wraps this run in a
+    ChannelLock itself, so the workspace is never read halfway through a
+    generation.
+
     Usage:
         config = PackRepoConfig('LmeSzinc_AzurLaneAutoScript_master.yaml')
-        results = await UploadRun(config).run(dry_run=False)
+        with ChannelLock(config.data.workspace_name).locked():
+            results = await UploadRun(config).run(dry_run=False)
     """
 
     def __init__(self, config, client=None, concurrency=None):

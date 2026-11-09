@@ -36,6 +36,7 @@ import argparse
 from alasio.deploy_dev.pack_server.gate import check_run_dir
 from alasio.deploy_dev.pack_server.model import PackRepoConfig
 from alasio.deploy_dev.pack_server.pack_repo import PackRepo
+from alasio.deploy_dev.pack_server.publish.lock import ChannelLock
 from alasio.deploy_dev.pack_server.repo import Repo
 from alasio.ext import env
 from alasio.logger import logger
@@ -92,10 +93,15 @@ class PackServer:
         barrier a client switches the version at. A failure of any step fails
         the config and keeps the previous latest.pack serving the clients.
 
+        The lock of the channel is held for the whole generation: a publication
+        of the same workspace, e.g. the one of PackRun, must never read it
+        halfway through a run, see publish/lock.py.
+
         Args:
             file (str): Name of the config file in the config folder
 
         Raises:
+            ChannelBusy: If another run holds the lock of the channel
             RunDirError: If env.PROJECT_ROOT is not a run directory of the
                 pack server, see check_run_dir
             ValueError: If Author, Repo, Remote or Branch of the config is
@@ -105,12 +111,13 @@ class PackServer:
             OSError: If a pack of the repo cannot be written
         """
         config = PackRepoConfig(file)
-        repo = PackRepo(config.data).run()
-        gen = Repo(repo, config.data)
-        gen.run()
-        # latest.pack is the publication barrier: the leftover packs and
-        # wheels of the previous version stay on the disk until it is written
-        gen.commit()
+        with ChannelLock(config.data.workspace_name).locked():
+            repo = PackRepo(config.data).run()
+            gen = Repo(repo, config.data)
+            gen.run()
+            # latest.pack is the publication barrier: the leftover packs and
+            # wheels of the previous version stay on the disk until it is written
+            gen.commit()
 
     def run(self):
         """

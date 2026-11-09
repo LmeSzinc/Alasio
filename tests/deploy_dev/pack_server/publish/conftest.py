@@ -29,6 +29,7 @@ from alasio.ext.file.yamlconfig import YamlConfig
 from alasio.ext.path import PathStr
 from alasio.ext.path.atomic import atomic_write
 from alasio.testing.filesystem import fs  # noqa: F401
+from tests.deploy_dev.pack_server.conftest import use_memory_lock
 from tests.deploy_dev.store.cos.fake_cos import FakeCos
 
 # the environment prefix of the remote of the tests
@@ -84,12 +85,18 @@ def run_dir(fs, monkeypatch):
     """
     A run directory of the pack server, set as env.PROJECT_ROOT.
 
+    The lock of a channel is swapped for the in-memory lock of the tests: the
+    real lock is a SQLite database, opened in the C layer of the interpreter
+    where the in-memory filesystem cannot serve it, see the conftest of the
+    pack server.
+
     Returns:
         PathStr: Absolute path of the run directory
     """
     root = PathStr.new(fs.root_dir.path).joinpath('pack_server')
     root.makedirs(exist_ok=True)
     monkeypatch.setattr(env, 'PROJECT_ROOT', root)
+    use_memory_lock(monkeypatch)
     return root
 
 

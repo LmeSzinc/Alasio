@@ -16,6 +16,10 @@ run (the same rule the generator follows). The whole run is reported at the end,
 and a config of which either half failed makes the run fail, so a scheduler sees
 it and retries.
 
+The two halves of one config hold the exclusive lock of its channel for the
+whole of them: a second run of the same channel is refused (ChannelBusy) instead
+of reading a workspace halfway through its replacement, see publish/lock.py.
+
 The publish half never runs on a workspace whose generation failed: a half
 written workspace would be refused by the guard of the uploader anyway, but not
 asking is cheaper and the log says why.
@@ -37,6 +41,7 @@ from alasio.deploy_dev.pack_server.gate import check_run_dir
 from alasio.deploy_dev.pack_server.model import PackRepoConfig
 from alasio.deploy_dev.pack_server.pack_repo import PackRepo
 from alasio.deploy_dev.pack_server.publish.common import ConfigError, PublishRunError, require_valid
+from alasio.deploy_dev.pack_server.publish.lock import ChannelLock
 from alasio.deploy_dev.pack_server.publish.upload import UploadRun
 from alasio.deploy_dev.pack_server.repo import Repo
 from alasio.ext import env
@@ -140,6 +145,12 @@ class PackRun:
         subprocess and file IO, and the event loop of the publication has
         nothing to do while it runs.
 
+        The lock of the channel is held across both halves: the publication
+        reads the tree the generation just wrote, and a second run of the same
+        channel must neither generate it halfway through the upload nor upload
+        it halfway through the generation. The lock is taken once, here, and
+        the steps inside it take none of their own, see publish/lock.py.
+
         Args:
             name (str): Name of the config file in the config folder
             remotes (Iterable[str]): Remote names of the call, None for every
@@ -151,6 +162,7 @@ class PackRun:
             list[UploadResult]: The publication result of every remote
 
         Raises:
+            ChannelBusy: If another run holds the lock of the channel
             ConfigError: If the config or a remote is not usable
             PublishRunError: If at least one remote failed
             RunDirError: If the run directory is not usable
@@ -160,12 +172,14 @@ class PackRun:
         # the generation reads the config model, the publication reads the same
         # object: one file, one read
         require_valid(config)
-        if dry_run:
-            logger.info(f'Config "{name}": dry run, the generation is skipped')
-        else:
-            await trio.to_thread.run_sync(_generate, config)
-        results = await UploadRun(config, client=self.client).run(
-            remotes=remotes, dry_run=dry_run)
+        lock = ChannelLock(config.data.workspace_name)
+        async with lock.alocked():
+            if dry_run:
+                logger.info(f'Config "{name}": dry run, the generation is skipped')
+            else:
+                await trio.to_thread.run_sync(_generate, config)
+            results = await UploadRun(config, client=self.client).run(
+                remotes=remotes, dry_run=dry_run)
         return results
 
 

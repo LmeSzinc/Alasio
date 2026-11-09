@@ -29,12 +29,16 @@ from alasio.deploy_dev.pack_server.publish.common import (
 )
 from alasio.deploy_dev.pack_server.publish.drivers import DRIVERS, Driver, create_store, driver_name, workspace_prefix
 from alasio.deploy_dev.pack_server.publish.env import env_value
+from alasio.deploy_dev.pack_server.publish.lock import LOCK_FOLDER, ChannelBusy, ChannelLock
 
 __all__ = [
     'BARRIER_KEY',
     'DRIVERS',
+    'LOCK_FOLDER',
     'MANIFEST_KEY',
     'READBACK_MAX',
+    'ChannelBusy',
+    'ChannelLock',
     'ConfigError',
     'Driver',
     'PublishError',

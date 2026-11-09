@@ -11,16 +11,20 @@ import pytest
 
 import alasio.deploy_dev.pack_server.run as run_module
 from alasio.deploy_dev.pack_server.model import PackRepoModel, RepoConfig
+from alasio.deploy_dev.pack_server.publish.channel import ChannelUpload
+from alasio.deploy_dev.pack_server.publish.lock import ChannelLock
 from alasio.deploy_dev.pack_server.run import PackRun, PackRunError
 from alasio.ext import env
 from alasio.ext.file.yamlconfig import YamlConfig
 from alasio.ext.path import PathStr
 from alasio.logger import logger
 from alasio.testing.filesystem import fs  # noqa: F401
+from tests.deploy_dev.pack_server.conftest import use_memory_lock
 from tests.deploy_dev.pack_server.publish import conftest as publish_fixtures
 from tests.deploy_dev.pack_server.publish.conftest import (
     AUTHOR, BRANCH, CHANNEL, REPO, Generation, make_model, make_remote
 )
+from tests.deploy_dev.pack_server.publish.test_lock import holder_thread
 
 # the fixtures of the publication, reused here: the services of the mirror and the
 # credentials belong to that package, and the run drives the real publication
@@ -39,12 +43,16 @@ def run_dir(fs, monkeypatch):
     """
     A run directory of the pack server, set as env.PROJECT_ROOT.
 
+    The lock of a channel is swapped for the in-memory lock of the tests, see
+    the conftest of the pack server.
+
     Returns:
         PathStr: Absolute path of the run directory
     """
     root = PathStr.new(fs.root_dir.path).joinpath('pack_server')
     root.makedirs(exist_ok=True)
     monkeypatch.setattr(env, 'PROJECT_ROOT', root)
+    use_memory_lock(monkeypatch)
     return root
 
 
@@ -127,6 +135,60 @@ class TestPackRun:
         with pytest.raises(PackRunError) as caught:
             await PackRun(client=credentials_env.client()).run()
         assert len(caught.value.errors) == 2
+
+    @pytest.mark.trio
+    async def test_the_lock_covers_the_generation_and_the_publication(
+            self, run_dir, credentials_env, monkeypatch):
+        """Both halves of a config run under the lock of its channel.
+
+        The publication reads the tree the generation wrote: a second run of the
+        channel must not slip in between them, so the lock is taken before the
+        generation and released after the last upload.
+        """
+        write_config(run_dir)
+        held = []
+        generated = stub_generation(monkeypatch)
+        generate = run_module._generate
+
+        def checked_generate(config):
+            held.append(ChannelLock(CHANNEL).is_locked)
+            generate(config)
+
+        original = ChannelUpload.run
+
+        async def checked_upload(self, dry_run=False):
+            held.append(ChannelLock(CHANNEL).is_locked)
+            return await original(self, dry_run)
+
+        monkeypatch.setattr(run_module, '_generate', checked_generate)
+        monkeypatch.setattr(ChannelUpload, 'run', checked_upload)
+        results = await PackRun(client=credentials_env.client()).run()
+        assert held == [True, True]
+        assert generated == [CHANNEL]
+        assert [result.status for result in results] == ['ok']
+        assert not ChannelLock(CHANNEL).is_locked
+
+    @pytest.mark.trio
+    async def test_a_busy_channel_is_reported(self, run_dir, credentials_env, monkeypatch):
+        """A channel another run holds is reported, and it is not generated.
+
+        The holder is a generation or a publication of the same workspace; the
+        scheduler retries the channel on its next round, so this run leaves it
+        alone instead of waiting.
+        """
+        write_config(run_dir)
+        generated = stub_generation(monkeypatch)
+        thread, release = holder_thread(ChannelLock(CHANNEL))
+        try:
+            with pytest.raises(PackRunError) as caught:
+                await PackRun(client=credentials_env.client()).run()
+        finally:
+            release.set()
+            thread.join(30)
+        assert generated == []
+        assert credentials_env.objects == {}
+        assert 'is being generated or published by another run' in str(
+            caught.value.errors[0][1])
 
     @pytest.mark.trio
     async def test_a_dry_run_skips_the_generation(self, run_dir, credentials_env,
