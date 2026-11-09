@@ -7,7 +7,7 @@ files, the listing of the mirror and the grace -- so it calls no store and can
 be tested without one. Two callers use it:
 
 - `ChannelUpload` retires the leftovers of the previous generation right after it
-  published the new one, from the listing it already made for the plan (§6.10);
+  published the new one, from the listing it already made for the plan;
 - `ChannelCleanup` retires a mirror whose local workspace is gone, from a
   listing it makes for that purpose.
 

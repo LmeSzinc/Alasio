@@ -16,8 +16,6 @@ A key the manifest does not list is deleted once BOTH the barrier of this remote
 has been in place for the grace, and the key itself is older than the grace: the
 first condition gives every client the full window to notice the new version, the
 second protects the leftovers of an interrupted upload.
-
-See doc/2026-11-07_pack-server-publish-upload-cleanup.md §7.
 """
 
 

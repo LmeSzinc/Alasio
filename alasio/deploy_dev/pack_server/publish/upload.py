@@ -6,8 +6,6 @@ builds the local generation of its workspace once (see local.py), and drives one
 `ChannelUpload` per remote (see channel.py). A remote that fails is reported and
 the run continues with the next one: an unreachable mirror must not stop the
 publication to the others.
-
-See doc/2026-11-07_pack-server-publish-upload-cleanup.md §6.
 """
 
 from alasio.deploy_dev.pack_server.publish.channel import STATUS_FAILED, ChannelUpload, UploadResult

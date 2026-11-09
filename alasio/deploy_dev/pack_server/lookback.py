@@ -6,7 +6,7 @@ lookback commits, and an update pack from every lookback commit to the
 latest commit, see PackRepoModel for the pack files.
 
 Note: the parent selection is a known open issue, the current implementation
-walks every parent of every commit, see doc/2026-09-25_lookback-parent-and-merge-message.md
+walks every parent of every commit.
 """
 
 import heapq
@@ -69,8 +69,8 @@ bounded by it, it is not a lookback version at all, see latest_commit.
     of a commit, so the commits of a feature branch of a pull request are
     lookback commits too, though a client never runs them. Which parent to
     follow is a known open issue, the plan is to read it from the merge
-    message, see doc/2026-09-25_lookback-parent-and-merge-message.md ; the
-    'parent-0' rule is the rough way to get rid of them on a main branch.
+    message; the 'parent-0' rule is the rough way to get rid of them on a main
+    branch.
     """
 
     def __init__(self, repo, config):

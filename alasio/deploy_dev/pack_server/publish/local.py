@@ -4,17 +4,16 @@ its files.
 
 The facts here belong to the **channel**, not to a mirror. The records of a
 generation are two files on the disk, and the digests of the files they name do
-not change while a run publishes them (the run lock of §9 exists for exactly
-that reason). A run that mirrors one generation to three hosts must therefore
-read and digest it **once**, not once per host: a generation of 300 files and
-1.5 GB would otherwise re-read 4.5 GB from the disk for the third mirror.
+not change while a run publishes them: the lock of the channel keeps every
+writer but this run out of the workspace for the whole of it (see lock.py). A
+run that mirrors one generation to three hosts must therefore read and digest
+it **once**, not once per host: a generation of 300 files and 1.5 GB would
+otherwise re-read 4.5 GB from the disk for the third mirror.
 
 `LocalGeneration.files` is an async cached property (see
 `cached_property_async_trio_lock`): the first channel to await it digests the
 generation, the other channels await the same result without doing any IO, and
 concurrent first awaits are deduplicated by a trio lock.
-
-See doc/2026-11-07_pack-server-publish-upload-cleanup.md §6.11.
 """
 
 from typing import List
@@ -82,7 +81,8 @@ class LocalGeneration:
     channel: the first one to await `files` reads the record and digests the
     files, the others await the same result. An instance is a snapshot of a
     generation, not a live view: a generator that writes a new generation needs
-    a new instance (the run lock of §9 keeps the two apart).
+    a new instance, and the lock of the channel keeps the two apart (see
+    lock.py).
 
     Usage:
         local = LocalGeneration(workspace)

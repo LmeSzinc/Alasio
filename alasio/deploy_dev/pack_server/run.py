@@ -29,8 +29,6 @@ Usage:
 
     from alasio.deploy_dev.pack_server.run import PackRun
     await PackRun().run()
-
-See doc/2026-11-07_pack-server-publish-upload-cleanup.md §6.10.
 """
 
 import argparse
