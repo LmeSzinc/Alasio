@@ -75,6 +75,10 @@ SOURCE_ABSENT = 'absent'
 COMPARE_UPLOAD = 'upload'
 COMPARE_SAME = 'same'
 
+# the width of the size column of a progress line: '1023.99MB' is the widest
+# a pack reaches, and a shorter size is padded to keep the keys aligned
+SIZE_COLUMN = 8
+
 
 class UploadResult(msgspec.Struct):
     """
@@ -260,7 +264,7 @@ class ChannelUpload:
         """
         return f'[{self.remote_name}] {self.channel}'
 
-    def _step(self, action, relative, detail='', number=None):
+    def _step(self, action, relative, size=None, note='', number=None):
         """
         Log one request or one decision, as a line of a progress report.
 
@@ -269,10 +273,16 @@ class ChannelUpload:
         that fails still shows what it was doing. The numbering is against the
         count the run announced, so the last entry of a run reads `n/n`.
 
+        The size is a column of its own, wide enough for the largest unit a
+        pack reaches, so the keys of a report read as a column instead of
+        starting after a size of a different length.
+
         Args:
             action (str): 'SAME', 'PUT', 'HEAD' or 'DELETE'
             relative (str): Key of the object
-            detail (str): What the line says after the key, e.g. the size.
+            size (int): Size of the object in bytes, None for a line whose key
+                is not the object the report measures. Defaults to None
+            note (str): What the line says after the key, e.g. 'manifest'.
                 Defaults to ''
             number (int): The entry this line belongs to, None for a request
                 outside the count, e.g. a HEAD of the barrier before the total
@@ -282,8 +292,11 @@ class ChannelUpload:
             head = action
         else:
             head = f'{action} {number}/{self.total}'
-        suffix = f'  {detail}' if detail else ''
-        logger.info(f'  {head} {relative:<44}{suffix}')
+        # a line without a size keeps the column, or its key would start left
+        # of the keys above and below it
+        column = pretty_size(size).rjust(SIZE_COLUMN) if size is not None else ' ' * SIZE_COLUMN
+        suffix = f'  {note}' if note else ''
+        logger.info(f'  {head} {column} {relative}{suffix}')
 
     def _etag_md5(self, info):
         """
@@ -379,7 +392,7 @@ class ChannelUpload:
                 # position in the report, not the position of its key in the
                 # queue, so the report of a concurrent run stays in order
                 number = None if entry is None else entry.claim()
-                self._step('HEAD', item.relative, 'the stored object', number)
+                self._step('HEAD', item.relative, note='the stored object', number=number)
                 head = await self.store.head(item.relative)
         except ObjectNotFound:
             # the key went away between the listing and the lookup, or the
@@ -430,7 +443,7 @@ class ChannelUpload:
             return info.etag == item.md5
         if capabilities.head_checksum and info.checksum:
             async with self.remote_limit:
-                self._step('HEAD', item.relative, 'the checksum of the stored object', number)
+                self._step('HEAD', item.relative, note='the checksum of the stored object', number=number)
                 head = await self.store.head(item.relative)
             if not head.checksum:
                 raise IncompleteStore(
@@ -459,12 +472,10 @@ class ChannelUpload:
         Raises:
             PublishError: If the write fails or the object does not verify
         """
-        detail = pretty_size(item.size)
-        if kind != KIND_CONTENT:
-            detail += f', {kind}'
+        note = kind if kind != KIND_CONTENT else ''
         async with self.remote_limit:
             number = entry.claim()
-            self._step('PUT', item.relative, detail, number)
+            self._step('PUT', item.relative, item.size, note=note, number=number)
             info = await self.store.put(
                 item.relative, item.file, item.size, item.md5,
                 content_type=content_type(item.relative),
@@ -509,11 +520,10 @@ class ChannelUpload:
             item = await self.local.item(relative)
             entry = _Entry(counter)
             outcome = compare(item, await self._resolve(item, entry))
-            detail = pretty_size(item.size)
             if outcome == COMPARE_SAME:
-                self._step('SAME', item.relative, detail, entry.claim())
+                self._step('SAME', item.relative, item.size, number=entry.claim())
             elif dry_run:
-                self._step('PUT', item.relative, detail, entry.claim())
+                self._step('PUT', item.relative, item.size, number=entry.claim())
             else:
                 await self._put(item, KIND_CONTENT, entry)
             found[relative] = (outcome, item)
@@ -700,11 +710,10 @@ class ChannelUpload:
                 (barrier_item, barrier_outcome, KIND_BARRIER, barrier_number),
                 (contract_item, contract_outcome, KIND_MANIFEST, contract_number),
             ):
-                detail = f'{pretty_size(item.size)}, {kind}'
                 if outcome == COMPARE_SAME:
-                    self._step('SAME', item.relative, detail, number)
+                    self._step('SAME', item.relative, item.size, note=kind, number=number)
                 elif dry_run:
-                    self._step('PUT', item.relative, detail, number)
+                    self._step('PUT', item.relative, item.size, note=kind, number=number)
                 else:
                     await self._put(item, kind, _Entry.single(number))
 
@@ -781,19 +790,20 @@ class ChannelUpload:
         """
         if not retire.keys:
             return []
+        logger.hr(f'Cleanup {self.channel}', level=2)
         # the entries of the round, in the order the lines are written
         counter = itertools.count(first_number)
 
         async def one(relative):
-            detail = pretty_size(listing.objects[relative].size)
+            size = listing.objects[relative].size
             if dry_run:
-                self._step('WOULD DELETE', relative, detail, next(counter))
+                self._step('WOULD DELETE', relative, size, number=next(counter))
                 return relative
             try:
                 async with self.remote_limit:
                     # taken inside the limit: a task that is still queued has
                     # no line yet, so it must not take an entry
-                    self._step('DELETE', relative, detail, next(counter))
+                    self._step('DELETE', relative, size, number=next(counter))
                     await self.store.delete(relative)
             except Exception as e:  # noqa: BLE001 - one key must not stop the rest
                 logger.warning(f'{self._where()}: cannot delete "{relative}": {e}')

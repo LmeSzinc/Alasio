@@ -143,6 +143,7 @@ class Repo:
         atomic_failure_cleanup(self.base.packdep_folder, recursive=True)
         atomic_failure_cleanup(self.base.packrepo_folder, recursive=True)
 
+        logger.hr('Wheels', level=2)
         # the pins the repo provides, logged before the steps: the set is the
         # input of the pip index and does not depend on the pack channel
         provided = [
@@ -158,8 +159,10 @@ class Repo:
         self.wheel.run()
         # 2. the wheels of the dependency packs and the packs themselves, the
         # snapshots go to the tree pack
+        logger.hr('Dependency packs', level=2)
         self.dep.run()
         # 3. the packs of the repo tree
+        logger.hr('Packs', level=2)
         self.pack.run()
         self._generated = True
 
@@ -190,12 +193,16 @@ class Repo:
             raise RuntimeError('Repo.run() must be called before commit()')
         # the pages of the wheels of the version, then the publication barrier:
         # a client that reads the new latest.pack finds the index of it too
+        logger.hr('Pip index', level=2)
         self.pypi.run()
+        logger.hr('Latest pack', level=2)
         self.latest.run()
         # the record of the generation, after the barrier it names and before
         # the cleanup it is the record of: the local half first, the published
         # contract last
+        logger.hr('Manifest', level=2)
         self.manifest.run()
+        logger.hr('Stale files', level=2)
         self.base.cleanup()
         self._generated = False
         logger.info(f'Repo "{self.base.workspace.name}" committed')

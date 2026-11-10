@@ -266,6 +266,7 @@ class PackRepo:
         check_run_dir()
         folder = self.repo_folder
         git = GitCmdline()
+        logger.hr('Git repo', level=2)
         if self._is_clone(folder):
             self._update(git, folder)
         else:

@@ -63,7 +63,7 @@ def join_path(root, *parts):
 
 def log_events(log):
     """
-    The event lines of a log, without the traceback panels.
+    The event lines of a log as one text, without the traceback panels.
 
     The body of a rich traceback panel (the source context and the locals of a
     frame) is rendered from the live frames and the line cache of the process:
@@ -75,12 +75,13 @@ def log_events(log):
         log (str): Captured log text
 
     Returns:
-        list[str]: INFO / ERROR / WARNING lines and the hr separators, in order
+        str: INFO / ERROR / WARNING lines and the hr separators, in order,
+            joined by a newline
     """
-    return [
+    return '\n'.join(
         line for line in log.splitlines()
         if line.startswith(('INFO | ', 'ERROR | ', 'WARNING | ', '='))
-    ]
+    )
 
 
 def config_content(repo='AzurLaneAutoScript'):
@@ -311,11 +312,19 @@ class TestPackServerRun:
         assert capture.concat() == f"""\
 INFO | Write config {run_dir}/config/template.yaml
 INFO | Running 2 configs of "{run_dir}"
-===================== RUNNING CONFIG "LMESZINC_AZURLANEAUTOSCRIPT_MASTER.YAML" =====================
++==================================================================================================+
+|                     RUNNING CONFIG "LMESZINC_AZURLANEAUTOSCRIPT_MASTER.YAML"                     |
++==================================================================================================+
 INFO | RUNNING CONFIG "LMESZINC_AZURLANEAUTOSCRIPT_MASTER.YAML"
+============================================= GENERATE =============================================
+INFO | GENERATE
 INFO | Config "LmeSzinc_AzurLaneAutoScript_master.yaml" done
-====================== RUNNING CONFIG "LMESZINC_STARRAILCOPILOT_MASTER.YAML" =======================
++==================================================================================================+
+|                      RUNNING CONFIG "LMESZINC_STARRAILCOPILOT_MASTER.YAML"                       |
++==================================================================================================+
 INFO | RUNNING CONFIG "LMESZINC_STARRAILCOPILOT_MASTER.YAML"
+============================================= GENERATE =============================================
+INFO | GENERATE
 INFO | Config "LmeSzinc_StarRailCopilot_master.yaml" done
 INFO | Ran 2 configs: 2 done, 0 failed
 """
@@ -348,20 +357,22 @@ INFO | Ran 2 configs: 2 done, 0 failed
         assert 'RuntimeError: fake failure of the repo "AzurLaneAutoScript"' in log
         assert 'RuntimeError: fake failure of the packs of "StarRailCopilot"' in log
         # the failures do not stop the last config, the run fails at the end
-        assert log_events(log) == [
-            f'INFO | Write config {run_dir}/config/template.yaml',
-            f'INFO | Running 3 configs of "{run_dir}"',
-            '=========================== RUNNING CONFIG "LMESZINC_ALASIO_MASTER.YAML" ===========================',
-            'INFO | RUNNING CONFIG "LMESZINC_ALASIO_MASTER.YAML"',
-            'INFO | Config "LmeSzinc_Alasio_master.yaml" done',
-            '===================== RUNNING CONFIG "LMESZINC_AZURLANEAUTOSCRIPT_MASTER.YAML" =====================',
-            'INFO | RUNNING CONFIG "LMESZINC_AZURLANEAUTOSCRIPT_MASTER.YAML"',
-            'ERROR | Config "LmeSzinc_AzurLaneAutoScript_master.yaml" failed',
-            '====================== RUNNING CONFIG "LMESZINC_STARRAILCOPILOT_MASTER.YAML" =======================',
-            'INFO | RUNNING CONFIG "LMESZINC_STARRAILCOPILOT_MASTER.YAML"',
-            'ERROR | Config "LmeSzinc_StarRailCopilot_master.yaml" failed',
-            'INFO | Ran 3 configs: 1 done, 2 failed',
-        ]
+        assert log_events(log) == f"""\
+INFO | Write config {run_dir}/config/template.yaml
+INFO | Running 3 configs of "{run_dir}"
+INFO | RUNNING CONFIG "LMESZINC_ALASIO_MASTER.YAML"
+============================================= GENERATE =============================================
+INFO | GENERATE
+INFO | Config "LmeSzinc_Alasio_master.yaml" done
+INFO | RUNNING CONFIG "LMESZINC_AZURLANEAUTOSCRIPT_MASTER.YAML"
+============================================= GENERATE =============================================
+INFO | GENERATE
+ERROR | Config "LmeSzinc_AzurLaneAutoScript_master.yaml" failed
+INFO | RUNNING CONFIG "LMESZINC_STARRAILCOPILOT_MASTER.YAML"
+============================================= GENERATE =============================================
+INFO | GENERATE
+ERROR | Config "LmeSzinc_StarRailCopilot_master.yaml" failed
+INFO | Ran 3 configs: 1 done, 2 failed"""
 
     def test_no_config(self, fs, run_dir, monkeypatch):
         """A run directory without a config file writes the template and runs nothing."""
@@ -389,8 +400,12 @@ WARNING | No config file in "{run_dir}/config", copy "template.yaml" to a config
         assert capture.concat() == f"""\
 INFO | Write config {run_dir}/config/template.yaml
 INFO | Running 1 config of "{run_dir}"
-===================== RUNNING CONFIG "LMESZINC_AZURLANEAUTOSCRIPT_MASTER.YAML" =====================
++==================================================================================================+
+|                     RUNNING CONFIG "LMESZINC_AZURLANEAUTOSCRIPT_MASTER.YAML"                     |
++==================================================================================================+
 INFO | RUNNING CONFIG "LMESZINC_AZURLANEAUTOSCRIPT_MASTER.YAML"
+============================================= GENERATE =============================================
+INFO | GENERATE
 INFO | Config "LmeSzinc_AzurLaneAutoScript_master.yaml" done
 INFO | Ran 1 config: 1 done, 0 failed
 """
@@ -400,8 +415,12 @@ INFO | Ran 1 config: 1 done, 0 failed
             main.PackServer().run()
         assert capture.concat() == f"""\
 INFO | Running 1 config of "{run_dir}"
-===================== RUNNING CONFIG "LMESZINC_AZURLANEAUTOSCRIPT_MASTER.YAML" =====================
++==================================================================================================+
+|                     RUNNING CONFIG "LMESZINC_AZURLANEAUTOSCRIPT_MASTER.YAML"                     |
++==================================================================================================+
 INFO | RUNNING CONFIG "LMESZINC_AZURLANEAUTOSCRIPT_MASTER.YAML"
+============================================= GENERATE =============================================
+INFO | GENERATE
 INFO | Config "LmeSzinc_AzurLaneAutoScript_master.yaml" done
 INFO | Ran 1 config: 1 done, 0 failed
 """

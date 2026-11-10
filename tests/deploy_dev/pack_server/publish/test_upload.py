@@ -17,8 +17,8 @@ import pytest
 from alasio.base.pretty import pretty_size
 from alasio.deploy_dev.pack_server.model import ConfigError, PackRepoConfig
 from alasio.deploy_dev.pack_server.publish.channel import (
-    COMPARE_SAME, COMPARE_UPLOAD, SOURCE_ABSENT, SOURCE_HEAD, SOURCE_LIST, STATUS_DRY_RUN, STATUS_FAILED, STATUS_OK,
-    STATUS_SKIPPED, ChannelUpload, RemoteState, compare
+    COMPARE_SAME, COMPARE_UPLOAD, SIZE_COLUMN, SOURCE_ABSENT, SOURCE_HEAD, SOURCE_LIST, STATUS_DRY_RUN, STATUS_FAILED,
+    STATUS_OK, STATUS_SKIPPED, ChannelUpload, RemoteState, compare
 )
 from alasio.deploy_dev.pack_server.publish.common import (
     BARRIER_KEY, MANIFEST_KEY, IncompleteStore, PublishError, PublishRunError
@@ -958,12 +958,12 @@ class TestProgress:
         assert result.uploaded == 5
         assert upload.total == 5
         assert capture.concat() == f"""\
-INFO |   PUT 1/5 packrepo/aaaaaaaa/full.pack                   21.00B
-INFO |   PUT 2/5 packrepo/aaaaaaaa/update_00000001.pack        11.00B
-INFO |   PUT 3/5 wheel/msgspec/0.22.0/msgspec-0.22.0-py3-none-any.whl  11.00B
+INFO |   PUT 1/5   21.00B packrepo/aaaaaaaa/full.pack
+INFO |   PUT 2/5   11.00B packrepo/aaaaaaaa/update_00000001.pack
+INFO |   PUT 3/5   11.00B wheel/msgspec/0.22.0/msgspec-0.22.0-py3-none-any.whl
 INFO | [cos-main] {CHANNEL}: version=aaaaaaaa 5 to upload (424.00B), 0 unchanged, 0 to retire (0.00B)
-INFO |   PUT 4/5 packrepo/latest.pack                          28.00B, barrier
-INFO |   PUT 5/5 manifest.json                                 {pretty_size(manifest_size)}, manifest
+INFO |   PUT 4/5   28.00B packrepo/latest.pack  barrier
+INFO |   PUT 5/5 {pretty_size(manifest_size).rjust(SIZE_COLUMN)} manifest.json  manifest
 """
 
     @pytest.mark.trio
@@ -981,12 +981,12 @@ INFO |   PUT 5/5 manifest.json                                 {pretty_size(mani
         assert result.uploaded == 0
         assert upload.total == 5
         assert capture.concat() == f"""\
-INFO |   SAME 1/5 packrepo/aaaaaaaa/full.pack                   21.00B
-INFO |   SAME 2/5 packrepo/aaaaaaaa/update_00000001.pack        11.00B
-INFO |   SAME 3/5 wheel/msgspec/0.22.0/msgspec-0.22.0-py3-none-any.whl  11.00B
+INFO |   SAME 1/5   21.00B packrepo/aaaaaaaa/full.pack
+INFO |   SAME 2/5   11.00B packrepo/aaaaaaaa/update_00000001.pack
+INFO |   SAME 3/5   11.00B wheel/msgspec/0.22.0/msgspec-0.22.0-py3-none-any.whl
 INFO | [cos-main] {CHANNEL}: version=aaaaaaaa 0 to upload (0.00B), 5 unchanged, 0 to retire (0.00B)
-INFO |   SAME 4/5 packrepo/latest.pack                          28.00B, barrier
-INFO |   SAME 5/5 manifest.json                                 {pretty_size(manifest_size)}, manifest
+INFO |   SAME 4/5   28.00B packrepo/latest.pack  barrier
+INFO |   SAME 5/5 {pretty_size(manifest_size).rjust(SIZE_COLUMN)} manifest.json  manifest
 """
 
     @pytest.mark.trio
@@ -1003,12 +1003,12 @@ INFO |   SAME 5/5 manifest.json                                 {pretty_size(man
         assert result.status == STATUS_DRY_RUN
         assert upload.total == 5
         assert capture.concat() == f"""\
-INFO |   PUT 1/5 packrepo/aaaaaaaa/full.pack                   21.00B
-INFO |   PUT 2/5 packrepo/aaaaaaaa/update_00000001.pack        11.00B
-INFO |   PUT 3/5 wheel/msgspec/0.22.0/msgspec-0.22.0-py3-none-any.whl  11.00B
+INFO |   PUT 1/5   21.00B packrepo/aaaaaaaa/full.pack
+INFO |   PUT 2/5   11.00B packrepo/aaaaaaaa/update_00000001.pack
+INFO |   PUT 3/5   11.00B wheel/msgspec/0.22.0/msgspec-0.22.0-py3-none-any.whl
 INFO | [cos-main] {CHANNEL}: version=aaaaaaaa 5 to upload (424.00B), 0 unchanged, 0 to retire (0.00B)
-INFO |   PUT 4/5 packrepo/latest.pack                          28.00B, barrier
-INFO |   PUT 5/5 manifest.json                                 {pretty_size(manifest_size)}, manifest
+INFO |   PUT 4/5   28.00B packrepo/latest.pack  barrier
+INFO |   PUT 5/5 {pretty_size(manifest_size).rjust(SIZE_COLUMN)} manifest.json  manifest
 """
         assert [r for r in credentials_env.requests if r[0] == 'PUT'] == []
 
@@ -1030,11 +1030,18 @@ class TestRetire:
             switched = await make_upload(workspace, store).run()
             assert switched.deleted == 0
             age_objects(credentials_env, 3600 + 1)
-            result = await make_upload(workspace, store).run()
+            with logger.mock_capture_writer() as capture:
+                result = await make_upload(workspace, store).run()
         finally:
             await store.aclose()
         assert result.status == STATUS_OK
         assert result.deleted == 2
+        # the deletes are a section of the log of their own, after the upload
+        lines = capture.concat().splitlines()
+        headers = [index for index, line in enumerate(lines)
+                   if 'CLEANUP LMESZINC_REPO_MASTER' in line]
+        deletes = [index for index, line in enumerate(lines) if ' DELETE ' in line]
+        assert headers and headers[0] < deletes[0]
         assert f'{PREFIX}packrepo/aaaaaaaa/full.pack' not in credentials_env.objects
         assert f'{PREFIX}packrepo/aaaaaaaa/update_00000001.pack' not in credentials_env.objects
         assert f'{PREFIX}packrepo/bbbbbbbb/full.pack' in credentials_env.objects
@@ -1110,8 +1117,12 @@ class TestRetire:
             await store.aclose()
         assert result.status == STATUS_DRY_RUN
         assert result.deleted == 2
-        assert 'WOULD DELETE 5/6 packrepo/aaaaaaaa/full.pack' in capture.concat()
-        assert 'WOULD DELETE 6/6 packrepo/aaaaaaaa/update_00000001.pack' in capture.concat()
+        text = capture.concat()
+        # the deletes are a section of their own, under the channel they are of
+        header = ' CLEANUP LMESZINC_REPO_MASTER '.center(100, '-')
+        assert header in text
+        assert 'WOULD DELETE 5/6   21.00B packrepo/aaaaaaaa/full.pack' in text
+        assert 'WOULD DELETE 6/6   11.00B packrepo/aaaaaaaa/update_00000001.pack' in text
         assert f'{PREFIX}packrepo/aaaaaaaa/full.pack' in credentials_env.objects
 
 

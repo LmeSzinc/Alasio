@@ -121,6 +121,7 @@ class PackServer:
             # value of another type; a check of the file raises ConfigError
             raise ConfigError(str(e)) from None
         with ChannelLock(config.data.workspace_name).locked():
+            logger.hr('Generate', level=1)
             repo = PackRepo(config.data).run()
             gen = Repo(repo, config.data)
             gen.run()
@@ -160,7 +161,7 @@ class PackServer:
             # one log file per config, the same rule as the chained run, see
             # config_log_name()
             with logger.log_file(config_log_name(file)):
-                logger.hr(f'Running config "{file}"', level=1)
+                logger.hr(f'Running config "{file}"', level=0)
                 try:
                     self.run_config(file)
                 except ConfigError:

@@ -158,7 +158,7 @@ class PackRun:
             # the thousands of lines of the others, and every run of the same
             # config writes a file of its own
             with logger.log_file(config_log_name(name)):
-                logger.hr(f'Running config "{name}"', level=1)
+                logger.hr(f'Running config "{name}"', level=0)
                 try:
                     results += await self.run_config(name, remotes=remotes, dry_run=dry_run)
                 except ConfigError:
@@ -219,6 +219,7 @@ class PackRun:
         require_valid(config)
         lock = ChannelLock(config.data.workspace_name)
         async with lock.alocked():
+            logger.hr('Generate', level=1)
             if dry_run:
                 logger.info(f'Config "{name}": dry run, the generation is skipped')
             else:

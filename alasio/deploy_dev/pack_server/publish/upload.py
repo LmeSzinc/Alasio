@@ -97,6 +97,7 @@ class UploadRun:
 
         results = []
         failed = []
+        logger.hr('Upload', level=1)
         for name in selected:
             remote = model.Publish[name]
             concurrency = self.concurrency or remote.Concurrency

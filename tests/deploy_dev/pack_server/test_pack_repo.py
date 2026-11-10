@@ -477,6 +477,8 @@ class TestClone:
         with logger.mock_capture_writer() as capture:
             repo = PackRepo(CONFIG).run()
         assert capture.concat() == f"""\
+--------------------------------------------- GIT REPO ---------------------------------------------
+INFO | GIT REPO
 INFO | Cloning repo: remote="{REMOTE}", branch="master", folder="{folder}"
 INFO | Git command: git clone --no-checkout --origin origin --branch master {REMOTE} {folder}
 INFO | Git command: git -C {folder} rev-parse --verify --quiet refs/remotes/origin/master
@@ -566,6 +568,8 @@ class TestUpdate:
         with logger.mock_capture_writer() as capture:
             PackRepo(CONFIG).run()
         assert capture.concat() == f"""\
+--------------------------------------------- GIT REPO ---------------------------------------------
+INFO | GIT REPO
 INFO | Updating repo: remote="{REMOTE}", folder="{folder}"
 INFO | Git command: git -C {folder} remote set-url origin {REMOTE}
 INFO | Git command: git -C {folder} fetch --prune origin +refs/heads/*:refs/remotes/origin/* +refs/tags/*:refs/tags/*
@@ -620,6 +624,8 @@ INFO | Git command: git -C {folder} update-ref refs/heads/master refs/remotes/or
         with logger.mock_capture_writer() as capture:
             PackRepo(config).run()
         assert capture.concat() == f"""\
+--------------------------------------------- GIT REPO ---------------------------------------------
+INFO | GIT REPO
 INFO | Updating repo: remote="{REMOTE}", folder="{folder}"
 INFO | Git command: git -C {folder} remote set-url origin {REMOTE}
 INFO | Git command: git -C {folder} fetch --prune origin +refs/heads/*:refs/remotes/origin/* +refs/tags/*:refs/tags/*
