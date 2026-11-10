@@ -233,6 +233,33 @@ class TestGuards:
         assert result.status == STATUS_SKIPPED
         assert 'switch is in progress' in result.reason
 
+    @pytest.mark.trio
+    async def test_the_listing_lost_the_barrier(self, workspace, credentials_env, monkeypatch):
+        """A listing without the barrier is not one an age, or a delete, comes from.
+
+        The two reads find the barrier, then the listing made after them does
+        not: the mirror changed under the run, so neither the age of the
+        generation nor the keep set of the listing can be trusted.
+        """
+        store = await fill(workspace, credentials_env)
+        credentials_env.store(f'{PREFIX}old/full.pack', b'old', 'application/octet-stream',
+                             None, last_modified=time.time() - GRACE * 10)
+        age_objects(credentials_env, GRACE + 1)
+        listing = await store.list()
+        del listing.objects[BARRIER_KEY]
+
+        async def list_without_barrier(self):
+            return listing
+
+        monkeypatch.setattr(type(store), 'list', list_without_barrier)
+        try:
+            result = await cleanup_of(credentials_env, store).run()
+        finally:
+            await store.aclose()
+        assert result.status == STATUS_SKIPPED
+        assert BARRIER_KEY in result.reason
+        assert f'{PREFIX}old/full.pack' in credentials_env.objects
+
 
 class TestGrace:
     """Nothing is deleted before the barrier of this mirror is old enough."""

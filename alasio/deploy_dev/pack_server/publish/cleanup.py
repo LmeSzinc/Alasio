@@ -176,6 +176,13 @@ class ChannelCleanup:
             logger.debug(
                 f'[{self.remote_name}] {self.workspace_name}: '
                 f'{len(listing.objects)} object(s) in the listing')
+            barrier = listing.objects.get(BARRIER_KEY)
+            if barrier is None:
+                # the barrier the two reads above just found is not in the
+                # listing made after them: the mirror changed under the run,
+                # and an age computed from a missing object would decide the
+                # grace of a generation that is no longer the one read
+                raise SkipCleanup(f'{BARRIER_KEY} is not in the listing of the mirror')
         except SkipCleanup as e:
             logger.info(f'[{self.remote_name}] {self.workspace_name}: skipped, {e}')
             return CleanupResult(
@@ -189,7 +196,6 @@ class ChannelCleanup:
         except (PublishError, ObjectNotFound) as e:
             return self._failed(stringify_event(e))
 
-        barrier = listing.objects[BARRIER_KEY]
         now = listing.server_date
         age = now - barrier.last_modified
         logger.info(
