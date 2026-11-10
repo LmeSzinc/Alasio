@@ -78,6 +78,19 @@ def updater_source():
         return f.read()
 
 
+def identity(pid):
+    """
+    Build the pair that identifies a process over time.
+
+    Args:
+        pid (int): Target pid
+
+    Returns:
+        "tuple[int, int]": Pid and its start marker
+    """
+    return pid, updater.start_time(pid)
+
+
 class TestParseStarttime:
     """The /proc/<pid>/stat parser."""
 
@@ -135,21 +148,26 @@ class TestStartTime:
         assert isinstance(first, int)
         assert first == second
 
-    def test_children_are_distinct(self):
-        """Two processes started back to back get different markers."""
+    def test_children_identities_are_distinct(self):
+        """Two processes started back to back have different identities.
+
+        The marker alone is not unique: linux counts it in jiffies (10ms by
+        default), so two processes of the same tick report the same value.
+        Identity is the pair, and the pids always differ.
+        """
         procs = [spawn_idle() for _ in range(2)]
         try:
-            markers = [updater.start_time(proc.pid) for proc in procs]
+            identities = [identity(proc.pid) for proc in procs]
         finally:
             kill_all(procs)
-        assert all(isinstance(marker, int) for marker in markers)
-        assert markers[0] != markers[1]
+        assert all(isinstance(marker, int) for _, marker in identities)
+        assert identities[0] != identities[1]
 
     def test_child_differs_from_self(self):
-        """A child is a different process, so its marker differs from ours."""
+        """A child is a different process, so its identity differs from ours."""
         proc = spawn_idle()
         try:
-            assert updater.start_time(proc.pid) != updater.start_time(os.getpid())
+            assert identity(proc.pid) != identity(os.getpid())
         finally:
             kill_all([proc])
 

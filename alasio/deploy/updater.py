@@ -17,6 +17,10 @@ Unlike psutil, the value returned by ``start_time()`` never mixes in the
 boot time or the current wall clock: it is the raw kernel counter, so a
 clock adjustment during the update cannot make a live process look
 restarted.
+
+The marker alone does not identify a process: linux counts it in jiffies
+(10ms by default), so two processes of the same tick report the same
+value. Identity is the ``(pid, marker)`` pair, the pids always differ.
 """
 import ctypes
 import errno
@@ -196,6 +200,9 @@ elif sys.platform.startswith('linux'):
         ``monotonic=True``: the raw ``starttime`` counter from procfs, which
         is expressed in clock ticks since boot and is unaffected by wall
         clock updates. The boot time is deliberately not added.
+
+        The resolution is one clock tick (10ms by default), so the value is
+        only unique together with the pid it was read for.
 
         Args:
             pid (int): Target pid
