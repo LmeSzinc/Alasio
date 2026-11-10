@@ -1,75 +1,76 @@
 """
-Generate the packs of every config in the run directory.
+The command line entry of the pack server: one channel after another, each one
 
-The modules below do one step of the work each, this module chains them:
+    config -> clone -> generate -> publish -> retire
 
-0. PackRepoConfig.write_template() writes config/template.yaml from the
-   model: the operator copies it to a config file, e.g.
-   config/LmeSzinc_AzurLaneAutoScript_master.yaml, and fills the values
-1. PackRepoConfig reads config/{Author}_{Repo}_{Branch}.yaml from the run
-   directory, the file is created from the model when it does not exist
+A channel is one config file in the config folder of the run directory. The
+steps are the ones of the modules below:
+
+0. PackRepoConfig.write_template() writes config/template.yaml from the model:
+   the operator copies it to a config file and fills it
+1. PackRepoConfig reads config/{Author}_{Repo}_{Branch}.yaml; the file is
+   created from the model when it does not exist
 2. PackRepo clones or fetches the git repo of the config into
    repo/{Author}_{Repo}
-3. Repo generates the workspace of the repo, the flow of PackRepoModel: the
-   wheels of the dependency versions, the pip index of the provided pins, the
-   dependency packs (packdep) and the packs of the repo tree (packrepo); then
-   latest.pack, the publication barrier, and only after it the removal of the
-   packs and wheels the window does not ask for. A config that fails at any
-   step keeps the previous latest.pack serving the clients
+3. Repo generates the workspace: the wheels of the dependency versions, the pip
+   index of the provided pins, the dependency packs (packdep) and the packs of
+   the repo tree (packrepo), then latest.pack, the publication barrier, and the
+   removal of the packs and wheels the window does not ask for
+4. UploadRun mirrors the workspace to every remote of the config, writes the
+   barrier and the contract last, and retires the keys the previous generation
+   no longer serves (see publish/channel.py)
 
-The configs are run one by one, sorted by name. A config that fails is
-logged with its traceback and left out, the other configs still run: a
-broken config, a remote that cannot be reached or a repo that does not
-build must not stop the whole run. The run is logged at the end, and a
-PackRunError is raised when at least one config failed, so the scheduler
-that starts the pack server sees the failed run and can retry it.
+The three steps of one channel run under one lock, held by ``PackRun``; a run
+that writes the workspace while another publishes it would mirror the record of
+one generation with the files of another.
+
+The configs are run one by one, sorted by name. A config that fails is logged
+with its traceback and left out, the other configs still run: a broken config, a
+remote that cannot be reached or a repo that does not build must not stop the
+whole run. The run is logged at the end, and a PackRunError is raised when at
+least one config failed, so the scheduler sees the failed run and retries it.
+
+Every config writes a log file of its own, see config_log_name(); the lines
+outside the configs (the start of the run, the tally at the end) go to the log
+file of the process.
 
 Usage:
     python -m alasio.deploy_dev.pack_server.main --root D:/AlasPack
+    python -m alasio.deploy_dev.pack_server.main --root D:/AlasPack --dry-run
 
-    from alasio.deploy_dev.pack_server.main import PackServer
-    PackServer().run()
+    from alasio.deploy_dev.pack_server.run import PackRun
+    await PackRun().run()
+
+A run that only builds the packs, with no remote and no credential, is
+``PackServer().run()``: it is the generation step alone, for a machine that
+prepares a workspace and publishes it later from elsewhere.
 """
 
 import argparse
+import functools
 import sys
+
+import trio
 
 from alasio.deploy_dev.pack_server.gate import RunDirError, check_run_dir
 from alasio.deploy_dev.pack_server.model import ConfigError, PackRepoConfig
 from alasio.deploy_dev.pack_server.pack_repo import PackRepo
 from alasio.deploy_dev.pack_server.publish.lock import ChannelLock
 from alasio.deploy_dev.pack_server.repo import Repo
-from alasio.deploy_dev.pack_server.run import config_log_name
+from alasio.deploy_dev.pack_server.run import PackRun, PackRunError, config_log_name
 from alasio.ext import env
 from alasio.logger import logger
 from alasio.logger.utils import stringify_event
 
 
-class PackRunError(ValueError):
-    """
-    Raised when the run of at least one config failed
-
-    Attributes:
-        errors (list[tuple[str, Exception]]): (config file, error) of every
-            failed config, in the order of the run
-    """
-
-    def __init__(self, errors):
-        """
-        Args:
-            errors (list[tuple[str, Exception]]): (config file, error) of
-                every failed config
-        """
-        self.errors = errors
-        count = len(errors)
-        names = ', '.join(name for name, _ in errors)
-        plural = 's' if count > 1 else ''
-        super().__init__(f'Failed to run {count} config{plural}: {names}')
-
-
 class PackServer:
     """
-    Generate the packs of every config of the run directory, see the module docstring.
+    Generate the packs of every config of the run directory, and nothing else.
+
+    This is the generation step alone: it needs no remote and no credential, so
+    a machine can prepare a workspace and another one publish it. The command
+    line runs the whole channel instead (see PackRun), which publishes what it
+    generated.
 
     Usage:
         PackServer().run()
@@ -183,7 +184,8 @@ class PackServer:
 
 def main():
     """
-    Command line entry, generate the packs of every config of the run directory.
+    Command line entry: generate, publish and retire every config of the run
+    directory, one channel after another.
 
     Raises:
         SystemExit: 0 when every config succeeded, 1 when at least one failed at
@@ -191,11 +193,15 @@ def main():
             directory or the configuration of a config are not usable
     """
     parser = argparse.ArgumentParser(
-        description='Generate the packs of every config of the pack server',
+        description='Generate, publish and retire every config of the pack server',
     )
     parser.add_argument(
         '-r', '--root', default='',
         help='run directory of the pack server, default to env.PROJECT_ROOT',
+    )
+    parser.add_argument(
+        '--dry-run', action='store_true',
+        help='generate nothing and upload nothing, print the plan of every config',
     )
     args = parser.parse_args()
     if args.root:
@@ -213,7 +219,7 @@ def main():
     # process is decided by the first write, see LogWriter.file
     logger.hr('Start', level=0)
     try:
-        PackServer().run()
+        trio.run(functools.partial(PackRun().run, dry_run=args.dry_run))
     except ConfigError as e:
         # a value the operator has to edit: no retry can fix it
         logger.error(stringify_event(e))

@@ -66,20 +66,25 @@ def run_cli(monkeypatch, argv):
     return None
 
 
-def stub_server(monkeypatch, error=None):
+def stub_server(monkeypatch, error=None, calls=None):
     """
     Replace the run of the configs with one that returns or raises.
 
     Args:
         monkeypatch (pytest.MonkeyPatch): The fixture of the test
         error (Exception): Raised by the run, None to return
+        calls (list): Filled with the dry_run of every run
     """
-    class FakeServer:
-        def run(self):
+    calls = [] if calls is None else calls
+
+    class FakeRun:
+        async def run(self, dry_run=False):
+            calls.append(dry_run)
             if error is not None:
                 raise error
 
-    monkeypatch.setattr(main_module, 'PackServer', FakeServer)
+    monkeypatch.setattr(main_module, 'PackRun', FakeRun)
+    return calls
 
 
 class TestRoot:
@@ -130,3 +135,19 @@ class TestExitCode:
         """A root that stops being usable during the run is not a retry."""
         stub_server(monkeypatch, error=RunDirError('Run directory was removed'))
         assert run_cli(monkeypatch, []) == 2
+
+
+class TestDryRun:
+    """--dry-run is the dry run of the publication, nothing is written."""
+
+    def test_the_default_runs_the_channel(self, root, monkeypatch):
+        """Without the flag the run generates and publishes."""
+        calls = stub_server(monkeypatch)
+        assert run_cli(monkeypatch, []) is None
+        assert calls == [False]
+
+    def test_the_flag_reaches_the_run(self, root, monkeypatch):
+        """--dry-run asks the publication for its plan instead."""
+        calls = stub_server(monkeypatch)
+        assert run_cli(monkeypatch, ['--dry-run']) is None
+        assert calls == [True]

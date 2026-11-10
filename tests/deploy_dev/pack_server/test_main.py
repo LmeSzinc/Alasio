@@ -11,7 +11,7 @@ import sys
 
 import pytest
 
-from alasio.deploy_dev.pack_server import main
+from alasio.deploy_dev.pack_server import main, run as run_module
 from alasio.deploy_dev.pack_server.gate import RunDirError, check_run_dir
 from alasio.deploy_dev.pack_server.model import ConfigError, PackRepoConfig
 from alasio.deploy_dev.pack_server.publish.lock import ChannelLock
@@ -424,14 +424,19 @@ class TestMain:
     """The command line entry."""
 
     def test_main_root(self, fs, run_dir, monkeypatch):
-        """--root sets the run directory of the run."""
+        """--root sets the run directory of the run.
+
+        The generation of the config goes through PackRun: the command line
+        runs the whole channel, generation and publication alike.
+        """
         make_config(run_dir)
         calls = []
-        monkeypatch.setattr(main, 'PackRepo', fake_repo(calls))
-        monkeypatch.setattr(main, 'Repo', fake_gen(calls))
+        monkeypatch.setattr(run_module, 'PackRepo', fake_repo(calls))
+        monkeypatch.setattr(run_module, 'Repo', fake_gen(calls))
         monkeypatch.setattr(sys, 'argv', ['main', '--root', str(run_dir)])
         main.main()
         assert env.PROJECT_ROOT == str(run_dir)
+        # the config of the test publishes nowhere: the run is the generation
         assert [step for step, *_ in calls] == ['repo', 'gen', 'gen-commit']
 
     def test_main_bad_args(self, fs, run_dir, monkeypatch):
@@ -445,11 +450,11 @@ class TestMain:
         decided by the first write, see LogWriter.file."""
         calls = []
 
-        class FakeServer:
-            def run(self):
+        class FakeRun:
+            async def run(self, dry_run=False):
                 calls.append('run')
 
-        monkeypatch.setattr(main, 'PackServer', FakeServer)
+        monkeypatch.setattr(main, 'PackRun', FakeRun)
         monkeypatch.setattr(sys, 'argv', ['main', '--root', str(run_dir)])
         with logger.mock_capture_writer() as capture:
             main.main()

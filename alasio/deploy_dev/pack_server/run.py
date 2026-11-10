@@ -139,6 +139,9 @@ class PackRun:
             PackRunError: If at least one config failed
         """
         check_run_dir()
+        # the template of a config file is written first, so the operator has a
+        # file to copy even on a run directory that has no config yet
+        PackRepoConfig.write_template()
         names = list(files) if files else list(PackRepoConfig.iter_files())
         if not names:
             folder = env.PROJECT_ROOT.joinpath(PackRepoConfig.CONFIG_FOLDER)
