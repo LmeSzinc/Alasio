@@ -150,7 +150,15 @@ class ChannelCleanup:
         """
         self.workspace_name = workspace_name
         self.store = store
-        self.grace = grace
+        self.grace = int(grace)
+        if self.grace <= 0:
+            # a grace of zero deletes every key of the previous generation the
+            # moment the barrier is older than zero seconds, i.e. on the run
+            # after the switch: the window that protects a client which just
+            # read the old barrier is the whole point of the value. The config
+            # refuses it as well; this is the same refusal for a caller that
+            # builds the cleaner by hand
+            raise ValueError(f'grace must be > 0 seconds, got {self.grace}')
         self.remote_name = remote_name
         self.concurrency = max(1, min(int(concurrency), MAX_CONCURRENCY))
         # the progress lines of a delete round: requests done of the requests

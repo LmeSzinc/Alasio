@@ -136,18 +136,19 @@ class RemoteBase(Struct, forbid_unknown_fields=True):
         "Concurrent transfers in flight to this remote, 1 to 8",
         "Past 8 the queue only moves into the connection pool, the uplink is the limit",
     ]})] = 4
-    GraceSeconds: Annotated[int, Meta(extra={"help": [
+    GraceSeconds: Annotated[int, Meta(ge=1, extra={"help": [
         "Retire grace of this remote in seconds",
         "The cleaner deletes a retired key only after the barrier of THIS remote",
         "has been in place for this long, and only if the key is older as well",
         "Must cover the CDN TTL plus one full client update",
+        "Must be positive: 0 would delete a generation a client may still be reading",
     ]})] = 3600
     EnvPrefix: Annotated[str, Meta(extra={"help": [
         "Environment variable prefix of the credentials of this remote",
         "'' for the default prefix of the driver: ALASIO_COS for 'cos'",
         "'ALASIO_COS_BACKUP' -> ALASIO_COS_BACKUP_SECRET_ID / _SECRET_KEY",
     ]})] = ""
-    TimeoutSeconds: Annotated[int, Meta(extra={"help": [
+    TimeoutSeconds: Annotated[int, Meta(ge=1, extra={"help": [
         "Read/write timeout of one request",
         "A 100 MB pack on a 10 Mbit/s uplink takes about 80 s",
     ]})] = 120
@@ -298,9 +299,11 @@ class PackRepoConfig(YamlConfig):
     them again. A config with an empty one raises ConfigError, the created or
     repaired file stays on the disk for the operator to fill. The proxy of the
     Env group is checked the same way: a value the http client cannot use would
-    fail every download of the run, long after the clone. The values of the
-    Publish group that cannot be worked around, a negative grace or a timeout
-    of zero, are refused as well.
+    fail every download of the run, long after the clone. The bounds of the
+    numeric fields of the Publish group (a grace or a timeout below one second)
+    are declared on the fields themselves, so the reader refuses such a value
+    like any other value the model cannot hold, and require_valid() reports it
+    to the caller that must not run on a repaired value.
 
     Args:
         file (str): Name of the yaml file in the config folder, e.g.
@@ -329,7 +332,6 @@ class PackRepoConfig(YamlConfig):
         super().__init__(file, model=PackRepoModel)
         self._check_repo()
         self._check_env()
-        self._check_publish()
 
     @classmethod
     def iter_files(cls):
@@ -447,30 +449,6 @@ class PackRepoConfig(YamlConfig):
             raise ConfigError(
                 f'Invalid Env.Proxy of the pack config, the host is empty: {proxy!r}, '
                 f'file="{self.file}"')
-
-    def _check_publish(self):
-        """
-        Check the Publish group: the remotes must be usable
-
-        A negative grace would retire a generation before the clients saw it,
-        and a timeout of zero fails every request of a remote, so both are
-        refused here instead of failing the upload of the repo later. The
-        fields a driver needs (Bucket, Region, BaseUrl) are checked by the
-        driver itself, before the first request: the model does not know which
-        driver serves which variant. Concurrency is not checked here: the
-        flows clamp it to 1..8, a value outside is a preference, not an error.
-
-        Raises:
-            ConfigError: If GraceSeconds is negative, or TimeoutSeconds is not
-                positive
-        """
-        for name, remote in self.data.Publish.items():
-            if remote.GraceSeconds < 0:
-                raise ConfigError(
-                    f'Publish.{name}.GraceSeconds must be >= 0, file="{self.file}"')
-            if remote.TimeoutSeconds <= 0:
-                raise ConfigError(
-                    f'Publish.{name}.TimeoutSeconds must be > 0, file="{self.file}"')
 
     def _log_errors(self, errors):
         """

@@ -264,6 +264,21 @@ class TestGuards:
 class TestGrace:
     """Nothing is deleted before the barrier of this mirror is old enough."""
 
+    @pytest.mark.parametrize('grace', [0, -1])
+    @pytest.mark.trio
+    async def test_a_cleaner_needs_a_positive_grace(self, workspace, credentials_env, grace):
+        """A window of zero seconds is not a window: the constructor refuses it.
+
+        The config refuses the value too; this is the same refusal for a caller
+        that builds the cleaner by hand.
+        """
+        store = make_store(make_remote(), CHANNEL, credentials_env)
+        try:
+            with pytest.raises(ValueError, match='grace must be > 0'):
+                ChannelCleanup(CHANNEL, store, grace, remote_name='cos-main')
+        finally:
+            await store.aclose()
+
     @pytest.mark.trio
     async def test_a_young_barrier_deletes_nothing(self, workspace, credentials_env):
         """A generation that was just switched keeps its predecessor."""

@@ -168,7 +168,6 @@ def requests_of(service):
 
 class TestCompare:
     """The one rule that decides whether a file is uploaded."""
-
     def test_a_key_that_is_not_on_the_mirror_is_written(self):
         """An absent key has nothing to compare, so the file is written."""
         assert compare(item('a.pack', b'x'), RemoteState()) == COMPARE_UPLOAD
@@ -316,6 +315,27 @@ class TestResolve:
         finally:
             await inner.aclose()
         assert relative in str(caught.value)
+
+
+class TestGrace:
+    """A channel refuses a retire window that protects nobody."""
+
+    @pytest.mark.parametrize('grace', [0, -1])
+    @pytest.mark.trio
+    async def test_a_channel_needs_a_positive_grace(self, workspace, credentials_env, grace):
+        """A window of zero seconds is not a window: the constructor refuses it.
+
+        The config refuses the value too; this is the same refusal for a caller
+        that builds the channel by hand.
+        """
+        store = make_store(make_remote(), CHANNEL, credentials_env)
+        try:
+            with pytest.raises(ValueError, match='grace must be > 0'):
+                ChannelUpload(
+                    LocalGeneration(workspace.workspace), store,
+                    remote_name='cos-main', grace=grace)
+        finally:
+            await store.aclose()
 
 
 class TestCapabilities:
@@ -1127,5 +1147,17 @@ class TestRun:
         """
         config.errors = [ValueError('Prefix of an unexpected type')]
         with pytest.raises(ConfigError, match='Prefix'):
+            await UploadRun(config, client=credentials_env.client()).run()
+        assert keys_of(credentials_env) == []
+
+    @pytest.mark.trio
+    async def test_a_grace_of_zero_stops_the_run(self, workspace, credentials_env, run_dir):
+        """The bound of a remote field is enforced by the model, before any request.
+
+        The reader falls back to the default and records why; the run refuses
+        the file instead of publishing with a grace nobody wrote.
+        """
+        config = write_config(run_dir, make_model({REMOTE: make_remote(GraceSeconds=0)}))
+        with pytest.raises(ConfigError, match='GraceSeconds'):
             await UploadRun(config, client=credentials_env.client()).run()
         assert keys_of(credentials_env) == []

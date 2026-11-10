@@ -189,14 +189,42 @@ class TestPublishConfig:
         assert isinstance(model.Publish['nas'], WebDavRemote)
 
     def test_a_negative_grace_is_refused(self, fs, run_dir):
-        """A negative grace would delete a generation before it was published."""
+        """A negative grace would delete a generation before it was published.
+
+        The bound is declared on the field, so the reader falls back to the
+        default and records why, and the run that must not go on refuses the
+        file instead of publishing with a value nobody wrote.
+        """
+        config = write_config(run_dir, make_model({REMOTE: make_remote(GraceSeconds=-1)}))
+        assert config.data.Publish[REMOTE].GraceSeconds == 3600
         with pytest.raises(ConfigError, match='GraceSeconds'):
-            write_config(run_dir, make_model({REMOTE: make_remote(GraceSeconds=-1)}))
+            require_valid(config)
+
+    def test_a_grace_of_zero_is_refused(self, fs, run_dir):
+        """A grace of zero turns the safety window off, so it is not a value.
+
+        With zero, the barrier age is never below the grace and no key is ever
+        younger than it either: the previous generation of a mirror that was
+        switched a second ago would be deleted while a client that read the old
+        barrier is still downloading it.
+        """
+        config = write_config(run_dir, make_model({REMOTE: make_remote(GraceSeconds=0)}))
+        assert config.data.Publish[REMOTE].GraceSeconds == 3600
+        with pytest.raises(ConfigError, match='GraceSeconds'):
+            require_valid(config)
+
+    def test_the_shortest_usable_grace(self, fs, run_dir):
+        """One second is a policy of the operator, not a value the model refuses."""
+        config = write_config(run_dir, make_model({REMOTE: make_remote(GraceSeconds=1)}))
+        assert config.data.Publish[REMOTE].GraceSeconds == 1
+        assert require_valid(config) is None
 
     def test_a_timeout_of_zero_is_refused(self, fs, run_dir):
         """A timeout of zero fails every request of the remote."""
+        config = write_config(run_dir, make_model({REMOTE: make_remote(TimeoutSeconds=0)}))
+        assert config.data.Publish[REMOTE].TimeoutSeconds == 120
         with pytest.raises(ConfigError, match='TimeoutSeconds'):
-            write_config(run_dir, make_model({REMOTE: make_remote(TimeoutSeconds=0)}))
+            require_valid(config)
 
 
 class TestCredentials:

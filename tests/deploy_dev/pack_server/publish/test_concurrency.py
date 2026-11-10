@@ -195,8 +195,8 @@ class TestCleanupConcurrency:
     @pytest.mark.trio
     async def test_the_cap_is_clamped(self):
         """A caller that asks for more than the cap gets the cap."""
-        assert ChannelCleanup('c', None, 0, concurrency=64).concurrency == MAX_CONCURRENCY
-        assert ChannelCleanup('c', None, 0, concurrency=-1).concurrency == 1
+        assert ChannelCleanup('c', None, 3600, concurrency=64).concurrency == MAX_CONCURRENCY
+        assert ChannelCleanup('c', None, 3600, concurrency=-1).concurrency == 1
 
 
 class TestLocalIo:

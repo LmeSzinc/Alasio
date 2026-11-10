@@ -177,7 +177,14 @@ class ChannelUpload:
         self.local = local
         self.store = store
         self.remote_name = remote_name
-        self.grace = max(0, int(grace))
+        self.grace = int(grace)
+        if self.grace <= 0:
+            # a grace of zero retires the previous generation the moment the
+            # barrier moves, and a client that just read the old barrier would
+            # be served a 404 by its next request. The config refuses the value
+            # as well; this is the same refusal for a caller that builds the
+            # channel by hand
+            raise ValueError(f'grace must be > 0 seconds, got {self.grace}')
         # the cap is a property of the tool, not of the config: more requests in
         # flight than this only move the queue into the connection pool
         self.concurrency = max(1, min(int(concurrency), MAX_CONCURRENCY))
