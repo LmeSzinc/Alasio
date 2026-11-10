@@ -71,6 +71,15 @@ def rgb888_image():
     return create_rgb888()
 
 
+@pytest.fixture(scope="module")
+def rgb565_image():
+    """
+    Fixture to create the RGB565 test image once for all tests.
+    This contains all possible RGB565 colors (0-65535) in a 256x256 image.
+    """
+    return create_rgb565()
+
+
 def color_blocks(image, size=173):
     """
     Yield non-overlapping size x size blocks covering the whole image.
@@ -147,17 +156,6 @@ class TestRgb565ToRgb888:
         g = g.astype(np.uint8)
         b = b.astype(np.uint8)
         return cv2.merge([r, g, b])
-
-    # a class-scoped fixture runs once per class, before any instance exists,
-    # so it takes no self: pytest deprecates the instance method form
-    @staticmethod
-    @pytest.fixture(scope="class")
-    def rgb565_image():
-        """
-        Fixture to create the RGB565 test image once for all tests in this class.
-        This contains all possible RGB565 colors (0-65535) in a 256x256 image.
-        """
-        return create_rgb565()
 
     def test_rgb565_to_rgb888(self, rgb565_image):
         """
