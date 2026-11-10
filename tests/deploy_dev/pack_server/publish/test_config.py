@@ -259,6 +259,35 @@ class TestCreateStore:
         with pytest.raises(ConfigError, match='Bucket'):
             create_store(REMOTE, make_remote(Bucket='a/b'), CHANNEL)
 
+    @pytest.mark.parametrize('prefix', ['pack//x', 'pack/../x', 'pack/./x'])
+    def test_an_unusable_prefix(self, prefix):
+        """A prefix the store would refuse is refused by the driver, by name.
+
+        The store raises ValueError for such a prefix when it is built; the
+        driver checks the same value first, so the failure is a ConfigError of
+        the field the operator has to edit instead of a ValueError traced out
+        of the store's constructor.
+        """
+        with pytest.raises(ConfigError, match='Prefix'):
+            create_store(REMOTE, make_remote(Prefix=prefix), CHANNEL)
+
+    @pytest.mark.parametrize('endpoint', [
+        'ftp://example.com',
+        'https://example.com/pack',
+    ])
+    def test_an_unusable_endpoint(self, endpoint):
+        """An endpoint that is not the host of an http(s) origin is refused."""
+        with pytest.raises(ConfigError, match='Endpoint'):
+            create_store(REMOTE, make_remote(Endpoint=endpoint), CHANNEL)
+
+    def test_a_usable_prefix_and_endpoint(self):
+        """The fields the driver now checks are still accepted when they are fine."""
+        store = create_store(
+            REMOTE,
+            make_remote(Prefix='/pack/', Endpoint='http://fake-cos.local:9000'),
+            CHANNEL)
+        assert store.prefix.rstrip('/') == f'{REMOTE_PREFIX}/{CHANNEL}'
+
     def test_a_missing_credential_is_refused_by_the_same_call(self, monkeypatch):
         """The store is built and its credentials read in one call, so a missing
         variable cannot slip through between a check and a build."""

@@ -48,9 +48,10 @@ from alasio.deploy_dev.pack_server.publish.common import (
     content_type, find_skip, first_failure, require_capabilities
 )
 from alasio.deploy_dev.pack_server.publish.retire import DeletePlan, SkipRetire, build_delete_plan
-from alasio.deploy_dev.store import BucketNotFound, ObjectNotFound
+from alasio.deploy_dev.store import BucketNotFound, ObjectNotFound, StoreError
 from alasio.ext.cache import cached_property_async_trio_lock
 from alasio.logger import logger
+from alasio.logger.utils import stringify_event
 
 # the status of one channel/remote pair, the value of UploadResult.status
 STATUS_OK = 'ok'
@@ -474,9 +475,62 @@ class ChannelUpload:
             channel=self.channel, remote=self.remote_name, status=STATUS_SKIPPED,
             reason=str(error))
 
+    def _failed(self, error):
+        """
+        Log a failed pair and build its result.
+
+        The log line is the reason only: a store failure is a fact of this pair
+        and not a bug of the run, so the run is not reported with a traceback.
+
+        Args:
+            error (StoreError): The request the store could not serve
+
+        Returns:
+            UploadResult: The failed result
+        """
+        reason = stringify_event(error)
+        logger.error(f'{self._where()}: {reason}')
+        return UploadResult(
+            channel=self.channel, remote=self.remote_name, status=STATUS_FAILED,
+            reason=reason)
+
+    def _refused(self, failure):
+        """
+        Turn the failure of a publish into what this run reports.
+
+        A nursery wraps the failures of its children, so the leaf is taken
+        first; a skip is a result of its own, a store that cannot serve the
+        workspace is a failed pair, and a bucket that does not exist is a
+        config error like everywhere else in the flow
+
+        Args:
+            failure (BaseException): The exception of the run, a group or a leaf
+
+        Returns:
+            UploadResult: The skipped or failed result
+
+        Raises:
+            BaseException: The failure, when it is not one of the above
+            ConfigError: If the bucket of the remote does not exist
+        """
+        if isinstance(failure, BaseExceptionGroup):
+            skip = find_skip(failure)
+            if skip is not None:
+                return self._skipped(skip)
+            failure = first_failure(failure)
+        if isinstance(failure, BucketNotFound):
+            raise ConfigError(f'{self._where()}: {failure}') from None
+        if isinstance(failure, StoreError):
+            return self._failed(failure)
+        raise failure
+
     async def run(self, dry_run=False):
         """
         Publish the generation of the workspace to the remote, then retire.
+
+        A store that cannot serve a request is a failed pair, not an exception
+        of the run: the mirror keeps the previous generation, the other remotes
+        of the channel still publish, and the next run asks the store again.
 
         Args:
             dry_run (bool): Report the decisions and write nothing. Defaults to
@@ -486,6 +540,7 @@ class ChannelUpload:
             UploadResult: What was written, retired, or why the run was refused
 
         Raises:
+            ConfigError: If the bucket of the remote does not exist
             IncompleteStore: If the store cannot prove the objects it holds
             PublishError: If a request fails
         """
@@ -500,16 +555,11 @@ class ChannelUpload:
         try:
             return await self._publish(manifest, dry_run)
         except SkipChannel as e:
-            # a serial run reaches the unreadable file without a nursery, so the
-            # skip arrives as it is
             return self._skipped(e)
-        except BaseExceptionGroup as group:
-            # a concurrent nursery wraps every failure of its children, even a
-            # single one
-            skip = find_skip(group)
-            if skip is not None:
-                return self._skipped(skip)
-            raise first_failure(group) from None
+        except (StoreError, BaseExceptionGroup) as failure:
+            # BucketNotFound is a StoreError of its own kind, and _refused()
+            # answers it with a ConfigError like every other read of the flow
+            return self._refused(failure)
 
     async def _publish(self, manifest, dry_run):
         """

@@ -24,6 +24,7 @@ nothing else in the flow knows the difference.
 from alasio.deploy_dev.pack_server.model import ConfigError, CosRemote
 from alasio.deploy_dev.pack_server.publish.env import env_value
 from alasio.deploy_dev.store.cos import CosStore
+from alasio.deploy_dev.store.cos.store import normalize_prefix, parse_endpoint
 from alasio.ext.path.validate import validate_filename
 
 
@@ -137,7 +138,13 @@ class CosDriver(Driver):
 
     def check(self, name, remote):
         """
-        Check the bucket and the region of the remote.
+        Refuse a remote whose container fields are not usable.
+
+        Every field here names the container of the requests: a bucket, a
+        region, a key prefix and an endpoint. They are checked with the same
+        functions the store uses to build its urls, so a value the store would
+        refuse is refused before the first request and by a ConfigError rather
+        than by a ValueError from inside the store's constructor.
 
         Args:
             name (str): Name of the remote in the config, for the message
@@ -155,6 +162,16 @@ class CosDriver(Driver):
         except ValueError as e:
             raise ConfigError(
                 f'Publish.{name}.Bucket is not a usable name: {e}') from None
+        try:
+            normalize_prefix(remote.Prefix)
+        except ValueError as e:
+            raise ConfigError(
+                f'Publish.{name}.Prefix is not usable: {e}') from None
+        try:
+            parse_endpoint(remote.Endpoint, remote.Bucket, remote.Region)
+        except ValueError as e:
+            raise ConfigError(
+                f'Publish.{name}.Endpoint is not usable: {e}') from None
 
     def create(self, name, remote, workspace, client=None):
         """
@@ -177,6 +194,15 @@ class CosDriver(Driver):
         """
         self.check(name, remote)
         prefix = remote.EnvPrefix or self.env_prefix
+        try:
+            key_prefix = workspace_prefix(remote, workspace)
+        except ValueError as e:
+            # the workspace name is the last part of the prefix, and it is the
+            # one value no field of the remote carries: the model refuses such
+            # a name when it builds it, this is the same answer for a caller
+            # that builds a store from a string of its own
+            raise ConfigError(
+                f'Publish.{name}: the workspace name is not usable: {e}') from None
         return CosStore(
             bucket=remote.Bucket,
             region=remote.Region,
@@ -184,7 +210,7 @@ class CosDriver(Driver):
             secret_key=env_value(prefix, 'SECRET_KEY', required=True),
             token=env_value(prefix, 'SESSION_TOKEN') or None,
             endpoint=remote.Endpoint or None,
-            prefix=workspace_prefix(remote, workspace),
+            prefix=key_prefix,
             client=client,
         )
 

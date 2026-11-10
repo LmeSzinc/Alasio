@@ -184,6 +184,8 @@ class FakeCos:
         fail_next_puts (int): Number of PUTs to answer by raising a transport
             error after the body was received, for the retry test
         fail_next_requests (int): Number of requests to answer with 500
+        fail_put_keys (set): Keys whose PUT answers 500, for a write the service
+            refuses without closing the connection
         fail_delete_keys (set): Keys whose DELETE answers 500, for a partial
             failure of a retire round
         bucket_missing (bool): True to answer every request with the 404 of a
@@ -202,6 +204,7 @@ class FakeCos:
         self.requests = []
         self.fail_next_puts = 0
         self.fail_next_requests = 0
+        self.fail_put_keys = set()
         self.fail_delete_keys = set()
         self.bucket_missing = False
         self._clients = []
@@ -369,6 +372,8 @@ class FakeCos:
         """
         if not key:
             return self._error(400, 'InvalidArgument', 'a PUT needs an object key')
+        if key in self.fail_put_keys:
+            return self._error(500, 'InternalError', 'injected put failure')
         declared = request.headers.get('content-length')
         if declared is not None and declared.isdigit() and int(declared) != len(body):
             # the real service reads exactly Content-Length bytes; a body of

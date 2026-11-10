@@ -17,8 +17,8 @@ import pytest
 from alasio.base.pretty import pretty_size
 from alasio.deploy_dev.pack_server.model import ConfigError
 from alasio.deploy_dev.pack_server.publish.channel import (
-    COMPARE_SAME, COMPARE_UPLOAD, SOURCE_ABSENT, SOURCE_HEAD, SOURCE_LIST, STATUS_DRY_RUN, STATUS_OK, STATUS_SKIPPED,
-    ChannelUpload, RemoteState, compare
+    COMPARE_SAME, COMPARE_UPLOAD, SOURCE_ABSENT, SOURCE_HEAD, SOURCE_LIST, STATUS_DRY_RUN, STATUS_FAILED, STATUS_OK,
+    STATUS_SKIPPED, ChannelUpload, RemoteState, compare
 )
 from alasio.deploy_dev.pack_server.publish.common import (
     BARRIER_KEY, MANIFEST_KEY, IncompleteStore, PublishError, PublishRunError
@@ -985,6 +985,54 @@ class TestRetire:
         assert f'{PREFIX}packrepo/aaaaaaaa/full.pack' in credentials_env.objects
 
 
+class TestStoreFailure:
+    """A store that cannot serve a request fails the pair instead of raising."""
+
+    @pytest.mark.trio
+    async def test_a_failed_put_fails_the_pair(self, workspace, credentials_env):
+        """A 500 on a content PUT is a result the caller collects, not an exception.
+
+        The run is serial, so the failure reaches the channel as the CosError
+        itself: no nursery wraps it on the way.
+        """
+        store = make_store(make_remote(), CHANNEL, credentials_env)
+        # the listing of the workspace succeeds, the first content file does not
+        credentials_env.fail_put_keys = {f'{PREFIX}packrepo/aaaaaaaa/full.pack'}
+        try:
+            result = await make_upload(workspace, store).run()
+        finally:
+            await store.aclose()
+        assert result.status == STATUS_FAILED
+        assert 'CosError' in result.reason
+        assert '500' in result.reason
+
+    @pytest.mark.trio
+    async def test_a_failed_put_of_a_concurrent_run(self, workspace, credentials_env):
+        """A nursery wraps the failure of a concurrent PUT, and the pair still fails."""
+        store = make_store(make_remote(), CHANNEL, credentials_env)
+        credentials_env.fail_put_keys = {f'{PREFIX}packrepo/aaaaaaaa/full.pack'}
+        try:
+            result = await make_upload(workspace, store, concurrency=4).run()
+        finally:
+            await store.aclose()
+        assert result.status == STATUS_FAILED
+        assert 'CosError' in result.reason
+
+    @pytest.mark.trio
+    async def test_a_failed_run_writes_neither_the_barrier_nor_the_contract(
+            self, workspace, credentials_env):
+        """A mirror that failed halfway keeps serving the previous generation."""
+        store = make_store(make_remote(), CHANNEL, credentials_env)
+        credentials_env.fail_put_keys = {f'{PREFIX}packrepo/aaaaaaaa/full.pack'}
+        try:
+            result = await make_upload(workspace, store).run()
+        finally:
+            await store.aclose()
+        assert result.status == STATUS_FAILED
+        assert f'{PREFIX}{BARRIER_KEY}' not in credentials_env.objects
+        assert f'{PREFIX}{MANIFEST_KEY}' not in credentials_env.objects
+
+
 class TestVerify:
     """A write that does not land as it was sent is a failure, not a warning."""
 
@@ -1040,6 +1088,19 @@ class TestRun:
         assert [pair[1] for pair in caught.value.failed] == ['backup']
         # the other remote was published before the run reported the failure
         assert keys_of(credentials_env)
+
+    @pytest.mark.trio
+    async def test_a_bad_prefix_stops_the_run(self, run_dir, credentials_env):
+        """A remote with a prefix the store cannot use is a config error.
+
+        It is not a failed pair: the operator has to edit the value, so the run
+        stops at once and the next remote is not touched.
+        """
+        config = write_config(
+            run_dir, make_model({REMOTE: make_remote(Prefix='pack//x')}))
+        with pytest.raises(ConfigError, match='Prefix'):
+            await UploadRun(config, client=credentials_env.client()).run()
+        assert credentials_env.objects == {}
 
     @pytest.mark.trio
     async def test_a_remote_filter(self, workspace, credentials_env, config):

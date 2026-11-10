@@ -13,7 +13,7 @@ import pytest
 
 from alasio.deploy_dev.pack_server.model import ConfigError
 from alasio.deploy_dev.pack_server.publish.cleanup import (
-    STATUS_DRY_RUN, STATUS_OK, STATUS_SKIPPED, ChannelCleanup, CleanupRun, SkipCleanup, build_delete_plan
+    STATUS_DRY_RUN, STATUS_FAILED, STATUS_OK, STATUS_SKIPPED, ChannelCleanup, CleanupRun, SkipCleanup, build_delete_plan
 )
 from alasio.deploy_dev.pack_server.publish.common import BARRIER_KEY, MANIFEST_KEY
 from alasio.deploy_dev.store import ObjectInfo, ObjectListing
@@ -456,6 +456,33 @@ class TestPartialDelete:
             await store.aclose()
         assert result.size == 1
         assert f'[{cleanup.remote_name}] {CHANNEL}: deleted 1 key(s), 1.00B' in capture.concat()
+
+
+class TestStoreFailure:
+    """A store that cannot serve a read fails the pair instead of raising."""
+
+    @pytest.mark.trio
+    async def test_a_failed_read_fails_the_pair(self, workspace, credentials_env):
+        """A 500 on the contract is a failed result, and nothing is deleted.
+
+        The run reads two objects before it can decide anything, so the failure
+        arrives from a nursery: the channel unwraps it and reports the pair
+        rather than letting the group out of a method documented to return a
+        result.
+        """
+        store = await fill(workspace, credentials_env)
+        credentials_env.store(f'{PREFIX}old/full.pack', b'old', 'application/octet-stream',
+                             None, last_modified=time.time() - GRACE * 10)
+        age_objects(credentials_env, GRACE + 1)
+        credentials_env.fail_next_requests = 1
+        try:
+            result = await cleanup_of(credentials_env, store).run()
+        finally:
+            await store.aclose()
+        assert result.status == STATUS_FAILED
+        assert 'CosError' in result.reason
+        assert f'{PREFIX}{MANIFEST_KEY}' in credentials_env.objects
+        assert f'{PREFIX}old/full.pack' in credentials_env.objects
 
 
 class TestDryRun:

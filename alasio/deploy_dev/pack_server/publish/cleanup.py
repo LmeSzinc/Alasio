@@ -36,7 +36,7 @@ from alasio.deploy_dev.pack_server.publish.common import (
 )
 from alasio.deploy_dev.pack_server.publish.drivers import create_store
 from alasio.deploy_dev.pack_server.publish.retire import SkipRetire as SkipCleanup, build_delete_plan
-from alasio.deploy_dev.store import BucketNotFound, ObjectNotFound
+from alasio.deploy_dev.store import BucketNotFound, ObjectNotFound, StoreError
 from alasio.ext.path.validate import validate_filepath
 from alasio.logger import logger
 from alasio.logger.utils import stringify_event
@@ -193,7 +193,10 @@ class ChannelCleanup:
             # not: the remote has to be configured, so the run stops instead of
             # reporting a workspace that was never published
             raise ConfigError(f'[{self.remote_name}] {self.workspace_name}: {e}') from None
-        except (PublishError, ObjectNotFound) as e:
+        except (PublishError, StoreError) as e:
+            # a store that cannot serve a read is a failed pair, not an
+            # exception of the run: the mirror keeps what it has and the next
+            # run asks again
             return self._failed(stringify_event(e))
 
         now = listing.server_date
