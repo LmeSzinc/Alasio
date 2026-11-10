@@ -15,12 +15,13 @@ import hashlib
 import pytest
 
 from alasio.base.pretty import pretty_size
+from alasio.deploy_dev.pack_server.model import ConfigError
 from alasio.deploy_dev.pack_server.publish.channel import (
     COMPARE_SAME, COMPARE_UPLOAD, SOURCE_ABSENT, SOURCE_HEAD, SOURCE_LIST, STATUS_DRY_RUN, STATUS_OK, STATUS_SKIPPED,
     ChannelUpload, RemoteState, compare
 )
 from alasio.deploy_dev.pack_server.publish.common import (
-    BARRIER_KEY, MANIFEST_KEY, ConfigError, IncompleteStore, PublishError
+    BARRIER_KEY, MANIFEST_KEY, IncompleteStore, PublishError, PublishRunError
 )
 from alasio.deploy_dev.pack_server.publish.local import LocalGeneration, UploadItem
 from alasio.deploy_dev.pack_server.publish.upload import UploadRun
@@ -457,19 +458,18 @@ class TestMissingBucket:
         assert [r for r in credentials_env.requests if r[0] == 'PUT'] == []
 
     @pytest.mark.trio
-    async def test_the_pair_is_reported_as_failed(self, workspace, credentials_env, config):
-        """A run of the config fails the remote, it never reports success.
+    async def test_the_run_stops_at_the_first_config_error(self, workspace, credentials_env,
+                                                          config):
+        """A publication of a misconfigured remote is refused at once.
 
-        The reason names the bucket, so an operator reads "fix the config"
-        rather than "the workspace was never published".
+        It is not a failed pair: the reason names the bucket, and the run does
+        not continue with the next remote, because a retry cannot fix a value
+        the operator has to edit.
         """
-        from alasio.deploy_dev.pack_server.publish.common import PublishRunError
         credentials_env.bucket_missing = True
-        with pytest.raises(PublishRunError) as caught:
+        with pytest.raises(ConfigError) as caught:
             await UploadRun(config, client=credentials_env.client()).run()
-        reason = caught.value.failed[0][2]
-        assert 'does not exist' in reason
-        assert 'skipped' not in reason.lower()
+        assert 'does not exist' in str(caught.value)
 
 
 class TestGuards:
@@ -996,23 +996,27 @@ class TestRun:
     @pytest.mark.trio
     async def test_a_failing_remote_does_not_stop_the_other(self, workspace, credentials_env,
                                                             run_dir):
-        """One remote that fails is reported, the other one is still published."""
-        from alasio.deploy_dev.pack_server.publish.common import PublishRunError
+        """One remote that fails at a request is reported, the other is published.
+
+        A failure of a request is not a configuration error: a later run may not
+        see it, so the run continues with the next remote and reports the pair
+        at the end.
+        """
         remote = make_remote()
-        broken = make_remote(Bucket='')
         config = write_config(
-            run_dir, make_model(remotes={REMOTE: remote, 'broken': broken}))
+            run_dir, make_model(remotes={REMOTE: remote, 'backup': make_remote()}))
+        # the first remote the run reaches answers one request with a 500
+        credentials_env.fail_next_requests = 1
         run = UploadRun(config, client=credentials_env.client())
         with pytest.raises(PublishRunError) as caught:
             await run.run()
-        assert [pair[1] for pair in caught.value.failed] == ['broken']
-        # the working remote was published before the run reported the failure
+        assert [pair[1] for pair in caught.value.failed] == ['backup']
+        # the other remote was published before the run reported the failure
         assert keys_of(credentials_env)
 
     @pytest.mark.trio
     async def test_a_remote_filter(self, workspace, credentials_env, config):
         """A remote the run is asked for and the config does not name is an error."""
-        from alasio.deploy_dev.pack_server.publish.common import ConfigError
         run = UploadRun(config, client=credentials_env.client())
         with pytest.raises(ConfigError):
             await run.run(remotes=['no-such-remote'])
@@ -1033,7 +1037,6 @@ class TestRun:
         broken Prefix would publish to the bucket root: the run refuses the file
         the reader recorded an error for, before any request.
         """
-        from alasio.deploy_dev.pack_server.publish.common import ConfigError
         config.errors = [ValueError('Prefix of an unexpected type')]
         with pytest.raises(ConfigError, match='Prefix'):
             await UploadRun(config, client=credentials_env.client()).run()

@@ -8,14 +8,16 @@ the run continues with the next one: an unreachable mirror must not stop the
 publication to the others.
 """
 
+from alasio.deploy_dev.pack_server.model import ConfigError, require_valid
 from alasio.deploy_dev.pack_server.publish.channel import STATUS_FAILED, ChannelUpload, UploadResult
-from alasio.deploy_dev.pack_server.publish.common import ConfigError, PublishError, PublishRunError, require_valid
+from alasio.deploy_dev.pack_server.publish.common import PublishError, PublishRunError
 from alasio.deploy_dev.pack_server.publish.drivers import create_store
 from alasio.deploy_dev.pack_server.publish.local import LocalGeneration
 from alasio.ext import env
 from alasio.ext.cache import cached_property
 from alasio.ext.path import PathStr
 from alasio.logger import logger
+from alasio.logger.utils import stringify_event
 
 # the folder of the workspaces, inside the run directory, the same one the
 # generator writes (see repo_base.PACK_FOLDER)
@@ -121,6 +123,11 @@ class UploadRun:
 
         Returns:
             UploadResult: The result of the pair
+
+        Raises:
+            ConfigError: If the remote is not usable. It is not a failed pair:
+                the run stops at once, because another attempt cannot fix a
+                configuration
         """
         logger.hr(f'Publish {self.workspace.name} -> {name}', level=2)
         store = None
@@ -130,11 +137,13 @@ class UploadRun:
                 self.local, store, remote_name=name, grace=remote.GraceSeconds,
                 concurrency=concurrency)
             return await upload.run(dry_run=dry_run)
+        except ConfigError:
+            raise
         except PublishError as e:
-            return self._failed(name, str(e))
+            return self._failed(name, stringify_event(e))
         except Exception as e:  # noqa: BLE001 - one pair must not stop the run
             logger.exception(f'[{name}] {self.workspace.name}: publish failed')
-            return self._failed(name, f'{type(e).__name__}: {e}')
+            return self._failed(name, stringify_event(e))
         finally:
             if store is not None:
                 await store.aclose()

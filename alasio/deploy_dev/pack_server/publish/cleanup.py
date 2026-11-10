@@ -30,15 +30,16 @@ except NameError:  # python 3.8 / 3.9
 from alasio.base.pretty import pretty_size
 from alasio.deploy.pack.server_file import LatestInfo
 from alasio.deploy_dev.pack_server.manifest import Manifest
+from alasio.deploy_dev.pack_server.model import ConfigError, require_valid
 from alasio.deploy_dev.pack_server.publish.common import (
-    BARRIER_KEY, MANIFEST_KEY, MAX_CONCURRENCY, ConfigError, PublishError, PublishRunError, find_skip, first_failure,
-    require_valid
+    BARRIER_KEY, MANIFEST_KEY, MAX_CONCURRENCY, PublishError, PublishRunError, find_skip, first_failure
 )
 from alasio.deploy_dev.pack_server.publish.drivers import create_store
 from alasio.deploy_dev.pack_server.publish.retire import SkipRetire as SkipCleanup, build_delete_plan
 from alasio.deploy_dev.store import BucketNotFound, ObjectNotFound
 from alasio.ext.path.validate import validate_filepath
 from alasio.logger import logger
+from alasio.logger.utils import stringify_event
 
 # the status of one channel/remote pair, the value of CleanupResult.status
 STATUS_OK = 'ok'
@@ -182,11 +183,11 @@ class ChannelCleanup:
                 status=STATUS_SKIPPED, reason=str(e))
         except BucketNotFound as e:
             # no object of this workspace exists, because the bucket itself does
-            # not: the remote has to be configured, and it must not look like a
-            # workspace that was never published
-            return self._failed(f'[{self.remote_name}] {self.workspace_name}: {e}')
+            # not: the remote has to be configured, so the run stops instead of
+            # reporting a workspace that was never published
+            raise ConfigError(f'[{self.remote_name}] {self.workspace_name}: {e}') from None
         except (PublishError, ObjectNotFound) as e:
-            return self._failed(str(e))
+            return self._failed(stringify_event(e))
 
         barrier = listing.objects[BARRIER_KEY]
         now = listing.server_date
@@ -428,6 +429,11 @@ class CleanupRun:
 
         Returns:
             CleanupResult: The result of the pair
+
+        Raises:
+            ConfigError: If the remote is not usable. It is not a failed pair:
+                the run stops at once, because another attempt cannot fix a
+                configuration
         """
         logger.hr(f'Clean {name} <- {remote_name}', level=2)
         store = None
@@ -437,10 +443,8 @@ class CleanupRun:
                 name, store, remote.GraceSeconds, remote_name=remote_name,
                 concurrency=remote.Concurrency)
             return await cleanup.run(dry_run=dry_run)
-        except ConfigError as e:
-            logger.error(f'[{remote_name}] {name}: {e}')
-            return CleanupResult(
-                channel=name, remote=remote_name, status=STATUS_FAILED, reason=str(e))
+        except ConfigError:
+            raise
         except Exception as e:  # noqa: BLE001 - one pair must not stop the run
             logger.exception(f'[{remote_name}] {name}: cleanup failed')
             return CleanupResult(

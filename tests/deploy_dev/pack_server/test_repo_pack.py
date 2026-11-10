@@ -31,7 +31,7 @@ from alasio.deploy_dev.pack.encode_packdep import encode_packdep
 from alasio.deploy_dev.pack.pack_full import PackFull
 from alasio.deploy_dev.pack_server import repo_base, repo_pack
 from alasio.deploy_dev.pack_server.gate import RunDirError, check_run_dir
-from alasio.deploy_dev.pack_server.model import LookbackConfig, PackRepoModel, RepoConfig
+from alasio.deploy_dev.pack_server.model import ConfigError, LookbackConfig, PackRepoModel, RepoConfig
 from alasio.deploy_dev.pack_server.repo import Repo
 from alasio.deploy_dev.pack_server.repo_base import RepoBase
 from alasio.deploy_dev.pack_server.repo_latest import RepoLatest
@@ -299,7 +299,7 @@ class TestConfigAndFolders:
     def test_branch_with_path_separator(self, fs, run_dir):
         """A Branch that would nest the pack folder inside another config is refused."""
         config = PackRepoModel(Repo=RepoConfig(Author='Author', Repo='Repo', Branch='feature/x'))
-        with pytest.raises(ValueError):
+        with pytest.raises(ConfigError):
             PackFlow(make_repo(VERSIONS), config)
 
     def test_pack_folder(self, fs, run_dir):

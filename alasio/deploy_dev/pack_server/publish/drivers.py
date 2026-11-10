@@ -21,8 +21,7 @@ next step of the plan: the factory refuses it with a message that says so, and
 nothing else in the flow knows the difference.
 """
 
-from alasio.deploy_dev.pack_server.model import CosRemote
-from alasio.deploy_dev.pack_server.publish.common import ConfigError
+from alasio.deploy_dev.pack_server.model import ConfigError, CosRemote
 from alasio.deploy_dev.pack_server.publish.env import env_value
 from alasio.deploy_dev.store.cos import CosStore
 from alasio.ext.path.validate import validate_filename

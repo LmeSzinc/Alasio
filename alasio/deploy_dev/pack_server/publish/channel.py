@@ -42,9 +42,10 @@ except NameError:  # python 3.8 / 3.9
     from exceptiongroup import BaseExceptionGroup
 
 from alasio.base.pretty import pretty_size
+from alasio.deploy_dev.pack_server.model import ConfigError
 from alasio.deploy_dev.pack_server.publish.common import (
-    BARRIER_KEY, MANIFEST_KEY, MAX_CONCURRENCY, MD5_HEX, ConfigError, IncompleteStore, PublishError, SkipChannel,
-    cache_control, content_type, find_skip, first_failure, require_capabilities
+    BARRIER_KEY, MANIFEST_KEY, MAX_CONCURRENCY, MD5_HEX, IncompleteStore, PublishError, SkipChannel, cache_control,
+    content_type, find_skip, first_failure, require_capabilities
 )
 from alasio.deploy_dev.pack_server.publish.retire import DeletePlan, SkipRetire, build_delete_plan
 from alasio.deploy_dev.store import BucketNotFound, ObjectNotFound

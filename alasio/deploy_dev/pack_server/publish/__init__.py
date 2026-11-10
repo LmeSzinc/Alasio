@@ -22,9 +22,9 @@ Neither of them knows what the host is: both work on the methods of
 ``alasio.deploy_dev.store.ObjectStore``.
 """
 
+from alasio.deploy_dev.pack_server.model import ConfigError
 from alasio.deploy_dev.pack_server.publish.common import (
-    BARRIER_KEY, MANIFEST_KEY, ConfigError, PublishError, PublishRunError, ancestor_folders, cache_control,
-    content_type, is_no_cache
+    BARRIER_KEY, MANIFEST_KEY, PublishError, PublishRunError, ancestor_folders, cache_control, content_type, is_no_cache
 )
 from alasio.deploy_dev.pack_server.publish.drivers import DRIVERS, Driver, create_store, driver_name, workspace_prefix
 from alasio.deploy_dev.pack_server.publish.env import env_value

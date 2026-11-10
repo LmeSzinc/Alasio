@@ -10,8 +10,9 @@ YamlConfig of the project.
 import msgspec
 import pytest
 
-from alasio.deploy_dev.pack_server.model import CosRemote, PackRepoConfig, PackRepoModel, RepoConfig, WebDavRemote
-from alasio.deploy_dev.pack_server.publish.common import ConfigError, require_valid
+from alasio.deploy_dev.pack_server.model import (
+    ConfigError, CosRemote, PackRepoConfig, PackRepoModel, RepoConfig, WebDavRemote, require_valid
+)
 from alasio.deploy_dev.pack_server.publish.drivers import create_store, driver_name
 from alasio.deploy_dev.pack_server.publish.env import env_value
 from alasio.ext.path import PathStr
@@ -89,7 +90,7 @@ class TestPublishModel:
     def test_a_branch_with_a_slash_is_refused(self):
         """A name that is not a single path component cannot be a folder of pack/."""
         model = PackRepoModel(Repo=RepoConfig(Author='A', Repo='B', Branch='feature/x'))
-        with pytest.raises(ValueError):
+        with pytest.raises(ConfigError):
             _ = model.workspace_name
 
     def test_an_unknown_field_is_an_error(self):
@@ -189,12 +190,12 @@ class TestPublishConfig:
 
     def test_a_negative_grace_is_refused(self, fs, run_dir):
         """A negative grace would delete a generation before it was published."""
-        with pytest.raises(ValueError, match='GraceSeconds'):
+        with pytest.raises(ConfigError, match='GraceSeconds'):
             write_config(run_dir, make_model({REMOTE: make_remote(GraceSeconds=-1)}))
 
     def test_a_timeout_of_zero_is_refused(self, fs, run_dir):
         """A timeout of zero fails every request of the remote."""
-        with pytest.raises(ValueError, match='TimeoutSeconds'):
+        with pytest.raises(ConfigError, match='TimeoutSeconds'):
             write_config(run_dir, make_model({REMOTE: make_remote(TimeoutSeconds=0)}))
 
 

@@ -10,6 +10,45 @@ from alasio.ext.path.validate import validate_filename, validate_resolve_filepat
 from alasio.logger import logger
 
 
+class ConfigError(Exception):
+    """
+    Raised when a config file, a credential or a remote setting is not usable.
+
+    Every check of the configuration raises this one error, so a caller tells
+    "a value the operator has to edit" from every other failure by its type:
+    an unknown key, an empty required field, a malformed proxy, a remote the
+    driver cannot serve, a credential the environment does not hold, a bucket
+    that does not exist. A run stops at the first one instead of retrying,
+    because another attempt cannot change a value of a file.
+
+    The message names the field and the file, never a credential.
+    """
+
+
+def require_valid(config):
+    """
+    Refuse a config file that the reader could not validate.
+
+    YamlConfig falls back to the default of a field that fails the validation,
+    which is what the generator can live with (a broken Lookback value still
+    generates the packs it can) but not what a run of the config can: a typo in
+    Publish would drop a remote, publish nowhere, and report success. The errors
+    of the file are read here, so the run refuses it.
+
+    Args:
+        config (YamlConfig): The config of a repo, its data is read here
+
+    Raises:
+        ConfigError: If any value of the file failed the validation
+    """
+    # the errors are filled by the read of the data, see YamlConfig.data
+    _ = config.data
+    errors = [error for error in config.errors if not isinstance(error, FileNotFoundError)]
+    if errors:
+        reasons = '; '.join(str(error) for error in errors)
+        raise ConfigError(f'Cannot read "{config.file}": {reasons}')
+
+
 class RepoConfig(Struct):
     """
     Clone repo to repo/{Author}_{Repo}
@@ -227,10 +266,13 @@ class PackRepoModel(Struct):
             str: E.g. 'LmeSzinc_AzurLaneAutoScript_master'
 
         Raises:
-            ValueError: If the name is not a single safe path component
+            ConfigError: If the name is not a single safe path component
         """
         name = f'{self.Repo.Author}_{self.Repo.Repo}_{self.Repo.Branch}'
-        validate_filename(name)
+        try:
+            validate_filename(name)
+        except ValueError as e:
+            raise ConfigError(f'Invalid workspace name "{name}": {e}') from None
         return name
 
 
@@ -253,7 +295,7 @@ class PackRepoConfig(YamlConfig):
 
     Author, Repo, Remote and Branch must not be empty: every user of the
     config needs them, so the check lives here and the users do not check
-    them again. A config with an empty one raises ValueError, the created or
+    them again. A config with an empty one raises ConfigError, the created or
     repaired file stays on the disk for the operator to fill. The proxy of the
     Env group is checked the same way: a value the http client cannot use would
     fail every download of the run, long after the clone. The values of the
@@ -280,7 +322,10 @@ class PackRepoConfig(YamlConfig):
     def __init__(self, file):
         check_run_dir()
         folder = env.PROJECT_ROOT.joinpath(self.CONFIG_FOLDER)
-        file = validate_resolve_filepath(folder, file)
+        try:
+            file = validate_resolve_filepath(folder, file)
+        except ValueError as e:
+            raise ConfigError(f'Invalid config file name: {e}') from None
         super().__init__(file, model=PackRepoModel)
         self._check_repo()
         self._check_env()
@@ -353,23 +398,23 @@ class PackRepoConfig(YamlConfig):
         lives in the reader and the users of the config do not check again.
 
         Raises:
-            ValueError: If Author, Repo, Remote or Branch is empty
+            ConfigError: If Author, Repo, Remote or Branch is empty
         """
         repo = self.data.Repo
         if not repo.Author:
-            raise ValueError(
+            raise ConfigError(
                 f'Empty Author in the pack config, cannot name the folder of the repo, '
                 f'file="{self.file}"{self._invalid_values()}')
         if not repo.Repo:
-            raise ValueError(
+            raise ConfigError(
                 f'Empty Repo name in the pack config, cannot name the folder of the repo, '
                 f'file="{self.file}"{self._invalid_values()}')
         if not repo.Remote:
-            raise ValueError(
+            raise ConfigError(
                 f'Empty Remote in the pack config, cannot clone the repo, '
                 f'file="{self.file}"{self._invalid_values()}')
         if not repo.Branch:
-            raise ValueError(
+            raise ConfigError(
                 f'Empty Branch in the pack config, cannot know what to fetch, '
                 f'file="{self.file}"{self._invalid_values()}')
 
@@ -384,7 +429,7 @@ class PackRepoConfig(YamlConfig):
         every request of the first step that fetches.
 
         Raises:
-            ValueError: If Env.Proxy is not a proxy url the http client can use
+            ConfigError: If Env.Proxy is not a proxy url the http client can use
         """
         proxy = self.data.Env.Proxy
         if not proxy:
@@ -395,11 +440,11 @@ class PackRepoConfig(YamlConfig):
         try:
             url = httpx2.Proxy(proxy).url
         except ValueError as e:
-            raise ValueError(
+            raise ConfigError(
                 f'Invalid Env.Proxy of the pack config, expected a proxy url like '
                 f'"http://127.0.0.1:7890": {e}, file="{self.file}"') from None
         if not url.host:
-            raise ValueError(
+            raise ConfigError(
                 f'Invalid Env.Proxy of the pack config, the host is empty: {proxy!r}, '
                 f'file="{self.file}"')
 
@@ -416,15 +461,15 @@ class PackRepoConfig(YamlConfig):
         flows clamp it to 1..8, a value outside is a preference, not an error.
 
         Raises:
-            ValueError: If GraceSeconds is negative, or TimeoutSeconds is not
+            ConfigError: If GraceSeconds is negative, or TimeoutSeconds is not
                 positive
         """
         for name, remote in self.data.Publish.items():
             if remote.GraceSeconds < 0:
-                raise ValueError(
+                raise ConfigError(
                     f'Publish.{name}.GraceSeconds must be >= 0, file="{self.file}"')
             if remote.TimeoutSeconds <= 0:
-                raise ValueError(
+                raise ConfigError(
                     f'Publish.{name}.TimeoutSeconds must be > 0, file="{self.file}"')
 
     def _log_errors(self, errors):

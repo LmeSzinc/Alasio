@@ -13,7 +13,7 @@ import pytest
 
 from alasio.deploy_dev.pack_server import main
 from alasio.deploy_dev.pack_server.gate import RunDirError, check_run_dir
-from alasio.deploy_dev.pack_server.model import PackRepoConfig
+from alasio.deploy_dev.pack_server.model import ConfigError, PackRepoConfig
 from alasio.deploy_dev.pack_server.publish.lock import ChannelLock
 from alasio.ext import env
 from alasio.ext.path import PathStr
@@ -258,7 +258,9 @@ class TestRunConfig:
         calls = []
         monkeypatch.setattr(main, 'PackRepo', fake_repo(calls))
         monkeypatch.setattr(main, 'Repo', fake_gen(calls))
-        with pytest.raises(ValueError, match='Empty Author'):
+        # a value the operator has to fill in, reported as a config error so the
+        # CLI gives it the exit code of a file to edit
+        with pytest.raises(ConfigError, match='Empty Author'):
             main.PackServer().run_config(FILE)
         assert calls == []
 

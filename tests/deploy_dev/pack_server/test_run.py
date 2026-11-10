@@ -10,7 +10,7 @@ fails to publish is reported, and the other configs still run.
 import pytest
 
 import alasio.deploy_dev.pack_server.run as run_module
-from alasio.deploy_dev.pack_server.model import PackRepoModel, RepoConfig
+from alasio.deploy_dev.pack_server.model import ConfigError, PackRepoModel, RepoConfig
 from alasio.deploy_dev.pack_server.publish.channel import ChannelUpload
 from alasio.deploy_dev.pack_server.publish.lock import ChannelLock
 from alasio.deploy_dev.pack_server.run import PackRun, PackRunError
@@ -219,4 +219,21 @@ class TestPackRun:
             PackRepoModel(Repo=RepoConfig(Remote='u', Author=AUTHOR, Repo=REPO, Branch=BRANCH)))
         with pytest.raises(PackRunError):
             await PackRun(client=credentials_env.client()).run()
+        assert credentials_env.objects == {}
+
+    @pytest.mark.trio
+    async def test_a_broken_config_stops_the_run(self, run_dir, credentials_env, monkeypatch):
+        """A config that has to be edited stops the run before the next config.
+
+        It is a ConfigError, not a failed config: another attempt cannot fix a
+        value the operator has to fill in, so the other configs are not run.
+        """
+        write_config(run_dir, FILE)
+        write_config(run_dir, 'other.yaml', remotes={'cos-2': make_remote()})
+        YamlConfig(run_dir.joinpath('config').joinpath(FILE), model=PackRepoModel).write_data(
+            PackRepoModel(Repo=RepoConfig(Remote='u', Author='', Repo=REPO, Branch=BRANCH)))
+        generated = stub_generation(monkeypatch)
+        with pytest.raises(ConfigError, match='Empty Author'):
+            await PackRun(client=credentials_env.client()).run()
+        assert generated == []
         assert credentials_env.objects == {}

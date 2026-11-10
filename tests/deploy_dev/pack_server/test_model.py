@@ -12,7 +12,9 @@ import pytest
 
 from alasio.deploy_dev.pack_server import model
 from alasio.deploy_dev.pack_server.gate import RunDirError, check_run_dir
-from alasio.deploy_dev.pack_server.model import EnvConfig, LookbackConfig, PackRepoConfig, PackRepoModel, RepoConfig
+from alasio.deploy_dev.pack_server.model import (
+    ConfigError, EnvConfig, LookbackConfig, PackRepoConfig, PackRepoModel, RepoConfig
+)
 from alasio.ext import env
 from alasio.ext.file.yamlconfig import build_help_map
 from alasio.ext.file.yamlfile import yaml_loads
@@ -121,7 +123,7 @@ class TestPackRepoConfig:
     def test_read_missing_file(self, fs, run_dir):
         """A file that does not exist is created from the model, then the empty config is refused."""
         with logger.mock_capture_writer() as capture:
-            with pytest.raises(ValueError, match='Empty Author'):
+            with pytest.raises(ConfigError, match='Empty Author'):
                 PackRepoConfig(FILE)
         assert capture.concat() == f"""\
 WARNING | Invalid pack config value: [Errno 2] No such file or directory: '{run_dir}/config/LmeSzinc_AzurLaneAutoScript.yaml', file={run_dir}/config/LmeSzinc_AzurLaneAutoScript.yaml
@@ -169,7 +171,7 @@ Repo:
     def test_empty_repo_value(self, fs, run_dir, empty, contents):
         """An empty Author / Repo / Remote / Branch is refused, every user of the config needs them."""
         fs.create_file(config_file(run_dir), contents=contents)
-        with pytest.raises(ValueError, match=f'{empty}.*{FILE}'):
+        with pytest.raises(ConfigError, match=f'{empty}.*{FILE}'):
             PackRepoConfig(FILE)
 
     def test_write_template(self, fs, run_dir):
@@ -347,7 +349,7 @@ INFO | Write config {run_dir}/config/LmeSzinc_AzurLaneAutoScript.yaml
         """A file that is not valid yaml is replaced by the model defaults, then the empty config is refused."""
         fs.create_file(config_file(run_dir), contents='Lookback: [unclosed\n')
         with logger.mock_capture_writer() as capture:
-            with pytest.raises(ValueError, match='Empty Author'):
+            with pytest.raises(ConfigError, match='Empty Author'):
                 PackRepoConfig(FILE)
         assert capture.concat() == f"""\
 WARNING | Invalid pack config value: while parsing a flow sequence
@@ -395,7 +397,7 @@ Repo:
 Env:
   Proxy: {proxy}
 """)
-        with pytest.raises(ValueError) as e:
+        with pytest.raises(ConfigError) as e:
             PackRepoConfig(FILE)
         assert str(e.value).startswith('Invalid Env.Proxy of the pack config')
         assert config_file(run_dir) in str(e.value)
@@ -413,7 +415,7 @@ Repo:
 Env:
   Proxy: http://
 """)
-        with pytest.raises(ValueError) as e:
+        with pytest.raises(ConfigError) as e:
             PackRepoConfig(FILE)
         assert str(e.value) == (
             "Invalid Env.Proxy of the pack config, the host is empty: 'http://', "
@@ -446,7 +448,7 @@ Repo:
     def test_file_outside_config_folder(self, fs, run_dir):
         """A path that escapes the config folder is refused."""
         fs.create_file(f'{run_dir}/{FILE}', contents='Repo:\n  Author: LmeSzinc\n')
-        with pytest.raises(ValueError):
+        with pytest.raises(ConfigError):
             PackRepoConfig(f'../{FILE}')
 
     def test_run_dir_is_a_mod(self, fs, run_dir, monkeypatch):

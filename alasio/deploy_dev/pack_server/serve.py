@@ -31,6 +31,7 @@ the run directory are served:
 
 import argparse
 import functools
+import sys
 
 import trio
 from hypercorn.config import Config
@@ -39,7 +40,7 @@ from starlette.applications import Starlette
 from starlette.routing import Mount
 from starlette.staticfiles import StaticFiles
 
-from alasio.deploy_dev.pack_server.gate import check_run_dir
+from alasio.deploy_dev.pack_server.gate import RunDirError, check_run_dir
 from alasio.ext import env
 from alasio.ext.path import PathStr
 from alasio.logger import logger
@@ -123,10 +124,16 @@ def create_config(args=None):
     parsed_args = parser.parse_args(args)
     if parsed_args.root:
         env.set_project_root(parsed_args.root)
+    # the check runs before the first log line, so a mistyped root is refused
+    # instead of being created by the log file, see run.main
+    try:
+        check_run_dir()
+    except RunDirError as e:
+        print(f'error: {e}', file=sys.stderr)
+        raise SystemExit(2) from None
     # the project root must be set before the first log: the log file of the
     # process is decided by the first write, see LogWriter.file
     logger.hr('Start', level=0)
-    check_run_dir()
     folder = pack_folder()
 
     config = Config()

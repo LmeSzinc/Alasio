@@ -25,30 +25,34 @@ written workspace would be refused by the guard of the uploader anyway, but not
 asking is cheaper and the log says why.
 
 Usage:
-    python -m alasio.deploy_dev.pack_server.run --root D:/AlasPack
-
     from alasio.deploy_dev.pack_server.run import PackRun
     await PackRun().run()
-"""
 
-import argparse
+The command line has one entry, `python -m alasio.deploy_dev.pack_server.main`.
+This module is the library chain of both halves, for a caller that publishes
+what it generated.
+"""
 
 import trio
 
 from alasio.deploy_dev.pack_server.gate import check_run_dir
-from alasio.deploy_dev.pack_server.model import PackRepoConfig
+from alasio.deploy_dev.pack_server.model import ConfigError, PackRepoConfig, require_valid
 from alasio.deploy_dev.pack_server.pack_repo import PackRepo
-from alasio.deploy_dev.pack_server.publish.common import ConfigError, PublishRunError, require_valid
 from alasio.deploy_dev.pack_server.publish.lock import ChannelLock
 from alasio.deploy_dev.pack_server.publish.upload import UploadRun
 from alasio.deploy_dev.pack_server.repo import Repo
 from alasio.ext import env
 from alasio.logger import logger
+from alasio.logger.utils import stringify_event
 
 
 class PackRunError(ValueError):
     """
     Raised at the end of a run in which at least one config failed.
+
+    A configuration error is never collected here: it stops the run at once,
+    see ConfigError, because another attempt cannot fix a value the operator
+    has to edit.
 
     Attributes:
         errors (list[tuple[str, str]]): (config file, reason) of every failed
@@ -105,6 +109,8 @@ class PackRun:
         Raises:
             RunDirError: If env.PROJECT_ROOT is not a run directory of the pack
                 server, see check_run_dir
+            ConfigError: If a config or a remote is not usable. The run stops
+                at once: the other configs are not run
             PackRunError: If at least one config failed
         """
         check_run_dir()
@@ -123,9 +129,13 @@ class PackRun:
             logger.hr(f'Running config "{name}"', level=1)
             try:
                 results += await self.run_config(name, remotes=remotes, dry_run=dry_run)
+            except ConfigError:
+                # a value the operator has to edit: the other configs are not
+                # run, a retry would fail on the same line
+                raise
             except Exception as e:  # noqa: BLE001 - one config must not stop the others
                 logger.exception(f'Config "{name}" failed')
-                errors.append((name, f'{type(e).__name__}: {e}'))
+                errors.append((name, stringify_event(e)))
             else:
                 logger.info(f'Config "{name}" done')
 
@@ -166,7 +176,12 @@ class PackRun:
             RunDirError: If the run directory is not usable
             ValueError: If the config cannot be packed
         """
-        config = await trio.to_thread.run_sync(PackRepoConfig, name)
+        try:
+            config = await trio.to_thread.run_sync(PackRepoConfig, name)
+        except ValueError as e:
+            # the reader raises ValueError for a file it cannot decode, e.g. a
+            # value of another type; a check of the file raises ConfigError
+            raise ConfigError(str(e)) from None
         # the generation reads the config model, the publication reads the same
         # object: one file, one read
         require_valid(config)
@@ -198,82 +213,3 @@ def _generate(config):
     # generation whose barrier is written, and the leftover files of the
     # previous version stay on the disk until it is
     gen.commit()
-
-
-def main():
-    """
-    Command line entry: generate and publish the configs of a run directory.
-
-    Raises:
-        SystemExit: 0 when every config succeeded, 1 when at least one failed
-            or a remote refused the publication, 2 when the arguments or the
-            run directory are not usable
-    """
-    parser = argparse.ArgumentParser(
-        description='Generate the packs of every config of the run directory and publish them',
-    )
-    parser.add_argument(
-        '-r', '--root', default='',
-        help='run directory of the pack server, default to env.PROJECT_ROOT',
-    )
-    parser.add_argument(
-        '-c', '--config', action='append', default=None,
-        help='config file to run, repeatable, default to every config of the run directory',
-    )
-    parser.add_argument(
-        '-m', '--remote', action='append', default=None,
-        help='remote to publish to, repeatable, default to every remote',
-    )
-    parser.add_argument(
-        '--dry-run', action='store_true',
-        help='print the publication plan of every config, generate nothing',
-    )
-    args = parser.parse_args()
-    if args.root:
-        env.set_project_root(args.root)
-    # the project root must be set before the first log: the log file of the
-    # process is decided by the first write
-    logger.hr('Start', level=0)
-
-    try:
-        results = trio.run(PackRun().run, args.config, args.remote, args.dry_run)
-    except ConfigError as e:
-        logger.error(str(e))
-        raise SystemExit(2) from None
-    except PackRunError as e:
-        logger.error(str(e))
-        raise SystemExit(1) from None
-    except PublishRunError as e:
-        logger.error(str(e))
-        raise SystemExit(1) from None
-    logger.info(_summary(results))
-
-
-def _summary(results):
-    """
-    Format the closing line of a run.
-
-    Args:
-        results (Iterable[UploadResult]): The results of every remote of every
-            config
-
-    Returns:
-        str: E.g. 'Published 2 workspace(s) to 3 remote(s): 12 file(s), 2.3MB,
-            40 key(s) retired, 0 failed'
-    """
-    results = list(results)
-    channels = len({result.channel for result in results})
-    remotes = len({result.remote for result in results})
-    uploaded = sum(result.uploaded for result in results)
-    size = sum(result.size for result in results)
-    deleted = sum(result.deleted for result in results)
-    failed = sum(1 for result in results if not result.ok)
-    skipped = sum(1 for result in results if result.status == 'skipped')
-    return (
-        f'Published {channels} workspace(s) to {remotes} remote(s): '
-        f'{uploaded} file(s), {size} bytes, {deleted} key(s) retired, '
-        f'{skipped} skipped, {failed} failed')
-
-
-if __name__ == '__main__':
-    main()

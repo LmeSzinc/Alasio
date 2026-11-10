@@ -80,16 +80,6 @@ class SkipChannel(Exception):
     """
 
 
-class ConfigError(PublishError):
-    """
-    Raised when publish.yaml or a credential is not usable: an unknown key, a
-    remote of a driver that does not exist, a missing environment variable.
-
-    A caller that runs a batch reads it as "this remote is not configured",
-    not as "the run failed at the network".
-    """
-
-
 class IncompleteStore(PublishError):
     """
     Raised when a store cannot prove an object it holds or was sent.
@@ -108,6 +98,8 @@ class PublishRunError(PublishError):
 
     The failures are reported one by one as they happen, and the run keeps
     going: one unreachable mirror must not stop the publication to the others.
+    A configuration error is not one of them: it stops the run at once (see
+    ConfigError), because retrying it cannot change anything.
 
     Attributes:
         failed (list): (channel, remote, reason) of every failed pair
@@ -185,30 +177,6 @@ def ancestor_folders(relative):
     """
     parts = relative.split('/')
     return ['/'.join(parts[:index]) for index in range(len(parts) - 1, 0, -1)]
-
-
-def require_valid(config):
-    """
-    Refuse a config file that the reader could not validate.
-
-    YamlConfig falls back to the default of a field that fails the validation,
-    which is what the generator can live with (a broken Lookback value still
-    generates the packs it can) but not what the publish flow can: a typo in
-    Publish would drop a remote, publish nowhere, and report success. The errors
-    of the file are read here, so the flow refuses it.
-
-    Args:
-        config (YamlConfig): The config of a repo, its data is read here
-
-    Raises:
-        ConfigError: If any value of the file failed the validation
-    """
-    # the errors are filled by the read of the data, see YamlConfig.data
-    _ = config.data
-    errors = [error for error in config.errors if not isinstance(error, FileNotFoundError)]
-    if errors:
-        reasons = '; '.join(str(error) for error in errors)
-        raise ConfigError(f'Cannot read "{config.file}": {reasons}')
 
 
 def require_capabilities(capabilities, where=''):

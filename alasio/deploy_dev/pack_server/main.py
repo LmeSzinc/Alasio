@@ -32,14 +32,16 @@ Usage:
 """
 
 import argparse
+import sys
 
-from alasio.deploy_dev.pack_server.gate import check_run_dir
-from alasio.deploy_dev.pack_server.model import PackRepoConfig
+from alasio.deploy_dev.pack_server.gate import RunDirError, check_run_dir
+from alasio.deploy_dev.pack_server.model import ConfigError, PackRepoConfig
 from alasio.deploy_dev.pack_server.pack_repo import PackRepo
 from alasio.deploy_dev.pack_server.publish.lock import ChannelLock
 from alasio.deploy_dev.pack_server.repo import Repo
 from alasio.ext import env
 from alasio.logger import logger
+from alasio.logger.utils import stringify_event
 
 
 class PackRunError(ValueError):
@@ -110,7 +112,12 @@ class PackServer:
             httpx2.HTTPError: If a wheel of a dependency cannot be fetched
             OSError: If a pack of the repo cannot be written
         """
-        config = PackRepoConfig(file)
+        try:
+            config = PackRepoConfig(file)
+        except ValueError as e:
+            # the reader raises ValueError for a file it cannot decode, e.g. a
+            # value of another type; a check of the file raises ConfigError
+            raise ConfigError(str(e)) from None
         with ChannelLock(config.data.workspace_name).locked():
             repo = PackRepo(config.data).run()
             gen = Repo(repo, config.data)
@@ -151,10 +158,14 @@ class PackServer:
             logger.hr(f'Running config "{file}"', level=1)
             try:
                 self.run_config(file)
+            except ConfigError:
+                # a value the operator has to edit: the other configs are not
+                # run, a retry would fail on the same line
+                raise
             except Exception as e:
-                # one config must not stop the others: a broken config or a
-                # remote that cannot be reached is retried by the next run,
-                # the error is collected and raised at the end of the run
+                # one config must not stop the others: a repo that does not
+                # build or a remote that cannot be reached is retried by the
+                # next run, the error is collected and raised at the end
                 errors.append((file, e))
                 logger.exception(f'Config "{file}" failed')
             else:
@@ -171,7 +182,9 @@ def main():
     Command line entry, generate the packs of every config of the run directory.
 
     Raises:
-        SystemExit: If the arguments are invalid
+        SystemExit: 0 when every config succeeded, 1 when at least one failed at
+            something a later run may succeed at, 2 when the arguments, the run
+            directory or the configuration of a config are not usable
     """
     parser = argparse.ArgumentParser(
         description='Generate the packs of every config of the pack server',
@@ -183,10 +196,30 @@ def main():
     args = parser.parse_args()
     if args.root:
         env.set_project_root(args.root)
+    # the check runs before the first log line: opening the log file creates
+    # {root}/log, so a mistyped root would exist by the time the check ran and
+    # read as a run directory that has no config yet
+    try:
+        check_run_dir()
+    except RunDirError as e:
+        # the log of the process would live under the root that was refused
+        print(f'error: {e}', file=sys.stderr)
+        raise SystemExit(2) from None
     # the project root must be set before the first log: the log file of the
     # process is decided by the first write, see LogWriter.file
     logger.hr('Start', level=0)
-    PackServer().run()
+    try:
+        PackServer().run()
+    except ConfigError as e:
+        # a value the operator has to edit: no retry can fix it
+        logger.error(stringify_event(e))
+        raise SystemExit(2) from None
+    except RunDirError as e:
+        logger.error(stringify_event(e))
+        raise SystemExit(2) from None
+    except PackRunError as e:
+        logger.error(stringify_event(e))
+        raise SystemExit(1) from None
 
 
 if __name__ == '__main__':

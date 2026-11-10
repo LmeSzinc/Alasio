@@ -16,7 +16,7 @@ that is missing, never a value.
 
 import os
 
-from alasio.deploy_dev.pack_server.publish.common import ConfigError
+from alasio.deploy_dev.pack_server.model import ConfigError
 
 
 def env_value(prefix, field, required=False, environ=None):
