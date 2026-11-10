@@ -226,3 +226,41 @@ class TestAuthorization:
             CosSigner('', 'SECRET')
         with pytest.raises(ValueError):
             CosSigner('AKID', '')
+
+
+class TestClock:
+    """How often a header reads the clock, and what it does with the value."""
+
+    def test_authorization_reads_the_clock_once(self):
+        """The window of the header is the window the signature was computed over.
+
+        A clock that steps one second per read puts the two reads of the old
+        implementation on either side of a second: the header then named the
+        first window and the signature was computed over the second, and the
+        service answered 403 to a request this process had just signed.
+        """
+        reads = []
+
+        def stepping_clock():
+            now = FROZEN_NOW + len(reads)
+            reads.append(now)
+            return now
+
+        signer = CosSigner('AKIDEXAMPLE', 'SECRETEXAMPLE', clock=stepping_clock)
+        authorization = signer.authorization(
+            'PUT', '/pack/ch/packrepo/latest.pack', {}, PUT_HEADERS)
+        fields = dict(part.split('=', 1) for part in authorization.split('&'))
+        assert len(reads) == 1
+        assert fields['q-sign-time'] == '1761469940;1761473600'
+        assert fields['q-key-time'] == fields['q-sign-time']
+        # the signature of that window, see TestAuthorization.test_put_authorization
+        assert fields['q-signature'] == 'a8d934ed57def6f040684ec8f08531f9305ab036'
+
+    def test_signature_honours_a_given_window(self):
+        """A caller that passes a window signs with exactly that window."""
+        signer = CosSigner('AKIDEXAMPLE', 'SECRETEXAMPLE', clock=lambda: FROZEN_NOW + 86400)
+        assert signer.signature(
+            'PUT', '/pack/ch/packrepo/latest.pack', {}, PUT_HEADERS,
+            key_time='1761469940;1761473600',
+        ) == frozen_signer().signature(
+            'PUT', '/pack/ch/packrepo/latest.pack', {}, PUT_HEADERS)

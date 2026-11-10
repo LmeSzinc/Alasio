@@ -197,7 +197,7 @@ class CosSigner:
             hashlib.sha1,
         ).hexdigest()
 
-    def signature(self, method, path, params, headers):
+    def signature(self, method, path, params, headers, key_time=None):
         """
         Compute the q-signature of one request.
 
@@ -206,11 +206,14 @@ class CosSigner:
             path (str): Escaped path of the request
             params (dict): Query parameters
             headers (dict): Request headers
+            key_time (str): Validity window to sign with, `key_time()` when
+                None. Defaults to None
 
         Returns:
             str: Hex HMAC-SHA1 signature of the canonical string
         """
-        key_time = self.key_time()
+        if key_time is None:
+            key_time = self.key_time()
         http_string = canonical_string(method, path, params, headers)
         to_sign = 'sha1\n{}\n{}\n'.format(
             key_time,
@@ -230,6 +233,11 @@ class CosSigner:
         in the signature: q-header-list holds the whitelisted headers of the
         request, q-url-param-list the parameters of the request.
 
+        The validity window is read from the clock once and both signed and
+        rendered from that one value: a second read could land in another
+        second, and the header would name a window the signature was not
+        computed over.
+
         Args:
             method (str): Http method
             path (str): Escaped path of the request
@@ -242,7 +250,7 @@ class CosSigner:
         key_time = self.key_time()
         header_names = ';'.join(sorted(name.lower() for name in headers if is_sign_header(name)))
         param_names = ';'.join(sorted(params))
-        signature = self.signature(method, path, params, headers)
+        signature = self.signature(method, path, params, headers, key_time=key_time)
         return (
             f'q-sign-algorithm={ALGORITHM}'
             f'&q-ak={self.secret_id}'
