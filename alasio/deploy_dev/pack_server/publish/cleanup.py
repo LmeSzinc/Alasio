@@ -225,7 +225,7 @@ class ChannelCleanup:
                 status=STATUS_DRY_RUN, deleted=len(plan.keys), size=plan.size,
                 kept=len(manifest.files))
 
-        deleted = await self._delete(plan.keys, listing, now)
+        deleted_keys = await self._delete(plan.keys, listing, now)
         if plan.folders:
             logger.debug(
                 f'[{self.remote_name}] {self.workspace_name}: '
@@ -236,12 +236,16 @@ class ChannelCleanup:
                 logger.warning(
                     f'[{self.remote_name}] {self.workspace_name}: '
                     f'cannot remove {len(plan.folders)} empty folder(s): {e}')
+        # the bytes of the keys that are gone, not of the plan: a delete that
+        # failed keeps its key, and counting it would report space freed that
+        # the mirror still holds
+        deleted_size = sum(listing.objects[relative].size for relative in deleted_keys)
         logger.info(
-            f'[{self.remote_name}] {self.workspace_name}: deleted {deleted} key(s), '
-            f'{plan.size} bytes')
+            f'[{self.remote_name}] {self.workspace_name}: '
+            f'deleted {len(deleted_keys)} key(s), {pretty_size(deleted_size)}')
         return CleanupResult(
             channel=self.workspace_name, remote=self.remote_name, status=STATUS_OK,
-            deleted=deleted, size=plan.size, kept=len(manifest.files))
+            deleted=len(deleted_keys), size=deleted_size, kept=len(manifest.files))
 
     async def _read_generation(self):
         """
@@ -312,10 +316,10 @@ class ChannelCleanup:
             now (float): The clock of the server
 
         Returns:
-            int: Number of keys that were deleted
+            List[str]: The keys that are gone, in the order of the plan
         """
         if not keys:
-            return 0
+            return []
         deleted = []
         limit = trio.Semaphore(self.concurrency)
         self.total = len(keys)
@@ -343,12 +347,12 @@ class ChannelCleanup:
             # keys in a stable order instead of the order of the scheduler
             for relative in keys:
                 await one(relative)
-            return len(deleted)
+            return deleted
 
         async with trio.open_nursery() as nursery:
             for relative in keys:
                 nursery.start_soon(one, relative)
-        return len(deleted)
+        return deleted
 
     def _failed(self, reason):
         """

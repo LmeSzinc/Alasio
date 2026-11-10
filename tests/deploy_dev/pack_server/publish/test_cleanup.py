@@ -391,7 +391,7 @@ class TestProgress:
 INFO | [cos-main] {CHANNEL}: manifest=aaaaaaaa barrier=aaaaaaaa, barrier age=1.0h, grace=1.0h
 INFO |   DELETE 1/2 old/w0.pack                                  age=1.0h 3.00B
 INFO |   DELETE 2/2 old/w1.pack                                  age=1.0h 3.00B
-INFO | [cos-main] {CHANNEL}: deleted 2 key(s), 6 bytes
+INFO | [cos-main] {CHANNEL}: deleted 2 key(s), 6.00B
 """
 
     @pytest.mark.trio
@@ -411,6 +411,51 @@ INFO | [cos-main] {CHANNEL}: manifest=aaaaaaaa barrier=aaaaaaaa, barrier age=1.0
 INFO |   WOULD DELETE old/w0.pack                                  age=1.0h 3.00B
 INFO |   WOULD DELETE old/w1.pack                                  age=1.0h 3.00B
 """
+
+
+class TestPartialDelete:
+    """A delete round reports what it removed, never what it tried to."""
+
+    @pytest.mark.trio
+    async def test_the_bytes_of_a_failed_key_are_not_counted(self, workspace, credentials_env):
+        """One key of two fails: the count and the bytes are the survivor's.
+
+        The two leftovers differ in size, so a result that reports the plan is
+        distinguishable from one that reports the deletes.
+        """
+        store = await fill(workspace, credentials_env)
+        credentials_env.store(f'{PREFIX}old/small.pack', b'a', 'application/octet-stream', None)
+        credentials_env.store(
+            f'{PREFIX}old/big.pack', b'0123456789', 'application/octet-stream', None)
+        age_objects(credentials_env, GRACE + 1)
+        credentials_env.fail_delete_keys = {f'{PREFIX}old/big.pack'}
+        try:
+            result = await cleanup_of(credentials_env, store).run()
+        finally:
+            await store.aclose()
+        assert result.status == STATUS_OK
+        assert result.deleted == 1
+        assert result.size == 1
+        assert f'{PREFIX}old/small.pack' not in credentials_env.objects
+        assert f'{PREFIX}old/big.pack' in credentials_env.objects
+
+    @pytest.mark.trio
+    async def test_the_tally_names_the_bytes_of_the_deleted_keys(self, workspace, credentials_env):
+        """The closing line of a round counts the key that stayed out."""
+        store = await fill(workspace, credentials_env)
+        credentials_env.store(f'{PREFIX}old/small.pack', b'a', 'application/octet-stream', None)
+        credentials_env.store(
+            f'{PREFIX}old/big.pack', b'0123456789', 'application/octet-stream', None)
+        age_objects(credentials_env, GRACE + 1)
+        credentials_env.fail_delete_keys = {f'{PREFIX}old/big.pack'}
+        cleanup = cleanup_of(credentials_env, store)
+        try:
+            with logger.mock_capture_writer() as capture:
+                result = await cleanup.run()
+        finally:
+            await store.aclose()
+        assert result.size == 1
+        assert f'[{cleanup.remote_name}] {CHANNEL}: deleted 1 key(s), 1.00B' in capture.concat()
 
 
 class TestDryRun:

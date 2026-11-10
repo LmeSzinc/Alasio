@@ -184,6 +184,8 @@ class FakeCos:
         fail_next_puts (int): Number of PUTs to answer by raising a transport
             error after the body was received, for the retry test
         fail_next_requests (int): Number of requests to answer with 500
+        fail_delete_keys (set): Keys whose DELETE answers 500, for a partial
+            failure of a retire round
         bucket_missing (bool): True to answer every request with the 404 of a
             bucket that does not exist, as COS does for a wrong Bucket or Region
     """
@@ -200,6 +202,7 @@ class FakeCos:
         self.requests = []
         self.fail_next_puts = 0
         self.fail_next_requests = 0
+        self.fail_delete_keys = set()
         self.bucket_missing = False
         self._clients = []
         self.app = Starlette(routes=[
@@ -435,6 +438,8 @@ class FakeCos:
         Returns:
             starlette.responses.Response: The answer
         """
+        if key in self.fail_delete_keys:
+            return self._error(500, 'InternalError', 'injected delete failure')
         if not self.remove(key):
             return self._error(404, 'NoSuchKey', 'The specified key does not exist.')
         return self._answer(204, b'')

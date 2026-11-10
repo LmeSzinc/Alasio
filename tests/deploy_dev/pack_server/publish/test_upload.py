@@ -935,6 +935,33 @@ class TestRetire:
         assert f'{PREFIX}packrepo/aaaaaaaa/full.pack' in credentials_env.objects
 
     @pytest.mark.trio
+    async def test_a_failed_delete_is_not_counted_as_freed(self, workspace, credentials_env):
+        """One key of the plan fails, the other goes: the result is the survivor.
+
+        The two leftovers differ in size, so a result that counts the plan
+        instead of the deletes is visible in both the count and the bytes.
+        """
+        from tests.deploy_dev.pack_server.publish.test_cleanup import age_objects
+        store = make_store(make_remote(), CHANNEL, credentials_env)
+        try:
+            await make_upload(workspace, store).run()
+            workspace.write('bbbbbbbb', {
+                'packrepo/bbbbbbbb/full.pack': b'full pack of bbbbbbbb',
+                'wheel/msgspec/0.22.0/msgspec-0.22.0-py3-none-any.whl': b'wheel bytes',
+            })
+            await make_upload(workspace, store).run()
+            age_objects(credentials_env, 3600 + 1)
+            credentials_env.fail_delete_keys = {f'{PREFIX}packrepo/aaaaaaaa/full.pack'}
+            result = await make_upload(workspace, store).run()
+        finally:
+            await store.aclose()
+        assert result.status == STATUS_OK
+        assert result.deleted == 1
+        assert result.deleted_size == len(b'update pack')
+        assert f'{PREFIX}packrepo/aaaaaaaa/full.pack' in credentials_env.objects
+        assert f'{PREFIX}packrepo/aaaaaaaa/update_00000001.pack' not in credentials_env.objects
+
+    @pytest.mark.trio
     async def test_a_dry_run_reports_the_retire(self, workspace, credentials_env):
         """A dry run prints the keys it would delete and deletes nothing."""
         from tests.deploy_dev.pack_server.publish.test_cleanup import age_objects

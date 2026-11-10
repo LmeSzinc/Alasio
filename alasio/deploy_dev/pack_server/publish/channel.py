@@ -576,14 +576,19 @@ class ChannelUpload:
                 else:
                     await self._put(item, kind, number)
 
-            deleted = await self._retire(
+            deleted_keys = await self._retire(
                 retire, contract_number + 1, listing, dry_run)
+            # the bytes of the keys that are gone, not of the ones the plan
+            # announced: a delete that failed keeps its key, and a report that
+            # counted it would tell an operator that space was freed that the
+            # mirror still holds
+            deleted_size = sum(
+                listing.objects[relative].size for relative in deleted_keys)
             return UploadResult(
                 channel=self.channel, remote=self.remote_name,
                 status=STATUS_DRY_RUN if dry_run else STATUS_OK,
                 uploaded=to_write, skipped=unchanged, size=size,
-                deleted=len(retire.keys) if dry_run else deleted,
-                deleted_size=retire.size if dry_run or deleted else 0,
+                deleted=len(deleted_keys), deleted_size=deleted_size,
             )
 
     def _retire_plan(self, manifest, listing, write_barrier):
@@ -638,24 +643,26 @@ class ChannelUpload:
             dry_run (bool): Report the keys and delete none. Defaults to False
 
         Returns:
-            int: Number of keys that were deleted
+            List[str]: The keys that are gone, in the order of the plan. A dry
+                run returns the keys of the plan: nothing was attempted, so the
+                plan is the honest answer
         """
         if not retire.keys:
-            return 0
+            return []
 
         async def one(number, relative):
             detail = pretty_size(listing.objects[relative].size)
             if dry_run:
                 self._step('WOULD DELETE', relative, detail, number)
-                return 1
+                return relative
             try:
                 async with self.remote_limit:
                     self._step('DELETE', relative, detail, number)
                     await self.store.delete(relative)
             except Exception as e:  # noqa: BLE001 - one key must not stop the rest
                 logger.warning(f'{self._where()}: cannot delete "{relative}": {e}')
-                return 0
-            return 1
+                return None
+            return relative
 
         # a failed delete is caught here, so nothing in the nursery raises and
         # the run is never cancelled by one key
@@ -684,4 +691,4 @@ class ChannelUpload:
                 logger.warning(
                     f'{self._where()}: cannot remove {len(retire.folders)} empty '
                     f'folder(s): {e}')
-        return sum(results)
+        return [relative for relative in results if relative is not None]
