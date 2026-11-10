@@ -1,5 +1,6 @@
 import threading
 import time
+from contextlib import contextmanager
 from datetime import datetime
 from io import StringIO
 
@@ -232,6 +233,62 @@ INFO | Hello Info
         """
         with self._lock:
             self._writer.check_rotate()
+
+    @contextmanager
+    def log_file(self, name):
+        """
+        Write the lines of the block into log/{date}_{name}.txt.
+
+        A process that runs several units of work one after another gives each
+        its own file, so the lines of one unit are read without the lines of
+        the others; the lines outside the blocks go back to the log file of
+        the process. The switch closes the file of the previous unit, so a
+        reader of the old one sees every line that was written to it.
+
+        A captured writer (see mock_capture_writer) has no file to switch, the
+        block only nests.
+
+        Args:
+            name (str): Name of the file, without the date and the suffix.
+                A name that is not a single usable file name is refused
+
+        Yields:
+            None: The block whose lines go to that file
+
+        Raises:
+            ValueError: If the name is not a single usable file name
+
+        Examples:
+            with logger.log_file('20200101_120000_my_config'):
+                logger.info('Config "my_config"')
+            # xxx/log/2020-01-01_20200101_120000_my_config.txt
+        """
+        previous = self.set_log_name(name)
+        try:
+            yield
+        finally:
+            self.set_log_name(previous)
+
+    def set_log_name(self, name):
+        """
+        Write the following lines into log/{date}_{name}.txt.
+
+        The form of a block is `log_file()`, which restores the name of the
+        caller; this method is the same switch without a block.
+
+        Args:
+            name (str): Name of the file, without the date and the suffix.
+                None for the default name of the process
+
+        Returns:
+            str: The name that was in force before this call, so a caller can
+                restore it
+
+        Raises:
+            ValueError: If the name is not a single usable file name
+        """
+        with self._lock:
+            return self._writer.set_name(name)
 
     def _process_event(self, level, event, event_dict, exc_info=None):
         """

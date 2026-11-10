@@ -21,6 +21,10 @@ class BaseLoggerTest:
         # Store original env values
         original_root = env.PROJECT_ROOT
         original_electron = env.ELECTRON
+        # the level is a global of the logger: a test that raises it (DEBUG) has
+        # to put it back, or every later capture in the same worker holds the
+        # debug lines of the code under test
+        original_level = logger._level
 
         # Create temp directory for test logs
         self.test_dir = PathStr.new(__file__).uppath(1)
@@ -41,6 +45,7 @@ class BaseLoggerTest:
         # Restore original env values
         env.PROJECT_ROOT = original_root
         env.ELECTRON = original_electron
+        logger.set_level(original_level)
 
         # Clean up log directory
         log_dir = self.test_dir / 'log'
