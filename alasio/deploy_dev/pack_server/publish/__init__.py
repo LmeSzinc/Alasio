@@ -1,6 +1,5 @@
 """
-The uploader and the cleaner of the pack server: the two consumers of the
-manifest a generation writes.
+The uploader of the pack server: the consumer of the manifest a generation writes.
 
 A generation writes one workspace per repo
 (``{run}/pack/{Author}_{Repo}_{Branch}``), with a published contract next to
@@ -13,10 +12,10 @@ The publish flow mirrors that workspace to every static host the config of the
 repo names, and removes what a later generation no longer serves:
 
 - upload.py writes the files of the manifest, then the barrier, then the
-  manifest, so a mirror that has the manifest has the whole generation;
-- cleanup.py reads the manifest and the barrier of ONE remote, and only then
-  lists it: the keep set and the age of the generation come from the same
-  generation, and a half written one is never deleted.
+  manifest, so a mirror that has the manifest has the whole generation, and
+  retires the keys the generation it replaced no longer serves;
+- retire.py decides which keys those are, from the listing the run took before
+  its first write.
 
 Neither of them knows what the host is: both work on the methods of
 ``alasio.deploy_dev.store.ObjectStore``.

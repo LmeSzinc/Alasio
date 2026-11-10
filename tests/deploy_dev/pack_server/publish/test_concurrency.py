@@ -18,12 +18,13 @@ import pytest
 import trio
 
 from alasio.deploy_dev.pack_server.publish.channel import STATUS_OK, ChannelUpload
-from alasio.deploy_dev.pack_server.publish.cleanup import ChannelCleanup
 from alasio.deploy_dev.pack_server.publish.common import BARRIER_KEY, MANIFEST_KEY, MAX_CONCURRENCY
 from alasio.deploy_dev.pack_server.publish.local import LocalGeneration
 from alasio.ext.path import PathStr
 from alasio.testing.filesystem import fs  # noqa: F401
-from tests.deploy_dev.pack_server.publish.conftest import CHANNEL, REMOTE_PREFIX, make_remote, make_store
+from tests.deploy_dev.pack_server.publish.conftest import (
+    CHANNEL, REMOTE_PREFIX, age_objects, fill, make_remote, make_store
+)
 
 PREFIX = f'{REMOTE_PREFIX}/{CHANNEL}/'
 GRACE = 3600
@@ -165,13 +166,12 @@ class TestUploadConcurrency:
         assert result.status == STATUS_OK
 
 
-class TestCleanupConcurrency:
+class TestRetireConcurrency:
     """The keys of a retired generation are deleted a few at a time."""
 
     @pytest.mark.trio
     async def test_deletes_run_in_parallel_up_to_the_cap(self, workspace, credentials_env):
         """Twenty leftovers are removed, never more than eight at once."""
-        from tests.deploy_dev.pack_server.publish.test_cleanup import age_objects, fill
         await fill(workspace, credentials_env)
         for index in range(FILE_COUNT):
             credentials_env.store(
@@ -179,11 +179,11 @@ class TestCleanupConcurrency:
         age_objects(credentials_env, GRACE + 1)
         store = make_store(make_remote(), CHANNEL, credentials_env)
         stats = count_in_flight(store, 'delete')
-        cleanup = ChannelCleanup(
-            CHANNEL, store, GRACE, remote_name='cos-main',
-            concurrency=MAX_CONCURRENCY)
+        upload = ChannelUpload(
+            LocalGeneration(workspace.workspace, MAX_CONCURRENCY), store,
+            remote_name='cos-main', concurrency=MAX_CONCURRENCY)
         try:
-            result = await cleanup.run()
+            result = await upload.run()
         finally:
             await store.aclose()
         assert result.status == STATUS_OK, result
@@ -191,12 +191,6 @@ class TestCleanupConcurrency:
         assert stats['peak'] == MAX_CONCURRENCY, stats
         assert not [key for key in credentials_env.objects if '/old/' in key], sorted(
             credentials_env.objects)
-
-    @pytest.mark.trio
-    async def test_the_cap_is_clamped(self):
-        """A caller that asks for more than the cap gets the cap."""
-        assert ChannelCleanup('c', None, 3600, concurrency=64).concurrency == MAX_CONCURRENCY
-        assert ChannelCleanup('c', None, 3600, concurrency=-1).concurrency == 1
 
 
 class TestLocalIo:

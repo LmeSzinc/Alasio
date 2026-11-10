@@ -307,3 +307,51 @@ def config(run_dir, workspace):
         PackRepoConfig: The config, reading config/{CHANNEL}.yaml
     """
     return write_config(run_dir)
+
+
+# the key prefix of the workspace of the tests, inside the bucket
+PREFIX = f'{REMOTE_PREFIX}/{CHANNEL}/'
+
+
+async def fill(workspace, service, remote=None, concurrency=1):
+    """
+    Publish the generation of the workspace to the service.
+
+    Args:
+        workspace (Generation): The workspace
+        service (FakeCos): The service
+        remote (CosRemote): The remote, the one of the tests when None
+        concurrency (int): Reads and transfers in flight. Defaults to 1, so the
+            order of a run is the order of the manifest
+
+    Returns:
+        CosStore: The store, closed by the caller
+    """
+    # the imports stay here: the flow modules import the config model, which
+    # this module builds, and a module level import would be a cycle
+    from alasio.deploy_dev.pack_server.publish.channel import ChannelUpload
+    from alasio.deploy_dev.pack_server.publish.local import LocalGeneration
+    remote = remote or make_remote()
+    store = make_store(remote, CHANNEL, service)
+    local = LocalGeneration(workspace.workspace, concurrency)
+    await ChannelUpload(local, store, remote_name='cos-main', concurrency=concurrency).run()
+    return store
+
+
+def age_objects(service, seconds, keys=None):
+    """
+    Move the objects of the workspace into the past.
+
+    The retirement decides the age of a generation from the LastModified of its
+    barrier, so a test that wants a generation to be old backdates what the
+    service reports instead of waiting an hour.
+
+    Args:
+        service (FakeCos): The service
+        seconds (float): Seconds to subtract from every last_modified
+        keys (Iterable[str]): Only these keys, every key of the prefix by default
+    """
+    wanted = keys if keys is not None else service.objects
+    for key in wanted:
+        if key.startswith(PREFIX):
+            service.objects[key].last_modified -= seconds

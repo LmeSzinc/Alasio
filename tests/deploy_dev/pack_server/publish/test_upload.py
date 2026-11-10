@@ -30,7 +30,7 @@ from alasio.ext.path import PathStr
 from alasio.logger import logger
 from alasio.testing.filesystem import fs  # noqa: F401
 from tests.deploy_dev.pack_server.publish.conftest import (
-    CHANNEL, REMOTE, REMOTE_PREFIX, make_model, make_remote, make_store, write_config
+    CHANNEL, REMOTE, REMOTE_PREFIX, age_objects, make_model, make_remote, make_store, write_config
 )
 
 # every test drives an in-process store over the fake filesystem: no port, no
@@ -916,7 +916,6 @@ class TestRetire:
     @pytest.mark.trio
     async def test_the_old_generation_is_retired(self, workspace, credentials_env):
         """A run whose barrier is already in place retires the files it replaced."""
-        from tests.deploy_dev.pack_server.publish.test_cleanup import age_objects
         store = make_store(make_remote(), CHANNEL, credentials_env)
         try:
             await make_upload(workspace, store).run()
@@ -938,9 +937,14 @@ class TestRetire:
         assert f'{PREFIX}packrepo/bbbbbbbb/full.pack' in credentials_env.objects
 
     @pytest.mark.trio
-    async def test_a_young_barrier_retires_nothing(self, workspace, credentials_env):
-        """A version switch restarts the grace: nothing goes in the same run."""
-        from tests.deploy_dev.pack_server.publish.test_cleanup import age_objects
+    async def test_the_switch_retires_the_generation_it_replaced(self, workspace, credentials_env):
+        """A run that switches the version still retires, in the same run.
+
+        The plan is built from the listing taken before the writes, so the
+        barrier it names is the one being replaced: the generation is retired
+        once IT has been live for the grace. Waiting for a later run would never
+        retire anything on a channel whose content changes every run.
+        """
         store = make_store(make_remote(), CHANNEL, credentials_env)
         try:
             await make_upload(workspace, store).run()
@@ -951,8 +955,13 @@ class TestRetire:
             result = await make_upload(workspace, store).run()
         finally:
             await store.aclose()
-        assert result.deleted == 0
-        assert f'{PREFIX}packrepo/aaaaaaaa/full.pack' in credentials_env.objects
+        assert result.status == STATUS_OK
+        assert result.deleted == 3
+        assert f'{PREFIX}packrepo/aaaaaaaa/full.pack' not in credentials_env.objects
+        assert f'{PREFIX}packrepo/aaaaaaaa/update_00000001.pack' not in credentials_env.objects
+        # the wheel is not served by the new generation either: it goes too
+        assert f'{PREFIX}wheel/msgspec/0.22.0/msgspec-0.22.0-py3-none-any.whl' \
+            not in credentials_env.objects
 
     @pytest.mark.trio
     async def test_a_failed_delete_is_not_counted_as_freed(self, workspace, credentials_env):
@@ -961,7 +970,6 @@ class TestRetire:
         The two leftovers differ in size, so a result that counts the plan
         instead of the deletes is visible in both the count and the bytes.
         """
-        from tests.deploy_dev.pack_server.publish.test_cleanup import age_objects
         store = make_store(make_remote(), CHANNEL, credentials_env)
         try:
             await make_upload(workspace, store).run()
@@ -984,7 +992,6 @@ class TestRetire:
     @pytest.mark.trio
     async def test_a_dry_run_reports_the_retire(self, workspace, credentials_env):
         """A dry run prints the keys it would delete and deletes nothing."""
-        from tests.deploy_dev.pack_server.publish.test_cleanup import age_objects
         store = make_store(make_remote(), CHANNEL, credentials_env)
         try:
             await make_upload(workspace, store).run()

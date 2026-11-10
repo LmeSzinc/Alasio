@@ -4,19 +4,15 @@ picks them.
 
 The decision is one function over data the caller already has -- the published
 files, the listing of the mirror and the grace -- so it calls no store and can
-be tested without one. Two callers use it:
+be tested without one. Its caller is `ChannelUpload`, which retires the
+leftovers of the generation it replaced right after it published the new one,
+from the listing it took before the writes.
 
-- `ChannelUpload` retires the leftovers of the previous generation right after it
-  published the new one, from the listing it already made for the plan;
-- `ChannelCleanup` retires a mirror whose local workspace is gone, from a
-  listing it makes for that purpose.
-
-The safety argument of the decision is the same for both: a key is deleted only
-when the manifest does not list it AND the barrier of the mirror has been in
-place for the grace AND the key itself is older than the grace. The first
-condition keeps everything the generation serves, the second gives every client
-the window to notice the new version, the third protects the leftovers of an
-interrupted upload.
+The safety argument of the decision: a key is deleted only when the manifest
+does not list it AND the barrier of the mirror has been in place for the grace
+AND the key itself is older than the grace. The first condition keeps everything
+the generation serves; the other two keep a generation the mirror has only
+recently started serving, and the leftovers of an interrupted upload.
 """
 
 from typing import List

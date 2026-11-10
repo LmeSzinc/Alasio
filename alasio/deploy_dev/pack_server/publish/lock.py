@@ -29,6 +29,12 @@ clone to the last upload of the last remote:
 - ``PackServer.run_config()`` holds it across the generation when the generate
   only entry runs on its own.
 
+The three stages of a channel — generate, publish, retire — are one run under
+one lock: the entry point that chains them takes the lock once around the whole
+sequence, and the stages it calls take none. The retirement is a step of the
+publication (`ChannelUpload._retire`), not an entry of its own, so there is no
+second place that could take the lock and no sequence to interleave with.
+
 The steps inside that boundary take no lock of their own: ``UploadRun`` is a
 publisher, not an entry point, and a nested acquire of the holding thread is an
 error (the lock is not reentrant, see alasio.deploy.pack.job.DeployJob for the

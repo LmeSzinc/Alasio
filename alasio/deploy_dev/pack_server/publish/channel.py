@@ -587,9 +587,9 @@ class ChannelUpload:
             listing = await self.snapshot
 
             # the barrier is decided before the content starts: whether this run
-            # switches the version decides whether anything is retired, and the
-            # total of the progress report follows from both. Both items are
-            # already read when the warmup block is entered.
+            # switches the version changes what is written, and the total of the
+            # progress report follows from both. Both items are already read
+            # when the warmup block is entered.
             barrier_item = await self.local.item(BARRIER_KEY)
             contract_item = await self.local.item(MANIFEST_KEY)
             barrier_outcome = compare(barrier_item, await self._resolve(barrier_item))
@@ -598,7 +598,7 @@ class ChannelUpload:
             write_contract = contract_outcome == COMPARE_UPLOAD
 
             content = [relative for relative in manifest.files if relative != BARRIER_KEY]
-            retire = self._retire_plan(manifest, listing, write_barrier)
+            retire = self._retire_plan(manifest, listing)
             # the content files take the first numbers, then the barrier, the
             # contract and the keys of the previous generation
             self.total = len(manifest.files) + 1 + len(retire.keys)
@@ -648,32 +648,32 @@ class ChannelUpload:
                 deleted=len(deleted_keys), deleted_size=deleted_size,
             )
 
-    def _retire_plan(self, manifest, listing, write_barrier):
+    def _retire_plan(self, manifest, listing):
         """
-        The keys of the mirror the generation that was just published no longer serves.
+        The keys of the mirror the generation being published no longer serves.
 
         The plan is built from the listing taken before the writes, so a key
-        written by this run is never a candidate. The age of the generation is
-        the age of the barrier in that listing:
+        written by this run is never a candidate, and the age of the generation
+        is the age of the barrier in that listing: the barrier the run is
+        replacing. A generation is therefore retired when IT has been live for
+        the grace, whether or not this run switches the version:
 
-        - the run writes the barrier (a version switch) → the age is zero for
-          this round, nothing is retired, the next run does it;
-        - the run skips the barrier (the content is already there) → the listing
-          holds the barrier of the live generation, and the grace applies to it.
+        - the run switches: the predecessor was live for the grace, so its keys
+          go now instead of waiting for a run that may never come (a channel
+          whose content changes every run would otherwise never retire);
+        - the run does not switch: the barrier of the listing is the live one,
+          and the same rule applies.
+
+        A first publication has no barrier in the listing and nothing to
+        retire; a listing that lost the barrier is refused by the same rule.
 
         Args:
             manifest (Manifest): The generation that was published
             listing (ObjectListing): The mirror as it was before the writes
-            write_barrier (bool): True when this run switched the version
 
         Returns:
-            DeletePlan: The keys to delete, empty when the grace is not over
+            DeletePlan: The keys to delete, empty when nothing is old enough
         """
-        if write_barrier:
-            logger.debug(
-                f'{self._where()}: the barrier was written by this run, '
-                f'the previous generation is retired by the next one')
-            return DeletePlan()
         try:
             return build_delete_plan(
                 manifest.files, listing, self.grace, listing.server_date,
@@ -681,7 +681,7 @@ class ChannelUpload:
         except SkipRetire as e:
             # a mirror without the barrier of its manifest is not one this run
             # may delete from, and it is not a failure of the publication
-            logger.warning(f'{self._where()}: no retire, {e}')
+            logger.debug(f'{self._where()}: no retire, {e}')
             return DeletePlan()
 
     async def _retire(self, retire, first_number, listing, dry_run=False):
