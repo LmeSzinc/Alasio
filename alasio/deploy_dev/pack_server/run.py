@@ -34,6 +34,8 @@ This module is the library chain of both halves, for a caller that publishes
 what it generated.
 """
 
+from datetime import datetime
+
 import trio
 
 from alasio.deploy_dev.pack_server.gate import check_run_dir
@@ -43,8 +45,30 @@ from alasio.deploy_dev.pack_server.publish.lock import ChannelLock
 from alasio.deploy_dev.pack_server.publish.upload import UploadRun
 from alasio.deploy_dev.pack_server.repo import Repo
 from alasio.ext import env
+from alasio.ext.path import PathStr
 from alasio.logger import logger
 from alasio.logger.utils import stringify_event
+
+
+def config_log_name(file):
+    """
+    Name of the log file of one config: the time it started, then its name.
+
+    The pack server runs one config after another in a single process, and the
+    log of a run is dominated by the lines of the biggest config: every config
+    writes a file of its own instead, so a failure of one is read without the
+    thousands of lines of the others. The start time gives the file of every
+    run of the same config a name of its own as well.
+
+    Args:
+        file (str): Name of the config file, e.g. 'alas-alas2026.yaml'
+
+    Returns:
+        str: E.g. '20261111002401_alas-alas2026', the name the log writer
+            prefixes with the date, see LogWriter.file
+    """
+    stamp = datetime.now().strftime('%Y%m%d%H%M%S')
+    return f'{stamp}_{PathStr.new(file).rootstem}'
 
 
 class PackRunError(ValueError):
@@ -127,18 +151,22 @@ class PackRun:
         results = []
         errors = []
         for name in names:
-            logger.hr(f'Running config "{name}"', level=1)
-            try:
-                results += await self.run_config(name, remotes=remotes, dry_run=dry_run)
-            except ConfigError:
-                # a value the operator has to edit: the other configs are not
-                # run, a retry would fail on the same line
-                raise
-            except Exception as e:  # noqa: BLE001 - one config must not stop the others
-                logger.exception(f'Config "{name}" failed')
-                errors.append((name, stringify_event(e)))
-            else:
-                logger.info(f'Config "{name}" done')
+            # one log file per config: a failure of this config is read without
+            # the thousands of lines of the others, and every run of the same
+            # config writes a file of its own
+            with logger.log_file(config_log_name(name)):
+                logger.hr(f'Running config "{name}"', level=1)
+                try:
+                    results += await self.run_config(name, remotes=remotes, dry_run=dry_run)
+                except ConfigError:
+                    # a value the operator has to edit: the other configs are not
+                    # run, a retry would fail on the same line
+                    raise
+                except Exception as e:  # noqa: BLE001 - one config must not stop the others
+                    logger.exception(f'Config "{name}" failed')
+                    errors.append((name, stringify_event(e)))
+                else:
+                    logger.info(f'Config "{name}" done')
 
         failed = len(errors)
         logger.info(f'Ran {len(names)} config(s): {len(names) - failed} done, {failed} failed')

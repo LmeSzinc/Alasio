@@ -39,6 +39,7 @@ from alasio.deploy_dev.pack_server.model import ConfigError, PackRepoConfig
 from alasio.deploy_dev.pack_server.pack_repo import PackRepo
 from alasio.deploy_dev.pack_server.publish.lock import ChannelLock
 from alasio.deploy_dev.pack_server.repo import Repo
+from alasio.deploy_dev.pack_server.run import config_log_name
 from alasio.ext import env
 from alasio.logger import logger
 from alasio.logger.utils import stringify_event
@@ -155,21 +156,24 @@ class PackServer:
         logger.info(f'Running {len(file_list)} config{plural} of "{env.PROJECT_ROOT}"')
         errors = []
         for file in file_list:
-            logger.hr(f'Running config "{file}"', level=1)
-            try:
-                self.run_config(file)
-            except ConfigError:
-                # a value the operator has to edit: the other configs are not
-                # run, a retry would fail on the same line
-                raise
-            except Exception as e:
-                # one config must not stop the others: a repo that does not
-                # build or a remote that cannot be reached is retried by the
-                # next run, the error is collected and raised at the end
-                errors.append((file, e))
-                logger.exception(f'Config "{file}" failed')
-            else:
-                logger.info(f'Config "{file}" done')
+            # one log file per config, the same rule as the chained run, see
+            # config_log_name()
+            with logger.log_file(config_log_name(file)):
+                logger.hr(f'Running config "{file}"', level=1)
+                try:
+                    self.run_config(file)
+                except ConfigError:
+                    # a value the operator has to edit: the other configs are not
+                    # run, a retry would fail on the same line
+                    raise
+                except Exception as e:
+                    # one config must not stop the others: a repo that does not
+                    # build or a remote that cannot be reached is retried by the
+                    # next run, the error is collected and raised at the end
+                    errors.append((file, e))
+                    logger.exception(f'Config "{file}" failed')
+                else:
+                    logger.info(f'Config "{file}" done')
 
         done = len(file_list) - len(errors)
         logger.info(f'Ran {len(file_list)} config{plural}: {done} done, {len(errors)} failed')

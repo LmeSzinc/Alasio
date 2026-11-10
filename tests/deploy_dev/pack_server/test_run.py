@@ -118,6 +118,37 @@ class TestPackRun:
         assert f'pack/{CHANNEL}/manifest.json' in credentials_env.objects
 
     @pytest.mark.trio
+    async def test_each_config_writes_its_own_log_file(self, run_dir, credentials_env,
+                                                       monkeypatch):
+        """Every config writes a log file of its own, named after the config.
+
+        The run of a config is thousands of lines: a failure of one config is
+        read from its own file instead of from the log of the whole run, which
+        the biggest config dominates.
+        """
+        write_config(run_dir, FILE)
+        write_config(run_dir, 'other.yaml', remotes={'cos-2': make_remote()}, branch='dev')
+        stub_generation(monkeypatch)
+        await PackRun(client=credentials_env.client()).run()
+
+        folder = run_dir.joinpath('log')
+        names = sorted(folder.iter_filenames())
+        mine = [name for name in names if name.endswith('_LmeSzinc_Repo_master.txt')]
+        other = [name for name in names if name.endswith('_other.txt')]
+        assert len(mine) == 1, names
+        assert len(other) == 1, names
+        # the run itself has a log of its own, the two configs are apart from it
+        assert len(names) == 3, names
+
+        mine_text = folder.joinpath(mine[0]).atomic_read_text()
+        other_text = folder.joinpath(other[0]).atomic_read_text()
+        # the header line of a section is uppercased
+        assert 'RUNNING CONFIG "LMESZINC_REPO_MASTER.YAML"' in mine_text
+        assert 'OTHER.YAML' not in mine_text
+        assert 'RUNNING CONFIG "OTHER.YAML"' in other_text
+        assert 'LMESZINC_REPO_MASTER.YAML' not in other_text
+
+    @pytest.mark.trio
     async def test_a_failed_generation_is_not_published(self, run_dir, credentials_env,
                                                         monkeypatch):
         """A config whose generation failed is reported and its mirror untouched."""
