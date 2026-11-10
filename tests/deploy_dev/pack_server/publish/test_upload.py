@@ -15,7 +15,7 @@ import hashlib
 import pytest
 
 from alasio.base.pretty import pretty_size
-from alasio.deploy_dev.pack_server.model import ConfigError
+from alasio.deploy_dev.pack_server.model import ConfigError, PackRepoConfig
 from alasio.deploy_dev.pack_server.publish.channel import (
     COMPARE_SAME, COMPARE_UPLOAD, SOURCE_ABSENT, SOURCE_HEAD, SOURCE_LIST, STATUS_DRY_RUN, STATUS_FAILED, STATUS_OK,
     STATUS_SKIPPED, ChannelUpload, RemoteState, compare
@@ -30,7 +30,8 @@ from alasio.ext.path import PathStr
 from alasio.logger import logger
 from alasio.testing.filesystem import fs  # noqa: F401
 from tests.deploy_dev.pack_server.publish.conftest import (
-    CHANNEL, REMOTE, REMOTE_PREFIX, age_objects, make_model, make_remote, make_store, write_config
+    BROKEN_VALUE_CONFIG, CHANNEL, REMOTE, REMOTE_PREFIX, age_objects, make_model, make_remote, make_store, write_config,
+    write_text_config
 )
 
 # every test drives an in-process store over the fake filesystem: no port, no
@@ -575,6 +576,90 @@ class TestGuards:
         assert 'not one of the published files' in result.reason
 
     @pytest.mark.trio
+    async def test_manifest_is_not_a_manifest(self, workspace, credentials_env):
+        """A contract of another schema, or a broken file, is not a generation."""
+        workspace._write(MANIFEST_KEY, b'{"not": "a manifest"}')
+        store = make_store(make_remote(), CHANNEL, credentials_env)
+        try:
+            result = await make_upload(workspace, store).run()
+        finally:
+            await store.aclose()
+        assert result.status == STATUS_SKIPPED
+        assert 'is not a manifest' in result.reason
+        assert keys_of(credentials_env) == []
+
+    @pytest.mark.trio
+    async def test_barrier_is_not_readable(self, workspace, credentials_env):
+        """A barrier that is not a version record cannot name a generation."""
+        workspace._write(BARRIER_KEY, b'x')
+        store = make_store(make_remote(), CHANNEL, credentials_env)
+        try:
+            result = await make_upload(workspace, store).run()
+        finally:
+            await store.aclose()
+        assert result.status == STATUS_SKIPPED
+        assert 'is not readable' in result.reason
+        assert keys_of(credentials_env) == []
+
+    @pytest.mark.trio
+    async def test_manifest_lists_a_file_twice(self, workspace, credentials_env):
+        """A contract that names the same key twice is not a keep set."""
+        from alasio.deploy_dev.pack_server.manifest import Manifest
+        files = sorted(workspace.files) + [BARRIER_KEY]
+        Manifest.build(
+            channel=CHANNEL,
+            version=workspace.version,
+            checksum=workspace.checksum,
+            files=files + [files[0]],
+        ).write(workspace.path(MANIFEST_KEY))
+        store = make_store(make_remote(), CHANNEL, credentials_env)
+        try:
+            result = await make_upload(workspace, store).run()
+        finally:
+            await store.aclose()
+        assert result.status == STATUS_SKIPPED
+        assert 'twice' in result.reason
+        assert keys_of(credentials_env) == []
+
+    @pytest.mark.trio
+    async def test_manifest_lists_itself(self, workspace, credentials_env):
+        """The contract is not one of the files it mirrors."""
+        from alasio.deploy_dev.pack_server.manifest import Manifest
+        Manifest.build(
+            channel=CHANNEL,
+            version=workspace.version,
+            checksum=workspace.checksum,
+            files=sorted(workspace.files) + [BARRIER_KEY, MANIFEST_KEY],
+        ).write(workspace.path(MANIFEST_KEY))
+        store = make_store(make_remote(), CHANNEL, credentials_env)
+        try:
+            result = await make_upload(workspace, store).run()
+        finally:
+            await store.aclose()
+        assert result.status == STATUS_SKIPPED
+        assert 'lists itself' in result.reason
+        assert keys_of(credentials_env) == []
+
+    @pytest.mark.trio
+    async def test_manifest_lists_an_unusable_path(self, workspace, credentials_env):
+        """A key that would leave the workspace stops the whole channel."""
+        from alasio.deploy_dev.pack_server.manifest import Manifest
+        Manifest.build(
+            channel=CHANNEL,
+            version=workspace.version,
+            checksum=workspace.checksum,
+            files=sorted(workspace.files) + [BARRIER_KEY, '../escape.pack'],
+        ).write(workspace.path(MANIFEST_KEY))
+        store = make_store(make_remote(), CHANNEL, credentials_env)
+        try:
+            result = await make_upload(workspace, store).run()
+        finally:
+            await store.aclose()
+        assert result.status == STATUS_SKIPPED
+        assert 'unusable path' in result.reason
+        assert keys_of(credentials_env) == []
+
+    @pytest.mark.trio
     async def test_local_file_missing(self, workspace, credentials_env):
         """A published file that is not on the disk stops the whole channel."""
         workspace.remove('wheel/msgspec/0.22.0/msgspec-0.22.0-py3-none-any.whl')
@@ -647,6 +732,24 @@ class TestUpload:
         assert result.uploaded == len(workspace.files) + 2
 
     @pytest.mark.trio
+    async def test_the_contract_reaches_the_mirror_byte_for_byte(self, workspace, credentials_env):
+        """manifest.json is mirrored as it is, not re-encoded on the way.
+
+        The contract of the mirror is the file a client reads, so the bytes
+        matter: a store that normalized, reordered or reserialized it would
+        serve a document that is not the one the generator wrote.
+        """
+        store = make_store(make_remote(), CHANNEL, credentials_env)
+        try:
+            await make_upload(workspace, store).run()
+        finally:
+            await store.aclose()
+        assert data_of(credentials_env, MANIFEST_KEY) == (
+            workspace.path(MANIFEST_KEY).atomic_read_bytes())
+        assert data_of(credentials_env, BARRIER_KEY) == (
+            workspace.path(BARRIER_KEY).atomic_read_bytes())
+
+    @pytest.mark.trio
     async def test_second_upload_writes_nothing(self, workspace, credentials_env):
         """A generation that is entirely on the mirror costs no PUT at all."""
         remote = make_remote()
@@ -711,8 +814,8 @@ class TestUpload:
             await store.aclose()
         assert result.status == STATUS_OK
         assert data_of(credentials_env, 'packrepo/bbbbbbbb/full.pack') == b'full pack of bbbbbbbb'
-        assert 'packrepo/aaaaaaaa/full.pack' in set(keys_of(credentials_env)) or True
-        # the previous generation is still on the mirror: the cleaner retires it
+        # the previous generation is still on the mirror: it is retired once its
+        # barrier has been live for the grace
         assert f'{PREFIX}packrepo/aaaaaaaa/full.pack' in keys_of(credentials_env)
 
     @pytest.mark.trio
@@ -1083,6 +1186,66 @@ class TestVerify:
         assert 'was written but the mirror reports' in str(caught.value)
 
 
+class TestResume:
+    """A run that failed halfway is completed by the next one."""
+
+    @pytest.mark.trio
+    async def test_the_files_that_landed_are_not_written_again(self, workspace, credentials_env):
+        """The next run writes only what the failed one did not.
+
+        The first run fails on the second content file: the first one is on
+        the mirror with its digest, the barrier and the contract are not. The
+        second run finds the first file by its ETag and writes the rest, so a
+        failure costs one transfer, not a whole generation.
+        """
+        store = make_store(make_remote(), CHANNEL, credentials_env)
+        second = 'packrepo/aaaaaaaa/update_00000001.pack'
+        credentials_env.fail_put_keys = {f'{PREFIX}{second}'}
+        try:
+            failed = await make_upload(workspace, store).run()
+            assert failed.status == STATUS_FAILED
+            assert f'{PREFIX}packrepo/aaaaaaaa/full.pack' in credentials_env.objects
+            assert f'{PREFIX}{BARRIER_KEY}' not in credentials_env.objects
+            assert f'{PREFIX}{MANIFEST_KEY}' not in credentials_env.objects
+            credentials_env.fail_put_keys = set()
+            before = len(credentials_env.requests)
+            result = await make_upload(workspace, store).run()
+        finally:
+            await store.aclose()
+        puts = [key for method, key in requests_of(credentials_env)[before:] if method == 'PUT']
+        assert result.status == STATUS_OK
+        assert 'packrepo/aaaaaaaa/full.pack' not in puts
+        assert second in puts
+        assert f'{PREFIX}{BARRIER_KEY}' in credentials_env.objects
+        assert f'{PREFIX}{MANIFEST_KEY}' in credentials_env.objects
+
+
+class TestRecord:
+    """The record of a generation is read once, and a failure is not a value."""
+
+    @pytest.mark.trio
+    async def test_a_failed_record_is_read_again(self, workspace, credentials_env):
+        """A skipped run does not pin the failure to the generation object.
+
+        The record is cached for every mirror of a channel; a failure is not
+        cached with it, or a workspace that was still being written at the
+        first attempt would be refused by every later mirror sharing the same
+        `LocalGeneration`.
+        """
+        local = LocalGeneration(workspace.workspace, concurrency=1)
+        store = make_store(make_remote(), CHANNEL, credentials_env)
+        workspace.remove(MANIFEST_KEY)
+        try:
+            first = await make_upload(workspace, store, local=local).run()
+            assert first.status == STATUS_SKIPPED
+            workspace.write(workspace.version, workspace.files)
+            second = await make_upload(workspace, store, local=local).run()
+        finally:
+            await store.aclose()
+        assert second.status == STATUS_OK
+        assert f'{PREFIX}{MANIFEST_KEY}' in credentials_env.objects
+
+
 class TestRun:
     """The run of a repo config, against the fake service."""
 
@@ -1130,6 +1293,29 @@ class TestRun:
         assert credentials_env.objects == {}
 
     @pytest.mark.trio
+    async def test_an_empty_remote_list_means_every_remote(self, workspace, credentials_env, run_dir):
+        """`remotes=[]` is not "no remote": the run publishes to all of them.
+
+        The filter follows the convention of the rest of the tool: an empty
+        selection is an unset one. A run that meant "nothing" would report
+        success after publishing nowhere.
+        """
+        config = write_config(
+            run_dir, make_model(remotes={REMOTE: make_remote(), 'backup': make_remote()}))
+        results = await UploadRun(config, client=credentials_env.client()).run(remotes=[])
+        assert [result.remote for result in results] == ['backup', REMOTE]
+        assert [result.status for result in results] == [STATUS_OK, STATUS_OK]
+
+    @pytest.mark.trio
+    async def test_a_subset_of_the_remotes(self, workspace, credentials_env, run_dir):
+        """A non-empty selection publishes to exactly those remotes."""
+        config = write_config(
+            run_dir, make_model(remotes={REMOTE: make_remote(), 'backup': make_remote()}))
+        results = await UploadRun(config, client=credentials_env.client()).run(remotes=['backup'])
+        assert [result.remote for result in results] == ['backup']
+        assert results[0].status == STATUS_OK
+
+    @pytest.mark.trio
     async def test_a_remote_filter(self, workspace, credentials_env, config):
         """A remote the run is asked for and the config does not name is an error."""
         run = UploadRun(config, client=credentials_env.client())
@@ -1145,15 +1331,16 @@ class TestRun:
         assert keys_of(credentials_env) == []
 
     @pytest.mark.trio
-    async def test_a_config_with_a_bad_value_is_refused(self, workspace, credentials_env, config):
+    async def test_a_config_with_a_bad_value_is_refused(self, workspace, credentials_env, run_dir):
         """A value the reader refused stops the run instead of publishing elsewhere.
 
-        The reader falls back to the default of the value, so a config with a
-        broken Prefix would publish to the bucket root: the run refuses the file
-        the reader recorded an error for, before any request.
+        YamlConfig falls back to the default of a value that fails validation,
+        so a run that trusted the result would publish with a value nobody
+        wrote: the file is refused before any request.
         """
-        config.errors = [ValueError('Prefix of an unexpected type')]
-        with pytest.raises(ConfigError, match='Prefix'):
+        config = write_text_config(run_dir, BROKEN_VALUE_CONFIG)
+        config = PackRepoConfig(config.name)
+        with pytest.raises(ConfigError, match='Concurrency'):
             await UploadRun(config, client=credentials_env.client()).run()
         assert keys_of(credentials_env) == []
 

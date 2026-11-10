@@ -1,10 +1,11 @@
 """
 One run of the pack server: generate the packs of a config, then publish them.
 
-The two halves are independent programs with their own entry (`main.py` generates,
-`upload.py` publishes), and running them apart is how a generation ends up on the
-disk but not on the mirror, or how an operator publishes a workspace a generator
-is still writing. This module chains them, one config at a time:
+The two halves are independent steps: `PackServer` generates the packs of a run
+and `UploadRun` mirrors a workspace, and running them apart is how a generation
+ends up on the disk but not on the mirror, or how an operator publishes a
+workspace a generator is still writing. This module chains them, one config at
+a time:
 
     config  ->  PackRepoConfig
     clone   ->  PackRepo

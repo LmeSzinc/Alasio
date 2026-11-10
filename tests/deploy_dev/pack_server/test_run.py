@@ -22,7 +22,7 @@ from alasio.testing.filesystem import fs  # noqa: F401
 from tests.deploy_dev.pack_server.conftest import use_memory_lock
 from tests.deploy_dev.pack_server.publish import conftest as publish_fixtures
 from tests.deploy_dev.pack_server.publish.conftest import (
-    AUTHOR, BRANCH, CHANNEL, REPO, Generation, make_model, make_remote
+    AUTHOR, BRANCH, BROKEN_VALUE_CONFIG, CHANNEL, REPO, Generation, make_model, make_remote, write_text_config
 )
 from tests.deploy_dev.pack_server.publish.test_lock import holder_thread
 
@@ -56,7 +56,7 @@ def run_dir(fs, monkeypatch):
     return root
 
 
-def write_config(root, name=FILE, remotes=None):
+def write_config(root, name=FILE, remotes=None, branch=BRANCH):
     """
     Write a config file of a run directory.
 
@@ -64,11 +64,14 @@ def write_config(root, name=FILE, remotes=None):
         root (PathStr): Run directory
         name (str): File name in the config folder. Defaults to FILE
         remotes (dict): The remotes of the config, one fake COS by default
+        branch (str): Branch of the repo, the last part of the workspace name.
+            Defaults to BRANCH
     """
     folder = root.joinpath('config')
     folder.makedirs(exist_ok=True)
-    YamlConfig(folder.joinpath(name), model=PackRepoModel).write_data(
-        make_model(remotes))
+    model = make_model(remotes)
+    model.Repo.Branch = branch
+    YamlConfig(folder.joinpath(name), model=PackRepoModel).write_data(model)
 
 
 def stub_generation(monkeypatch, generated=None, fail=()):
@@ -128,13 +131,20 @@ class TestPackRun:
     @pytest.mark.trio
     async def test_one_failed_config_does_not_stop_the_other(self, run_dir, credentials_env,
                                                              monkeypatch):
-        """Every config is run, the failed one is reported at the end."""
+        """Every config is run: the failed one is reported, the other is published.
+
+        The second config is another branch of the repo, so it is another
+        workspace: a failure of the first one must neither stop its generation
+        nor keep it off the mirror.
+        """
         write_config(run_dir, FILE)
-        write_config(run_dir, 'other.yaml', remotes={'cos-2': make_remote()})
+        write_config(run_dir, 'other.yaml', remotes={'cos-2': make_remote()}, branch='dev')
         stub_generation(monkeypatch, fail=(CHANNEL,))
         with pytest.raises(PackRunError) as caught:
             await PackRun(client=credentials_env.client()).run()
-        assert len(caught.value.errors) == 2
+        assert [name for name, _reason in caught.value.errors] == [FILE]
+        assert f'pack/{AUTHOR}_{REPO}_dev/manifest.json' in credentials_env.objects
+        assert f'pack/{CHANNEL}/manifest.json' not in credentials_env.objects
 
     @pytest.mark.trio
     async def test_the_lock_covers_the_generation_and_the_publication(
@@ -212,12 +222,15 @@ class TestPackRun:
         assert results == []
 
     @pytest.mark.trio
-    async def test_a_broken_config_is_reported(self, run_dir, credentials_env):
-        """A config the reader could not validate fails its own config only."""
-        write_config(run_dir)
-        YamlConfig(run_dir.joinpath('config').joinpath(FILE), model=PackRepoModel).write_data(
-            PackRepoModel(Repo=RepoConfig(Remote='u', Author=AUTHOR, Repo=REPO, Branch=BRANCH)))
-        with pytest.raises(PackRunError):
+    async def test_a_value_that_fell_back_is_refused(self, run_dir, credentials_env):
+        """A value the reader replaced with its default stops the run.
+
+        YamlConfig falls back to the default of a value that fails validation
+        and records the failure; the run must not publish with a value nobody
+        wrote, so require_valid() refuses the file before the first request.
+        """
+        write_text_config(run_dir, BROKEN_VALUE_CONFIG, FILE)
+        with pytest.raises(ConfigError, match='Concurrency'):
             await PackRun(client=credentials_env.client()).run()
         assert credentials_env.objects == {}
 

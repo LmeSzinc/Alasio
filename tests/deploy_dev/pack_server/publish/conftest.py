@@ -182,6 +182,46 @@ def make_store(remote, workspace, service):
     return create_store(REMOTE, remote, workspace, client=service.client())
 
 
+# a config file whose Concurrency is not a number: the reader falls back to the
+# default and records the failure, require_valid() is what refuses the file
+BROKEN_VALUE_CONFIG = """\
+Repo:
+  Remote: https://github.com/LmeSzinc/Repo
+  Author: LmeSzinc
+  Repo: Repo
+  Branch: master
+Publish:
+  cos-main:
+    Driver: cos
+    Bucket: alasio-test-1250000000
+    Region: ap-shanghai
+    Concurrency: abc
+"""
+
+
+def write_text_config(run_dir, text, name=CONFIG_FILE):
+    """
+    Write a config file of a run directory verbatim.
+
+    The file is read back by PackRepoConfig, the reader the flow uses, so a
+    test can break one value of it without building a model that allows it.
+
+    Args:
+        run_dir (PathStr): Run directory
+        text (str): Content of the file
+        name (str): File name in the config folder. Defaults to CONFIG_FILE
+
+    Returns:
+        PathStr: Absolute path of the file
+    """
+    folder = PathStr.new(run_dir).joinpath(PackRepoConfig.CONFIG_FOLDER)
+    folder.makedirs(exist_ok=True)
+    file = folder.joinpath(name)
+    with open(str(file), 'w', encoding='utf-8') as f:
+        f.write(text)
+    return file
+
+
 class Generation:
     """
     One generation of a workspace on the fake filesystem.
