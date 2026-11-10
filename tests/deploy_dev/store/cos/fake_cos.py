@@ -188,6 +188,10 @@ class FakeCos:
             refuses without closing the connection
         fail_delete_keys (set): Keys whose DELETE answers 500, for a partial
             failure of a retire round
+        bad_length_keys (set): Keys whose HEAD answers an unusable
+            Content-Length, for a broken answer of a proxy
+        repeat_token (str): When set, every listing page is full, truncated and
+            answers this continuation token, whatever page it was asked for
         bucket_missing (bool): True to answer every request with the 404 of a
             bucket that does not exist, as COS does for a wrong Bucket or Region
     """
@@ -206,6 +210,8 @@ class FakeCos:
         self.fail_next_requests = 0
         self.fail_put_keys = set()
         self.fail_delete_keys = set()
+        self.bad_length_keys = set()
+        self.repeat_token = None
         self.bucket_missing = False
         self._clients = []
         self.app = Starlette(routes=[
@@ -430,7 +436,10 @@ class FakeCos:
         if obj is None:
             return self._error(404, 'NoSuchKey', 'The specified key does not exist.')
         headers = self._object_headers(obj)
-        headers['Content-Length'] = str(len(obj.data))
+        if key in self.bad_length_keys:
+            headers['Content-Length'] = 'not-a-number'
+        else:
+            headers['Content-Length'] = str(len(obj.data))
         return self._answer(200, b'', headers)
 
     def _delete(self, key):
@@ -470,6 +479,11 @@ class FakeCos:
         page = keys[:max_keys]
         truncated = len(keys) > len(page)
         next_token = page[-1] if truncated and page else None
+        if self.repeat_token is not None:
+            # the page names the token it was asked with: a client that trusts
+            # it walks the same page forever, as a faulty proxy would make it
+            body = self._listing_xml(prefix, page, True, self.repeat_token)
+            return self._answer(200, body, {'Content-Type': 'application/xml'})
         body = self._listing_xml(prefix, page, truncated, next_token)
         return self._answer(200, body, {'Content-Type': 'application/xml'})
 

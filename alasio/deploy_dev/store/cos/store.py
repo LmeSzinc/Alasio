@@ -417,10 +417,20 @@ class CosStore(ObjectStore):
             params = {'list-type': '2', 'max-keys': str(self.PAGE_SIZE)}
             if self.prefix:
                 params['prefix'] = self.prefix
-            if token:
-                params['continuation-token'] = token
+            sent = token
+            if sent:
+                params['continuation-token'] = sent
             response = await self._call('GET', None, params=params)
             entries, truncated, token, date = self._parse_listing(response)
+            if truncated and token == sent:
+                # the page names the token it was asked with: the next request
+                # would return the same page again, forever. A store that keeps
+                # walking would grow the result until the process is killed,
+                # and the flow would never reach its first write
+                raise CosError(
+                    f'LIST answered the continuation token it was given '
+                    f'("{sent}") again after {len(objects)} object(s), so the '
+                    f'pages would never end')
             if server_date is None:
                 server_date = date
             for key, info in entries:
@@ -477,11 +487,13 @@ class CosStore(ObjectStore):
             ObjectInfo: What the server reports about the written object
 
         Raises:
-            CosError: If the write fails: a BadDigest answer means the file
-                changed while it was being uploaded
+            CosError: If the write fails: an object larger than the single PUT
+                limit, a digest or a length the request cannot carry, a file
+                that changed between the read of its digest and the upload, or
+                a BadDigest answer of the server
         """
         if size < 0:
-            raise ValueError(f'Size of "{relative}" is negative: {size}')
+            raise CosError(f'Size of "{relative}" is negative: {size}')
         if size > self.MAX_PUT_SIZE:
             raise CosError(
                 f'Object "{relative}" is {size} bytes, larger than the single PUT '
@@ -490,7 +502,8 @@ class CosStore(ObjectStore):
         try:
             content_md5 = base64.b64encode(bytes.fromhex(md5)).decode('ascii')
         except ValueError:
-            raise ValueError(f'MD5 of "{relative}" is not a hex string: "{md5}"') from None
+            raise CosError(
+                f'MD5 of "{relative}" is not a hex string: "{md5}"') from None
         import httpx2
 
         timeout = httpx2.Timeout(
@@ -524,7 +537,7 @@ class CosStore(ObjectStore):
                     # transfer and the loop retries eight times)
                     actual = await trio.to_thread.run_sync(lambda: os.fstat(f.fileno()).st_size)
                     if actual != size:
-                        raise ValueError(
+                        raise CosError(
                             f'Size of "{relative}" is declared {size} bytes, '
                             f'the file has {actual}')
                     response = await self._client.request(
@@ -953,11 +966,22 @@ class CosStore(ObjectStore):
                 f'Answer for "{self._describe(relative)}" carries no '
                 f'Content-Length or ETag: {dict(response.headers)}'
             )
+        try:
+            size_value = int(size)
+        except ValueError:
+            size_value = -1
+        if size_value < 0:
+            # a broken answer, not a transport failure: the size is read here
+            # rather than after the call, so a proxy page or a truncated
+            # header reads as what it is instead of as a ValueError
+            raise CosError(
+                f'Answer for "{self._describe(relative)}" carries an unusable '
+                f'Content-Length: "{size}"')
         last_modified = parse_http_date(response.headers.get('Last-Modified'))
         if last_modified is None:
             last_modified = parse_http_date(response.headers.get('Date'))
         return ObjectInfo(
-            size=int(size),
+            size=size_value,
             etag=etag,
             last_modified=last_modified if last_modified is not None else time.time(),
             checksum=response.headers.get(CRC64_HEADER, ''),

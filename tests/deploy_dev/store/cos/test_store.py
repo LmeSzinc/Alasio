@@ -248,26 +248,35 @@ class TestContentMd5:
             await store.get('v1/wrong.bin')
 
     @pytest.mark.trio
-    async def test_md5_must_be_hex(self, fs, store):
-        """A MD5 that is not a hex string is a caller error, not a request."""
+    async def test_md5_must_be_hex(self, fs, store, fake_cos):
+        """A MD5 that is not a hex string is refused before any request.
+
+        A store raises StoreError; the digest comes from the local read of the
+        file, so a value that is not a hex string means the two sides disagree
+        about the file, which is a failed transfer rather than a crash of the
+        flow.
+        """
         fs.create_file('/data.bin', contents=b'data')
-        with pytest.raises(ValueError):
+        with pytest.raises(CosError) as caught:
             await store.put('v1/data.bin', '/data.bin', 4, 'not-a-md5')
+        assert 'not a hex string' in str(caught.value)
+        assert fake_cos.requests == []
 
     @pytest.mark.trio
-    async def test_size_mismatch_is_a_caller_error(self, fs, store, fake_cos):
+    async def test_size_mismatch_is_a_failed_transfer(self, fs, store, fake_cos):
         """A declared size that is not the size of the file is refused up front.
 
         Left to the http stack the mismatch is a protocol error (a longer body
         than Content-Length is refused by h11, a shorter one stalls the peer),
         which reads as a network failure and is retried eight times. The check
         reads the size of the open file, so it costs no second lookup of the
-        path.
+        path. It is a StoreError like every other refusal of a store, so the
+        caller reports the pair instead of tracing an exception out of it.
         """
         data = b'x' * 100
         path = '/short.bin'
         fs.create_file(path, contents=data)
-        with pytest.raises(ValueError) as caught:
+        with pytest.raises(CosError) as caught:
             await store.put('v1/short.bin', path, 10, hashlib.md5(data).hexdigest())
         assert 'declared 10 bytes' in str(caught.value)
         assert fake_cos.requests == []
@@ -325,6 +334,24 @@ class TestList:
         assert sorted(listing.objects) == expected
         # five objects, two per page: three requests
         assert len([request for request in fake_cos.requests if request[0] == 'GET']) == 3
+
+    @pytest.mark.trio
+    async def test_a_token_that_does_not_advance_is_refused(self, fs, store, uploader, fake_cos):
+        """A page that names the token it was asked with ends the walk.
+
+        Without the guard the client sends the same request again for every
+        page, adds the same objects again and never reaches the end of a
+        listing it cannot finish: the result grows until the process dies, and
+        so does the number of requests.
+        """
+        store.PAGE_SIZE = 2
+        await uploader.put(fs, store, 'v1/a.bin', b'a')
+        fake_cos.repeat_token = 'the-same-page'
+        with pytest.raises(CosError) as caught:
+            await store.list()
+        assert 'continuation token' in str(caught.value)
+        # the first page and the refused second one, not a loop
+        assert len([request for request in fake_cos.requests if request[0] == 'GET']) == 2
 
     @pytest.mark.trio
     async def test_prefix_isolation(self, fs, store, fake_cos):
@@ -416,6 +443,21 @@ class TestHead:
         head = await store.head('v1/data.bin')
         assert head.checksum == info.checksum
         assert (await store.list()).objects['v1/data.bin'].checksum == ''
+
+    @pytest.mark.trio
+    async def test_a_broken_content_length_is_a_store_error(self, fs, store, uploader, fake_cos):
+        """A HEAD that answers a length that is not a number is a failed read.
+
+        A proxy that answers a page instead of the origin, or a truncated
+        header, must not raise a ValueError out of the store: the flow treats a
+        StoreError as a failed pair and a ValueError as its own bug.
+        """
+        await uploader.put(fs, store, 'v1/data.bin', b'data')
+        fake_cos.bad_length_keys = {PREFIX + 'v1/data.bin'}
+        with pytest.raises(CosError) as caught:
+            await store.head('v1/data.bin')
+        assert 'unusable Content-Length' in str(caught.value)
+        assert 'not-a-number' in str(caught.value)
 
 
 class TestDelete:

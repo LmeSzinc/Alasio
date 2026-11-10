@@ -270,13 +270,15 @@ class TestCredentials:
         assert f'{ENV_PREFIX}_SECRET_KEY' in message
         assert 'the-id-must-not-be-printed' not in message
 
-    def test_the_default_prefix_of_the_driver(self, monkeypatch):
+    @pytest.mark.trio
+    async def test_the_default_prefix_of_the_driver(self, monkeypatch):
         """A remote without EnvPrefix reads the variables of the driver prefix."""
         remote = make_remote(EnvPrefix='')
         monkeypatch.setenv('ALASIO_COS_SECRET_ID', 'a')
         monkeypatch.setenv('ALASIO_COS_SECRET_KEY', 'b')
         # a store that read the two values instead of refusing the remote
-        assert create_store(REMOTE, remote, CHANNEL) is not None
+        store = create_store(REMOTE, remote, CHANNEL)
+        await store.aclose()
         # and one variable missing is refused
         monkeypatch.delenv('ALASIO_COS_SECRET_KEY')
         with pytest.raises(ConfigError, match='ALASIO_COS_SECRET_KEY'):
@@ -328,15 +330,20 @@ class TestCreateStore:
         with pytest.raises(ConfigError, match='Endpoint'):
             create_store(REMOTE, make_remote(Endpoint=endpoint), CHANNEL)
 
-    def test_a_usable_prefix_and_endpoint(self):
+    @pytest.mark.trio
+    async def test_a_usable_prefix_and_endpoint(self):
         """The fields the driver now checks are still accepted when they are fine."""
         store = create_store(
             REMOTE,
             make_remote(Prefix='/pack/', Endpoint='http://fake-cos.local:9000'),
             CHANNEL)
-        assert store.prefix.rstrip('/') == f'{REMOTE_PREFIX}/{CHANNEL}'
+        try:
+            assert store.prefix.rstrip('/') == f'{REMOTE_PREFIX}/{CHANNEL}'
+        finally:
+            await store.aclose()
 
-    def test_an_empty_prefix_publishes_at_the_bucket_root(self):
+    @pytest.mark.trio
+    async def test_an_empty_prefix_publishes_at_the_bucket_root(self):
         """Prefix '' keeps the workspace as the first segment of the key.
 
         The empty string is the way to opt out of the default pack/: the
@@ -344,7 +351,10 @@ class TestCreateStore:
         the workspace does not include the objects of a sibling one.
         """
         store = create_store(REMOTE, make_remote(Prefix=''), CHANNEL)
-        assert store.prefix == f'{CHANNEL}/'
+        try:
+            assert store.prefix == f'{CHANNEL}/'
+        finally:
+            await store.aclose()
 
     def test_a_missing_credential_is_refused_by_the_same_call(self, monkeypatch):
         """The store is built and its credentials read in one call, so a missing
@@ -358,10 +368,14 @@ class TestCreateStore:
         with pytest.raises(ConfigError, match='webdav'):
             create_store('nas', WebDavRemote(BaseUrl='https://nas.example/dav'), CHANNEL)
 
-    def test_a_usable_remote_builds_a_store(self):
+    @pytest.mark.trio
+    async def test_a_usable_remote_builds_a_store(self):
         """The store of the fake service is bound to the workspace of the config."""
         store = create_store(REMOTE, make_remote(), CHANNEL)
-        assert store.prefix.rstrip('/') == f'{REMOTE_PREFIX}/{CHANNEL}'
+        try:
+            assert store.prefix.rstrip('/') == f'{REMOTE_PREFIX}/{CHANNEL}'
+        finally:
+            await store.aclose()
 
     def test_the_default_config_of_a_repo_has_nothing_to_publish(self):
         """An empty Publish map is valid: the repo publishes nowhere."""

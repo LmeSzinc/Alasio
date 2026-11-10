@@ -139,9 +139,10 @@ class LocalGeneration:
             manifest_data, barrier_data = await trio.to_thread.run_sync(
                 _read_pair, self.workspace.joinpath(MANIFEST_FILE),
                 self.workspace.joinpath(BARRIER_KEY))
-        except FileNotFoundError as e:
-            raise SkipChannel(f'{e.filename} is not there yet') from None
         except OSError as e:
+            # _read_pair answers None for a file that is not there, so this is a
+            # file that exists and cannot be read: a permission, a folder where
+            # a file belongs
             raise SkipChannel(f'cannot read the record: {e}') from None
 
         if manifest_data is None:
