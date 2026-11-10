@@ -13,15 +13,12 @@ from alasio.deploy_dev.pack_server.publish.channel import STATUS_FAILED, Channel
 from alasio.deploy_dev.pack_server.publish.common import PublishError, PublishRunError
 from alasio.deploy_dev.pack_server.publish.drivers import create_store
 from alasio.deploy_dev.pack_server.publish.local import LocalGeneration
+from alasio.deploy_dev.pack_server.repo_base import PACK_FOLDER
 from alasio.ext import env
 from alasio.ext.cache import cached_property
 from alasio.ext.path import PathStr
 from alasio.logger import logger
 from alasio.logger.utils import stringify_event
-
-# the folder of the workspaces, inside the run directory, the same one the
-# generator writes (see repo_base.PACK_FOLDER)
-PACK_FOLDER = 'pack'
 
 
 class UploadRun:

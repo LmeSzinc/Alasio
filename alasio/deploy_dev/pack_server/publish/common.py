@@ -14,13 +14,13 @@ except NameError:  # python 3.8 / 3.9
     from exceptiongroup import BaseExceptionGroup
 
 from alasio.deploy_dev.pack_server.manifest import MANIFEST_FILE
+from alasio.deploy_dev.pack_server.repo_base import PACKREPO_FOLDER
 from alasio.deploy_dev.pack_server.repo_latest import LATEST_FILE
 
 # the relative key of the published contract and of the barrier, inside a
-# workspace. The uploader writes the barrier last but one, the contract last;
-# the cleaner reads both before it lists.
+# workspace. The uploader writes the barrier last but one, the contract last.
 MANIFEST_KEY = MANIFEST_FILE
-BARRIER_KEY = f'packrepo/{LATEST_FILE}'
+BARRIER_KEY = f'{PACKREPO_FOLDER}/{LATEST_FILE}'
 
 # the transfers (and local reads) one channel runs at once. A cap of the tool
 # rather than of the config: past it the queue only moves into the connection

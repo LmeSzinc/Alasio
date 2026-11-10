@@ -41,15 +41,11 @@ from starlette.routing import Mount
 from starlette.staticfiles import StaticFiles
 
 from alasio.deploy_dev.pack_server.gate import RunDirError, check_run_dir
+from alasio.deploy_dev.pack_server.repo_base import PACK_FOLDER, PACKREPO_FOLDER
+from alasio.deploy_dev.pack_server.repo_latest import LATEST_FILE
 from alasio.ext import env
 from alasio.ext.path import PathStr
 from alasio.logger import logger
-
-# folder of the repos in the run directory, see PackRepoModel
-PACK_FOLDER = 'pack'
-
-# folder of the packs of a repo, the subfolder of a repo folder
-PACKREPO_FOLDER = 'packrepo'
 
 # url prefix the packs are served under, the folder name
 PACK_URL = f'/{PACK_FOLDER}'
@@ -154,7 +150,8 @@ async def serve_app(args=None):
     address = config.bind[0]
     logger.info(f'Serving "{folder}" at http://{address}{PACK_URL}/')
     for name in folder.iter_foldernames():
-        logger.info(f'http://{address}{PACK_URL}/{name}/{PACKREPO_FOLDER}/latest.pack')
+        logger.info(
+            f'http://{address}{PACK_URL}/{name}/{PACKREPO_FOLDER}/{LATEST_FILE}')
     await serve(create_app(folder), config)
 
 
