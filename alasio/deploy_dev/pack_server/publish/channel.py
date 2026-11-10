@@ -33,6 +33,8 @@ Every request carries a numbered line, `PUT 3/12 wheel/x.whl 1.18MB`, so a long
 run reads as a progress report instead of a silence that ends in a summary.
 """
 
+import itertools
+
 import msgspec
 import trio
 
@@ -107,6 +109,55 @@ class UploadResult(msgspec.Struct):
             bool: True when nothing failed
         """
         return self.status != STATUS_FAILED
+
+
+class _Entry:
+    """
+    The number of one file in the progress report.
+
+    A file may print twice, a HEAD and then the line of the decision, and the
+    two lines are one entry of the report: the number is allocated at the first
+    of them and reused by the second.
+
+    Attributes:
+        number (int): The entry, 0 while the file has printed nothing
+    """
+
+    __slots__ = ('_counter', 'number')
+
+    def __init__(self, counter):
+        """
+        Args:
+            counter (Iterator[int]): The counter of the report of this run
+        """
+        self._counter = counter
+        self.number = 0
+
+    def claim(self):
+        """
+        The number of this file, allocated the first time it is asked for.
+
+        Returns:
+            int: The entry of the file in the report
+        """
+        if not self.number:
+            self.number = next(self._counter)
+        return self.number
+
+    @classmethod
+    def single(cls, number):
+        """
+        The entry of a file that prints one line, at a number known up front.
+
+        Args:
+            number (int): The entry of that line in the report
+
+        Returns:
+            _Entry: The entry, its number already fixed
+        """
+        entry = cls(iter(()))
+        entry.number = number
+        return entry
 
 
 class RemoteState(msgspec.Struct):
@@ -282,7 +333,7 @@ class ChannelUpload:
             raise PublishError(
                 f'{self._where()}: cannot list the workspace: {e}') from None
 
-    async def _resolve(self, item, number=None):
+    async def _resolve(self, item, entry=None):
         """
         What the mirror reports about one key, with the cheapest answer first.
 
@@ -300,7 +351,9 @@ class ChannelUpload:
 
         Args:
             item (UploadItem): The local file
-            number (int): The entry this lookup belongs to, for the log
+            entry (_Entry): The entry of the file in the report, so a HEAD and
+                the line after it share the number. None for a lookup outside
+                the report, e.g. the barrier before the plan is known
 
         Returns:
             RemoteState: What the mirror reports and what it proves
@@ -322,6 +375,10 @@ class ChannelUpload:
             return RemoteState(info=info, md5=md5, source=SOURCE_LIST)
         try:
             async with self.remote_limit:
+                # claimed right before the line: the number of a line is its
+                # position in the report, not the position of its key in the
+                # queue, so the report of a concurrent run stays in order
+                number = None if entry is None else entry.claim()
                 self._step('HEAD', item.relative, 'the stored object', number)
                 head = await self.store.head(item.relative)
         except ObjectNotFound:
@@ -387,14 +444,17 @@ class ChannelUpload:
             f'that the write landed'
         )
 
-    async def _put(self, item, kind, number):
+    async def _put(self, item, kind, entry):
         """
         Write one file and verify the answer of the mirror.
 
         Args:
             item (UploadItem): The file to write
             kind (str): KIND_CONTENT / KIND_BARRIER / KIND_MANIFEST
-            number (int): The entry of the progress report
+            entry (_Entry): The entry of the file in the report, claimed inside
+                the limit: the line is written once the transfer is allowed to
+                start, so a task that is still queued holds no entry and the
+                report stays in order
 
         Raises:
             PublishError: If the write fails or the object does not verify
@@ -403,6 +463,7 @@ class ChannelUpload:
         if kind != KIND_CONTENT:
             detail += f', {kind}'
         async with self.remote_limit:
+            number = entry.claim()
             self._step('PUT', item.relative, detail, number)
             info = await self.store.put(
                 item.relative, item.file, item.size, item.md5,
@@ -422,9 +483,8 @@ class ChannelUpload:
         Each file runs its own pipeline — resolve its key, compare, write it if
         it differs — so a key the listing already proves costs no request at
         all and a key it cannot prove is asked about while the others are being
-        written. The entry of each file in the progress report is its position
-        in this queue, so a number belongs to a file rather than to a moment of
-        the schedule.
+        written. The entry of a file in the report is claimed when the file
+        reaches it, so the lines of a concurrent run read as a progress bar.
 
         Args:
             relatives (List[str]): Keys of the content files, in manifest order
@@ -440,29 +500,34 @@ class ChannelUpload:
         """
 
         found = {}
+        # the entries of the report of this run, in the order the lines are
+        # written: the first content file is 1, and the barrier, the contract
+        # and the keys to retire continue from where the content stopped
+        counter = itertools.count(1)
 
-        async def one(number, relative):
+        async def one(relative):
             item = await self.local.item(relative)
-            outcome = compare(item, await self._resolve(item, number))
+            entry = _Entry(counter)
+            outcome = compare(item, await self._resolve(item, entry))
             detail = pretty_size(item.size)
             if outcome == COMPARE_SAME:
-                self._step('SAME', item.relative, detail, number)
+                self._step('SAME', item.relative, detail, entry.claim())
             elif dry_run:
-                self._step('PUT', item.relative, detail, number)
+                self._step('PUT', item.relative, detail, entry.claim())
             else:
-                await self._put(item, KIND_CONTENT, number)
+                await self._put(item, KIND_CONTENT, entry)
             found[relative] = (outcome, item)
 
         if self.concurrency == 1:
             # one at a time, in the order of the manifest: the progress lines of
             # a serial run follow the manifest, not the scheduler
-            for number, relative in enumerate(relatives, 1):
-                await one(number, relative)
+            for relative in relatives:
+                await one(relative)
         else:
             try:
                 async with trio.open_nursery() as nursery:
-                    for number, relative in enumerate(relatives, 1):
-                        nursery.start_soon(one, number, relative)
+                    for relative in relatives:
+                        nursery.start_soon(one, relative)
             except BaseExceptionGroup as group:
                 raise first_failure(group) from None
         return [found[relative] for relative in relatives]
@@ -570,11 +635,14 @@ class ChannelUpload:
 
     async def _publish(self, manifest, dry_run):
         """
-        The body of a run, with the generation warmed up around it.
+        The body of a run, with the generation warmed up beside it.
 
-        `LocalGeneration.warmup()` validates the record before this body starts
-        and reads the content while it runs, so the first request of the run and
-        the first read of a content file happen at the same time.
+        The files of the generation are read by `warmup()` tasks the caller
+        starts in a nursery of its own: the first request of the run goes out
+        while the head of the queue is being read, and the file the body asks
+        for first is the first one handed to a reader. A failure of the block
+        cancels the reads that have not finished, so a run that will not
+        publish does not read the rest of the disk.
 
         Args:
             manifest (Manifest): The published contract
@@ -583,13 +651,14 @@ class ChannelUpload:
         Returns:
             UploadResult: The result of the pair
         """
-        async with self.local.warmup():
+        await self.local.prepare()
+        async with trio.open_nursery() as nursery:
+            self.local.start(nursery)
             listing = await self.snapshot
 
             # the barrier is decided before the content starts: whether this run
             # switches the version changes what is written, and the total of the
-            # progress report follows from both. Both items are already read
-            # when the warmup block is entered.
+            # progress report follows from both.
             barrier_item = await self.local.item(BARRIER_KEY)
             contract_item = await self.local.item(MANIFEST_KEY)
             barrier_outcome = compare(barrier_item, await self._resolve(barrier_item))
@@ -599,9 +668,15 @@ class ChannelUpload:
 
             content = [relative for relative in manifest.files if relative != BARRIER_KEY]
             retire = self._retire_plan(manifest, listing)
-            # the content files take the first numbers, then the barrier, the
-            # contract and the keys of the previous generation
+            # the report is a progress bar: the entry of a line is its position
+            # in the report, taken when the line is about to be written. A
+            # position fixed by the queue would print out of order, because the
+            # tasks of a concurrent run are scheduled by trio, not by the
+            # manifest
             self.total = len(manifest.files) + 1 + len(retire.keys)
+
+            # the content files are the entries 1..len(content), then the
+            # barrier and the contract
             barrier_number = len(manifest.files)
             contract_number = barrier_number + 1
 
@@ -631,10 +706,10 @@ class ChannelUpload:
                 elif dry_run:
                     self._step('PUT', item.relative, detail, number)
                 else:
-                    await self._put(item, kind, number)
+                    await self._put(item, kind, _Entry.single(number))
 
             deleted_keys = await self._retire(
-                retire, contract_number + 1, listing, dry_run)
+                retire, listing, first_number=len(manifest.files) + 2, dry_run=dry_run)
             # the bytes of the keys that are gone, not of the ones the plan
             # announced: a delete that failed keeps its key, and a report that
             # counted it would tell an operator that space was freed that the
@@ -684,7 +759,7 @@ class ChannelUpload:
             logger.debug(f'{self._where()}: no retire, {e}')
             return DeletePlan()
 
-    async def _retire(self, retire, first_number, listing, dry_run=False):
+    async def _retire(self, retire, listing, first_number, dry_run=False):
         """
         Delete the keys of the plan, a few at a time, keeping the run alive.
 
@@ -694,9 +769,9 @@ class ChannelUpload:
 
         Args:
             retire (DeletePlan): The keys to delete
-            first_number (int): The entry of the first key in the report
             listing (ObjectListing): The listing the plan was built on, for the
                 size of each key
+            first_number (int): The entry of the first key of the plan
             dry_run (bool): Report the keys and delete none. Defaults to False
 
         Returns:
@@ -706,15 +781,19 @@ class ChannelUpload:
         """
         if not retire.keys:
             return []
+        # the entries of the round, in the order the lines are written
+        counter = itertools.count(first_number)
 
-        async def one(number, relative):
+        async def one(relative):
             detail = pretty_size(listing.objects[relative].size)
             if dry_run:
-                self._step('WOULD DELETE', relative, detail, number)
+                self._step('WOULD DELETE', relative, detail, next(counter))
                 return relative
             try:
                 async with self.remote_limit:
-                    self._step('DELETE', relative, detail, number)
+                    # taken inside the limit: a task that is still queued has
+                    # no line yet, so it must not take an entry
+                    self._step('DELETE', relative, detail, next(counter))
                     await self.store.delete(relative)
             except Exception as e:  # noqa: BLE001 - one key must not stop the rest
                 logger.warning(f'{self._where()}: cannot delete "{relative}": {e}')
@@ -724,19 +803,16 @@ class ChannelUpload:
         # a failed delete is caught here, so nothing in the nursery raises and
         # the run is never cancelled by one key
         if self.concurrency == 1:
-            results = [
-                await one(number, relative)
-                for number, relative in enumerate(retire.keys, first_number)
-            ]
+            results = [await one(relative) for relative in retire.keys]
         else:
             results = {}
 
-            async def task(number, relative):
-                results[relative] = await one(number, relative)
+            async def task(relative):
+                results[relative] = await one(relative)
 
             async with trio.open_nursery() as nursery:
-                for number, relative in enumerate(retire.keys, first_number):
-                    nursery.start_soon(task, number, relative)
+                for relative in retire.keys:
+                    nursery.start_soon(task, relative)
             results = [results[relative] for relative in retire.keys]
 
         if retire.folders:

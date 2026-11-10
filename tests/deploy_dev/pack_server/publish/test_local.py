@@ -9,6 +9,7 @@ waits for the file it is about to publish rather than for the generation.
 """
 
 import hashlib
+from contextlib import asynccontextmanager
 
 import pytest
 import trio
@@ -40,6 +41,27 @@ ALL_FILES = (BARRIER_KEY, MANIFEST_KEY, FULL_PACK,
              'packrepo/aaaaaaaa/update_00000001.pack', WHEEL)
 
 
+@asynccontextmanager
+async def warming(local):
+    """
+    Read the generation beside the block, as a publication does.
+
+    The caller opens the nursery and starts the warmup of the generation in it:
+    the reads run in the order of the manifest while the block does its own
+    work.
+
+    Args:
+        local (LocalGeneration): The generation to read
+
+    Yields:
+        None: The block that runs beside the reads
+    """
+    await local.prepare()
+    async with trio.open_nursery() as nursery:
+        local.start(nursery)
+        yield
+
+
 def count_digests(monkeypatch):
     """
     Count the calls of the local digest, the one IO the generation costs.
@@ -68,7 +90,7 @@ class TestLocalGeneration:
     async def test_warmup_reads_the_whole_generation(self, workspace):
         """Every published file and the contract are readable in the block."""
         local = LocalGeneration(workspace.workspace)
-        async with local.warmup():
+        async with warming(local):
             expected = dict(workspace.files)
             expected[BARRIER_KEY] = (
                 workspace.version.encode() + bytes.fromhex(workspace.checksum))
@@ -97,47 +119,50 @@ class TestLocalGeneration:
 
         monkeypatch.setattr(local_module, 'md5_local', spy)
         local = LocalGeneration(workspace.workspace)
-        async with local.warmup():
+        async with warming(local):
             assert reads == []
             assert (await local.item(BARRIER_KEY)).relative == BARRIER_KEY
             assert (await local.item(MANIFEST_KEY)).relative == MANIFEST_KEY
 
     @pytest.mark.trio
-    async def test_a_serial_warmup_reads_in_the_order_of_the_manifest(self, workspace,
-                                                                       monkeypatch):
-        """Concurrency 1 reads one file at a time, in the order of the queue.
+    async def test_the_files_are_claimed_in_the_order_of_the_manifest(self, workspace,
+                                                                      monkeypatch):
+        """One reader takes the queue in order: the head first, then the rest.
 
-        The order is the manifest followed by the contract, and every read is
-        done before the block is entered: a serial run is a loop, not a nursery
-        handing the order to the scheduler, so a test can pin it.
+        With a single reader there is no scheduler to hand the order to, so the
+        reads follow the manifest and the contract that the manifest does not
+        list.
         """
         reads = []
-        real = local_module.md5_local
-
-        async def spy(path):
-            reads.append(PathStr.new(str(path)).name)
-            return await real(path)
-
-        monkeypatch.setattr(local_module, 'md5_local', spy)
         local = LocalGeneration(workspace.workspace, concurrency=1)
-        async with local.warmup():
-            assert reads == [
-                'full.pack',
-                'update_00000001.pack',
-                'latest.pack',
-                'msgspec-0.22.0-py3-none-any.whl',
-                'manifest.json',
-            ]
+        real = local._read
+
+        async def spy(relative):
+            reads.append(relative)
+            return await real(relative)
+
+        monkeypatch.setattr(local, '_read', spy)
+        async with warming(local):
+            for relative in ALL_FILES:
+                await local.item(relative)
+        # the reads are serial, so the block sees the queue in its order
+        assert reads == [
+            'packrepo/aaaaaaaa/full.pack',
+            'packrepo/aaaaaaaa/update_00000001.pack',
+            'packrepo/latest.pack',
+            'wheel/msgspec/0.22.0/msgspec-0.22.0-py3-none-any.whl',
+            'manifest.json',
+        ]
 
     @pytest.mark.trio
     async def test_warmup_is_idempotent(self, workspace, monkeypatch):
         """A second mirror warms the same generation up without reading again."""
         calls = count_digests(monkeypatch)
         local = LocalGeneration(workspace.workspace)
-        async with local.warmup():
+        async with warming(local):
             for relative in ALL_FILES:
                 await local.item(relative)
-        async with local.warmup():
+        async with warming(local):
             for relative in ALL_FILES:
                 await local.item(relative)
         assert len(calls) == GENERATION_FILES
@@ -152,29 +177,34 @@ class TestLocalGeneration:
         while the record it already has costs nothing.
         """
         calls = count_digests(monkeypatch)
-        local = LocalGeneration(workspace.workspace)
+        # one reader: the block fails after the head of the queue is read, so the
+        # rest of the queue is still unread when the run is cancelled
+        local = LocalGeneration(workspace.workspace, concurrency=1)
 
         class Boom(Exception):
             pass
 
         with pytest.raises(BaseException):
-            async with local.warmup():
+            async with warming(local):
                 raise Boom('the mirror refused the run')
         assert len(calls) < GENERATION_FILES
-        async with local.warmup():
+        async with warming(local):
             for relative in ALL_FILES:
                 await local.item(relative)
-        assert len(calls) == GENERATION_FILES
+        # the read that was in flight when the block failed runs again: its
+        # digest may have run, but its slot was never settled
         assert len(set(calls)) == GENERATION_FILES
+        assert len(calls) <= GENERATION_FILES + 1
 
     @pytest.mark.trio
-    async def test_an_item_waits_for_its_own_file_only(self, workspace, monkeypatch):
-        """A file that is still being read does not hold up the others.
+    async def test_a_slow_file_does_not_hold_up_the_others(self, workspace, monkeypatch):
+        """One reader per file in flight: a slow file blocks only its own slot.
 
-        The pack of the fixture is held open by the test, and the wheel is
-        awaited while it is: a generation-wide await would deadlock here.
+        The pack is held open by the test and the wheel is read by another
+        reader at the same time: awaiting the wheel does not wait for the pack,
+        which is what the concurrency of the reads buys.
         """
-        local = LocalGeneration(workspace.workspace)
+        local = LocalGeneration(workspace.workspace, concurrency=2)
         real = local_module.md5_local
         reading = trio.Event()
         release = trio.Event()
@@ -186,7 +216,7 @@ class TestLocalGeneration:
             return await real(path)
 
         monkeypatch.setattr(local_module, 'md5_local', slow)
-        async with local.warmup():
+        async with warming(local):
             await reading.wait()
             with trio.fail_after(5):
                 item = await local.item(WHEEL)
@@ -198,7 +228,7 @@ class TestLocalGeneration:
         """One file that is gone is a skip of that file, not of the generation."""
         workspace.remove(WHEEL)
         local = LocalGeneration(workspace.workspace)
-        async with local.warmup():
+        async with warming(local):
             with pytest.raises(SkipChannel) as caught:
                 await local.item(WHEEL)
             assert 'missing on the disk' in str(caught.value)
@@ -212,7 +242,7 @@ class TestLocalGeneration:
         does not is a bug of the flow: it must not be silently read here.
         """
         local = LocalGeneration(workspace.workspace)
-        async with local.warmup():
+        async with warming(local):
             with pytest.raises(KeyError):
                 await local.item('wheel/not/in/the/manifest.whl')
 
@@ -241,9 +271,36 @@ class TestLocalGeneration:
         workspace.remove('manifest.json')
         local = LocalGeneration(workspace.workspace)
         with pytest.raises(SkipChannel) as caught:
-            async with local.warmup():
+            async with warming(local):
                 pass
         assert 'not there yet' in str(caught.value)
+
+    @pytest.mark.trio
+    async def test_the_files_are_read_in_the_order_of_the_manifest(self, workspace, monkeypatch):
+        """The head of the queue is the first file handed to a reader.
+
+        trio runs the tasks a nursery starts in the reverse of the order they
+        were started: one reading task per file would read the manifest
+        backwards, and the first `item()` of the caller would wait for the whole
+        disk instead of for the first file.
+        """
+        local = LocalGeneration(workspace.workspace, concurrency=1)
+        real = local._read
+        order = []
+
+        async def spy(relative):
+            order.append(relative)
+            return await real(relative)
+
+        monkeypatch.setattr(local, '_read', spy)
+        async with warming(local):
+            for relative in list(workspace.files) + [MANIFEST_KEY]:
+                await local.item(relative)
+        # every file is read once, in the order of the queue: the published
+        # files of the manifest (sorted, the barrier among them) and then the
+        # contract, which the manifest does not list
+        expected = sorted(set(workspace.files) | {BARRIER_KEY}) + [MANIFEST_KEY]
+        assert order == expected
 
 
 class TestOncePerChannel:

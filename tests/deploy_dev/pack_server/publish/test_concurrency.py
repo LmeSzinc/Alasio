@@ -12,6 +12,7 @@ Two properties are checked here that no other test states:
   transfer of the run, which is exactly what this suite would not notice.
 """
 
+import re
 import threading
 
 import pytest
@@ -21,6 +22,7 @@ from alasio.deploy_dev.pack_server.publish.channel import STATUS_OK, ChannelUplo
 from alasio.deploy_dev.pack_server.publish.common import BARRIER_KEY, MANIFEST_KEY, MAX_CONCURRENCY
 from alasio.deploy_dev.pack_server.publish.local import LocalGeneration
 from alasio.ext.path import PathStr
+from alasio.logger import logger
 from alasio.testing.filesystem import fs  # noqa: F401
 from tests.deploy_dev.pack_server.publish.conftest import (
     CHANNEL, REMOTE_PREFIX, age_objects, fill, make_remote, make_store
@@ -114,10 +116,10 @@ class TestUploadConcurrency:
         store = make_store(remote, CHANNEL, credentials_env)
         try:
             assert ChannelUpload(
-                LocalGeneration(workspace.workspace), store, concurrency=64
+                LocalGeneration(workspace.workspace, MAX_CONCURRENCY), store, concurrency=64
             ).concurrency == MAX_CONCURRENCY
             assert ChannelUpload(
-                LocalGeneration(workspace.workspace), store, concurrency=0
+                LocalGeneration(workspace.workspace, MAX_CONCURRENCY), store, concurrency=0
             ).concurrency == 1
         finally:
             await store.aclose()
@@ -135,7 +137,7 @@ class TestUploadConcurrency:
         """
         remote = make_remote()
         store = make_store(remote, CHANNEL, credentials_env)
-        local = LocalGeneration(workspace.workspace, MAX_CONCURRENCY)
+        local = LocalGeneration(workspace.workspace)
         upload = ChannelUpload(local, store, remote_name='cos-main')
         listing_started = trio.Event()
         read_started = trio.Event()
@@ -168,6 +170,30 @@ class TestUploadConcurrency:
 
 class TestRetireConcurrency:
     """The keys of a retired generation are deleted a few at a time."""
+
+    @pytest.mark.trio
+    async def test_the_report_of_a_concurrent_run_is_in_order(self, workspace, credentials_env):
+        """The entries of the report are claimed when the line is written.
+
+        A number fixed by the queue of the run would print out of order: the
+        tasks of a concurrent run are scheduled by trio, so with every slot
+        already warmed up the lines come out in the reverse of the manifest and
+        the report stops reading as a progress bar.
+        """
+        store = make_store(make_remote(), CHANNEL, credentials_env)
+        upload = ChannelUpload(
+            LocalGeneration(workspace.workspace, MAX_CONCURRENCY), store,
+            remote_name='cos-main', concurrency=MAX_CONCURRENCY)
+        try:
+            with logger.mock_capture_writer() as capture:
+                result = await upload.run()
+        finally:
+            await store.aclose()
+        assert result.status == STATUS_OK
+        entries = [int(m.group(1)) for m in re.finditer(
+            r'(?:SAME|PUT) (\d+)/', capture.concat())]
+        assert entries == list(range(1, len(entries) + 1))
+        assert len(entries) == result.uploaded + result.skipped
 
     @pytest.mark.trio
     async def test_deletes_run_in_parallel_up_to_the_cap(self, workspace, credentials_env):
@@ -242,9 +268,10 @@ class TestLocalIo:
         local = LocalGeneration(workspace.workspace)
         # the record is read before the spy: the test is about the files of the
         # generation, not about the two files that name it
-        await local.record
+        await local.prepare()
         monkeypatch.setattr(builtins, 'open', spy)
-        async with local.warmup():
+        async with trio.open_nursery() as nursery:
+            local.start(nursery)
             for relative in ALL_FILES:
                 await local.item(relative)
 

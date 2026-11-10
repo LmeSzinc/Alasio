@@ -218,7 +218,7 @@ class TestResolve:
         upload = make_upload(workspace, store)
         self.listing(monkeypatch, store, {relative: info(data)})
         try:
-            state = await upload._resolve(item(relative, data), 1)
+            state = await upload._resolve(item(relative, data))
         finally:
             await store.aclose()
         assert (state.source, state.md5) == (SOURCE_LIST, hashlib.md5(data).hexdigest())
@@ -237,7 +237,7 @@ class TestResolve:
         upload = make_upload(workspace, store)
         self.listing(monkeypatch, store, {})
         try:
-            state = await upload._resolve(item('wheel/a.whl', data), 1)
+            state = await upload._resolve(item('wheel/a.whl', data))
         finally:
             await store.aclose()
         assert (state.source, state.info, state.md5) == (SOURCE_ABSENT, None, '')
@@ -255,7 +255,7 @@ class TestResolve:
         self.listing(monkeypatch, store, {
             relative: ObjectInfo(size=1, etag='opaque', last_modified=0.0)})
         try:
-            state = await upload._resolve(item(relative, data), 1)
+            state = await upload._resolve(item(relative, data))
         finally:
             await store.aclose()
         assert (state.source, state.md5) == (SOURCE_LIST, '')
@@ -275,7 +275,7 @@ class TestResolve:
             relative: ObjectInfo(size=len(data), etag='opaque', last_modified=0.0)})
         before = len(credentials_env.requests)
         try:
-            state = await upload._resolve(item(relative, data), 1)
+            state = await upload._resolve(item(relative, data))
         finally:
             await store.aclose()
         assert (state.source, state.md5) == (SOURCE_HEAD, hashlib.md5(data).hexdigest())
@@ -292,7 +292,7 @@ class TestResolve:
         self.listing(monkeypatch, store, {
             relative: ObjectInfo(size=len(data), etag='opaque', last_modified=0.0)})
         try:
-            state = await upload._resolve(item(relative, data), 1)
+            state = await upload._resolve(item(relative, data))
         finally:
             await store.aclose()
         assert state.source == SOURCE_ABSENT
@@ -312,7 +312,7 @@ class TestResolve:
             relative: ObjectInfo(size=len(data), etag='opaque', last_modified=0.0)})
         try:
             with pytest.raises(IncompleteStore) as caught:
-                await upload._resolve(item(relative, data), 1)
+                await upload._resolve(item(relative, data))
         finally:
             await inner.aclose()
         assert relative in str(caught.value)

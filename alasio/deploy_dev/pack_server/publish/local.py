@@ -12,11 +12,12 @@ otherwise re-read 4.5 GB from the disk for the third mirror.
 
 Reading is split from deciding, because the two have very different latencies:
 the disk reads a hundred files while the mirror answers its first request, and
-the uploader should not wait for either. Entering `warmup()` reads the two files
-of the record and starts one task per content file; `item()` waits for the file
-it is about to publish, and only for that one. An `UploadItem` is therefore
-never read twice, and a mirror is never held back by a file it does not need
-yet.
+the uploader should not wait for either. `prepare()` creates one slot per file
+of the generation, `warmup()` reads them in the order of the manifest beside the
+caller (the caller starts it in a nursery of its own), and `item()` waits for
+the file it is about to publish and only for that one. An `UploadItem` is
+therefore never read twice, and a mirror waits for the file it needs, not for
+the generation.
 
 There is exactly one reader per file. `warmup()` starts it; `item()` never does
 IO of its own. A read that is cancelled with the run that queued it leaves its
@@ -24,7 +25,7 @@ slot unread, so the next `warmup()` of the same generation queues it again
 instead of handing a caller a file that was never read.
 """
 
-from contextlib import asynccontextmanager
+from collections import deque
 
 import msgspec
 import trio
@@ -63,9 +64,9 @@ class _Slot:
     """
     One file of the generation, read once.
 
-    A slot is created by `warmup()`, once per key of its queue, and that is the
-    only place a key is added: a caller that asks for a key the warmup did not
-    queue gets a KeyError, because both lists come from the manifest.
+    A slot is created by `prepare()`, once per key of its queue, and that is the
+    only place a key is added: a caller that asks for a key the queue did not
+    create gets a KeyError, because both lists come from the manifest.
 
     There are two states, and one field tells them apart: a settled slot holds
     an item or an error, an unread one holds neither. A slot of a run whose
@@ -98,7 +99,9 @@ class LocalGeneration:
     keeps the two apart (see lock.py).
 
     Usage:
-        async with local.warmup():
+        local.prepare(await local.record)
+        async with trio.open_nursery() as nursery:
+            local.start(nursery)
             item = await local.item('packrepo/latest.pack')
 
     Attributes:
@@ -114,9 +117,10 @@ class LocalGeneration:
         """
         self.workspace = PathStr.new(workspace)
         self.concurrency = max(1, min(int(concurrency), MAX_CONCURRENCY))
-        # the width of the read queue, held by the readers and by nobody else
-        self._limit = trio.Semaphore(self.concurrency)
         self._slots = {}
+        # the files the running warmup has to read, in queue order, see
+        # prepare() and warmup()
+        self._pending = deque()
 
     @cached_property_async_trio_lock
     async def record(self):
@@ -182,56 +186,72 @@ class LocalGeneration:
                 raise SkipChannel(f'{MANIFEST_FILE} lists an unusable path: {e}') from None
         return manifest
 
-    @asynccontextmanager
-    async def warmup(self):
+    async def prepare(self):
         """
-        Hold the generation open while the caller publishes it.
+        Validate the record, then create one slot per file of the generation.
 
-        Entering the block validates the record of the generation: the two files
-        that name it are read and checked, so a workspace that is broken is
-        refused before the caller sends its first request. Nothing else is
-        awaited: the block is entered while the disk has read only those two
-        small files.
+        The slots exist before `warmup()` runs, so a caller may ask `item()` for
+        a file the warmup has not reached yet: it waits for that file instead of
+        failing on a key the queue has not created.
 
-        The content files are then read in tasks of a nursery of this call,
-        including the barrier and the contract, which the uploader publishes
-        last but reads like any other file: nothing in this class treats them
-        specially, and the queue is the manifest itself. The reads run while the
-        caller sends its first requests; a failure in the block cancels the ones
-        that have not finished, so a run that will not publish does not read the
-        rest of the disk, while a clean exit waits for them.
+        A file that is already read is skipped, which is what makes the second
+        mirror of a channel read nothing; a file whose read was cancelled has
+        neither an item nor an error and is queued again. The state of the disk
+        outlives the mirror that happened to fail.
 
-        With a concurrency of 1 the reads are a loop instead of tasks of a
-        nursery: one file at a time, in the order of the queue, all of them
-        before the block is entered. The caller that asks for one at a time
-        gets a run whose requests and reads have one order, which is what a
-        test pins.
-
-        A read that was cancelled with an earlier mirror left its slot unread
-        and is queued again here, while a file that is already read is skipped:
-        the state of the disk outlives the mirror that happened to fail.
-
-        Yields:
-            None: The block in which `item()` may be awaited
-
-        Raises:
-            SkipChannel: If the record of the generation is not usable
+        The record is read first: a workspace whose two records do not name
+        one generation is refused before a single file of it is read.
         """
         manifest = await self.record
-        # the keys of the queue are exactly the keys a caller may ask for: the
-        # published files, and the contract the manifest does not list
-        order = list(manifest.files) + [MANIFEST_KEY]
-        if self.concurrency == 1:
-            # a serial read is a loop, a nursery would only hand the order to
-            # the scheduler
-            for relative, slot in self._queue(order):
-                await self._fill(relative, slot)
-            yield
-            return
-        async with trio.open_nursery() as nursery:
-            for relative, slot in self._queue(order):
-                nursery.start_soon(self._fill, relative, slot)
-            yield
+        self._pending = deque(self._queue(list(manifest.files) + [MANIFEST_KEY]))
+
+    def start(self, nursery):
+        """
+        Start the reads of the prepared generation in this nursery.
+
+        One `warmup()` task per reader: each pulls the queue on its own, so the
+        head of the queue is the first file read and several files are read at
+        once. The nursery belongs to the caller, which keeps its own work in
+        the same block: the reads of the disk overlap the first requests of the
+        run, and a failure of the block cancels the reads that have not
+        finished.
+
+        Args:
+            nursery (trio.Nursery): The nursery of the calling block
+        """
+        for _ in range(min(self.concurrency, len(self._pending))):
+            nursery.start_soon(self.warmup)
+
+    async def warmup(self):
+        """
+        Read the files of the generation, claiming them in queue order.
+
+        One task of this method is one reader: it takes the next file of the
+        queue, reads it, and takes the next one until the queue is empty. The
+        claim is one synchronous popleft(), so two readers never take the same
+        file, and the file at the head of the queue is always the first one
+        taken.
+
+        The order matters because the slots exist from prepare(): the first
+        `item()` of the run waits for the head of the queue, not for the whole
+        disk, and the reads its caller needs first are the ones that start
+        first.
+
+        A queue position is not a file number: the tasks of a nursery are
+        scheduled by trio, so which reader takes which file is the scheduler's
+        business. What is fixed is the order the files are handed out in.
+        """
+        while self._pending:
+            relative, slot = self._pending.popleft()
+            # the failure is stored on the slot instead of raised: a missing
+            # file is the concern of the mirror that publishes it, and the
+            # other files of the generation are still readable
+            try:
+                slot.item = await self._read(relative)
+            except SkipChannel as e:
+                slot.error = e
+            finally:
+                slot.done.set()
 
     def _queue(self, order):
         """
@@ -243,7 +263,7 @@ class LocalGeneration:
         makes the second mirror of a channel read nothing; a key whose read was
         cancelled has neither an item nor an error, and is queued again.
 
-        The caller runs the warmup blocks of one generation one after another
+        The caller runs the reads of one generation one after another
         (the mirrors of a channel are published in turn), so nothing has to
         guard against two readers of the same key.
 
@@ -292,26 +312,6 @@ class LocalGeneration:
             raise PublishError(
                 f'"{relative}" was not read: the attempt was cancelled')
         return slot.item
-
-    async def _fill(self, relative, slot):
-        """
-        Read one file and settle its slot, a few readers at a time.
-
-        The failure is stored on the slot instead of raised: a missing file is
-        the concern of the mirror that publishes it, and the other files of the
-        generation are still readable.
-
-        Args:
-            relative (str): '/'-separated key relative to the workspace
-            slot (_Slot): The slot of that key, queued by warmup()
-        """
-        try:
-            async with self._limit:
-                slot.item = await self._read(relative)
-        except SkipChannel as e:
-            slot.error = e
-        finally:
-            slot.done.set()
 
     async def _read(self, relative):
         """
