@@ -2,7 +2,7 @@
 From a configured remote to the ObjectStore of one workspace.
 
 A store is bound to one workspace: every key it takes and returns is relative to
-it, so the uploader and the cleaner never build a physical path and a wrong
+it, so the publication never builds a physical path and a wrong
 slash cannot move a file into the workspace next to it (see store.cos.CosStore).
 
 The dispatch is `DRIVERS[type(remote)]`: msgspec already picked the variant from

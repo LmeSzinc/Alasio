@@ -1,9 +1,10 @@
 """
-The values the uploader and the cleaner share: the errors, the keys of the
+The values the uploader uses across its modules: the errors, the keys of the
 record, and the per-path headers a mirror serves.
 
-Nothing here knows about a host: the module is imported by both flows and by the
-stores' users, and it depends on the standard library alone.
+Nothing here knows about a host: the module is imported by the uploader and by
+the stores' users, and it depends on the layout of a workspace and the standard
+library, not on a protocol.
 """
 
 import re

@@ -18,7 +18,7 @@ from alasio.deploy_dev.pack_server.publish.env import env_value
 from alasio.ext.path import PathStr
 from alasio.testing.filesystem import fs  # noqa: F401
 from tests.deploy_dev.pack_server.publish.conftest import (
-    BUCKET, CHANNEL, CONFIG_FILE, ENV_PREFIX, REMOTE, REMOTE_PREFIX, make_model, make_remote, write_config
+    BUCKET, CHANNEL, CONFIG_FILE, ENV_PREFIX, REGION, REMOTE, REMOTE_PREFIX, make_model, make_remote, write_config
 )
 
 pytestmark = [
@@ -69,6 +69,26 @@ class TestPublishModel:
         assert remote.GraceSeconds == 3600
         assert remote.TimeoutSeconds == 120
         assert remote.EnvPrefix == ENV_PREFIX
+
+    def test_the_default_prefix_is_pack(self):
+        """A remote of the model that names no prefix publishes under pack/.
+
+        The generator writes its workspaces under ``{run}/pack``, so the mirror
+        that keeps the same layout can be served as it is, by the server of the
+        run directory, and a client that knows one path knows the other.
+        """
+        assert CosRemote(Bucket=BUCKET, Region=REGION).Prefix == 'pack'
+
+    def test_a_config_without_a_prefix_reads_the_default(self, fs, run_dir):
+        """A file that does not name Prefix gets pack/, not the bucket root.
+
+        The default of the field is what an existing config without the key
+        reads, so the mirror of every config written before the field existed
+        stays where a client already looks for it.
+        """
+        write_text(run_dir, REPO_TEXT)
+        config = PackRepoConfig(CONFIG_FILE)
+        assert config.data.Publish[REMOTE].Prefix == 'pack'
 
     def test_the_driver_key_picks_the_variant(self):
         """The tagged union reads the Driver key, the same shape the file uses."""
@@ -315,6 +335,16 @@ class TestCreateStore:
             make_remote(Prefix='/pack/', Endpoint='http://fake-cos.local:9000'),
             CHANNEL)
         assert store.prefix.rstrip('/') == f'{REMOTE_PREFIX}/{CHANNEL}'
+
+    def test_an_empty_prefix_publishes_at_the_bucket_root(self):
+        """Prefix '' keeps the workspace as the first segment of the key.
+
+        The empty string is the way to opt out of the default pack/: the
+        object keys become ``{workspace}/{relative path}`` and the listing of
+        the workspace does not include the objects of a sibling one.
+        """
+        store = create_store(REMOTE, make_remote(Prefix=''), CHANNEL)
+        assert store.prefix == f'{CHANNEL}/'
 
     def test_a_missing_credential_is_refused_by_the_same_call(self, monkeypatch):
         """The store is built and its credentials read in one call, so a missing

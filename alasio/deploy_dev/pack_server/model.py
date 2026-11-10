@@ -166,12 +166,13 @@ class CosRemote(RemoteBase, tag='cos', tag_field='Driver'):
     ]})] = ""
     Endpoint: Annotated[str, Meta(extra={"help": [
         "Custom origin endpoint, '' for https://{Bucket}.cos.{Region}.myqcloud.com",
-        "A host only, never a CDN domain: the cleaner must read the origin",
+        "A host only, never a CDN domain: the publication lists and writes the origin",
     ]})] = ""
     Prefix: Annotated[str, Meta(extra={"help": [
-        "Key prefix inside the bucket, '' for no prefix",
+        "Key prefix inside the bucket, 'pack' by default",
         "The object key is {Prefix}/{workspace}/{relative path}",
-    ]})] = ""
+        "'' publishes at the root of the bucket: {workspace}/{relative path}",
+    ]})] = "pack"
 
 
 class WebDavRemote(RemoteBase, tag='webdav', tag_field='Driver'):
@@ -185,7 +186,7 @@ class WebDavRemote(RemoteBase, tag='webdav', tag_field='Driver'):
     BaseUrl: Annotated[str, Meta(extra={"help": [
         "URL of the collection that holds the workspaces, no trailing slash",
         "The object URL is {BaseUrl}/{workspace}/{relative path}",
-        "The origin, never a CDN domain: the cleaner must read the origin",
+        "The origin, never a CDN domain: the publication lists and writes the origin",
         "Example: 'https://nas.example:5006/dav/pack'",
     ]})] = ""
     VerifyTls: Annotated[bool, Meta(extra={"help": [

@@ -1168,3 +1168,55 @@ class TestRun:
         with pytest.raises(ConfigError, match='GraceSeconds'):
             await UploadRun(config, client=credentials_env.client()).run()
         assert keys_of(credentials_env) == []
+
+
+class TestRemotePrefix:
+    """Where a workspace lands in the bucket.
+
+    The uploader never builds a physical path: it names the files of the
+    workspace, and the store joins its prefix to them (see _object_key). The
+    prefix is built once, from the Prefix of the remote and the workspace name,
+    which is why a change of the default does not touch the flow and why these
+    tests check the keys the service actually holds instead of the store field.
+    """
+
+    @pytest.mark.trio
+    async def test_the_prefix_keeps_the_layout_of_the_run_directory(
+            self, workspace, credentials_env):
+        """Under pack/, a key of the mirror is the path the local server serves.
+
+        The run directory serves {run}/pack as /pack, so a bucket that mirrors
+        the layout lets the same path name the file on both sides.
+        """
+        store = make_store(make_remote(Prefix='pack'), CHANNEL, credentials_env)
+        try:
+            result = await make_upload(workspace, store).run()
+        finally:
+            await store.aclose()
+        assert result.status == STATUS_OK
+        assert keys_of(credentials_env) == [
+            f'pack/{CHANNEL}/{MANIFEST_KEY}',
+            f'pack/{CHANNEL}/packrepo/aaaaaaaa/full.pack',
+            f'pack/{CHANNEL}/packrepo/aaaaaaaa/update_00000001.pack',
+            f'pack/{CHANNEL}/{BARRIER_KEY}',
+            f'pack/{CHANNEL}/wheel/msgspec/0.22.0/msgspec-0.22.0-py3-none-any.whl',
+        ]
+
+    @pytest.mark.trio
+    async def test_an_empty_prefix_puts_the_workspace_at_the_root(
+            self, workspace, credentials_env):
+        """An empty Prefix makes the workspace the first segment of the key."""
+        store = make_store(make_remote(Prefix=''), CHANNEL, credentials_env)
+        try:
+            result = await make_upload(workspace, store).run()
+        finally:
+            await store.aclose()
+        assert result.status == STATUS_OK
+        assert keys_of(credentials_env) == [
+            f'{CHANNEL}/{MANIFEST_KEY}',
+            f'{CHANNEL}/packrepo/aaaaaaaa/full.pack',
+            f'{CHANNEL}/packrepo/aaaaaaaa/update_00000001.pack',
+            f'{CHANNEL}/{BARRIER_KEY}',
+            f'{CHANNEL}/wheel/msgspec/0.22.0/msgspec-0.22.0-py3-none-any.whl',
+        ]
+        assert not [key for key in credentials_env.objects if key.startswith('pack/')]
