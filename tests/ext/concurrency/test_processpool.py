@@ -1,5 +1,6 @@
 import multiprocessing
 import os
+import sys
 import threading
 import time
 
@@ -43,6 +44,20 @@ def worker_system_exit():
     sys.exit(1)
 
 
+# Read by worker_inherited_value inside the worker. A fork based start method
+# copies the memory of the parent, so the child would see the value a test
+# assigned here; a spawn based one re-imports this module and sees the default.
+INHERITED_VALUE = 'default'
+
+
+def worker_inherited_value():
+    return INHERITED_VALUE
+
+
+def worker_start_method():
+    return multiprocessing.get_start_method()
+
+
 # ===========================
 # Tests
 # ===========================
@@ -52,6 +67,33 @@ def test_submit_and_get():
         job = pool.submit(1, 2)
         assert job.get() == 3
         assert job._status == 'FINISHED'
+
+
+def test_workers_are_spawned():
+    """A worker reports spawn as its own start method.
+
+    The pool starts a listener thread per worker, so from the second worker on
+    a fork would fork a process that already has threads: the child inherits
+    locks owned by threads it does not have and can never release them.
+    """
+    with ProcessPool(worker_start_method, max_workers=1) as pool:
+        assert pool.submit().get() == 'spawn'
+
+
+def test_workers_do_not_inherit_parent_memory():
+    """A value assigned in the parent after import is not visible in a worker.
+
+    fork copies the memory of the parent, spawn re-imports the module, so this
+    is the observable difference between the two start methods.
+    """
+    this_module = sys.modules[__name__]
+    original = this_module.INHERITED_VALUE
+    this_module.INHERITED_VALUE = 'parent'
+    try:
+        with ProcessPool(worker_inherited_value, max_workers=1) as pool:
+            assert pool.submit().get() == 'default'
+    finally:
+        this_module.INHERITED_VALUE = original
 
 
 def test_concurrency():

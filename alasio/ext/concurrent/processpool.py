@@ -224,13 +224,22 @@ class ProcessPool:
 
     def _spawn_worker(self) -> Worker:
         """创建一个新的 Worker 进程和对应的监听线程"""
-        parent_conn, child_conn = multiprocessing.Pipe()
+        # Workers are always started with spawn, on every platform. The pool
+        # keeps a listener thread per worker, so a fork based start method
+        # would fork a multi-threaded process: the child inherits locks held by
+        # threads it does not have and can never release them (Python 3.12
+        # deprecates exactly this). spawn also keeps the pool's behaviour the
+        # same on Linux, whose default start method moved from fork to
+        # forkserver in Python 3.14. The context is built here, not at import
+        # time, so importing this module does not configure multiprocessing.
+        ctx = multiprocessing.get_context('spawn')
+        parent_conn, child_conn = ctx.Pipe()
 
         with self._lock:
             self._worker_count += 1
             name = f'ProcessPool-{self.worker_func.__name__}-worker{self._worker_count}'
 
-        p = multiprocessing.Process(
+        p = ctx.Process(
             target=worker_loop,
             args=(child_conn, self.worker_func),
             name=name,
