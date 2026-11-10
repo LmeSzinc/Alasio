@@ -1,11 +1,16 @@
 """
 Standalone helper that replaces app.asar and relaunches electron.
 
-The module is a single file on purpose: the backend spawns it as
-``python <path>/updater.py`` (see the app.asar relaunch design), so it must
-not rely on package ``__init__`` side effects and must not import anything
-outside the standard library. The import allowlist is enforced by
-``tests/deploy/updater/test_start_time.py``.
+The file is a single script on purpose: the backend starts it as
+``python <ALASIO_ROOT>/deploy/updater.py``, by path and never through ``-m``,
+so the ``alasio`` package never enters the import chain and the standard
+library only rule is enforced by the interpreter instead of by agreement.
+Nothing in this module may read the environment at import time: the backend
+imports it too (for ``start_time``), and the two processes do not share one.
+
+``ElectronUpdater`` is the whole relaunch: it reads its input in the
+constructor, and every step of the flow (wait, replace, relaunch) is a method
+of it, so the state a step works on is the object it is called on.
 
 The process identity helpers are a stdlib translation of psutil 7.2.2:
 
@@ -24,45 +29,92 @@ value. Identity is the ``(pid, marker)`` pair, the pids always differ.
 """
 import ctypes
 import errno
+import hashlib
+import json
+import os
 import socket
+import subprocess
 import sys
+import time
 
-# The probe has to answer "can the backend bind this port again", which is
-# also the question the updater asks before it relaunches electron.
+# Exit codes, see the design document of the app.asar relaunch
+EXIT_OK = 0
+EXIT_ERROR = 1
+EXIT_PREFLIGHT = 2
+EXIT_TIMEOUT = 3
+EXIT_REPLACE = 4
+EXIT_RELAUNCH = 5
+EXIT_NO_GO = 6
+
+# States of one waited target
+GONE = 'GONE'
+ALIVE = 'ALIVE'
+REUSED = 'REUSED'
+UNKNOWN = 'UNKNOWN'
+
+# The three roles of ALASIO_RELAUNCH_TARGETS, all of them are required
+TARGET_NAMES = ('backend', 'supervisor', 'electron')
+
+# Interval and budget of the wait, and of the poll that decides whether the new
+# process started: the window is long enough for a crash on startup to show,
+# short enough that a swallowed instance is noticed at once
+POLL_INTERVAL = 0.1
+START_INTERVAL = 0.5
+START_WINDOW = 10.0
+LOG_MAX_SIZE = 1 << 20
+CHUNK_SIZE = 1 << 20
+
+# The TCP socket type of the port probe
 _TCP = (socket.AF_INET, socket.SOCK_STREAM)
 
 
-def _parse_starttime(data):
-    """
-    Extract the starttime field of a /proc/<pid>/stat content.
+class PreflightError(Exception):
+    """The input of the updater is missing or malformed, nothing was touched."""
 
-    Translated from ``psutil._pslinux.Process._parse_stat_file()``: the
-    process name sits between parentheses and may itself contain spaces and
-    parentheses, so fields are counted from the last ')'. "man proc" numbers
-    starttime as field 22, which is index 19 after dropping pid, comm and
-    state.
 
-    Defined on every platform so the parser can be exercised by the whole CI
-    matrix, it is only reachable from ``start_time()`` on Linux.
+class Target:
+    """One process the updater waits for."""
 
-    Args:
-        data (bytes): Raw content of /proc/<pid>/stat
+    __slots__ = ('name', 'pid', 'start')
 
-    Returns:
-        int: Start time in clock ticks since boot
+    def __init__(self, name, pid, start=None):
+        """
+        Args:
+            name (str): Role of the process, one of TARGET_NAMES
+            pid (int): Pid recorded at spawn time
+            start (int): Start marker read at spawn time, None when it could
+                not be read and only the existence of the pid can be asked
+                about. Defaults to None.
+        """
+        self.name = name
+        self.pid = pid
+        self.start = start
 
-    Raises:
-        OSError: The content is truncated or malformed, the value is unknown
-            and the caller must not treat it as "gone"
-    """
-    rparen = data.rfind(b')')
-    if rparen < 0:
-        raise OSError(errno.EINVAL, 'malformed /proc/<pid>/stat', None)
-    fields = data[rparen + 2:].split()
-    try:
-        return int(fields[19])
-    except (IndexError, ValueError):
-        raise OSError(errno.EINVAL, 'truncated /proc/<pid>/stat', None) from None
+    def __repr__(self):
+        return f'<Target {self.name} {self.pid} {self.start}>'
+
+    def probe(self):
+        """
+        Classify the process against the marker recorded at spawn time.
+
+        The caller treats GONE and REUSED as "this process is done" and keeps
+        waiting on ALIVE and UNKNOWN, so an unreadable process never makes the
+        updater act early.
+
+        Returns:
+            str: GONE, ALIVE, REUSED or UNKNOWN
+        """
+        try:
+            current = start_time(self.pid)
+        except ProcessLookupError:
+            return GONE
+        except (PermissionError, OSError, NotImplementedError, ValueError):
+            # permission denied, an unreadable procfs entry, an unsupported
+            # platform: the value is unknown, which is not a reason to act
+            return UNKNOWN
+        if self.start is None:
+            return ALIVE
+        return ALIVE if current == self.start else REUSED
 
 
 def port_available(host, port):
@@ -76,6 +128,10 @@ def port_available(host, port):
       second socket steal a bound port and the probe would always succeed.
     - POSIX: ``SO_REUSEADDR``, which ignores TIME_WAIT leftovers but still
       refuses a second listener on the same address.
+
+    The updater does not use it: a free port does not prove electron is gone,
+    and the start markers already answer that question. It is kept for the
+    diagnostics of a chain that does not come down.
 
     Args:
         host (str): Address to bind, '' for every interface
@@ -99,6 +155,40 @@ def port_available(host, port):
     finally:
         sock.close()
     return True
+
+
+def _parse_stat(data):
+    """
+    Read the state and the starttime of a /proc/<pid>/stat content.
+
+    Translated from ``psutil._pslinux.Process._parse_stat_file()``: the
+    process name sits between parentheses and may itself contain spaces and
+    parentheses, so fields are counted from the last ')'. "man proc" numbers
+    starttime as field 22, which is index 19 after dropping pid, comm and
+    state.
+
+    Defined on every platform so the parser can be exercised by the whole CI
+    matrix, it is only reachable from ``start_time()`` on Linux.
+
+    Args:
+        data (bytes): Raw content of /proc/<pid>/stat
+
+    Returns:
+        "tuple[bytes, int]": Process state letter and start time in clock
+            ticks since boot
+
+    Raises:
+        OSError: The content is truncated or malformed, the value is unknown
+            and the caller must not treat it as "gone"
+    """
+    rparen = data.rfind(b')')
+    if rparen < 0:
+        raise OSError(errno.EINVAL, 'malformed /proc/<pid>/stat', None)
+    fields = data[rparen + 2:].split()
+    try:
+        return fields[0], int(fields[19])
+    except (IndexError, ValueError):
+        raise OSError(errno.EINVAL, 'truncated /proc/<pid>/stat', None) from None
 
 
 if sys.platform == 'win32':
@@ -211,19 +301,25 @@ elif sys.platform.startswith('linux'):
             int: Start time in clock ticks since boot
 
         Raises:
-            ProcessLookupError: No such process
+            ProcessLookupError: No such process, or a zombie (the process is
+                gone and every resource it held is released)
             PermissionError: The process exists but cannot be queried
             OSError: procfs returned unexpected content
         """
         try:
-            with open('/proc/%s/stat' % pid, 'rb') as f:
+            with open(f'/proc/{pid}/stat', 'rb') as f:
                 data = f.read()
         except FileNotFoundError:
             raise ProcessLookupError(errno.ENOENT, 'no such process', pid) from None
         except NotADirectoryError:
             # /proc itself is missing (non standard kernel build)
             raise OSError(errno.ENOSYS, 'procfs is not mounted', pid) from None
-        return _parse_starttime(data)
+        state, marker = _parse_stat(data)
+        if state == b'Z':
+            # a zombie has exited and holds nothing, which is what the caller
+            # asks about; psutil calls it running, that difference is intended
+            raise ProcessLookupError(errno.ESRCH, 'process is a zombie', pid)
+        return marker
 
 
 elif sys.platform == 'darwin':
@@ -260,6 +356,10 @@ elif sys.platform == 'darwin':
         ``struct kinfo_proc`` and ``kp_proc.p_starttime`` is read from it.
         ``struct extern_proc`` starts with a union whose other member is a
         pair of pointers, so the timeval is the first 16 bytes of the struct.
+
+        A zombie is not detected here (it would need the state field of the
+        same struct); the macOS shell target is unsupported anyway, so the
+        value is only used by the tests and by the diagnostics.
 
         Args:
             pid (int): Target pid
@@ -301,4 +401,619 @@ else:
         Raises:
             NotImplementedError: Always, the platform is not supported
         """
-        raise NotImplementedError('platform %s is not supported' % sys.platform)
+        raise NotImplementedError(f'platform {sys.platform} is not supported')
+
+
+class Log:
+    """Append only log file, silent when no path is configured."""
+
+    __slots__ = ('path', 'file')
+
+    def __init__(self, path=''):
+        """
+        Args:
+            path (str): Log file, '' to write nothing. Defaults to ''.
+        """
+        self.path = path
+        self.file = None
+
+    def open(self):
+        """Open the log file, rotating a file that reached the size limit."""
+        if not self.path:
+            return
+        try:
+            if os.path.getsize(self.path) >= LOG_MAX_SIZE:
+                os.replace(self.path, self.path + '.1')
+        except OSError:
+            # missing file, no permission to rotate: append anyway
+            pass
+        try:
+            self.file = open(self.path, 'a', encoding='utf-8')
+        except OSError:
+            self.file = None
+
+    def info(self, message):
+        """
+        Append one line, stamped and flushed.
+
+        Args:
+            message (str): Text to write, must not contain a credential
+        """
+        if self.file is None:
+            return
+        try:
+            self.file.write(f'{time.strftime("%Y-%m-%d %H:%M:%S")} {message}\n')
+            self.file.flush()
+        except OSError:
+            self.file = None
+
+    def close(self):
+        """Close the file, ignoring every error."""
+        if self.file is not None:
+            try:
+                self.file.close()
+            except OSError:
+                pass
+            self.file = None
+
+
+class ElectronUpdater:
+    """The app.asar relaunch: read the input, wait, install, start again.
+
+    The variables of the environment are the whole input of the process: the
+    command line is empty, so there is no second source to disagree with.
+    Nothing is read at import time, because the backend imports this module
+    for ``start_time`` too.
+
+    Usage::
+
+        sys.exit(ElectronUpdater.main())
+    """
+
+    __slots__ = (
+        'dst', 'src', 'temp', 'exe', 'cwd', 'argv', 'targets', 'sha256', 'resume_file',
+        'token', 'timeout', 'log_path', 'env', 'log',
+    )
+
+    def __init__(self, environ=None):
+        """
+        Args:
+            environ (Mapping[str, str]): Environment to read, os.environ when
+                omitted. Defaults to None.
+
+        Raises:
+            PreflightError: A variable is missing or malformed
+        """
+        environ = os.environ if environ is None else environ
+        self.dst = self._as_path(environ.get('ALASIO_APP_ASAR', ''), 'ALASIO_APP_ASAR')
+        if os.path.basename(self.dst) != 'app.asar':
+            raise PreflightError(f'ALASIO_APP_ASAR must point at app.asar: {self.dst!r}')
+        # the staged archive lives next to the installed one, so os.replace
+        # stays on the same volume
+        self.src = os.path.join(os.path.dirname(self.dst), 'new-app.asar')
+        # where the staged archive is copied to, next to the target so that
+        # os.replace stays atomic; the pid keeps two updaters apart
+        self.temp = f'{self.dst}.tmp-{os.getpid()}'
+        self.exe = self._as_path(environ.get('ALASIO_APP_EXE', ''), 'ALASIO_APP_EXE')
+        self.cwd = environ.get('ALASIO_APP_CWD', '')
+        if not self.cwd:
+            raise PreflightError('ALASIO_APP_CWD is not set')
+        self.argv = self._read_argv(environ.get('ALASIO_APP_ARGV', ''))
+        targets_text = environ.get('ALASIO_RELAUNCH_TARGETS', '')
+        if not targets_text:
+            raise PreflightError('ALASIO_RELAUNCH_TARGETS is not set')
+        self.targets = self.parse_targets(targets_text)
+        self.sha256 = self._read_digest(environ.get('ALASIO_RELAUNCH_SHA256', ''))
+        self.resume_file = self._as_path(environ.get('ALASIO_RESUME_FILE', ''), 'ALASIO_RESUME_FILE')
+        self.token = environ.get('ALASIO_RESUME_TOKEN', '')
+        if not self.token:
+            # without it the new chain starts but never resumes anything: the
+            # failure would only show up minutes later as "the tasks stopped"
+            raise PreflightError('ALASIO_RESUME_TOKEN is not set')
+        self.timeout = self._read_timeout(environ.get('ALASIO_RELAUNCH_TIMEOUT', ''))
+        self.log_path = environ.get('ALASIO_RELAUNCH_LOG', '')
+        # The environment of the new chain is inherited, minus every key that
+        # describes the old one. It is a subtraction, not a whitelist: this
+        # environment came from electron itself (updater is spawned by the
+        # backend, which came from the supervisor, which came from electron),
+        # so passing it back cannot disclose anything the application did not
+        # already have, while a whitelist would have to name every variable
+        # electron needs per platform (SYSTEMROOT / APPDATA on Windows, DISPLAY
+        # / DBUS_SESSION_BUS_ADDRESS on Linux, TMPDIR on macOS) and would break
+        # silently when one of them is missing.
+        #
+        # Dropped:
+        # - ALASIO_RELAUNCH_* / ALASIO_RESUME_FILE: this run's own input.
+        # - ALASIO_APP_*: electron is their only writer and rewrites all five
+        #   at startBackend(), so forwarding them adds nothing and is how a
+        #   stale path would survive into the next generation (an older
+        #   electron, e.g. after a downgrade, does not rewrite them at all).
+        # - ELECTRON: the mode of the old chain; the new supervisor sets it.
+        # Kept: ALASIO_RESUME_TOKEN (must reach the new backend) and the
+        # general environment above.
+        self.env = {
+            name: value
+            for name, value in environ.items()
+            if not name.startswith(('ALASIO_RELAUNCH_', 'ALASIO_APP_'))
+            and name not in ('ALASIO_RESUME_FILE', 'ELECTRON')
+        }
+        self.env['ALASIO_RESUME_TOKEN'] = self.token
+        self.log = Log(self.log_path)
+
+    @staticmethod
+    def _as_path(value, name):
+        """
+        Validate one required absolute path variable.
+
+        Args:
+            value (str): Raw value, may be empty
+            name (str): Variable name, for the error message
+
+        Returns:
+            str: The path
+
+        Raises:
+            PreflightError: The value is empty or relative
+        """
+        if not value:
+            raise PreflightError(f'{name} is not set')
+        if not os.path.isabs(value):
+            raise PreflightError(f'{name} must be absolute: {value!r}')
+        return value
+
+    @staticmethod
+    def _read_argv(value):
+        """
+        Read the argument list handed to the new process.
+
+        Args:
+            value (str): Raw value of ALASIO_APP_ARGV
+
+        Returns:
+            "list[str]": The arguments
+
+        Raises:
+            PreflightError: The value is not a json list of strings
+        """
+        if not value:
+            raise PreflightError('ALASIO_APP_ARGV is not set')
+        try:
+            argv = json.loads(value)
+        except ValueError as e:
+            raise PreflightError(f'ALASIO_APP_ARGV is not json: {e}') from None
+        if not isinstance(argv, list) or not all(isinstance(item, str) for item in argv):
+            raise PreflightError('ALASIO_APP_ARGV must be a list of strings')
+        return argv
+
+    @staticmethod
+    def _read_digest(value):
+        """
+        Read the expected digest of the staged archive.
+
+        Args:
+            value (str): Raw value of ALASIO_RELAUNCH_SHA256
+
+        Returns:
+            str: Lowercase hex sha256
+
+        Raises:
+            PreflightError: The value is not a sha256 digest
+        """
+        digest = value.strip().lower()
+        if not digest:
+            raise PreflightError('ALASIO_RELAUNCH_SHA256 is not set')
+        if len(digest) != 64 or any(char not in '0123456789abcdef' for char in digest):
+            raise PreflightError(f'ALASIO_RELAUNCH_SHA256 is not a sha256 digest: {digest!r}')
+        return digest
+
+    @staticmethod
+    def _read_timeout(value):
+        """
+        Read the budget of the wait.
+
+        Args:
+            value (str): Raw value of ALASIO_RELAUNCH_TIMEOUT, '' for the default
+
+        Returns:
+            float: Seconds to wait at most
+
+        Raises:
+            PreflightError: The value is not a positive number
+        """
+        if not value:
+            return 120.0
+        try:
+            timeout = float(value)
+        except ValueError:
+            raise PreflightError(f'ALASIO_RELAUNCH_TIMEOUT is not a number: {value!r}') from None
+        if not timeout > 0:
+            raise PreflightError(f'ALASIO_RELAUNCH_TIMEOUT must be positive: {value!r}')
+        return timeout
+
+    @staticmethod
+    def parse_targets(value):
+        """
+        Read ``ALASIO_RELAUNCH_TARGETS`` into the processes to wait for.
+
+        The value is a JSON object keyed by role::
+
+            {"backend": {"pid": 1234, "start": 987654},
+             "supervisor": {"pid": 4321, "start": 987700},
+             "electron": {"pid": 8765}}
+
+        ``start`` is the process start marker read when the list was built; it
+        may be omitted or null, and then only the existence of the pid is
+        asked about. A process that was already gone needs no sentinel:
+        probing its pid returns GONE at once.
+
+        Args:
+            value (str): Raw value of the variable
+
+        Returns:
+            "list[Target]": The three targets, in the order of TARGET_NAMES
+
+        Raises:
+            PreflightError: The text is not json, or a target is missing or
+                malformed
+        """
+        try:
+            parsed = json.loads(value)
+        except ValueError as e:
+            raise PreflightError(f'ALASIO_RELAUNCH_TARGETS is not json: {e}') from None
+        if not isinstance(parsed, dict):
+            raise PreflightError('ALASIO_RELAUNCH_TARGETS must be a json object')
+        missing = [name for name in TARGET_NAMES if name not in parsed]
+        if missing:
+            raise PreflightError(f'ALASIO_RELAUNCH_TARGETS lacks: {", ".join(missing)}')
+        extra = sorted(set(parsed) - set(TARGET_NAMES))
+        if extra:
+            raise PreflightError(
+                f'ALASIO_RELAUNCH_TARGETS has unexpected entries: {", ".join(extra)}')
+        return [ElectronUpdater._read_target(name, parsed[name]) for name in TARGET_NAMES]
+
+    @staticmethod
+    def _read_target(name, raw):
+        """
+        Read one entry of ``ALASIO_RELAUNCH_TARGETS``.
+
+        Args:
+            name (str): Role of the process
+            raw (dict): The entry, with a positive integer pid and an optional
+                integer start marker
+
+        Returns:
+            Target: The target
+
+        Raises:
+            PreflightError: The entry is malformed
+        """
+        if not isinstance(raw, dict):
+            raise PreflightError(f'target {name} must be a json object')
+        pid = raw.get('pid')
+        if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0:
+            raise PreflightError(f'target {name} has no positive integer pid')
+        start = raw.get('start')
+        if start is not None and (not isinstance(start, int) or isinstance(start, bool) or start < 0):
+            raise PreflightError(f'target {name} has a malformed start marker')
+        return Target(name, pid, start)
+
+    @staticmethod
+    def sha256_file(path):
+        """
+        Digest the content of a file.
+
+        Args:
+            path (str): File to read
+
+        Returns:
+            str: Lowercase hex sha256
+
+        Raises:
+            OSError: The file cannot be read
+        """
+        digest = hashlib.sha256()
+        with open(path, 'rb') as f:
+            while True:
+                chunk = f.read(CHUNK_SIZE)
+                if not chunk:
+                    break
+                digest.update(chunk)
+        return digest.hexdigest()
+
+    def stage(self):
+        """
+        Copy the staged archive to the temporary file, hashing as it copies.
+
+        The copy is the only pass over the source content: the digest is
+        computed from the bytes actually written, so a source that changed
+        since the preflight is caught here without reading it twice. The
+        temporary file belongs to this process, so the retries of replace()
+        never copy again.
+
+        Returns:
+            str: Path of the temporary file to install, None when the source
+                is gone (another updater consumed it)
+
+        Raises:
+            OSError: The copy failed
+            PreflightError: The copied content does not match the digest
+        """
+        temp = self.temp
+        digest = hashlib.sha256()
+        try:
+            fsrc = open(self.src, 'rb')
+        except FileNotFoundError:
+            # another updater already installed the very same content
+            return None
+        with fsrc, open(temp, 'wb') as fdst:
+            while True:
+                chunk = fsrc.read(CHUNK_SIZE)
+                if not chunk:
+                    break
+                digest.update(chunk)
+                fdst.write(chunk)
+        if digest.hexdigest() != self.sha256:
+            self._discard(temp)
+            raise PreflightError(
+                f'{self.src} is {digest.hexdigest()}, expected {self.sha256}')
+        return temp
+
+    @staticmethod
+    def _discard(path):
+        """
+        Remove a file, ignoring every error.
+
+        Args:
+            path (str): File to remove
+        """
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
+    def wait_targets(self, interval=POLL_INTERVAL):
+        """
+        Wait until every target is done or the budget is spent.
+
+        Polling is deliberate: it needs nothing armed before the processes
+        die, so the ready line never has to promise that a handle was opened
+        in time. The first sleep comes before the first probe: the old chain
+        never comes down that fast after the ready line, so probing at once
+        only burns a system call.
+
+        Args:
+            interval (float): Seconds between two probe rounds. Defaults to 0.1.
+
+        Returns:
+            "list[str]": Names of the targets still running, empty when all
+                are done
+        """
+        deadline = time.monotonic() + self.timeout
+        while True:
+            time.sleep(interval)
+            pending = []
+            for target in self.targets:
+                if target.probe() in (ALIVE, UNKNOWN):
+                    pending.append(target.name)
+            if not pending:
+                return []
+            if time.monotonic() >= deadline:
+                return pending
+
+    def replace(self, temp, attempts=5):
+        """
+        Install the staged temporary file over the installed archive.
+
+        Only the swap is retried: os.replace is atomic (the target is either
+        the old file or the new one), so a failure leaves the installed
+        archive untouched and the next attempt has nothing to redo but the
+        swap itself. There is no backup to keep for the same reason: the old
+        content is only ever replaced in one step, never overwritten in
+        place, so a failed installation is simply the old version still in
+        place.
+
+        Args:
+            temp (str): Temporary file produced by stage()
+            attempts (int): Attempts before the failure is reported. Defaults
+                to 5.
+
+        Raises:
+            OSError: The swap failed after every attempt
+        """
+        delay = 0.2
+        error = None
+        for attempt in range(attempts):
+            try:
+                os.replace(temp, self.dst)
+            except FileNotFoundError:
+                # nothing left to install: retrying cannot create the file
+                raise
+            except OSError as e:
+                error = e
+                if attempt + 1 < attempts:
+                    time.sleep(delay)
+                    delay *= 2
+            else:
+                # the staged archive is consumed: leaving it behind would make
+                # the next preflight compare against a stale copy
+                self._discard(self.src)
+                return
+        raise error
+
+    @staticmethod
+    def _wait_started(process, window, interval):
+        """
+        Watch a freshly started process for a while and report what it did.
+
+        A process that is alive at the end of the window has started: the
+        window is what catches a crash on startup, which happens within
+        seconds. The process is polled, never slept through, so a fast exit is
+        noticed at the first interval instead of after the whole window.
+
+        Args:
+            process (subprocess.Popen): The started process
+            window (float): Seconds to watch at most
+            interval (float): Seconds between two polls
+
+        Returns:
+            int: Exit code when the process exited during the window, None
+                when it was still running at the end of it
+        """
+        deadline = time.monotonic() + window
+        while True:
+            code = process.poll()
+            if code is not None:
+                return code
+            if time.monotonic() >= deadline:
+                return None
+            time.sleep(interval)
+
+    def relaunch(self, attempts=3, window=START_WINDOW, interval=START_INTERVAL):
+        """
+        Start the application again, detached from this process.
+
+        The arguments are a list, never a shell string, and the credential
+        stays in the environment (built in __init__): it is not visible in
+        the process list that way.
+
+        The child is polled for ``window`` seconds: still running at the end
+        of it means it started; exiting with a non zero code is a crash of the
+        new build, which retrying would only repeat; exiting with 0 is the
+        single instance lock of a running electron or an application that quit
+        on its own, and both are worth another attempt.
+
+        Args:
+            attempts (int): Attempts before the failure is reported. Defaults
+                to 3.
+            window (float): Seconds each attempt is watched. Defaults to 10.
+            interval (float): Seconds between two polls. Defaults to 0.5.
+
+        Raises:
+            OSError: The program cannot be started
+            RuntimeError: The program exited with an error, or exited on every
+                attempt without starting
+        """
+        kwargs = {
+            'cwd': self.cwd,
+            'env': self.env,
+            'stdin': subprocess.DEVNULL,
+            'stdout': subprocess.DEVNULL,
+            'stderr': subprocess.DEVNULL,
+            'close_fds': True,
+        }
+        if sys.platform == 'win32':
+            kwargs['creationflags'] = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+        else:
+            kwargs['start_new_session'] = True
+        error = None
+        for attempt in range(attempts):
+            try:
+                process = subprocess.Popen([self.exe, *self.argv], **kwargs)
+            except OSError as e:
+                error = e
+            else:
+                code = self._wait_started(process, window, interval)
+                if code is None:
+                    return
+                if code != 0:
+                    # a crash on startup: retrying would only repeat it
+                    raise RuntimeError(f'the application exited with code {code}')
+                error = RuntimeError(
+                    'the application exited at once, another instance is running')
+            if attempt + 1 < attempts:
+                time.sleep(interval)
+        raise error
+
+    def run(self):
+        """
+        Carry the relaunch through, from the ready line to the new process.
+
+        Returns:
+            int: Exit code, see the constants of this module
+        """
+        log = self.log
+        log.info(f'preflight: {self.src} -> {self.dst}')
+        try:
+            digest = self.sha256_file(self.src)
+        except OSError as e:
+            log.info(f'preflight: cannot read {self.src}: {e}')
+            return EXIT_PREFLIGHT
+        if digest != self.sha256:
+            log.info(f'preflight: {self.src} is {digest}, expected {self.sha256}, not staging')
+            return EXIT_PREFLIGHT
+
+        pending = self.wait_targets()
+        if pending:
+            log.info(f'wait: still running after {self.timeout:.1f}s: {", ".join(pending)}')
+            return EXIT_TIMEOUT
+        log.info('wait: the old chain is gone')
+
+        try:
+            os.stat(self.resume_file)
+        except FileNotFoundError:
+            log.info(f'go: {self.resume_file} is gone, the relaunch was withdrawn')
+            return EXIT_NO_GO
+        except OSError as e:
+            log.info(f'go: cannot read {self.resume_file}: {e}')
+            return EXIT_NO_GO
+
+        installed = False
+        try:
+            temp = self.stage()
+        except PreflightError as e:
+            log.info(f'replace: {e}, keeping the installed one')
+        except OSError as e:
+            log.info(f'replace: cannot stage {self.src}: {e}')
+        else:
+            if temp is None:
+                # another updater consumed the staged archive: it installed
+                # the very same content, so there is nothing left to do
+                log.info(f'replace: {self.src} already consumed, leaving {self.dst} alone')
+                installed = True
+            else:
+                try:
+                    self.replace(temp)
+                except OSError as e:
+                    log.info(f'replace: {temp} -> {self.dst} failed: {e}')
+                else:
+                    installed = True
+                    log.info(f'replace: installed {self.dst}')
+
+        try:
+            self.relaunch()
+        except (OSError, RuntimeError) as e:
+            log.info(f'relaunch: {self.exe} failed: {e}')
+            return EXIT_RELAUNCH
+        log.info(f'relaunch: started {self.exe}')
+        return EXIT_OK if installed else EXIT_REPLACE
+
+    @classmethod
+    def main(cls):
+        """
+        Entry point of ``python updater.py``.
+
+        The command line carries nothing, the environment is the whole input,
+        and nothing is printed on stdout after the ready line.
+
+        Returns:
+            int: Exit code, see the constants of this module
+        """
+        try:
+            updater = cls()
+        except PreflightError as e:
+            # nothing is known yet, so there is no log file either
+            sys.stderr.write(f'alasio.updater: {e}\n')
+            sys.stderr.flush()
+            return EXIT_PREFLIGHT
+        updater.log.open()
+        try:
+            return updater.run()
+        except Exception as e:
+            updater.log.info(f'error: {type(e).__name__}: {e}')
+            return EXIT_ERROR
+        finally:
+            updater.log.close()
+
+
+if __name__ == '__main__':
+    sys.exit(ElectronUpdater.main())

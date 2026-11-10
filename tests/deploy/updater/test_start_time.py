@@ -91,13 +91,13 @@ def identity(pid):
     return pid, updater.start_time(pid)
 
 
-class TestParseStarttime:
+class TestParseStat:
     """The /proc/<pid>/stat parser."""
 
     @pytest.mark.parametrize('starttime', [0, 1, 987654, 4294967296])
     def test_reads_field_19_after_comm(self, starttime):
         """starttime is field 22 of "man proc", index 19 after pid/comm/state."""
-        assert updater._parse_starttime(make_stat(starttime)) == starttime
+        assert updater._parse_stat(make_stat(starttime))[1] == starttime
 
     @pytest.mark.parametrize(
         'comm',
@@ -113,12 +113,17 @@ class TestParseStarttime:
     )
     def test_comm_with_spaces_and_parentheses(self, comm):
         """The comm may contain spaces and parentheses, fields start at the last ')'."""
-        assert updater._parse_starttime(make_stat(4242, comm=comm)) == 4242
+        assert updater._parse_stat(make_stat(4242, comm=comm))[1] == 4242
 
     def test_parser_ignores_trailing_content(self):
         """Fields after starttime are not needed, so a short tail is enough."""
         data = b'1 (x) S ' + b' '.join(b'%d' % i for i in range(1, 19)) + b' 777'
-        assert updater._parse_starttime(data) == 777
+        assert updater._parse_stat(data)[1] == 777
+
+    def test_reports_the_state_letter(self):
+        """The state comes before starttime; linux reports a zombie as gone."""
+        data = b'1 (x) Z ' + b' '.join(b'%d' % i for i in range(1, 19)) + b' 777'
+        assert updater._parse_stat(data) == (b'Z', 777)
 
     @pytest.mark.parametrize(
         'data',
@@ -134,7 +139,7 @@ class TestParseStarttime:
     def test_malformed_content_is_not_reported_as_gone(self, data):
         """A malformed content raises OSError, never ProcessLookupError."""
         with pytest.raises(OSError) as excinfo:
-            updater._parse_starttime(data)
+            updater._parse_stat(data)
         assert not isinstance(excinfo.value, ProcessLookupError)
 
 
@@ -236,4 +241,4 @@ class TestStandaloneModule:
         """The module exposes the two helpers the updater needs at this stage."""
         assert callable(updater.start_time)
         assert callable(updater.port_available)
-        assert callable(updater._parse_starttime)
+        assert callable(updater._parse_stat)
