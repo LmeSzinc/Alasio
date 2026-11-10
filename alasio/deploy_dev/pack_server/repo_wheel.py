@@ -24,9 +24,16 @@ on the order of the other.
 
 A published wheel is verified against the cached one: a file that is already
 there with the sha256 of its cache file is kept as it is, a file that is
-missing, truncated or replaced is copied again. A wheel of a name and a version
-is immutable, so a published file that differs from the cache is a broken copy
-and never a new release: the index page of every client may have cached it.
+missing, truncated or replaced is copied again. The published copy is hashed
+directly, without a stat of the two files first: the copy is usually already
+there, and one read of it answers both questions at once. A wheel of a name and
+a version is immutable, so a published file that differs from the cache is a
+broken copy and never a new release: the index page of every client may have
+cached it.
+
+The files of the run are verified and copied a few at a time (SYNC_CONCURRENT):
+the work of one file is a read of the disk that ends in a skip, so a run that
+follows the previous one hashes gigabytes and the reads overlap.
 
 The index pages a client reads on top of the folder are repo_pypi.
 
@@ -49,6 +56,12 @@ from alasio.deploy_dev.pack_server.fetch_wheel import WheelFetcher, WheelNotFoun
 from alasio.deploy_dev.pack_server.repo_base import DEFAULT_INDEX
 from alasio.ext.path.atomic import atomic_copy, atomic_read_bytes_stream
 from alasio.logger import logger
+
+# the files one step verifies and copies at once. The work of a file is a read
+# of the disk that usually ends in a skip, so the reads of a run overlap: the
+# limit is the queue of the disk rather than the cores, and a copy of a wheel
+# is one streamed read and one streamed write
+SYNC_CONCURRENT = 8
 
 
 class RepoWheel:
@@ -74,8 +87,9 @@ class RepoWheel:
         """
         Download the wheels of the provided pins and sync them to the pip index.
 
-        The fetch is the only async work of the step: it runs on an event loop
-        of its own, then the files of the run are copied from the cache.
+        Both halves run on the one event loop of the step: the fetch overlaps
+        the transfers of a version, the sync overlaps the verification and the
+        copy of every file.
 
         Raises:
             WheelNotFoundError: If a provided pin has no usable wheel
@@ -84,8 +98,14 @@ class RepoWheel:
             OSError: If a wheel cannot be written
         """
         self.publish_files = {}
-        trio.run(self._fetch)
-        self._sync()
+        trio.run(self._run)
+
+    async def _run(self):
+        """
+        Fetch the wheels, then sync them, see run().
+        """
+        await self._fetch()
+        await self._sync()
 
     async def _fetch(self):
         """
@@ -128,40 +148,64 @@ class RepoWheel:
                 finally:
                     await fetcher.aclose()
 
-    def _sync(self):
+    async def _sync(self):
         """
         Copy the wheels of the run from the cache to the pip index.
 
         A published file with the sha256 of its cache file is kept, so a rerun
-        of an up to date workspace writes nothing, see _is_synced().
+        of an up to date workspace writes nothing, see _sync_wheel(). The
+        wheels of one pin run a few at a time (SYNC_CONCURRENT), each one in a
+        worker thread: the verification of a warm file is a read of the disk,
+        and the reads would otherwise wait for each other. The next pin starts
+        once the wheels of the previous one are written, so the line of a pin
+        is the head of its own work rather than an announcement of a whole run
+        of lines to come.
 
         Raises:
-            OSError: If a wheel cannot be copied
+            OSError: If a wheel cannot be copied. The failure names the file,
+                the other wheels of the pin are still synced, and the pins
+                after it are not started
         """
+        if not self.publish_files:
+            return
         total = len(self.publish_files)
-        for index, ((name, version), wheels) in enumerate(self.publish_files.items(), start=1):
+        # one budget for the whole step: the pins are written one after the
+        # other, so the transfers of two of them never overlap anyway
+        limiter = trio.CapacityLimiter(SYNC_CONCURRENT)
+
+        async def sync(failures, source, target, sha256):
+            try:
+                await trio.to_thread.run_sync(
+                    _sync_wheel, source, target, sha256, limiter=limiter)
+            except OSError as e:
+                # trio.Cancelled is a BaseException: a cancelled step is not a
+                # failure of the file it interrupted
+                failures.append(OSError(f'Failed to publish "{target}": {e}'))
+
+        for index, ((name, version), wheels) in enumerate(
+                self.publish_files.items(), start=1):
             folder = self.base.wheel_folder.joinpath(name).joinpath(version)
             logger.info(f'[{index}/{total}] Publishing wheels of "{name}=={version}"')
-            for wheel in wheels:
-                file = folder.joinpath(wheel.file.name)
-                self.base.touch(file)
-                if _is_synced(wheel.file, file, wheel.hashes['sha256']):
-                    logger.info(f'Wheel exists, skipped: "{file}"')
-                    continue
-                logger.info(f'Copy wheel: "{wheel.file}" -> "{file}"')
-                # the write is atomic and creates the folder of the version:
-                # a client never reads a half copied wheel
-                atomic_copy(wheel.file, file)
+            failures = []
+            async with trio.open_nursery() as nursery:
+                for wheel in wheels:
+                    target = folder.joinpath(wheel.file.name)
+                    # the record of the cleanup is a task of the trio thread,
+                    # the worker thread only reads and writes the file
+                    self.base.touch(target)
+                    nursery.start_soon(sync, failures, wheel.file, target, wheel.hashes['sha256'])
+            if failures:
+                raise failures[0]
 
 
-def _is_synced(source, target, sha256):
+def _sync_wheel(source, target, sha256):
     """
-    Whether the published file is the copy of its cache file.
+    Make the published file the copy of its cache file.
 
-    The size is checked first: a file of another size is not the copy, and a
-    hash of it would only be a longer way to the same answer. The content is
-    verified when the sizes agree, so a file of the right size that was
-    truncated and padded, or replaced under the same name, is copied again.
+    The work of one wheel of the run: the verification of the published copy,
+    and the atomic copy of the cache file over it when it is not the copy. It
+    is one function because it is one trip to a worker thread, see
+    RepoWheel._sync().
 
     Args:
         source (PathStr): File in the cache
@@ -169,27 +213,45 @@ def _is_synced(source, target, sha256):
         sha256 (str): Lowercase hex digest of the file in the cache
 
     Returns:
-        bool: True when the target is the file of the cache
+        bool: True when the target was already the copy, False when the file
+            was written
+
+    Raises:
+        OSError: If the target cannot be read or written
     """
-    try:
-        if target.stat().st_size != source.stat().st_size:
-            return False
-        return _sha256_of(target) == sha256
-    except OSError:
-        return False
+    if _is_synced(target, sha256):
+        logger.info(f'Wheel exists, skipped: "{target}"')
+        return True
+    logger.info(f'Copy wheel: "{source}" -> "{target}"')
+    # the write is atomic and creates the folder of the version: a client
+    # never reads a half copied wheel
+    atomic_copy(source, target)
+    return False
 
 
-def _sha256_of(file):
+def _is_synced(target, sha256):
     """
-    The sha256 of a file, streamed in chunks.
+    Whether the published file is the copy of its cache file, hashed in place.
+
+    The published file is hashed directly: the copy of an up to date workspace
+    is usually already there, and one read of it answers both questions at
+    once. A file of another size has another digest too, so a stat of the two
+    files first would only add two calls before the read that decides it. A
+    file that is missing, truncated or replaced under the same name does not
+    hash to the digest of the cache file, and is copied again.
 
     Args:
-        file (PathStr): Path of the file
+        target (PathStr): File in the pip index
+        sha256 (str): Lowercase hex digest of the file in the cache
 
     Returns:
-        str: Lowercase hex digest
+        bool: True when the target is the file of the cache
     """
     digest = hashlib.sha256()
-    for chunk in atomic_read_bytes_stream(file):
-        digest.update(chunk)
-    return digest.hexdigest()
+    try:
+        for chunk in atomic_read_bytes_stream(target):
+            digest.update(chunk)
+    except OSError:
+        # missing, unreadable, or replaced while it was read: not the copy
+        return False
+    return digest.hexdigest() == sha256

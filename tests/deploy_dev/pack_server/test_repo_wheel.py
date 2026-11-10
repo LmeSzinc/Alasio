@@ -13,13 +13,15 @@ the MockMirror of the fetch tests (an httpx2.MockTransport handler), the git
 repo is a MockGitRepo of a linear chain.
 """
 import hashlib
+import threading
+import time
 
 import pytest
 
 from alasio.deploy.pip_download.pypi_file import WheelHashError, WheelNotFoundError
 from alasio.deploy_dev.pack import pack_wheel
 from alasio.deploy_dev.pack._pack_cache import PackCache
-from alasio.deploy_dev.pack_server import repo_base
+from alasio.deploy_dev.pack_server import repo_base, repo_wheel
 from alasio.deploy_dev.pack_server.repo_base import RepoBase
 from alasio.deploy_dev.pack_server.repo_dep import RepoDep
 from alasio.deploy_dev.pack_server.repo_wheel import RepoWheel
@@ -47,6 +49,9 @@ MSGS_WHEELS = (
     'msgspec-0.22.0-cp38-cp38-manylinux_2_17_x86_64.whl',
     'msgspec-0.22.0-cp38-cp38-win_amd64.whl',
 )
+
+# a second index the repo provides, for the tests of more than one provided pin
+OTHER_URL = 'http://other.example/simple'
 
 # the dependency files of the tests: msgspec comes from the index the repo
 # provides, httpx from the mirror of the pins (not provided by the repo)
@@ -416,3 +421,123 @@ INFO | Wheel exists, skipped: "{published_folder(run_dir, 'msgspec', '0.22.0')}/
         assert (f'INFO | Copy wheel: "{cache_folder(run_dir, "msgspec", "0.22.0")}/'
                 f'{MSGS_WHEELS[1]}" -> "{file}"\n' in capture.concat())
         assert file.atomic_read_bytes() == content
+
+    def test_the_wheels_are_synced_at_once(self, fs, run_dir, mirror, monkeypatch):
+        """The files of the run are verified in parallel, a few at a time.
+
+        The work of one file is a read of the disk that usually ends in a skip,
+        so a run over an up to date workspace would otherwise read gigabytes one
+        after another.
+        """
+        register_msgspec_wheels(mirror)
+        repo = make_provided_repo()
+        WheelFlow(repo, client=mirror.client).generate()
+
+        in_flight = []
+        peak = []
+        lock = threading.Lock()
+        original = repo_wheel._is_synced
+
+        def slow(target, sha256):
+            with lock:
+                in_flight.append(1)
+                peak.append(len(in_flight))
+            # long enough for the file of the other thread to arrive: the step
+            # starts both tasks before either read answers
+            time.sleep(0.1)
+            try:
+                return original(target, sha256)
+            finally:
+                with lock:
+                    in_flight.pop()
+
+        monkeypatch.setattr(repo_wheel, '_is_synced', slow)
+        with logger.mock_capture_writer():
+            WheelFlow(repo, client=mirror.client).generate()
+
+        # both wheels are verified at the same time, and the worker threads
+        # keep the peak under the limit of the step
+        assert max(peak) == 2
+        assert max(peak) <= repo_wheel.SYNC_CONCURRENT
+
+    def test_a_failed_copy_is_reported_and_the_others_are_written(
+            self, fs, run_dir, mirror, monkeypatch):
+        """A file that cannot be written names itself and stops no other file."""
+        register_msgspec_wheels(mirror)
+        repo = make_provided_repo()
+        WheelFlow(repo, client=mirror.client).generate()
+        failed = published_folder(run_dir, 'msgspec', '0.22.0').joinpath(MSGS_WHEELS[0])
+        kept = published_folder(run_dir, 'msgspec', '0.22.0').joinpath(MSGS_WHEELS[1])
+        failed.file_remove()
+        kept.file_remove()
+        original = repo_wheel.atomic_copy
+
+        def copy(source, target, **kwargs):
+            if target == failed:
+                raise OSError(f'disk is full: {target}')
+            original(source, target, **kwargs)
+
+        monkeypatch.setattr(repo_wheel, 'atomic_copy', copy)
+        with pytest.raises(OSError) as e:
+            WheelFlow(repo, client=mirror.client).generate()
+
+        assert str(failed) in str(e.value)
+        assert 'disk is full' in str(e.value)
+        # the other file of the run was still written
+        assert not failed.exists()
+        assert kept.atomic_read_bytes() == cache_folder(
+            run_dir, 'msgspec', '0.22.0').joinpath(MSGS_WHEELS[1]).atomic_read_bytes()
+
+    def test_a_pin_is_written_before_the_next_one_starts(self, fs, run_dir, mirror):
+        """The line of a pin heads its own writes, not a run of lines to come.
+
+        The wheels of one pin are verified and copied at once, and the next pin
+        starts once they are written: a log reads one pin after another instead
+        of announcing all of them and then working.
+        """
+        other = mirror.alias(OTHER_URL)
+        register_msgspec_wheels(mirror)
+        mirror.register('httpx', '0.28.1')
+        requirements = {
+            'c3': (requirement('httpx==0.28.1', f'{other}/')
+                   + requirement('msgspec==0.22.0', f'{PROVIDED_URL}/')),
+        }
+        repo = make_repo(requirements, entry=entry_source(provide=(other, PROVIDED_URL)))
+        with logger.mock_capture_writer() as capture:
+            WheelFlow(repo, client=mirror.client).generate()
+
+        lines = capture.concat().splitlines()
+        first = lines.index('INFO | [1/2] Publishing wheels of "httpx==0.28.1"')
+        second = lines.index('INFO | [2/2] Publishing wheels of "msgspec==0.22.0"')
+        httpx = [index for index, line in enumerate(lines)
+                 if line.startswith('INFO | Copy wheel') and 'httpx-0.28.1' in line]
+        msgspec = [index for index, line in enumerate(lines)
+                   if line.startswith('INFO | Copy wheel') and 'msgspec-0.22.0' in line]
+        # the copies of the first pin sit between the two heads, the copies of
+        # the second one follow their own head
+        assert first < min(httpx) and max(httpx) < second < min(msgspec)
+
+    def test_a_failed_pin_stops_the_pins_after_it(self, fs, run_dir, mirror, monkeypatch):
+        """A pin that cannot be written ends the step, the next one is not started."""
+        other = mirror.alias(OTHER_URL)
+        register_msgspec_wheels(mirror)
+        mirror.register('httpx', '0.28.1')
+        requirements = {
+            'c3': (requirement('httpx==0.28.1', f'{other}/')
+                   + requirement('msgspec==0.22.0', f'{PROVIDED_URL}/')),
+        }
+        repo = make_repo(requirements, entry=entry_source(provide=(other, PROVIDED_URL)))
+        original = repo_wheel._sync_wheel
+
+        def sync(source, target, sha256):
+            if 'httpx' in target.name:
+                raise OSError(f'disk is full: {target}')
+            return original(source, target, sha256)
+
+        monkeypatch.setattr(repo_wheel, '_sync_wheel', sync)
+        with pytest.raises(OSError) as e:
+            WheelFlow(repo, client=mirror.client).generate()
+
+        assert 'disk is full' in str(e.value)
+        # the wheels of the second pin are not published at all
+        assert not published_folder(run_dir, 'msgspec', '0.22.0').exists()
