@@ -7,6 +7,38 @@ from alasio.git.fetch.pkt import (
 from alasio.git.fetch.transport import BaseTransport
 from alasio.logger import logger
 
+# Bytes to read from the connection at once
+RECEIVE_SIZE = 65536
+
+
+async def receive_chunks(stream, size=RECEIVE_SIZE):
+    """
+    Yield what the server sends until the stream ends.
+
+    The end of a git:// answer is not always a clean close: a server may reset
+    the connection right after the last byte of the pack. `git daemon` on
+    windows does exactly that, and every byte of the pack did arrive before the
+    reset, so a reset is the end of the stream here, not a failure. A pack cut
+    short is detected by its own trailing sha1 when the pack is read, see
+    `alasio.git.stage.genidx`.
+
+    Args:
+        stream (trio.abc.ReceiveStream): The connection
+        size (int): Bytes to read at once. Defaults to RECEIVE_SIZE.
+
+    Yields:
+        bytes: One chunk of the answer
+    """
+    while True:
+        try:
+            chunk = await stream.receive_some(size)
+        except (trio.BrokenResourceError, trio.ClosedResourceError):
+            # Reset by the peer, the stream is over
+            return
+        if not chunk:
+            return
+        yield chunk
+
 
 class GitTransport(BaseTransport):
     """Transport implementation for Git protocol using TCP."""
@@ -99,14 +131,7 @@ class GitTransport(BaseTransport):
             await stream.send_all(payload.build())
 
             # Receive packfile
-            async def stream_iterator():
-                while True:
-                    chunk = await stream.receive_some(65536)
-                    if not chunk:
-                        break
-                    yield chunk
-
-            pkt_stream = aparse_pkt_line(stream_iterator())
+            pkt_stream = aparse_pkt_line(receive_chunks(stream))
             file_stream = aparse_packfile_stream(pkt_stream)
             data = await agather_bytes(file_stream)
 
@@ -151,14 +176,7 @@ class GitTransport(BaseTransport):
             await stream.send_all(v2_payload)
 
             # Receive packfile
-            async def stream_iterator():
-                while True:
-                    chunk = await stream.receive_some(65536)
-                    if not chunk:
-                        break
-                    yield chunk
-
-            pkt_stream = aparse_pkt_line(stream_iterator())
+            pkt_stream = aparse_pkt_line(receive_chunks(stream))
             file_stream = aparse_packfile_stream(pkt_stream)
             data = await agather_bytes(file_stream)
 
