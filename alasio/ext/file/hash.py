@@ -1,10 +1,10 @@
 import hashlib
 import time
 
-from ..path.atomic import IS_WINDOWS, WINDOWS_MAX_ATTEMPT, windows_attempt_delay
+from ..path.atomic import CHUNK_SIZE, IS_WINDOWS, WINDOWS_MAX_ATTEMPT, windows_attempt_delay
 
 
-def _get_md5(file, chunk_size=262144):
+def _get_md5(file, chunk_size=CHUNK_SIZE):
     """
     Directly get md5 of a file, and be fast
     If filesize <= chunk_size, read and calculate directly
@@ -36,7 +36,7 @@ def _get_md5(file, chunk_size=262144):
     return digest.hexdigest()
 
 
-def file_md5(file, chunk_size=262144):
+def file_md5(file, chunk_size=CHUNK_SIZE):
     """
     Get md5 of a file, be fast and handle locked files on Windows
 
@@ -65,7 +65,7 @@ def file_md5(file, chunk_size=262144):
         return _get_md5(file, chunk_size)
 
 
-def _get_sha1(file, chunk_size=262144):
+def _get_sha1(file, chunk_size=CHUNK_SIZE):
     """
     Directly get sha1 of a file, and be fast
     If filesize <= chunk_size, read and calculate directly
@@ -97,7 +97,7 @@ def _get_sha1(file, chunk_size=262144):
     return digest.hexdigest()
 
 
-def file_sha1(file, chunk_size=262144):
+def file_sha1(file, chunk_size=CHUNK_SIZE):
     """
     Get sha1 of a file, be fast and handle locked files on Windows
 

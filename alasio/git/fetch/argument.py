@@ -1,5 +1,6 @@
 from alasio.ext.cache import cached_property
 from alasio.ext.path import PathStr
+from alasio.ext.path.atomic import CHUNK_SIZE
 from alasio.git.fetch.url import GitUrl
 
 
@@ -33,7 +34,7 @@ class Arguments:
     # If have_lookback is 0, send the entire have list letting server decide.
     have_lookback = 20
     # 256KB default write buffer size
-    buffer_size: int = 262144
+    buffer_size: int = CHUNK_SIZE
 
     def __init__(self, repo_path, repo_url):
         """

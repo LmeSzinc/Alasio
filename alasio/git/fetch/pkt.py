@@ -1,5 +1,6 @@
 from collections import deque
 
+from alasio.ext.path.atomic import CHUNK_SIZE
 from alasio.logger import logger
 
 
@@ -88,7 +89,7 @@ def parse_pkt_line(content):
         yield line
 
 
-async def aparse_packfile_stream(stream_iterator, buffer_size=262144) -> int:
+async def aparse_packfile_stream(stream_iterator, buffer_size=CHUNK_SIZE) -> int:
     """
     A generic, buffered packfile stream handler.
 

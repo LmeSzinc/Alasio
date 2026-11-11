@@ -1,10 +1,10 @@
 import os
 
 from alasio.ext.cache import cached_property_threadsafe
-from alasio.ext.path.atomic import atomic_open
+from alasio.ext.path.atomic import CHUNK_SIZE, atomic_open
 
 
-def extract_last_task(src, target_fd, block_size=262144):
+def extract_last_task(src, target_fd, block_size=CHUNK_SIZE):
     """
     Extract last task from file, each task is startswith hr0()
     Copy logs with minimal IO operations and static memory usage
@@ -14,7 +14,7 @@ def extract_last_task(src, target_fd, block_size=262144):
             (e.g. BytesIO). When a path is given, the file is opened with
             buffering disabled for efficient reverse-seeking.
         target_fd (io.IOBase): Writable binary stream to receive output.
-        block_size (int): Read block size in bytes. Defaults to 262144.
+        block_size (int): Read block size in bytes. Defaults to 256KB.
             Clamped to ``max(4096, block_size)`` and rounded down to the
             nearest multiple of 4096.
     """
