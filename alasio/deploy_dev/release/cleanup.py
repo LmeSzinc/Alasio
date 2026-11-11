@@ -1,6 +1,6 @@
 from alasio.ext.path import PathStr
-from alasio.ext.path.atomic import atomic_read_bytes, file_remove, folder_rmtree
-from alasio.ext.path.iter import iter_folders
+from alasio.ext.path.atomic import atomic_read_bytes, file_remove, folder_rmtree, folder_rmtree_empty
+from alasio.ext.path.iter import iter_files, iter_folders
 
 
 def rmtree(path):
@@ -29,6 +29,20 @@ def cleanup_pycache(root):
             rmtree(path)
 
 
+def cleanup_pdb(root: PathStr):
+    """
+    Remove program database files of the bundled python and its DLLs
+
+    Debug symbols are only read by a debugger, the interpreter never loads them.
+
+    Args:
+        root: path to the release folder
+    """
+    print(f'Cleanup pdb: {root}')
+    for file in iter_files(root, ext='.pdb', recursive=True):
+        rm(file)
+
+
 def cleanup_python_lib(root: PathStr):
     """
     Cleanup builtin lib of python
@@ -37,15 +51,55 @@ def cleanup_python_lib(root: PathStr):
         root: path to python/Lib
     """
     print(f'Cleanup python/Lib: {root}')
+    # Not imported at runtime: the bundled pip wheels of ensurepip, the venv
+    # bootstrap that is built on ensurepip, and the turtle demo application
+    rmtree(root / 'ensurepip')
+    rmtree(root / 'turtledemo')
+    rmtree(root / 'venv')
     rmtree(root / 'ctypes/test')
     rmtree(root / 'distutils/test')
     rmtree(root / 'distutils/tests')
     rmtree(root / 'idlelib/idle_test')
-    rm(root / 'idlelib/ChangeLog')
+    # Documentation of the IDLE editor, it is only shown by the About dialog
+    # and the help window, which are never opened outside of IDLE
+    for name in (
+        'ChangeLog',
+        'CREDITS.txt',
+        'HISTORY.txt',
+        'NEWS.txt',
+        'NEWS2x.txt',
+        'README.txt',
+        'TODO.txt',
+        'extend.txt',
+        'help.html',
+        'Icons/README.txt',
+    ):
+        rm(root / f'idlelib/{name}')
     rmtree(root / 'lib2to3/tests')
     rmtree(root / 'sqlite3/test')
     rmtree(root / 'tkinter/test')
     rmtree(root / 'unittest/test')
+
+
+def cleanup_tcl(root: PathStr):
+    """
+    Cleanup the tcl runtime folder of the bundled python
+
+    Args:
+        root: path to python/tcl
+    """
+    print(f'Cleanup python/tcl: {root}')
+    # Demo applications of tk and tix, they are standalone scripts that nothing
+    # in the runtime sources or loads
+    rmtree(root / 'tk8.6/demos')
+    rmtree(root / 'tix8.4.3/demos')
+    # License terms and the readme of the demo images, they are only referenced
+    # by the "See the file license.terms" comments of the tcl scripts
+    rm(root / 'tk8.6/license.terms')
+    # The tk logo images are only used by the demos, every image of the runtime
+    # widgets is created from inline -data of icons.tcl / msgbox.tcl / tkfbox.tcl,
+    # the bitmaps of tix are in tix8.4.3/bitmaps instead of here
+    rmtree(root / 'tk8.6/images')
 
 
 def cleanup_python_packages(root: PathStr):
@@ -61,7 +115,9 @@ def cleanup_python_packages(root: PathStr):
     # imported by anyio 3.x, `pygments/lexers/testing.py` is a gherkin/TAP lexer, etc.
     # Only folders and modules named `test` / `tests` are removed, no one imports them.
     rmtree(root / 'async_generator/_tests')
+    rmtree(root / 'certifi/tests')
     rmtree(root / 'colorama/tests')
+    rm(root / 'coloredlogs/tests.py')
     rmtree(root / 'commonmark/tests')
     rmtree(root / 'Crypto/SelfTest')
     rmtree(root / 'future/tests')
@@ -78,6 +134,7 @@ def cleanup_python_packages(root: PathStr):
     rmtree(root / 'mpmath/tests')
     rmtree(root / 'numpy/tests')
     rmtree(root / 'psutil/tests')
+    rm(root / 'py/test.py')
     rmtree(root / 'pyreadline3/test')
     rmtree(root / 'retry/tests')
     rmtree(root / 'shapely/tests')
@@ -86,6 +143,8 @@ def cleanup_python_packages(root: PathStr):
     rmtree(root / 'sniffio/_tests')
     rmtree(root / 'sqlite_bro/tests')
     rmtree(root / 'tornado/test')
+    rmtree(root / 'trio/_core/_tests')
+    rmtree(root / 'trio/_tests')
     rm(root / 'ua_parser/user_agent_parser_test.py')
     rm(root / 'user_agents/tests.py')
     rmtree(root / 'wcwidth/tests')
@@ -128,18 +187,24 @@ def cleanup_python_packages(root: PathStr):
 
     # scipy tests in submodules
     for path in root.joinpath('numpy').iter_folders(recursive=False):
-        # `numpy/testing` is kept as a whole, including its own tests
-        if path.endswith('testing'):
-            continue
+        # `numpy/testing` itself is kept, `numpy/__init__.py` imports it,
+        # but its own tests are never imported
         rmtree(path / 'tests')
     # Do not remove numpy/testing, `numpy/__init__.py` does `from .testing import Tester`,
     # removing it breaks `import numpy` and everything importing numpy (e.g. cv2).
     rm(root / 'numpy/_pyinstaller/test_pyinstaller.py')
+    rm(root / 'numpy/conftest.py')
+    # numpy ships its documentation as python modules
+    rmtree(root / 'numpy/doc')
     for path in root.joinpath('scipy').iter_folders(recursive=True):
         rmtree(path / 'tests')
+    rm(root / 'scipy/conftest.py')
     for path in root.joinpath('sympy').iter_folders(recursive=True):
         rmtree(path / 'tests')
+        rmtree(path / 'benchmarks')
+    rmtree(root / 'sympy/benchmarks')
     rmtree(root / 'sympy/parsing/autolev/test-examples')
+    rm(root / 'sympy/conftest.py')
 
     # demo images in imageio, so you can access with
     # import imageio.v3 as iio
@@ -147,6 +212,8 @@ def cleanup_python_packages(root: PathStr):
     # print(im.shape)  # (300, 451, 3)
     # I don't think you need these in production
     rmtree(root / 'imageio/resources')
+    # The demo image of `scipy.misc.face()`, which is deprecated by scipy itself
+    rm(root / 'scipy/misc/face.dat')
 
     # mxnet tools
     rm(root / 'mxnet/tools/bandwidth/.gitignore')
@@ -162,6 +229,11 @@ def cleanup_python_packages(root: PathStr):
         if file.name == '__init__.py':
             continue
         rm(file)
+
+    # Cython sources are used to build the packages, never imported at runtime
+    for file in root.iter_files(recursive=True):
+        if file.endswith(('.pyx', '.pxd', '.pxi')):
+            rm(file)
 
 
 # Files that are imported at runtime, do not remove them in the cleanup above.
@@ -220,39 +292,63 @@ def check_runtime_required(root: PathStr):
 
 KEEP_EXT = {'.py', '.pyi', '.pyd', '.dll', '.so'}
 
+# Files with these name prefixes are licenses, readmes or changelogs,
+# none of them is imported at runtime
+DOC_NAME_PREFIX = (
+    'license',
+    'licence',
+    'license-',
+    'license_',
+    'authors',
+    'changelog',
+    'copying',
+    'credits',
+    'description',
+    'notice',
+    'readme',
+    'thirdparty',
+)
+
+
+def cleanup_doc_files(root: PathStr):
+    """
+    Remove the documentation files of a folder tree
+
+    Args:
+        root: path to the folder tree to clean
+    """
+    for file in root.iter_files(recursive=True):
+        # Keep the files that may be imported
+        if file.suffix.lower() in KEEP_EXT:
+            continue
+        if file.name.lower().startswith(DOC_NAME_PREFIX):
+            rm(file)
+
 
 def cleanup_license(root: PathStr):
     print(f'Cleanup license: {root}')
-    license_file = (
-        'license',
-        'licence',
-        'license-',
-        'license_',
-        'authors',
-        'copying',
-        'notice',
-        'readme',
-        'description',
-    )
-    DOC_SUFFIX = {
-        '.md', '.rst', '.txt', '.psf', '.html', '.htm',
-        '.mit', '.bsd', '.apache', '.apache2', '.lesser'
-    }
-    for file in root.iter_files(recursive=True):
-        name = file.name.lower()
-        ext = file.suffix.lower()
-        if ext in KEEP_EXT:
-            continue
-
-        if name.startswith(license_file):
-            if not ext or ext in DOC_SUFFIX:
-                rm(file)
+    cleanup_doc_files(root)
 
     rmtree(root / 'scipy/linalg/src/id_dist/doc')
     rm(root / 'scipy/HACKING.rst.txt')
     rm(root / 'scipy/INSTALL.rst.txt')
     rm(root / 'scipy/THANKS.txt')
     rmtree(root / 'scipy/linalg/src/id_dist/doc')
+
+
+def cleanup_empty_folders(root: PathStr):
+    """
+    Remove folders that were emptied after their files were removed
+
+    Args:
+        root: path to the folder tree to clean
+    """
+    print(f'Cleanup empty folders: {root}')
+    # iter_folders() yields a folder before its subfolders, iterate in reverse
+    # so a subfolder is removed before its parent is checked
+    for path in reversed(list(iter_folders(root, recursive=True))):
+        if folder_rmtree_empty(path):
+            print(f'rmdir {path}')
 
 
 def find_test_file(root: PathStr):
@@ -297,10 +393,17 @@ def cleanup(root: str):
 
     # python
     cleanup_pycache(root)
+    cleanup_pdb(root)
     cleanup_python_lib(root / 'toolkit/Lib')
-    cleanup_python_packages(root / 'toolkit/Lib/site-packages')
-    cleanup_license(root / 'toolkit/Lib/site-packages')
-    # find_test_file(root / 'toolkit/Lib/site-packages')
+    cleanup_tcl(root / 'toolkit/tcl')
+    site_packages = root / 'toolkit/Lib/site-packages'
+    cleanup_python_packages(site_packages)
+    cleanup_license(site_packages)
+    # The standard library ships documentation too, e.g. the CREDITS.txt and
+    # the NEWS.txt of idlelib, the README of distutils
+    cleanup_doc_files(root / 'toolkit/Lib')
+    cleanup_empty_folders(site_packages)
+    # find_test_file(site_packages)
 
     # electron
     cleanup_electron(root)
