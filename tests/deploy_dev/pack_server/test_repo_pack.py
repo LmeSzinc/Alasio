@@ -44,6 +44,10 @@ from alasio.logger import logger
 from alasio.testing.filesystem import fs  # noqa: F401
 from tests.deploy_dev.pack_server.conftest import join_path
 
+pytestmark = [
+    pytest.mark.parallel,
+]
+
 # rules of the mock repos: text files are lf, notes and guides are crlf
 GITATTRIBUTES = (
     b'*.py text eol=lf\n'

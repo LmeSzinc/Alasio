@@ -28,6 +28,10 @@ from tests.deploy_dev.pack_server.publish.conftest import (
     CHANNEL, REMOTE_PREFIX, age_objects, fill, make_remote, make_store
 )
 
+pytestmark = [
+    pytest.mark.parallel,
+]
+
 PREFIX = f'{REMOTE_PREFIX}/{CHANNEL}/'
 GRACE = 3600
 

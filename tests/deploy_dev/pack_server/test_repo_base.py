@@ -26,6 +26,11 @@ from tests.deploy_dev.pack_server.conftest import join_path
 from tests.deploy_dev.pack_server.test_repo import PROXY, make_config, make_proxy_config, make_repo
 
 
+pytestmark = [
+    pytest.mark.parallel,
+]
+
+
 class FakeClient:
     """
     A client of the tests: it sends nothing and records the close of the step.

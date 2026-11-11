@@ -21,6 +21,11 @@ from alasio.testing.filesystem import fs  # noqa: F401
 raw_check = check_run_dir.__wrapped__
 
 
+pytestmark = [
+    pytest.mark.parallel,
+]
+
+
 @pytest.fixture
 def root(fs, monkeypatch):
     """

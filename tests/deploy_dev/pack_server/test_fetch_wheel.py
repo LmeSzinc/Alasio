@@ -32,6 +32,10 @@ from alasio.ext.path import PathStr
 from alasio.logger import logger
 from alasio.testing.filesystem import fs  # noqa: F401
 
+pytestmark = [
+    pytest.mark.parallel,
+]
+
 # folder of the downloaded wheels in the workspace of the tests, see
 # RepoBase.wheel_cache_folder
 CACHE_FOLDER = '.wheel_cache'

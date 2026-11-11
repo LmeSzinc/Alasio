@@ -26,6 +26,10 @@ from tests.deploy_dev.pack_server.test_repo import (
     PROVIDED_URL, Repo as RepoFlow, entry_source, make_config, make_repo, register_wheels, requirement, run_commit
 )
 
+pytestmark = [
+    pytest.mark.parallel,
+]
+
 # folder of the workspace of the config in the run directory
 WORKSPACE = 'pack/Author_Repo_master'
 

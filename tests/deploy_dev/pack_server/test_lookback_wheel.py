@@ -22,6 +22,11 @@ from alasio.git.mock.mock_repo import MockGitRepo
 from alasio.logger import logger
 
 
+pytestmark = [
+    pytest.mark.parallel,
+]
+
+
 def pin(name, version, source=''):
     """
     Build the pin a dependency file of the mock repo asks for.

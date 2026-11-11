@@ -23,6 +23,10 @@ from alasio.ext.path.atomic import atomic_write, file_read_bytes
 from alasio.git.mock.mock_repo import MockGitRepo
 from alasio.testing.filesystem import fs  # noqa: F401
 
+pytestmark = [
+    pytest.mark.parallel,
+]
+
 # the builtin .gitattributes of the library, the pack encoders read it from
 # env.ALASIO_ROOT to resolve the eol of the files
 BUILTIN_GITATTRIBUTES = env.ALASIO_ROOT.joinpath('.gitattributes').atomic_read_bytes()

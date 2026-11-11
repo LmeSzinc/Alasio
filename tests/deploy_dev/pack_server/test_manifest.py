@@ -23,6 +23,10 @@ from alasio.ext.path.atomic import file_read_bytes
 from alasio.logger import logger
 from alasio.testing.filesystem import fs  # noqa: F401
 
+pytestmark = [
+    pytest.mark.parallel,
+]
+
 # a tmp file of an interrupted atomic write, the shape is_tmp_file() accepts
 TMP_FILE = 'packrepo/latest.pack.sTD2kF.tmp'
 

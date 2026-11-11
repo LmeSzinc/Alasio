@@ -22,6 +22,10 @@ from alasio.ext.path import PathStr
 from alasio.logger import logger
 from alasio.testing.filesystem import fs  # noqa: F401
 
+pytestmark = [
+    pytest.mark.parallel,
+]
+
 FILE = 'LmeSzinc_AzurLaneAutoScript.yaml'
 
 

@@ -41,6 +41,10 @@ from tests.deploy_dev.pack_server.test_repo import (
     register_wheels, requirement
 )
 
+pytestmark = [
+    pytest.mark.parallel,
+]
+
 # folder of the workspace of the config in the run directory
 WORKSPACE = 'pack/Author_Repo_master'
 

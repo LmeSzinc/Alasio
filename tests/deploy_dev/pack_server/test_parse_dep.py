@@ -18,6 +18,11 @@ from alasio.deploy_dev.pack_server.parse_dep import DepInfo, PyprojectParser, Re
 from alasio.logger import logger
 
 
+pytestmark = [
+    pytest.mark.parallel,
+]
+
+
 def parse_requirements(content):
     """
     dict_deps of a requirements content.

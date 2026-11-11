@@ -24,6 +24,10 @@ from alasio.git.repo import GitRepo
 from alasio.logger import logger
 from alasio.testing.filesystem import fs  # noqa: F401
 
+pytestmark = [
+    pytest.mark.parallel,
+]
+
 REMOTE = 'https://github.com/Author/Repo'
 
 CONFIG = PackRepoModel(

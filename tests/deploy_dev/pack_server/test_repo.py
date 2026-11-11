@@ -40,6 +40,10 @@ from tests.deploy_dev.pack_server.conftest import join_path
 # every commit, demo is pinned but is not a name the entry declares, so it gets
 # no pack, and msgspec is provided to pip with the wheels of its index
 
+pytestmark = [
+    pytest.mark.parallel,
+]
+
 # base url of the mock mirror, the index the pins of the dependency files are
 # annotated with: a compiled dependency file annotates every pin with the index
 # it was resolved from
@@ -577,7 +581,10 @@ class TestRun:
     def test_no_dependency(self, fs, run_dir, mirror):
         """A repo whose entry declares no pin still publishes the tree packs."""
         with logger.mock_capture_writer() as capture:
-            gen = Repo(make_repo(entry=None), make_config())
+            # the client of the mirror: the step has no wheel to fetch, and a
+            # real client would be built against the real filesystem the fake
+            # one hides (its version lookup reads the site-packages)
+            gen = Repo(make_repo(entry=None), make_config(), client=mirror.client)
             assert gen.run() is None
         assert capture.concat() == """\
 ---------------------------------------------- WHEELS ----------------------------------------------

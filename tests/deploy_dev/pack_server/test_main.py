@@ -21,6 +21,10 @@ from alasio.logger import logger
 from alasio.testing.filesystem import fs  # noqa: F401
 from tests.deploy_dev.pack_server.conftest import use_memory_lock
 
+pytestmark = [
+    pytest.mark.parallel,
+]
+
 FILE = 'LmeSzinc_AzurLaneAutoScript_master.yaml'
 OTHER = 'LmeSzinc_StarRailCopilot_master.yaml'
 THIRD = 'LmeSzinc_Alasio_master.yaml'

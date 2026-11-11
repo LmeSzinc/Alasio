@@ -15,6 +15,10 @@ from alasio.git.mock.mock_repo import MockGitRepo
 from alasio.git.stage.hashobj import blob_hash
 from alasio.logger import logger
 
+pytestmark = [
+    pytest.mark.parallel,
+]
+
 DAY = 86400
 
 

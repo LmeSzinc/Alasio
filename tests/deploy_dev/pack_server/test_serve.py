@@ -25,6 +25,10 @@ from alasio.ext import env
 from alasio.ext.path import PathStr
 from alasio.testing.filesystem import fs  # noqa: F401
 
+pytestmark = [
+    pytest.mark.parallel,
+]
+
 # folder of the packs of the tests, one config of the run directory
 FOLDER_NAME = 'Author_Repo_master'
 

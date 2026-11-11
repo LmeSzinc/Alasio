@@ -41,6 +41,10 @@ from tests.deploy_dev.pack.conftest import MemoryLock, MockServerFile
 from tests.deploy_dev.pack_server.conftest import join_path, run_dir  # noqa: F401
 from tests.deploy_dev.pack_server.test_fetch_wheel import MockMirror
 
+pytestmark = [
+    pytest.mark.parallel,
+]
+
 # The mod of the scenario
 MOD = 'DepsMod'
 # The index the pins are resolved from: the '# from' annotation of a compiled
