@@ -9,6 +9,7 @@ file, the restore after the block, and the refusal of a name that is not a
 single file name.
 """
 
+import os
 import sys
 from datetime import date
 
@@ -31,6 +32,22 @@ def log_path(name):
         PathStr: xxx/log/{date}_{name}.txt
     """
     return PathStr.new(env.PROJECT_ROOT).joinpath('log').joinpath(f'{TODAY}_{name}.txt')
+
+
+def program_path(*parts):
+    """
+    The path a program file has in sys.argv[0] on this platform.
+
+    The value is always a native path: a windows one on windows and a posix one
+    everywhere else, which is what the interpreter puts in argv[0].
+
+    Args:
+        parts (str): Components below the root
+
+    Returns:
+        str: Absolute path of the program
+    """
+    return os.path.join(os.sep, *parts)
 
 
 class TestLogFile(BaseLoggerTest):
@@ -169,12 +186,12 @@ class TestModuleName(BaseLoggerTest):
 
     @pytest.mark.parametrize('argv, expected', [
         # python -m a.b: argv[0] is the path of the module file
-        ([r'E:\pack\alasio\deploy_dev\pack_server\main.py'], 'main'),
+        ([program_path('pack', 'alasio', 'deploy_dev', 'pack_server', 'main.py')], 'main'),
         # python -m a: argv[0] is the __main__.py of the package, whose stem
         # says nothing, the folder names the program
-        ([r'E:\pack\alasio\deploy_dev\pack_server\__main__.py'], 'pack_server'),
+        ([program_path('pack', 'alasio', 'deploy_dev', 'pack_server', '__main__.py')], 'pack_server'),
         # a script run by path
-        ([r'E:\pack\run_pack_server.py'], 'run_pack_server'),
+        ([program_path('pack', 'run_pack_server.py')], 'run_pack_server'),
         # python -c and a script from stdin have no module to name
         (['-c'], '-c'),
     ])
@@ -188,7 +205,7 @@ class TestModuleName(BaseLoggerTest):
 
     def test_the_default_file_is_named_after_the_module(self, monkeypatch):
         """Without a block, a line goes to the file of the program."""
-        monkeypatch.setattr(sys, 'argv', [r'E:\pack\pack_server\main.py'])
+        monkeypatch.setattr(sys, 'argv', [program_path('pack', 'pack_server', 'main.py')])
         writer = LogWriter()
         writer.set_name(None)
         assert writer.name == 'main'
@@ -196,7 +213,7 @@ class TestModuleName(BaseLoggerTest):
 
     def test_a_block_goes_back_to_the_file_of_the_program(self, monkeypatch):
         """After the block the lines land in the file of the program again."""
-        monkeypatch.setattr(sys, 'argv', [r'E:\pack\pack_server\main.py'])
+        monkeypatch.setattr(sys, 'argv', [program_path('pack', 'pack_server', 'main.py')])
         writer = LogWriter()
         writer.set_name(None)
         with logger.log_file('a_config'):

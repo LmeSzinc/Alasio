@@ -69,6 +69,36 @@ CHUNK_SIZE = 1 << 20
 _TCP = (socket.AF_INET, socket.SOCK_STREAM)
 
 
+def _is_abspath(path):
+    """
+    Check whether a path is absolute, with the same answer on every python
+    version.
+
+    os.path.isabs() is not asked: on Windows a rooted path without a drive
+    (``\\resources\\app.asar``) counted as absolute up to python 3.12 and
+    became relative in python 3.13, so one and the same environment would pass
+    or fail the preflight depending on the interpreter that runs it. The rule
+    is the one the rest of the project uses (alasio.ext.path.is_abspath),
+    restated here because this module imports the standard library only:
+
+    - POSIX: the path starts at the root, '/'
+    - Windows: a rooted path (the root of the current drive, a UNC share) or a
+      drive with a root after it ('C:/', 'C:/a'); a drive relative path
+      ('C:a') is not absolute
+
+    Args:
+        path (str): Path to check, normalized or not
+
+    Returns:
+        bool: True when the path is absolute
+    """
+    if os.sep != '\\':
+        return path.startswith('/')
+    if path[1:2] == ':' and path[:1].isalpha():
+        return path[2:3] in ('/', '\\', '')
+    return path.startswith(('/', '\\'))
+
+
 class PreflightError(Exception):
     """The input of the updater is missing or malformed, nothing was touched."""
 
@@ -650,7 +680,7 @@ class ElectronUpdater:
         """
         if not value:
             raise PreflightError(f'{name} is not set')
-        if not os.path.isabs(value):
+        if not _is_abspath(value):
             raise PreflightError(f'{name} must be absolute: {value!r}')
         return value
 

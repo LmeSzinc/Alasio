@@ -760,7 +760,11 @@ class TestRun:
         monkeypatch.setattr(updater.ElectronUpdater, 'wait_targets', lambda self, interval=0.1: [])
         error = PermissionError(13, 'permission denied')
 
-        def denied(path):
+        # The whole signature of os.stat, keywords included: pytest stats the
+        # source file of every frame while it formats a failure, and a stub
+        # that takes one positional argument raises TypeError there instead,
+        # which kills the worker and takes the whole run down with it
+        def denied(*args, **kwargs):
             raise error
         monkeypatch.setattr(os, 'stat', denied)
         log = self.make_log(monkeypatch)
