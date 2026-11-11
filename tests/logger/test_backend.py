@@ -55,12 +55,12 @@ class BaseLoggerTest:
         """
         # Store original env values
         original_root = env.PROJECT_ROOT
-        original_electron = env.ELECTRON
+        original_electron = env.ELECTRON_PID
 
         # Create temp directory for test logs
         self.test_dir = PathStr.new(__file__).uppath(1)
         env.PROJECT_ROOT = self.test_dir
-        env.ELECTRON = ""
+        env.ELECTRON_PID = ""
 
         # Create mock backend
         self.mock_backend = MockBackendBridge()
@@ -82,7 +82,7 @@ class BaseLoggerTest:
         writer.close()
 
         env.PROJECT_ROOT = original_root
-        env.ELECTRON = original_electron
+        env.ELECTRON_PID = original_electron
 
         log_dir = self.test_dir / 'log'
         log_dir.folder_rmtree()

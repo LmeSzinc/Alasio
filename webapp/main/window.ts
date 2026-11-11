@@ -9,11 +9,15 @@ import {
   IPC_WINDOW_MINIMIZE,
 } from "../shared/ipc";
 import { appState } from "./app-state";
-import { ShutdownStage, shutdownBackend } from "./backend";
+import { ShutdownStage, setQuittingProbe, shutdownBackend } from "./backend";
 import { type StartupWindowMode, getStartupWindowMode } from "./startup-args";
 
 let mainWindow: BrowserWindow | null = null;
 let isQuitting = false;
+
+// The relaunch path of the backend asks whether the user is already closing
+// the app before it takes the exit over (see backend.ts:requestRelaunch)
+setQuittingProbe(() => isQuitting);
 
 export function createWindow(): BrowserWindow {
   // The window is created hidden in production and revealed once the

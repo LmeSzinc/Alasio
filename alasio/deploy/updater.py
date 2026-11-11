@@ -12,6 +12,14 @@ imports it too (for ``start_time``), and the two processes do not share one.
 constructor, and every step of the flow (wait, replace, relaunch) is a method
 of it, so the state a step works on is the object it is called on.
 
+This process copies nothing. The archive it installs was written next to the
+installed one by the backend, before the chain came down, together with the
+digest handed over in the environment: the bytes are pinned at the moment the
+relaunch is decided, while a failure is still recoverable. Here the archive is
+read once to prove it is still the agreed one, and then renamed over the
+installed file -- os.replace is atomic and the two paths share a directory, so
+there is no intermediate copy to make, retry or clean up.
+
 The process identity helpers are a stdlib translation of psutil 7.2.2:
 
 - Windows: ``psutil_proc_times()`` in ``arch/windows/proc.c``
@@ -456,7 +464,7 @@ class Log:
     - ``INFO``: the flow went on, or it stopped without touching anything
       because it was told to (the relaunch was withdrawn).
     - ``WARNING``: the application was started, but not from the new build:
-      the archive could not be staged or swapped, or the goal could not be
+      the archive could not be read or swapped, or the goal could not be
       read. The user runs the previous version and can try again.
     - ``ERROR``: the flow stopped on a broken input, a chain that never came
       down, or a new build that would not start. Nothing is running.
@@ -581,7 +589,7 @@ class ElectronUpdater:
     """
 
     __slots__ = (
-        'dst', 'src', 'temp', 'exe', 'cwd', 'argv', 'targets', 'sha256', 'resume_file',
+        'dst', 'src', 'exe', 'cwd', 'argv', 'targets', 'sha256', 'resume_file',
         'token', 'timeout', 'env', 'log',
     )
 
@@ -601,11 +609,8 @@ class ElectronUpdater:
         if os.path.basename(self.dst) != 'app.asar':
             raise PreflightError(f'ALASIO_APP_ASAR must point at app.asar: {self.dst!r}')
         # the staged archive lives next to the installed one, so os.replace
-        # stays on the same volume
+        # stays on one volume and needs no copy of its own
         self.src = os.path.join(os.path.dirname(self.dst), 'new-app.asar')
-        # where the staged archive is copied to, next to the target so that
-        # os.replace stays atomic; the pid keeps two updaters apart
-        self.temp = f'{self.dst}.tmp-{os.getpid()}'
         self.exe = self._as_path(environ.get('ALASIO_APP_EXE', ''), 'ALASIO_APP_EXE')
         self.cwd = environ.get('ALASIO_APP_CWD', '')
         if not self.cwd:
@@ -635,18 +640,19 @@ class ElectronUpdater:
         #
         # Dropped:
         # - ALASIO_RELAUNCH_* / ALASIO_RESUME_FILE: this run's own input.
-        # - ALASIO_APP_*: electron is their only writer and rewrites all five
-        #   at startBackend(), so forwarding them adds nothing and is how a
-        #   stale path would survive into the next generation (an older
-        #   electron, e.g. after a downgrade, does not rewrite them at all).
-        # - ELECTRON: the mode of the old chain; the new supervisor sets it.
+        # - ALASIO_APP_*: the chain writes them (electron the install context
+        #   and its own pid) and rewrites them at the next start, so forwarding
+        #   them adds nothing and is how a stale path would survive into the next
+        #   generation (an older electron, e.g. after a downgrade, does not
+        #   rewrite them at all). The prefix also drops the host pid, which is
+        #   the electron mode switch of the next generation.
         # Kept: ALASIO_RESUME_TOKEN (must reach the new backend) and the
         # general environment above.
         self.env = {
             name: value
             for name, value in environ.items()
             if not name.startswith(('ALASIO_RELAUNCH_', 'ALASIO_APP_'))
-            and name not in ('ALASIO_RESUME_FILE', 'ELECTRON')
+            and name != 'ALASIO_RESUME_FILE'
         }
         self.env['ALASIO_RESUME_TOKEN'] = self.token
         self.log = Log(self.log_path()) if log is None else log
@@ -843,56 +849,32 @@ class ElectronUpdater:
                 digest.update(chunk)
         return digest.hexdigest()
 
-    def stage(self):
+    def verify(self):
         """
-        Copy the staged archive to the temporary file, hashing as it copies.
+        Check the staged archive against the digest this run was started with.
 
-        The copy is the only pass over the source content: the digest is
-        computed from the bytes actually written, so a source that changed
-        since the preflight is caught here without reading it twice. The
-        temporary file belongs to this process, so the retries of replace()
-        never copy again.
+        The bytes were pinned before the chain came down: the backend wrote the
+        package archive next to the installed one and handed over its digest
+        with this process, so there is nothing to prepare here. This is a read,
+        never a copy: the install is a rename of the very file that was
+        checked, and checking it twice (before waiting, and again before the
+        rename) costs one read of a few hundred kilobytes each time.
 
         Returns:
-            str: Path of the temporary file to install, None when the source
-                is gone (another updater consumed it)
+            bool: True when the staged archive matches, False when it is gone
+                (another updater installed the very same content)
 
         Raises:
-            OSError: The copy failed
-            PreflightError: The copied content does not match the digest
+            OSError: The staged archive cannot be read
+            PreflightError: The bytes are not the ones that were agreed on
         """
-        temp = self.temp
-        digest = hashlib.sha256()
         try:
-            fsrc = open(self.src, 'rb')
+            digest = self.sha256_file(self.src)
         except FileNotFoundError:
-            # another updater already installed the very same content
-            return None
-        with fsrc, open(temp, 'wb') as fdst:
-            while True:
-                chunk = fsrc.read(CHUNK_SIZE)
-                if not chunk:
-                    break
-                digest.update(chunk)
-                fdst.write(chunk)
-        if digest.hexdigest() != self.sha256:
-            self._discard(temp)
-            raise PreflightError(
-                f'{self.src} is {digest.hexdigest()}, expected {self.sha256}')
-        return temp
-
-    @staticmethod
-    def _discard(path):
-        """
-        Remove a file, ignoring every error.
-
-        Args:
-            path (str): File to remove
-        """
-        try:
-            os.remove(path)
-        except OSError:
-            pass
+            return False
+        if digest != self.sha256:
+            raise PreflightError(f'{self.src} is {digest}, expected {self.sha256}')
+        return True
 
     def wait_targets(self, interval=POLL_INTERVAL):
         """
@@ -923,31 +905,32 @@ class ElectronUpdater:
             if time.monotonic() >= deadline:
                 return pending
 
-    def replace(self, temp, attempts=5):
+    def replace(self, attempts=5):
         """
-        Install the staged temporary file over the installed archive.
+        Move the staged archive over the installed one.
 
-        Only the swap is retried: os.replace is atomic (the target is either
-        the old file or the new one), so a failure leaves the installed
-        archive untouched and the next attempt has nothing to redo but the
-        swap itself. There is no backup to keep for the same reason: the old
-        content is only ever replaced in one step, never overwritten in
-        place, so a failed installation is simply the old version still in
-        place.
+        The staged file sits in the directory of the destination, so the swap
+        is one rename on one volume and os.replace is atomic on every
+        platform: the installed archive is either the old file or the new one,
+        never a mix, and a failure leaves it untouched. The rename consumes the
+        staged file, which is the wanted end state -- a copy left behind would
+        be compared against by the next run. Nothing is copied here, so a retry
+        has nothing else to redo.
 
         Args:
-            temp (str): Temporary file produced by stage()
             attempts (int): Attempts before the failure is reported. Defaults
                 to 5.
 
         Raises:
+            FileNotFoundError: The staged archive is gone (another updater
+                installed it first)
             OSError: The swap failed after every attempt
         """
         delay = 0.2
         error = None
         for attempt in range(attempts):
             try:
-                os.replace(temp, self.dst)
+                os.replace(self.src, self.dst)
             except FileNotFoundError:
                 # nothing left to install: retrying cannot create the file
                 raise
@@ -957,9 +940,6 @@ class ElectronUpdater:
                     time.sleep(delay)
                     delay *= 2
             else:
-                # the staged archive is consumed: leaving it behind would make
-                # the next preflight compare against a stale copy
-                self._discard(self.src)
                 return
         raise error
 
@@ -1057,12 +1037,15 @@ class ElectronUpdater:
         log = self.log
         log.info(f'preflight: {self.src} -> {self.dst}')
         try:
-            digest = self.sha256_file(self.src)
+            staged = self.verify()
+        except PreflightError as e:
+            log.error(f'preflight: {e}, not installing')
+            return EXIT_PREFLIGHT
         except OSError as e:
             log.error(f'preflight: cannot read {self.src}: {e}')
             return EXIT_PREFLIGHT
-        if digest != self.sha256:
-            log.error(f'preflight: {self.src} is {digest}, expected {self.sha256}, not staging')
+        if not staged:
+            log.error(f'preflight: {self.src} is gone, nothing to install')
             return EXIT_PREFLIGHT
 
         pending = self.wait_targets()
@@ -1084,22 +1067,25 @@ class ElectronUpdater:
 
         installed = False
         try:
-            temp = self.stage()
+            staged = self.verify()
         except PreflightError as e:
             log.warning(f'replace: {e}, keeping the installed one')
         except OSError as e:
-            log.warning(f'replace: cannot stage {self.src}: {e}')
+            log.warning(f'replace: cannot read {self.src}: {e}')
         else:
-            if temp is None:
-                # another updater consumed the staged archive: it installed
-                # the very same content, so there is nothing left to do
+            if not staged:
+                # another updater consumed the staged archive: it installed the
+                # very same content, so there is nothing left to do here
                 log.info(f'replace: {self.src} already consumed, leaving {self.dst} alone')
                 installed = True
             else:
                 try:
-                    self.replace(temp)
+                    self.replace()
+                except FileNotFoundError:
+                    log.info(f'replace: {self.src} was consumed by another updater')
+                    installed = True
                 except OSError as e:
-                    log.warning(f'replace: {temp} -> {self.dst} failed: {e}')
+                    log.warning(f'replace: {self.src} -> {self.dst} failed: {e}')
                 else:
                     installed = True
                     log.info(f'replace: installed {self.dst}')

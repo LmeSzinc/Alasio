@@ -120,7 +120,8 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
  * The backend now enforces the electron layer: the
  * deployment has no password configured, so the global gate (rule A)
  * only lets requests carrying a valid electron token through. The test
- * backend is therefore spawned with --electron and the token announced
+ * backend is therefore spawned with the host pid in the environment and the
+ * token announced
  * on stdout is injected into the ws handshake header.
  */
 class HeaderedWebSocket extends globalThis.WebSocket {
@@ -166,18 +167,18 @@ async function waitFor(
 }
 
 /**
- * Spawns the backend through gui.py (same entry as the desktop app,
- * with --electron so the token announcements and the electron layer are
- * exercised) and resolves once hypercorn reports "Running on http://...".
- * The output listeners stay attached so the pipe cannot fill up.
+ * Spawns the backend through gui.py (same entry as the desktop app, with the
+ * host pid in the environment so the token announcements and the electron
+ * layer are exercised) and resolves once hypercorn reports "Running on
+ * http://...". The output listeners stay attached so the pipe cannot fill up.
  */
 function startBackend(python: string, port: number): Promise<ChildProcess> {
   return new Promise((resolve, reject) => {
-    const proc = spawn(python, ["gui.py", "--host", "127.0.0.1", "--port", String(port), "--electron"], {
+    const proc = spawn(python, ["gui.py", "--host", "127.0.0.1", "--port", String(port)], {
       cwd: REPO_ROOT,
       stdio: ["pipe", "pipe", "pipe"],
       windowsHide: true,
-      env: { ...process.env, PYTHONUNBUFFERED: "1" },
+      env: { ...process.env, PYTHONUNBUFFERED: "1", ALASIO_APP_ELECTRON_PID: String(process.pid) },
     });
 
     let stdout = "";

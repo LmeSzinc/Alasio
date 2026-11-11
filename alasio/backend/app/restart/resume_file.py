@@ -22,6 +22,10 @@ File protocol:
   announced is never consumed (the read requires the token from the
   credential);
 - the file is read at most once and always deleted right after the read;
+- the publication can be committed (commit()): from then on the file is the
+  goal signal of the app.asar updater, which observes it from another process,
+  and no withdrawal of this process touches it again (rollback_commit() undoes
+  a commit whose relaunch request never left this process);
 - the publication and the withdrawal are two critical sections of one lock
   held by the tasks (ResumeFiles._publication_lock): the publication writes the
   file AND announces its credential, the withdrawal removes the file AND
@@ -122,6 +126,9 @@ class ResumeFiles:
         self.file: "Optional[PathStr]" = None
         # owner of the published file
         self.owner = ''
+        # True from commit() on: the file is the goal signal of the updater, so
+        # the withdrawal paths of this process leave it alone
+        self.committed = False
 
     def reset(self):
         """
@@ -129,6 +136,7 @@ class ResumeFiles:
         """
         self.file = None
         self.owner = ''
+        self.committed = False
 
     @property
     def folder(self) -> PathStr:
@@ -303,11 +311,20 @@ class ResumeFiles:
         only the file this process published is removed, a foreign file in the
         folder is never touched.
 
+        A committed publication is never withdrawn: from the commit on, the
+        file is not a description of this process any more but the goal signal
+        of the updater that is already running, and the shutdown of the chain
+        (the host closes this process) must not take it away. The cancel paths
+        therefore become no-ops as well -- by the time the commit happened the
+        relaunch is out of the user's hands.
+
         Returns:
             PathStr | None: The removed file, None when there was nothing to
-                remove (nothing published)
+                remove (nothing published, or the publication is committed)
         """
         async with self._publication_lock:
+            if self.committed:
+                return None
             file = self.file
             if file is None:
                 # nothing of this process to withdraw: no file of ours to
@@ -320,6 +337,36 @@ class ResumeFiles:
             return None
         logger.info(f'[Restart] Resume file removed by the withdraw: {file}')
         return file
+
+    def commit(self):
+        """
+        Make the publication final: the file stays whatever the shutdown does.
+
+        Called by the handover right before it asks the host to shut the chain
+        down: from then on the file is the goal signal of the updater, so the
+        stop that the shutdown delivers (which runs the abort path of the flow
+        model) must not remove it.
+
+        Returns:
+            bool: True when a publication was committed, False when there was
+                nothing published (the abort path got here first: the caller
+                must not ask for the relaunch)
+        """
+        if self.file is None:
+            return False
+        self.committed = True
+        return True
+
+    def rollback_commit(self):
+        """
+        Undo a commit whose relaunch request never left this process.
+
+        A failed send is the one case where the process knows the host was
+        never told: nothing can consume the file, so the ordinary failure path
+        may withdraw it again. Once the send succeeded, the outcome is unknown
+        and the file stays (see commit).
+        """
+        self.committed = False
 
     def _remove_and_retract(self, file):
         """
@@ -363,7 +410,7 @@ class ResumeFiles:
             ResumeRecord | None: The verified record, or None (no credential,
                 no file, checksum mismatch, malformed payload)
         """
-        credential = os.environ.get(RESUME_TOKEN_ENV, '')
+        credential = os.environ.pop(RESUME_TOKEN_ENV, '')
         if not credential:
             return None
         token, sep, checksum = credential.partition('-')

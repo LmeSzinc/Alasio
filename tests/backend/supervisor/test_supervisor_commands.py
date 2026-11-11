@@ -13,6 +13,20 @@ pytestmark = [
 ]
 
 
+@pytest.fixture(autouse=True)
+def no_electron_host(monkeypatch):
+    """
+    Keep the electron switch out of the test process.
+
+    A supervisor reads ALASIO_APP_ELECTRON_PID at construction: a value
+    inherited from the environment of the test runner would put every
+    supervisor of this worker into electron mode (token announcements on
+    stdout), which the tests do not expect. TestElectronMode sets its own
+    value after this fixture ran.
+    """
+    monkeypatch.delenv('ALASIO_APP_ELECTRON_PID', raising=False)
+
+
 def wait_stdin_listener(supervisor, timeout=2.0):
     """
     Wait until the stdin listener thread of the supervisor is alive
@@ -1268,3 +1282,106 @@ class TestGracefulShutdown:
         supervisor.graceful_shutdown()
 
         assert supervisor.process is None
+        assert supervisor.parent_conn is None
+
+
+class TestHandleRelaunch:
+    """The whole-application relaunch request of the backend."""
+
+    @staticmethod
+    def capture_stdout(monkeypatch):
+        """
+        Args:
+            monkeypatch (pytest.MonkeyPatch): Fixture of the test
+
+        Returns:
+            CaptureStream: Everything the supervisor printed
+        """
+        from alasio.logger.writer import CaptureStream
+
+        capture = CaptureStream()
+        monkeypatch.setattr(sys, 'stdout', capture)
+        return capture
+
+    def test_asks_the_host_with_the_current_token(self, monkeypatch):
+        """The request is authenticated: any worker can write to this stdout."""
+        capture = self.capture_stdout(monkeypatch)
+        supervisor = Supervisor()
+        token = 'a' * 64
+        supervisor.token_manager._window.append(token)
+
+        supervisor.handle_backend_message(b'command:relaunch')
+
+        assert supervisor.relaunch_requested is True
+        # the relaunch is not a restart and not a stop: the host owns the exit
+        assert supervisor.restart_requested is False
+        assert supervisor.stop_requested is False
+        assert supervisor.sigint_count == 0
+        assert capture.any_contains(f'[Supervisor] relaunch:{token}')
+
+    def test_without_an_announced_token_nothing_is_asked(self, monkeypatch):
+        """Not in electron mode: there is no host to ask."""
+        capture = self.capture_stdout(monkeypatch)
+        supervisor = Supervisor()
+
+        supervisor.handle_backend_message(b'command:relaunch')
+
+        assert supervisor.relaunch_requested is True
+        assert not capture.any_contains('[Supervisor] relaunch:')
+
+    def test_the_request_is_not_an_unknown_command(self, monkeypatch):
+        """The message has a handler of its own."""
+        capture = self.capture_stdout(monkeypatch)
+        supervisor = Supervisor()
+
+        supervisor.handle_backend_message(b'command:relaunch')
+
+        assert not capture.any_contains('Unknown command')
+
+
+class TestElectronMode:
+    """The electron mode switch: the host pid in the environment."""
+
+    @staticmethod
+    def _record_spawn_env(monkeypatch):
+        """
+        Patch multiprocessing.Process.start to record the environment state
+        at spawn time without actually spawning a child.
+
+        Args:
+            monkeypatch (pytest.MonkeyPatch): Fixture of the test
+
+        Returns:
+            dict: The environment seen at spawn time
+        """
+        import multiprocessing.process as mp_process
+
+        observed = {}
+
+        def recording_start(self):
+            observed.update(os.environ)
+
+        monkeypatch.setattr(mp_process.BaseProcess, 'start', recording_start)
+        return observed
+
+    def test_the_host_pid_is_the_switch(self, monkeypatch):
+        """Electron writes its own pid; the supervisor only reads it."""
+        monkeypatch.setenv('ALASIO_APP_ELECTRON_PID', '4242')
+        assert Supervisor().is_electron is True
+
+    def test_no_host_pid_is_no_electron_mode(self, monkeypatch):
+        """A hand-started supervisor has no host and generates no token."""
+        monkeypatch.delenv('ALASIO_APP_ELECTRON_PID', raising=False)
+        assert Supervisor().is_electron is False
+
+    def test_the_switch_is_not_rewritten_for_the_child(self, monkeypatch):
+        """The chain inherits the pid; the supervisor adds nothing."""
+        monkeypatch.setenv('ALASIO_APP_ELECTRON_PID', '4242')
+        supervisor, _ = make_supervisor_with_pipe()
+        observed = self._record_spawn_env(monkeypatch)
+
+        supervisor.start_backend([])
+
+        assert observed['ALASIO_APP_ELECTRON_PID'] == '4242'
+        # the old flag is gone from the chain
+        assert 'ELECTRON' not in observed

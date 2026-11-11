@@ -11,7 +11,7 @@ import threading
 import time
 
 from alasio.backend.entry import backend_process_entry
-from alasio.backend.mpipe.token_supervisor import SupervisorTokenManager
+from alasio.backend.mpipe.token_supervisor import PRINT_LOCK, SupervisorTokenManager
 
 
 def loop_until_timeout(timeout):
@@ -37,7 +37,8 @@ def mprint(*args, start=''):
         start (str): Prefix inserted before the [Supervisor] marker
     """
     try:
-        print(f'{start}[Supervisor]', *args)
+        with PRINT_LOCK:
+            print(f'{start}[Supervisor]', *args)
     except (AttributeError, OSError, ValueError):
         # stdout is missing, closed or its pipe is broken: drop the line
         pass
@@ -81,10 +82,11 @@ class Supervisor:
         # Communication pipe - supervisor's end only
         self.parent_conn: "multiprocessing.PipeConnection | None" = None
 
-        # Whether this supervisor was started with --electron. Only then
-        # tokens are generated / rotated / announced and ELECTRON=1 is set
-        # for the backend chain.
-        self.is_electron = False
+        # Whether this supervisor was started by electron. Only then are tokens
+        # generated / rotated / announced. Electron writes its own pid into the
+        # spawn environment and the whole chain inherits it, so the pid is the
+        # switch -- there is no separate command line flag any more.
+        self.is_electron = bool(os.environ.get('ALASIO_APP_ELECTRON_PID', ''))
 
         # Guards every parent_conn.send_bytes on the supervisor side:
         # rotation delivery (through the token manager), stdin forwarding
@@ -120,6 +122,13 @@ class Supervisor:
         # Set when a stop is requested through stdin, so the supervisor exits
         # after the backend is gone instead of restarting it
         self.stop_requested = False
+
+        # Set when the backend asks for a whole-application relaunch
+        # (command:relaunch): the updater it started replaces the electron
+        # archive and starts a new chain, so this supervisor must not restart
+        # the backend it is about to lose -- it exits once the backend is gone,
+        # whatever the reason of the exit turns out to be
+        self.relaunch_requested = False
 
         # One-shot resume credential (token-checksum) announced by the backend
         # through command:resume:<credential>. The next start_backend()
@@ -215,8 +224,8 @@ class Supervisor:
         # Note that we use daemon=False here, because backend needs to spawn workers
         # and python does not allow daemonic processes to have children
         # It's fine without daemon as backend will exit if pipe broken
-        # Token window for the new backend (empty without --electron: the
-        # backend token table stays empty and sensitive APIs are locked).
+        # Token window for the new backend (empty without an electron host:
+        # the backend token table stays empty and sensitive APIs are locked).
         tokens = self.token_manager.window()
         self.process = ctx.Process(
             target=backend_process_entry,
@@ -231,15 +240,11 @@ class Supervisor:
         # hang. The thread is restarted by recv_loop once the backend has
         # finished starting up, so buffered commands are not lost.
         self.stop_stdin_listener()
-        # ELECTRON=1 must be set before process.start(): multiprocessing
-        # spawn inherits the parent environment, so the whole chain
-        # (backend → worker → worker children) gets it. Only set in
-        # electron mode.
-        if self.is_electron:
-            os.environ['ELECTRON'] = '1'
-        # Inject the announced resume credential the same way: only write when
-        # the backend announced one, so an inherited value (e.g. passed down
-        # by an update relaunch) is never modified without an announcement.
+        # The announced resume credential is written into the environment before
+        # process.start(): multiprocessing spawn inherits the parent environment,
+        # so the backend child reads it. Only write when the backend announced
+        # one, so an inherited value (e.g. passed down by an update relaunch) is
+        # never modified without an announcement.
         if self.resume_token:
             os.environ['ALASIO_RESUME_TOKEN'] = self.resume_token
         try:
@@ -592,6 +597,17 @@ class Supervisor:
             # message arriving after the window already ended, where the
             # listener is up already and there is nothing to do.
             pass
+        elif msg == b'command:relaunch':
+            # The backend asks for a whole-application relaunch: the updater it
+            # started replaces the electron archive and starts a new chain. The
+            # host is told through an authenticated line (any worker can write
+            # to this stdout, so the token is what makes the request credible),
+            # and this supervisor never restarts the backend from here on --
+            # the host stops the chain, and a backend started by the restart
+            # path would race the updater for the same archive.
+            self.relaunch_requested = True
+            mprint('Backend requested relaunch, asking the host')
+            self.token_manager.announce_relaunch()
         elif msg.startswith(b'command:resume:'):
             # One-shot resume credential announcement (graceful restart or
             # crash takeover): the next start_backend() injects it into the
@@ -765,10 +781,9 @@ class Supervisor:
 
         mprint(f"Running on PID: {os.getpid()}")
 
-        # Electron mode: generate and announce T1, start the rotation
-        # thread. Without --electron no token is generated: the backend
-        # token table stays empty and sensitive APIs are locked.
-        self.is_electron = bool(args) and '--electron' in args
+        # Electron mode (tokens generated, rotated and announced) is decided by
+        # the host pid electron wrote into the spawn environment; without one
+        # the backend token table stays empty and sensitive APIs are locked.
         if self.is_electron:
             self.token_manager.init_token()
             self.token_manager.start_rotation()
@@ -802,6 +817,12 @@ class Supervisor:
                 # Stop was requested through stdin, exit without restarting
                 if self.stop_requested:
                     mprint("Stop requested through stdin, exiting")
+                    break
+
+                # A relaunch was requested: the updater is waiting for this
+                # chain to be gone and starts the next one itself
+                if self.relaunch_requested:
+                    mprint("Relaunch requested by the backend, exiting without restarting")
                     break
 
                 # Check if this was a startup failure

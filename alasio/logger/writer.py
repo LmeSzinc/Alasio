@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 class LogWriter(metaclass=Singleton):
     def __init__(self):
         self.create_date: "date | None" = None
-        self.is_electron = bool(env.ELECTRON)
+        self.is_electron = bool(env.ELECTRON_PID)
 
     @cached_property_threadsafe
     def backend(self) -> "BackendBridge | PseudoBackendBridge":

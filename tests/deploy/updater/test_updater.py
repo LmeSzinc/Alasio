@@ -402,58 +402,31 @@ class TestWaitTargets:
 
 
 class TestReplace:
-    """The installation of the staged archive, in two steps."""
+    """The installation of the staged archive: one rename, no copy."""
 
     def staged(self, fs, content=b'new'):
         """
-        Create the installed archive and a staged one, and stage the copy.
+        Create the installed archive and the staged one the backend left.
 
         Args:
             fs (FakeFilesystem): Fixture
             content (bytes): Content of the staged archive
 
         Returns:
-            "updater.ElectronUpdater": An updater whose temporary file is ready
+            "updater.ElectronUpdater": An updater whose source is ready
         """
         fs.create_file(DST, contents=b'old')
         fs.create_file(SRC, contents=content)
-        instance = make_updater(ALASIO_RELAUNCH_SHA256=hashlib.sha256(content).hexdigest())
-        temp = instance.stage()
-        assert temp == instance.temp
-        return instance
-
-    def test_stage_copies_and_hashes(self, fs):
-        """The temporary file holds the content and lives next to the target."""
-        instance = self.staged(fs)
-        temp = instance.temp
-        assert temp.startswith(DST)
-        assert temp != instance.src
-        with open(temp, 'rb') as f:
-            assert f.read() == b'new'
-
-    def test_stage_rejects_changed_content(self, fs):
-        """A source that does not match the digest is not copied into place."""
-        fs.create_file(DST, contents=b'old')
-        fs.create_file(SRC, contents=b'tampered')
-        instance = make_updater(ALASIO_RELAUNCH_SHA256=hashlib.sha256(b'new').hexdigest())
-        with pytest.raises(updater.PreflightError):
-            instance.stage()
-        assert not os.path.exists(instance.temp)
-
-    def test_stage_of_a_consumed_source(self, fs):
-        """A source that is already gone reports that somebody installed it."""
-        fs.create_file(DST, contents=b'old')
-        assert make_updater().stage() is None
+        return make_updater(ALASIO_RELAUNCH_SHA256=hashlib.sha256(content).hexdigest())
 
     def test_installs(self, fs):
-        """The target holds the new content, the temporary and staged files are gone."""
+        """The target holds the new content and the staged file is consumed."""
         instance = self.staged(fs)
-        instance.replace(instance.temp)
+        instance.replace()
         with open(DST, 'rb') as f:
             assert f.read() == b'new'
-        assert not os.path.exists(instance.temp)
-        # the staged archive is consumed, a stale copy would be compared by
-        # the next preflight
+        # the rename consumed the staged archive: a stale copy left behind
+        # would be compared against by the next run
         assert not os.path.exists(SRC)
         assert not os.path.exists(DST + '.old')
 
@@ -461,14 +434,18 @@ class TestReplace:
         """A target that does not exist yet is installed."""
         fs.create_file(SRC, contents=b'new')
         instance = make_updater(ALASIO_RELAUNCH_SHA256=hashlib.sha256(b'new').hexdigest())
-        temp = instance.stage()
-        assert temp == instance.temp
-        instance.replace(instance.temp)
+        instance.replace()
         with open(DST, 'rb') as f:
             assert f.read() == b'new'
 
+    def test_a_consumed_source_is_reported(self, fs):
+        """Another updater installed the very same content first."""
+        fs.create_file(DST, contents=b'old')
+        with pytest.raises(FileNotFoundError):
+            make_updater().replace()
+
     def test_retries_only_the_swap(self, fs, monkeypatch):
-        """A failing swap is retried, and the copy is not repeated."""
+        """A failing swap is retried and nothing is read or written again."""
         instance = self.staged(fs)
         calls = []
         real_replace = os.replace
@@ -478,19 +455,18 @@ class TestReplace:
             if len(calls) < 3:
                 raise PermissionError(13, 'in use', src)
             return real_replace(src, dst)
-        copies = []
+        opened = []
         real_open = open
 
         def counting_open(path, mode='r', *args, **kwargs):
-            if isinstance(path, str) and path == instance.src and 'r' in mode:
-                copies.append(path)
+            opened.append((path, mode))
             return real_open(path, mode, *args, **kwargs)
         monkeypatch.setattr(os, 'replace', flaky_replace)
         monkeypatch.setattr('builtins.open', counting_open)
-        instance.replace(instance.temp, attempts=5)
+        instance.replace(attempts=5)
         assert len(calls) == 3
-        # the source was read once, by stage(), never again by the retries
-        assert len(copies) == 0
+        # no copy is made anywhere: the retries are renames of the same file
+        assert opened == []
         with open(DST, 'rb') as f:
             assert f.read() == b'new'
 
@@ -504,10 +480,13 @@ class TestReplace:
             raise PermissionError(13, 'in use', src)
         monkeypatch.setattr(os, 'replace', broken_replace)
         with pytest.raises(OSError):
-            instance.replace(instance.temp, attempts=3)
+            instance.replace(attempts=3)
         assert len(calls) == 3
         with open(DST, 'rb') as f:
             assert f.read() == b'old'
+        # the staged archive is still there for a later run
+        with open(SRC, 'rb') as f:
+            assert f.read() == b'new'
 
 
 class TestRelaunchEnv:
@@ -671,7 +650,6 @@ class TestRun:
 """
         with open(DST, 'rb') as f:
             assert f.read() == b'new'
-        assert not os.path.exists(instance.temp)
         assert not os.path.exists(SRC)
         assert not os.path.exists(DST + '.old')
         assert len(launched) == 1
@@ -687,7 +665,7 @@ class TestRun:
         assert instance.run() == updater.EXIT_PREFLIGHT
         assert read_text(LOG) == f"""\
 {STAMP} | INFO | preflight: {SRC} -> {DST}
-{STAMP} | ERROR | preflight: {SRC} is {self.digest_of(b'tampered')}, expected {self.digest_of(b'new')}, not staging
+{STAMP} | ERROR | preflight: {SRC} is {self.digest_of(b'tampered')}, expected {self.digest_of(b'new')}, not installing
 """
         with open(DST, 'rb') as f:
             assert f.read() == b'old'
@@ -696,18 +674,11 @@ class TestRun:
         """A staged archive that never existed stops before the wait."""
         fs.create_file(DST, contents=b'old')
         monkeypatch.setattr(updater.ElectronUpdater, 'wait_targets', lambda self, interval=0.1: [])
-        try:
-            with open(SRC, 'rb'):
-                pass
-        except OSError as e:
-            missing = e
-        else:
-            raise AssertionError(f'{SRC} must not exist')
         log = self.make_log(monkeypatch)
         assert self.make_instance(log=log).run() == updater.EXIT_PREFLIGHT
         assert read_text(LOG) == f"""\
 {STAMP} | INFO | preflight: {SRC} -> {DST}
-{STAMP} | ERROR | preflight: cannot read {SRC}: {missing}
+{STAMP} | ERROR | preflight: {SRC} is gone, nothing to install
 """
 
     def test_timeout_keeps_the_installation(self, fs, monkeypatch):
@@ -835,17 +806,23 @@ class TestRun:
 """
         assert len(launched) == 1
 
-    def test_staging_failure_keeps_the_installation(self, fs, monkeypatch):
-        """A temporary file that cannot be written leaves the old version."""
+    def test_unreadable_staged_archive_keeps_the_installation(self, fs, monkeypatch):
+        """A staged archive that cannot be read again leaves the old version."""
         fs.create_file(DST, contents=b'old')
         fs.create_file(SRC, contents=b'new')
         fs.create_file(RESUME, contents=b'{}')
         monkeypatch.setattr(updater.ElectronUpdater, 'wait_targets', lambda self, interval=0.1: [])
-        error = OSError(28, 'no space left on device')
+        error = OSError(13, 'permission denied')
+        real_verify = updater.ElectronUpdater.verify
+        calls = []
 
-        def broken(self):
-            raise error
-        monkeypatch.setattr(updater.ElectronUpdater, 'stage', broken)
+        def flaky(self):
+            # the preflight read it, the second read (before the rename) fails
+            calls.append(1)
+            if len(calls) > 1:
+                raise error
+            return real_verify(self)
+        monkeypatch.setattr(updater.ElectronUpdater, 'verify', flaky)
         launched = []
         monkeypatch.setattr(updater.ElectronUpdater, 'relaunch',
                             lambda self, **kwargs: launched.append(self.env))
@@ -855,7 +832,7 @@ class TestRun:
         assert read_text(LOG) == f"""\
 {STAMP} | INFO | preflight: {SRC} -> {DST}
 {STAMP} | INFO | wait: the old chain is gone
-{STAMP} | WARNING | replace: cannot stage {SRC}: {error}
+{STAMP} | WARNING | replace: cannot read {SRC}: {error}
 {STAMP} | INFO | relaunch: started {EXE}
 """
         assert len(launched) == 1
@@ -870,7 +847,7 @@ class TestRun:
         monkeypatch.setattr(updater.ElectronUpdater, 'wait_targets', lambda self, interval=0.1: [])
         error = PermissionError(13, 'the file is in use')
 
-        def broken(self, temp, attempts=5):
+        def broken(self, attempts=5):
             raise error
         monkeypatch.setattr(updater.ElectronUpdater, 'replace', broken)
         launched = []
@@ -882,7 +859,7 @@ class TestRun:
         assert read_text(LOG) == f"""\
 {STAMP} | INFO | preflight: {SRC} -> {DST}
 {STAMP} | INFO | wait: the old chain is gone
-{STAMP} | WARNING | replace: {instance.temp} -> {DST} failed: {error}
+{STAMP} | WARNING | replace: {SRC} -> {DST} failed: {error}
 {STAMP} | INFO | relaunch: started {EXE}
 """
         assert len(launched) == 1

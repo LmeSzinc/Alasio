@@ -107,10 +107,18 @@ class FakeFiles:
         self.writes = []
         self.withdraws = 0
         self.write_error = None
+        # the file the write published (see commit)
+        self.file = 'resume-file'
+        self.committed = False
 
     async def write(self, configs, owner=OWNER_RESTART, actions=None, updated_all_at=0.0):
         if self.write_error is not None:
             raise self.write_error
+        if not self.file:
+            # an abort took the publication away before the write
+            self.file = None
+            return 'token-checksum'
+        self.file = 'resume-file'
         self.writes.append({
             'configs': list(configs), 'owner': owner, 'actions': actions,
             'updated_all_at': updated_all_at})
@@ -118,7 +126,19 @@ class FakeFiles:
 
     async def withdraw(self):
         self.withdraws += 1
+        if self.committed:
+            return None
+        self.file = None
         return None
+
+    def commit(self):
+        if self.file is None:
+            return False
+        self.committed = True
+        return True
+
+    def rollback_commit(self):
+        self.committed = False
 
 
 class FakeUpdateCheck:
@@ -179,6 +199,59 @@ async def _no_restart():
     return None
 
 
+async def _no_relaunch(commit):
+    """The application relaunch, for the tests that never reach it"""
+    return None
+
+
+class FakeShell:
+    """
+    Shell update stand-in: what the handover asks before it hands over
+    """
+
+    def __init__(self, staged=None, stage_error=None, spawn_error=None):
+        """
+        Args:
+            staged (object): What stage() returns, None when there is nothing
+                to install
+            stage_error (Exception): Raised by stage()
+            spawn_error (Exception): Raised by spawn_updater()
+        """
+        self.staged = staged
+        self.stage_error = stage_error
+        self.spawn_error = spawn_error
+        self.stage_calls = 0
+        self.spawns = []
+        self.killed = 0
+
+    async def pending_async(self):
+        """The archive question, answered from the staged value"""
+        return self.staged is not None
+
+    async def stage_async(self):
+        """The staging call of the handover, with its failure handled"""
+        self.stage_calls += 1
+        if self.stage_error is not None:
+            return None
+        return self.staged
+
+    def stage(self):
+        self.stage_calls += 1
+        if self.stage_error is not None:
+            raise self.stage_error
+        return self.staged
+
+    def spawn_updater(self, staged, credential, resume_file):
+        if self.spawn_error is not None:
+            raise self.spawn_error
+        self.spawns.append((staged, credential, resume_file))
+        return self
+
+    def kill(self):
+        """The updater process of a relaunch that never left this process"""
+        self.killed += 1
+
+
 @pytest.fixture(autouse=True)
 def daily_target(monkeypatch):
     """
@@ -211,7 +284,8 @@ def make_daily(crossed=False):
     return daily
 
 
-def make_manager(worker_manager=None, update_check=None, daily=None, files=None, restart_fn=None):
+def make_manager(worker_manager=None, update_check=None, daily=None, files=None, restart_fn=None,
+                 relaunch_fn=None, shell=None):
     """
     A manager of the real steps with injected stand-ins
     """
@@ -221,6 +295,8 @@ def make_manager(worker_manager=None, update_check=None, daily=None, files=None,
         daily=daily if daily is not None else DailyState(),
         files=files if files is not None else FakeFiles(),
         restart_fn=restart_fn if restart_fn is not None else _no_restart,
+        relaunch_fn=relaunch_fn if relaunch_fn is not None else _no_relaunch,
+        shell=shell if shell is not None else FakeShell(),
     )
 
 
@@ -391,6 +467,126 @@ class TestHandover:
         # nothing was published and the process is not being replaced
         assert manager.frozen is False
         assert files.withdraws == 0
+
+
+class TestHandoverRelaunch:
+    """The shell update: the updater process and the relaunch of the chain"""
+
+    @staticmethod
+    def staged():
+        """
+        Returns:
+            SimpleNamespace: A staged archive as the shell update reports it
+        """
+        return SimpleNamespace(src='/resources/new-app.asar', dst='/resources/app.asar',
+                               sha256='a' * 64)
+
+    @pytest.mark.trio
+    async def test_the_updater_is_started_before_the_request(self):
+        """The updater waits before the chain goes down, the request follows."""
+        shell = FakeShell(staged=self.staged())
+        files = FakeFiles()
+        calls = []
+
+        async def relaunch_fn(commit):
+            calls.append('relaunch')
+            assert commit() is True
+
+        async def restart_fn():
+            calls.append('restart')
+
+        manager = make_manager(files=files, shell=shell, relaunch_fn=relaunch_fn,
+                               restart_fn=restart_fn)
+        await manager.handover(FlowUpdate(manager), 'update', ['cfg_a'])
+        # the plain restart is never asked on top of the relaunch
+        assert calls == ['relaunch']
+        assert shell.spawns == [(self.staged(), 'token-checksum', 'resume-file')]
+        # the publication is final: the stop that ends this process must not
+        # take the goal signal of the updater away
+        assert files.committed is True
+        assert files.withdraws == 0
+        assert phase() == 'shutting-down'
+
+    @pytest.mark.trio
+    async def test_an_updater_that_cannot_start_falls_back_to_no_handover(self):
+        """A process that cannot be started is a failure of the handover,
+        before anything was told to the host."""
+        shell = FakeShell(staged=self.staged(), spawn_error=OSError(2, 'no such file'))
+        files = FakeFiles()
+        calls = []
+
+        async def relaunch_fn(commit):
+            calls.append('relaunch')
+
+        manager = make_manager(files=files, shell=shell, relaunch_fn=relaunch_fn)
+        with pytest.raises(HandoverFailed):
+            await manager.handover(FlowUpdate(manager), 'update', ['cfg_a'])
+        assert calls == []
+        assert files.withdraws == 1
+        assert manager.frozen is False
+
+    @pytest.mark.trio
+    async def test_a_request_that_never_left_stops_the_updater(self):
+        """A broken pipe is the one failure the process can still undo."""
+        shell = FakeShell(staged=self.staged())
+        files = FakeFiles()
+
+        async def relaunch_fn(commit):
+            raise OSError('broken pipe')
+
+        manager = make_manager(files=files, shell=shell, relaunch_fn=relaunch_fn)
+        with pytest.raises(HandoverFailed):
+            await manager.handover(FlowUpdate(manager), 'update', ['cfg_a'])
+        # the updater has nothing to wait for any more: kill it, and drop the
+        # commit so the withdrawal takes the goal signal away
+        assert shell.killed == 1
+        assert files.committed is False
+        assert files.withdraws == 1
+        assert manager.frozen is False
+
+    @pytest.mark.trio
+    async def test_a_withdrawn_publication_stops_before_the_updater(self):
+        """The user closed the app between the publication and the updater."""
+        shell = FakeShell(staged=self.staged())
+        files = FakeFiles()
+        files.file = None
+        manager = make_manager(files=files, shell=shell)
+        with pytest.raises(HandoverFailed):
+            await manager.handover(FlowUpdate(manager), 'update', ['cfg_a'])
+        assert shell.spawns == []
+        assert shell.killed == 0
+
+    @pytest.mark.trio
+    async def test_a_staging_failure_restarts_the_backend_only(self):
+        """The archive is an addition to the restart, never a condition for it."""
+        shell = FakeShell(stage_error=OSError(28, 'no space left on device'))
+        calls = []
+
+        async def restart_fn():
+            calls.append('restart')
+
+        async def relaunch_fn(commit):
+            calls.append('relaunch')
+
+        manager = make_manager(shell=shell, restart_fn=restart_fn, relaunch_fn=relaunch_fn)
+        await manager.handover(FlowUpdate(manager), 'update', ['cfg_a'])
+        assert calls == ['restart']
+        assert shell.spawns == []
+
+    @pytest.mark.trio
+    async def test_nothing_to_install_keeps_the_plain_restart(self):
+        """An installation without a pending archive never starts an updater."""
+        shell = FakeShell()
+        calls = []
+
+        async def restart_fn():
+            calls.append('restart')
+
+        manager = make_manager(shell=shell, restart_fn=restart_fn)
+        await manager.handover(FlowRestart(manager), 'user request', ['cfg_a'])
+        assert calls == ['restart']
+        assert shell.stage_calls == 1
+        assert shell.spawns == []
 
 
 class TestResumeQueue:

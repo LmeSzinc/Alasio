@@ -61,7 +61,7 @@ def backend_process_entry(conn, args, backend_entry_fn, tokens=()):
         backend_entry_fn (Callable): The backend entry callable, usually a
             module-level function in this file
         tokens (tuple[str]): Initial token window from the supervisor
-            (empty when not started with --electron). Seeded into the
+            (empty when the chain has no electron host). Seeded into the
             backend token table before serve, so the table is populated
             before any request can arrive (single-writer constraint).
     """

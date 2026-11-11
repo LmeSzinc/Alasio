@@ -1,10 +1,11 @@
 import { ChildProcess, spawn } from "child_process";
-import { BrowserWindow, session } from "electron";
+import { BrowserWindow, app, session } from "electron";
 import kill from "tree-kill";
 import { IPC_BACKEND_LOG, IPC_BACKEND_READY } from "../shared/ipc";
 import { acceptAnnouncement, parseAnnouncement } from "./announcement";
 import { appState } from "./app-state";
 import { LineSplitter } from "./line-splitter";
+import { parseRelaunch } from "./relaunch";
 import { StartupLogBuffer } from "./startup-log";
 
 // Backend startup status callback, wired by main/index.ts to shared state
@@ -41,6 +42,11 @@ export enum ShutdownStage {
 // a while on slow machines.
 const BACKEND_START_TIMEOUT = 30_000;
 
+// Upper bound of the wait for the supervisor to exit during a relaunch. The
+// supervisor answers a stop within its own graceful timeout (5s) plus the
+// force kill (2s), so this only covers a supervisor that is already stuck.
+const RELAUNCH_EXIT_TIMEOUT = 10_000;
+
 let backendProcess: ChildProcess | null = null;
 let mainWindow: BrowserWindow | null = null;
 
@@ -65,6 +71,72 @@ let backendReady = false;
 // startup-log.ts and doc/2026-09-03_electron-window-flicker-and-loading-page.md
 // §4.2).
 const startupLog = new StartupLogBuffer();
+
+// Whether the relaunch requested by the backend is in flight: the updater is
+// waiting for the chain to go down and this process must not kill it.
+let relaunching = false;
+
+// Whether the user already confirmed closing the app, asked of the window
+// module (which owns that state) instead of imported from it: window.ts
+// imports this module, not the other way round.
+let quittingProbe: () => boolean = () => false;
+
+/**
+ * Wire the quitting state of the window module. Called once at module scope by
+ * window.ts, before any backend is started.
+ *
+ * Args:
+ *     probe (function): Returns true once the user confirmed closing the app
+ */
+export function setQuittingProbe(probe: () => boolean) {
+  quittingProbe = probe;
+}
+
+/**
+ * Returns:
+ *     boolean: Whether a relaunch is in flight (the updater is waiting for the
+ *     chain, the exit belongs to it)
+ */
+export function isRelaunching(): boolean {
+  return relaunching;
+}
+
+/**
+ * The install context of a packaged application, exported to the backend chain.
+ *
+ * The backend cannot discover any of it by itself: the archive it may replace,
+ * the executable and the arguments to start it again, the working directory it
+ * runs in. Only a packaged app carries an archive to replace — in every other
+ * mode those variables are removed from this process' environment, so a stale
+ * value of an earlier generation can never be mistaken for an install context.
+ *
+ * The pid of this process is written on every launch, packaged or not: it is
+ * the electron mode switch of the chain (the supervisor generates its tokens
+ * only when it is there, the logger stops writing to a stdout somebody else
+ * reads) and, when the archive has to be replaced, the process the updater has
+ * to outlive.
+ *
+ * Returns:
+ *     dict: Variables to add to the supervisor spawn, empty when the app has
+ *         no archive to manage
+ */
+function installContextEnv(): Record<string, string> {
+  const appPath = app.getAppPath();
+  const packaged = app.isPackaged && appPath.endsWith("app.asar");
+  if (!packaged) {
+    for (const name of ["ALASIO_APP_ASAR", "ALASIO_APP_EXE", "ALASIO_APP_CWD", "ALASIO_APP_ARGV"]) {
+      delete process.env[name];
+    }
+    return { ALASIO_APP_ELECTRON_PID: String(process.pid) };
+  }
+  return {
+    ALASIO_APP_ASAR: appPath,
+    ALASIO_APP_EXE: app.getPath("exe"),
+    ALASIO_APP_CWD: process.cwd(),
+    ALASIO_APP_ARGV: JSON.stringify(process.argv.slice(1)),
+    ALASIO_APP_ELECTRON_PID: String(process.pid),
+  };
+}
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -163,6 +235,67 @@ export function sendStdinCommand(command: string): boolean {
   }
 }
 
+/**
+ * Shut the chain down for the relaunch the backend requested.
+ *
+ * The updater is already running and waits for every process of this chain to
+ * be gone before it replaces the archive; it starts the next Electron itself.
+ * So the exit is: stop the supervisor, wait for its exit event, quit — and
+ * never kill the process tree (the updater is a descendant of the supervisor,
+ * a tree kill would take it down together with the chain it waits for).
+ *
+ * A user who already confirmed the close wins: the app is going down anyway,
+ * the updater then finds the chain gone without the goal signal it needs, and
+ * nothing is installed and nothing comes back.
+ *
+ * Args:
+ *     child (ChildProcess): The supervisor process
+ */
+function requestRelaunch(child: ChildProcess) {
+  if (relaunching) return;
+  if (quittingProbe()) {
+    console.info("Relaunch requested, but the app is already closing: ignored");
+    return;
+  }
+  relaunching = true;
+  console.info("Relaunch requested by the backend, shutting the chain down");
+  try {
+    child.stdin?.write("command:stop\n");
+  } catch (err) {
+    // stdin is already closed: the supervisor is gone or going, the wait
+    // below resolves at once
+    console.error("Failed to send stop for the relaunch:", err);
+  }
+  waitForExit(child, RELAUNCH_EXIT_TIMEOUT).then(() => {
+    // app.exit does not run the before-quit / will-quit handlers: this process
+    // is about to be replaced, nothing here may delay the updater
+    app.exit(0);
+  });
+}
+
+/**
+ * Wait for a child process to exit.
+ *
+ * Args:
+ *     child (ChildProcess): Process to watch
+ *     timeoutMs (number): Upper bound of the wait
+ *
+ * Returns:
+ *     Promise<void>: Resolves at the exit or at the timeout, never rejects
+ */
+function waitForExit(child: ChildProcess, timeoutMs: number): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(), timeoutMs);
+    child.once("exit", () => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
+}
+
 export function startBackend(
   pythonExecutable: string,
   rootPath: string,
@@ -184,22 +317,16 @@ export function startBackend(
     // --host/--port must be passed explicitly: command-line args take
     // priority over the deploy.yaml Backend section, and without --port the
     // backend would fall back to hypercorn's default 8000.
-    // --electron switches the supervisor into electron mode: it generates /
-    // rotates / announces the token and sets ELECTRON=1 for the whole
-    // backend chain. Without it no token exists and sensitive APIs stay
-    // locked (403).
-    const child = spawn(
-      pythonExecutable,
-      ["gui.py", "--host", backendHost, "--port", String(backendPort), "--electron"],
-      {
-        cwd: rootPath,
-        // stdin is piped so graceful shutdown can be requested through it
-        stdio: ["pipe", "pipe", "pipe"],
-        // python block-buffers stdout on a pipe; unbuffered mode makes the
-        // token announcements (and supervisor logs) reach us immediately
-        env: { ...process.env, PYTHONUNBUFFERED: "1" },
-      },
-    );
+    // The electron mode is not a command line flag any more: it is the pid in
+    // the environment (installContextEnv), which the whole chain inherits.
+    const child = spawn(pythonExecutable, ["gui.py", "--host", backendHost, "--port", String(backendPort)], {
+      cwd: rootPath,
+      // stdin is piped so graceful shutdown can be requested through it
+      stdio: ["pipe", "pipe", "pipe"],
+      // python block-buffers stdout on a pipe; unbuffered mode makes the
+      // token announcements (and supervisor logs) reach us immediately
+      env: { ...process.env, PYTHONUNBUFFERED: "1", ...installContextEnv() },
+    });
     backendProcess = child;
 
     let settled = false;
@@ -250,6 +377,9 @@ export function startBackend(
       if (authToken && backendReady) {
         settle();
         mainWindow?.webContents.send(IPC_BACKEND_READY);
+        // The credential served its spawn: drop the copy this process holds,
+        // so a later respawn of the backend cannot inject a consumed one.
+        delete process.env.ALASIO_RESUME_TOKEN;
         // Backend is up: push the current language/theme so the backend
         // persists them into deploy.yaml (idempotent: no write when the
         // value already matches).
@@ -266,6 +396,13 @@ export function startBackend(
     // must never enter the renderer JS environment). The forward filter
     // is line-based, so a token line split across chunks is filtered too.
     const stdoutLines = new LineSplitter((line) => {
+      // The relaunch request goes before the announcement parser and before
+      // the log forward: it carries the token, which must never reach the
+      // renderer, and its handling is exclusive.
+      if (parseRelaunch(line, authToken)) {
+        requestRelaunch(child);
+        return;
+      }
       const announcement = parseAnnouncement(line);
       if (!announcement) {
         // non-announcement lines go to the loading page log (before ready).
@@ -389,6 +526,13 @@ export async function shutdownBackend(onStageChange?: (stage: ShutdownStage) => 
   }
 
   // Stage 3: tree-kill (4s)
+  if (relaunching) {
+    // The updater of a relaunch is a descendant of this chain: a tree kill
+    // would take it down with the supervisor it is waiting for, and the
+    // application would not come back at all. The relaunch owns the exit.
+    onStageChange?.(ShutdownStage.Done);
+    return;
+  }
   onStageChange?.(ShutdownStage.Killing);
   await new Promise<void>((resolve) => {
     kill(pid, "SIGKILL", (err) => {

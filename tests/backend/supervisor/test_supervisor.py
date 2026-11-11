@@ -15,6 +15,20 @@ pytestmark = [
     pytest.mark.parallel,
 ]
 
+
+@pytest.fixture(autouse=True)
+def no_electron_host(monkeypatch):
+    """
+    Keep the electron switch out of the spawned supervisors.
+
+    The supervisors of these tests are real child processes that inherit this
+    environment: an ALASIO_APP_ELECTRON_PID coming from the test runner would
+    put them into electron mode, where the logger stops writing to stdout and
+    every line these tests wait for would be missing.
+    """
+    monkeypatch.delenv('ALASIO_APP_ELECTRON_PID', raising=False)
+
+
 # Initial config of the prefs tests. The prefs backend is a spawned process,
 # so the in-memory fake filesystem of the test process can't intercept its
 # writes; each test gets a disposable project root under temp/ instead of

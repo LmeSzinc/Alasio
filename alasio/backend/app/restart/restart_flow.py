@@ -125,12 +125,14 @@ class FlowStartup(Flow):
                 if manager.daily.mark_done_if_covered():
                     logger.info('[Restart] The crossing of the daily target is served by the '
                                 'startup full update')
-            if changed:
+            if changed or (has_supervisor() and await manager.shell.pending_async()):
                 # the files just applied need the new process: hand over, the new
                 # process sees the fresh check in the record and starts its own
                 # checks directly. The resume list is read inside the frozen
                 # section of the handover: every start accepted during the
-                # startup is in it
+                # startup is in it. A pending electron archive is a handover
+                # reason of its own -- the running electron keeps the archive it
+                # loaded and only a relaunch installs the new one
                 await manager.handover(self, 'startup convergence')
                 return
             manager.update_check.start()
@@ -301,6 +303,12 @@ class FlowUpdate(Flow):
                 click into a no-op)
         """
         update_check = self.manager.update_check
+        if await self.manager.shell.pending_async():
+            # the mods of the scope may all be current, but the electron
+            # archive of the package is not: the flow has to stop the workers
+            # and hand over anyway, the relaunch is the only way to install it
+            logger.info('[Shell] The electron archive has an update, the flow continues')
+            return False
         for name in names:
             mod = update_check.mods.get(name, None)
             if mod is None or mod.mirrors is None:

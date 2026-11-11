@@ -4,19 +4,26 @@ import threading
 import time
 
 # Rotation interval in seconds (30min+). The rotation
-# thread only runs when the supervisor was started with --electron.
+# thread only runs when the supervisor has an electron host.
 ROTATION_INTERVAL = 1800
 # Seconds to wait for the backend ack before dropping the rotation round
 ACK_TIMEOUT = 2.0
+
+# Serializes whole stdout lines of the supervisor. The announcements and the
+# log lines are written by different threads (the rotation thread, the recv
+# loop, the stdin listener); print() writes the text and the newline in two
+# calls, so without a lock a rotation announcement and a relaunch announcement
+# could end up on one line, and the host would parse neither
+PRINT_LOCK = threading.Lock()
 
 
 class SupervisorTokenManager:
     """
     Supervisor-side token manager. One instance per supervisor, created
     by Supervisor.run() with the owning supervisor object. Only active
-    when the supervisor was started with --electron; otherwise it
-    generates nothing and the backend token table stays empty (sensitive
-    APIs locked).
+    when the supervisor has an electron host (ALASIO_APP_ELECTRON_PID in
+    the environment); otherwise it generates nothing and the backend token
+    table stays empty (sensitive APIs locked).
 
     The supervisor is the single source of truth for tokens: it
     generates, holds, rotates, sends down the pipe and announces them;
@@ -49,13 +56,15 @@ class SupervisorTokenManager:
         Generate T1 and announce it (the backend is not born yet).
 
         The announcement must use print, not logger: the logger is muted
-        in Electron mode (ELECTRON=1) and would swallow the announcement.
+        in electron mode (a host pid in the environment) and would swallow
+        the announcement.
         """
         token = secrets.token_hex(32)
         self._window.append(token)
-        # flush: the announcement must reach Electron immediately even
-        # though python block-buffers stdout on a pipe
-        print(f'[Supervisor] token_set:begin:{token}', flush=True)
+        with PRINT_LOCK:
+            # flush: the announcement must reach Electron immediately even
+            # though python block-buffers stdout on a pipe
+            print(f'[Supervisor] token_set:begin:{token}', flush=True)
 
     def window(self):
         """
@@ -68,7 +77,7 @@ class SupervisorTokenManager:
 
     def start_rotation(self):
         """
-        Start the daemon rotation thread. No-op without --electron.
+        Start the daemon rotation thread. No-op without an electron host.
         """
         if self._rotation_thread and self._rotation_thread.is_alive():
             return
@@ -112,13 +121,30 @@ class SupervisorTokenManager:
             # old = the previous announced token inside the window
             old = self._window[-1] if self._window else ''
             self._window.append(token)
-            # flush: the announcement must reach Electron immediately even
-            # though python block-buffers stdout on a pipe
-            print(f'[Supervisor] token_set:{old}:{token}', flush=True)
+            with PRINT_LOCK:
+                # flush: the announcement must reach Electron immediately even
+                # though python block-buffers stdout on a pipe
+                print(f'[Supervisor] token_set:{old}:{token}', flush=True)
         else:
             # ack timeout: drop the token, Electron stays on the old one
             pass
         self._reset_pending()
+
+    def announce_relaunch(self):
+        """
+        Ask the host to shut the chain down for a whole-application relaunch.
+
+        The line carries the current token: every worker of the backend can
+        write to this stdout, so the host accepts the request only from the
+        party that knows the token -- the same chain rule the token
+        announcements use. Without an announced token (not in electron mode)
+        there is nobody to ask, and nothing is printed.
+        """
+        token = self._window[-1] if self._window else ''
+        if not token:
+            return
+        with PRINT_LOCK:
+            print(f'[Supervisor] relaunch:{token}', flush=True)
 
     def _reset_pending(self):
         with self._pending_lock:

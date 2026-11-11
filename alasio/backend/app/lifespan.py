@@ -194,6 +194,48 @@ async def lifespan_restart():
     SHUTDOWN_EVENT.set()
 
 
+async def lifespan_relaunch(commit):
+    """
+    Ask the supervisor to relaunch the whole application (the app.asar update)
+
+    The supervisor answers by printing an authenticated relaunch line for the
+    host and by never restarting this backend; the host stops the chain and
+    exits, and the updater the handover started replaces the archive and starts
+    the new chain.
+
+    The commit of the resume publication happens between the send and the
+    shutdown: the file becomes the goal signal of the updater at the last
+    instant where a send that failed is still recoverable -- a failed send
+    raises before the commit and the caller rolls it back (nothing was told to
+    anyone, nothing may consume the file). After the send the outcome is
+    unknown, and keeping the file is the side that cannot lose the relaunch.
+
+    Args:
+        commit (Callable[[], bool]): Called once the request left this process,
+            returns False when the publication was withdrawn meanwhile (the
+            host is shutting the chain down on its own: no relaunch)
+
+    Raises:
+        PermissionError: The backend runs without a supervisor, or the
+            publication was withdrawn before the commit
+    """
+    if not mpipe_backend:
+        raise PermissionError(f'Cannot relaunch the application running without supervisor')
+
+    # log
+    logger.info('Backend received relaunch request, shutting down the chain')
+
+    # Send b'command:relaunch' to supervisor (strict: must fail loudly when the
+    # pipe is unavailable, that is the one failure this process can still undo)
+    await trio.to_thread.run_sync(mpipe_backend.send, b'command:relaunch', True)
+
+    if not commit():
+        raise PermissionError('The resume publication was withdrawn before the relaunch')
+
+    # stop backend
+    SHUTDOWN_EVENT.set()
+
+
 async def lifespan_stop():
     """
     Stop the entire backend

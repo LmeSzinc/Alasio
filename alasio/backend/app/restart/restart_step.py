@@ -40,10 +40,11 @@ from typing import Callable, Dict, List, Optional
 import trio
 from msgspec import Struct
 
-from alasio.backend.app.lifespan import SHUTDOWN_EVENT, lifespan_restart
+from alasio.backend.app.lifespan import SHUTDOWN_EVENT, lifespan_relaunch, lifespan_restart
 from alasio.backend.app.restart.daily import DAILY, DailyState
 from alasio.backend.app.restart.restart_base import Flow, RestartBase
 from alasio.backend.app.restart.resume_file import OWNER_RESTART, RESUME_FILES, ResumeFiles, ResumeRecord
+from alasio.backend.app.restart.shell_update import SHELL_UPDATE, ShellUpdate
 from alasio.backend.app.restart.update_check import UPDATE_CHECK, UpdateCheck
 from alasio.backend.mpipe.mpipe_backend import has_supervisor
 from alasio.backend.topic.restart import RestartSource
@@ -184,13 +185,26 @@ class RestartStep(RestartBase):
             pause / restore discipline drive
         daily (DailyState): The daily bookkeeping
         files (ResumeFiles): The resume file IO
+        shell (ShellUpdate): The electron archive: the digest comparison, the
+            staged archive and the updater process
         restart_fn (Callable): Coroutine asking the supervisor to replace the
+            backend process
+        relaunch_fn (Callable): Coroutine asking the supervisor to relaunch the
+            whole application (the shell update path); it takes the commit of
+            the resume publication and returns once the request left this
             process
     """
 
-    def __init__(self, worker_manager=None, update_check: "Optional[UpdateCheck]" = None,
-                 daily: "Optional[DailyState]" = None, files: "Optional[ResumeFiles]" = None,
-                 restart_fn=None):
+    def __init__(
+        self,
+        worker_manager=None,
+        update_check: "Optional[UpdateCheck]" = None,
+        daily: "Optional[DailyState]" = None,
+        files: "Optional[ResumeFiles]" = None,
+        restart_fn=None,
+        relaunch_fn=None,
+        shell: "Optional[ShellUpdate]" = None
+    ):
         """
         Args:
             worker_manager (WorkerManager): Defaults to the process singleton
@@ -201,13 +215,17 @@ class RestartStep(RestartBase):
             daily (DailyState): Defaults to the process singleton DAILY
             files (ResumeFiles): Defaults to the process singleton RESUME_FILES
             restart_fn (Callable): Defaults to lifespan_restart
+            relaunch_fn (Callable): Defaults to lifespan_relaunch
+            shell (ShellUpdate): Defaults to the process singleton SHELL_UPDATE
         """
         super().__init__()
         self._worker_manager = worker_manager
         self.update_check = update_check if update_check is not None else UPDATE_CHECK
         self.daily = daily if daily is not None else DAILY
         self.files = files if files is not None else RESUME_FILES
+        self.shell = shell if shell is not None else SHELL_UPDATE
         self.restart_fn = restart_fn if restart_fn is not None else lifespan_restart
+        self.relaunch_fn = relaunch_fn if relaunch_fn is not None else lifespan_relaunch
 
     @property
     def worker_manager(self):
@@ -601,20 +619,30 @@ class RestartStep(RestartBase):
            Reading it before the freeze would drop a start accepted in between
            -- it is still accepted as a queued resume (the flow owns the
            backend) but the file is written from the earlier list;
-        2. publish the resume intent: the file is written and its one-shot
+        2. stage the electron archive when the package carries a different one
+           (see ``shell_update``). Only ``new-app.asar`` is written here: the
+           installed archive is replaced by the updater after the whole chain
+           is down. A staging failure is not an error of the handover: the
+           backend restarts alone and the next flow tries again;
+        3. publish the resume intent: the file is written and its one-shot
            credential is announced to the supervisor in the same step (a cancel
            cannot interleave the two);
-        3. mark the daily action done when the last full update of this process
+        4. mark the daily action done when the last full update of this process
            already covers it (the handover is the daily action of a crossed
            target);
-        4. push the 'shutting-down' phase;
-        5. ask the supervisor for the process restart (the shutdown event set
-           inside ends the backend).
+        5. push the 'shutting-down' phase;
+        6. ask for the restart: with a staged archive this is a relaunch of the
+           whole chain (the updater is started first and the host is told
+           through the supervisor), without one it is the replacement of this
+           backend. Either way the shutdown event set inside ends the process.
 
-        Never returns on the success path. A failure (no supervisor, broken
-        pipe) withdraws the publication and unfreezes the state, then raises
+        Never returns on the success path. A failure before the request left
+        this process (no supervisor, broken pipe, the updater cannot start)
+        withdraws the publication and unfreezes the state, then raises
         HandoverFailed: the caller wraps up, the mods already written are marked
-        restart-required and the next process start converges them.
+        restart-required and the next process start converges them. A failure
+        after the request left is not reported here -- the process is on its
+        way down and the updater decides from the files it finds.
 
         Args:
             flow (Flow): The flow handing over (only its name is used: the log
@@ -627,45 +655,124 @@ class RestartStep(RestartBase):
             actions (list[str]): Optional resume action tags, see RESUME_ACTIONS
 
         Raises:
-            HandoverFailed: When the process restart cannot be requested
+            HandoverFailed: When the process cannot be replaced
         """
         with self.handover_intent():
             if resume_list is None:
                 # the resume list of a flow that stopped no worker: the queued
                 # starts, read inside the frozen section (see above)
                 resume_list = await self.queued_resume_list()
-            # 1) the file and its credential are one step (see the resume_file
+            # 1) the shell update: the package archive is staged next to the
+            #    installed one, the installed file is never touched here
+            staged = await self.shell.stage_async()
+            # 2) the file and its credential are one step (see the resume_file
             #    module): a file whose credential was never announced is never
             #    consumed
-            await self.files.write(
+            credential = await self.files.write(
                 resume_list, owner=OWNER_RESTART, actions=actions,
                 updated_all_at=self.daily.updated_all_at)
-            # 2) the daily action of a crossed target is served by this
+            # 3) the daily action of a crossed target is served by this
             #    handover: the full update of this process completed after the
             #    target moment
             if self.daily.mark_done_if_covered():
                 logger.info('[Restart] Daily action covered by the full update of this process')
             logger.info(f'[Restart] Handover of the "{flow.name}" flow ({reason}): '
                         f'{len(resume_list)} configs to resume')
-            # 3) the frontend phase
+            # 4) the frontend phase
             await self.push_flow_phase('shutting-down')
-            # 4) the process restart: the supervisor stops this backend and
-            #    starts a new one with the credential in its environment
+            # 5) the replacement: the supervisor stops this backend and starts
+            #    a new one with the credential in its environment
             try:
-                await self.restart_fn()
-            except Exception as e:
-                # the process is not replaced: a published intent would be
-                # consumed by nothing and the frozen state would refuse every
-                # start forever (the context manager clears it on the way out)
-                logger.error(f'[Restart] Handover failed, the backend keeps running: {e}')
-                try:
-                    await self.files.withdraw()
-                except Exception as withdraw_error:
-                    # best effort: the credential is one-shot and the file is
-                    # stale-cleaned, a failed removal must not mask the
-                    # handover error
-                    logger.error(f'[Restart] Failed to withdraw the resume file: {withdraw_error}')
-                raise HandoverFailed(f'Cannot restart the backend: {e}') from e
+                if staged is not None:
+                    await self._relaunch(staged, credential)
+                    # the shutdown event is set: the flow must not ask for a
+                    # plain restart on top of the relaunch it just requested
+                    return
+                await self._restart()
+            except HandoverFailed:
+                # the process is not replaced: a publication left behind would
+                # be consumed by a later process for a relaunch that never
+                # started
+                await self._withdraw_publication()
+                raise
+
+    async def _withdraw_publication(self):
+        """
+        Take the publication back after a handover that did not happen.
+
+        Best effort: the credential is one-shot and the file is stale-cleaned,
+        so a failed removal must never mask the handover error.
+        """
+        try:
+            await self.files.withdraw()
+        except Exception as e:
+            logger.error(f'[Restart] Failed to withdraw the resume file: {e}')
+
+    async def _relaunch(self, staged, credential):
+        """
+        Start the updater and ask the supervisor to relaunch the whole app.
+
+        The updater is started before the request goes out: it must already be
+        waiting when the chain comes down, otherwise nothing is left to
+        replace the archive or start the application again. The resume
+        publication is committed between the send and the shutdown (see
+        ``lifespan_relaunch``): from the commit on the file is the goal signal
+        of the updater and the stop that ends this process leaves it alone.
+
+        Args:
+            staged (StagedAsar): The archive the updater installs
+            credential (str): The published resume credential
+
+        Raises:
+            HandoverFailed: The updater cannot start, or the request did not
+                leave this process (the updater is terminated again: with the
+                publication withdrawn it has nothing to wait for)
+        """
+        resume_file = self.files.file
+        if resume_file is None:
+            raise HandoverFailed('The resume publication is gone')
+        try:
+            updater = await trio.to_thread.run_sync(
+                self.shell.spawn_updater, staged, credential, resume_file)
+        except OSError as e:
+            raise HandoverFailed(f'Cannot start the updater: {e}') from e
+        try:
+            await self.relaunch_fn(lambda: self.files.commit())
+        except Exception as e:
+            # the request never left this process, so nothing will ever come
+            # down for the updater: it would only sit out its timeout
+            self._terminate(updater)
+            self.files.rollback_commit()
+            raise HandoverFailed(f'Cannot relaunch the application: {e}') from e
+
+    async def _restart(self):
+        """
+        Ask the supervisor to replace this backend (the plain restart).
+
+        Raises:
+            HandoverFailed: The restart cannot be requested
+        """
+        try:
+            await self.restart_fn()
+        except Exception as e:
+            # the process is not replaced: the frozen state would refuse every
+            # start forever, the context manager clears it on the way out
+            logger.error(f'[Restart] Handover failed, the backend keeps running: {e}')
+            raise HandoverFailed(f'Cannot restart the backend: {e}') from e
+
+    @staticmethod
+    def _terminate(process):
+        """
+        Stop the updater that was started for a relaunch that never happened.
+
+        Args:
+            process (subprocess.Popen): The updater
+        """
+        try:
+            process.kill()
+        except OSError:
+            # already gone
+            pass
 
     async def wrap_up(self, flow, resume_list=None):
         """

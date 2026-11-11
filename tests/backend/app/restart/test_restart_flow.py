@@ -135,6 +135,22 @@ class FakeUpdateCheck:
         self.required.extend(names)
 
 
+class FakeShell:
+    """The shell update surface the flows ask (the archive of the package)"""
+
+    def __init__(self, pending=False):
+        """
+        Args:
+            pending (bool): Whether the electron archive of the package is
+                pending
+        """
+        self.pending = pending
+
+    async def pending_async(self):
+        """The archive question, not recorded (it is not a flow step)"""
+        return self.pending
+
+
 class FakeManager:
     """
     The manager surface the flows drive (the single steps), recorded instead of
@@ -142,7 +158,7 @@ class FakeManager:
     """
 
     def __init__(self, record=None, stop_result=(True, ['cfg_a']), changed=(), failed=(),
-                 handover_error=None, available=('m',), uptodate=False):
+                 handover_error=None, available=('m',), uptodate=False, shell=False):
         """
         Args:
             record (ResumeRecord): The resume intent the startup flow reads
@@ -152,6 +168,8 @@ class FakeManager:
             handover_error (Exception): Raised by the handover step
             available (list[str]): The mods with an available update
             uptodate (bool): The pre-check verdict of the available mods
+            shell (bool): Whether the electron archive of the package is
+                pending
         """
         self.calls = []
         self.record = record
@@ -160,6 +178,7 @@ class FakeManager:
         self.failed = list(failed)
         self.handover_error = handover_error
         self.handed_over = []
+        self.shell = FakeShell(pending=shell)
         self.views = 0
         self.worker_manager = FakeWorkerManager()
         self.update_check = FakeUpdateCheck(available=available, uptodate=uptodate)

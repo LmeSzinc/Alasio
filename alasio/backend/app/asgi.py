@@ -121,9 +121,19 @@ def create_config(args=None):
     else:
         env.set_project_root(os.getcwd())
     logger.attr('PROJECT_ROOT', env.PROJECT_ROOT)
-    logger.attr('ELECTRON', bool(env.ELECTRON))
+    logger.attr('ELECTRON_PID', env.ELECTRON_PID)
     DeployConfig().config.show()
     DeployConfig().config.write()
+
+    # The install context of a packaged electron, read once per process: the
+    # flows ask it whether the archive of the package has to replace the
+    # installed one. A process without a context (a development checkout, a
+    # remote deployment, a backend started by hand) simply never offers the
+    # shell update. The import is local: the module reads no project state at
+    # import time, but the app chain must not be imported before the root is
+    # set (see the module header).
+    from alasio.backend.app.restart.shell_update import SHELL_UPDATE
+    SHELL_UPDATE.configure()
 
     apply_hypercorn_exclusivity_patch()
     deploy = DeployConfig().config.data

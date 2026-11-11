@@ -54,6 +54,11 @@ def set_project_root(root, up=0):
 # behaves like a real worker without setting anything; only the backend
 # process declares itself.
 PROCESS_ROLE = 'worker'
-# Set to "1" by the supervisor when started with --electron; silences structlog stdout
-ELECTRON = os.environ.get("ELECTRON", "")
+# Pid of the electron main process that hosts this chain, written by electron
+# itself. It is the electron mode switch of every process of the chain: the
+# chain is spawned with an inherited environment, so the backend and its workers
+# read the same value the supervisor does. Nothing verifies the pid at startup --
+# it is a switch there, and a target only where the electron archive actually
+# has to be replaced (see backend/app/restart/shell_update.py).
+ELECTRON_PID = os.environ.get('ALASIO_APP_ELECTRON_PID', '')
 CHINAC_CLOUDPHONE = os.environ.get("cloudphone", "") == "cloudphone"

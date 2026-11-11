@@ -191,6 +191,41 @@ class TestWithdraw:
         assert credentials[-1] == ''
 
 
+class TestCommit:
+    """The publication that becomes the goal signal of the updater"""
+
+    @pytest.mark.trio
+    async def test_a_commit_protects_the_file_from_the_withdrawal(self, files, monkeypatch):
+        """The stop that ends the chain must not take the goal signal away."""
+        credentials = []
+        monkeypatch.setattr(files, 'announce', credentials.append)
+        credential = await files.write(['cfg_a'])
+        file = files.file_of(credential.partition('-')[0])
+        assert files.commit() is True
+        assert await files.withdraw() is None
+        assert file.isfile()
+        # the credential is not retracted either: the new backend consumes it
+        assert credentials[-1] != ''
+
+    @pytest.mark.trio
+    async def test_a_commit_without_a_publication(self, files):
+        """Nothing to commit: the caller must not ask for the relaunch."""
+        assert files.commit() is False
+
+    @pytest.mark.trio
+    async def test_a_rolled_back_commit_withdraws_again(self, files, monkeypatch):
+        """A request that never left the process leaves nothing behind."""
+        credentials = []
+        monkeypatch.setattr(files, 'announce', credentials.append)
+        credential = await files.write(['cfg_a'])
+        file = files.file_of(credential.partition('-')[0])
+        files.commit()
+        files.rollback_commit()
+        assert await files.withdraw() == file
+        assert not file.isfile()
+        assert credentials[-1] == ''
+
+
 class TestCleanup:
     """The stale file cleanup"""
 

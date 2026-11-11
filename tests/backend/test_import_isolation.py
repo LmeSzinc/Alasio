@@ -63,6 +63,10 @@ SUPERVISOR_BLACKLIST = {
     'alasio.backend.worker',
     'msgspec',
     'alasio.logger',
+    # the platform process probe lives with the updater; only the backend reads
+    # it (to learn the start marker of the host), the supervisor publishes the
+    # bare pid and stops there
+    'alasio.deploy.updater',
 }
 
 # What the worker process must not import: the backend web stack,
