@@ -133,6 +133,6 @@ tmp_path_retention_count = 1
 tmp_path_retention_policy = "failed"
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
-    "network: marks tests that require external network access (skip with '--run-network' unset)",
+    "network: marks tests that reach an external service, they run on CI only",
     "parallel: the file is safe to run in parallel with other marked files",
 ]

@@ -15,6 +15,10 @@ from alasio.git.fetch.argument import Arguments
 from alasio.git.fetch.pkt import FetchPayload
 from alasio.git.fetch.transport_http import HttpTransport
 
+# The tests only read from a public server and write under a temporary folder of
+# their own, so this file is safe to run beside the other marked files
+pytestmark = pytest.mark.parallel
+
 # Test configuration - using GitHub as it's reliable and supports v2
 TEST_REPO_URL = "https://github.com/LmeSzinc/AzurLaneAutoScript"
 TEST_TAG_V051 = "50f49a6350aa584d96dc4efe162cec8ce09a212b"

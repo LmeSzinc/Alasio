@@ -10,6 +10,11 @@ project and are overridable:
     ALAS2026_COS_REGION    ap-shanghai
     ALAS2026_COS_ENDPOINT  derived from the bucket and the region
 
+The module is marked `network` as well, so it runs on CI only, see
+tests/conftest.py. A local run with a credential is:
+
+    CI=1 pytest tests/deploy_dev/store/cos/test_real.py
+
 Two groups:
 
 - TestCosClientReal: the client itself, its five verbs and its signature;
