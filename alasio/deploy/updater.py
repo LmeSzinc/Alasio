@@ -36,6 +36,8 @@ import socket
 import subprocess
 import sys
 import time
+import traceback
+from datetime import datetime
 
 # Exit codes, see the design document of the app.asar relaunch
 EXIT_OK = 0
@@ -61,7 +63,6 @@ TARGET_NAMES = ('backend', 'supervisor', 'electron')
 POLL_INTERVAL = 0.1
 START_INTERVAL = 0.5
 START_WINDOW = 10.0
-LOG_MAX_SIZE = 1 << 20
 CHUNK_SIZE = 1 << 20
 
 # The TCP socket type of the port probe
@@ -404,8 +405,32 @@ else:
         raise NotImplementedError(f'platform {sys.platform} is not supported')
 
 
+# The script lives in <root>/alasio/deploy but the log belongs to the
+# installation, not to the package: the backend starts the updater in the
+# project root, so the working directory is that root on every launch path
+# (electron -> supervisor -> backend -> here). The directory is resolved from
+# it and never from __file__, which points into the library.
+LOG_DIRECTORY_NAME = 'log'
+
+
 class Log:
-    """Append only log file, silent when no path is configured."""
+    """Append only log file, silent when no path is configured.
+
+    The lines are laid out like the lines of the application logger, so one
+    reader (and one habit) covers both files::
+
+        2026-11-11 08:01:20.123 | INFO | preflight: /app/new-app.asar -> ...
+
+    The level tells the consequence, not the mood of the writer:
+
+    - ``INFO``: the flow went on, or it stopped without touching anything
+      because it was told to (the relaunch was withdrawn).
+    - ``WARNING``: the application was started, but not from the new build:
+      the archive could not be staged or swapped, or the goal could not be
+      read. The user runs the previous version and can try again.
+    - ``ERROR``: the flow stopped on a broken input, a chain that never came
+      down, or a new build that would not start. Nothing is running.
+    """
 
     __slots__ = ('path', 'file')
 
@@ -418,15 +443,16 @@ class Log:
         self.file = None
 
     def open(self):
-        """Open the log file, rotating a file that reached the size limit."""
+        """Open the log file, creating its directory."""
         if not self.path:
             return
-        try:
-            if os.path.getsize(self.path) >= LOG_MAX_SIZE:
-                os.replace(self.path, self.path + '.1')
-        except OSError:
-            # missing file, no permission to rotate: append anyway
-            pass
+        folder = os.path.dirname(self.path)
+        if folder:
+            try:
+                os.makedirs(folder, exist_ok=True)
+            except OSError:
+                # read only installation: run without a log, never fail here
+                return
         try:
             self.file = open(self.path, 'a', encoding='utf-8')
         except OSError:
@@ -434,18 +460,72 @@ class Log:
 
     def info(self, message):
         """
-        Append one line, stamped and flushed.
+        Append one line at INFO level.
 
         Args:
             message (str): Text to write, must not contain a credential
         """
+        self._write('INFO', message)
+
+    def warning(self, message):
+        """
+        Append one line at WARNING level.
+
+        Args:
+            message (str): Text to write, must not contain a credential
+        """
+        self._write('WARNING', message)
+
+    def error(self, message, exc_info=False):
+        """
+        Append one line at ERROR level, optionally with the stack that raised.
+
+        The stack is appended the way the application logger appends it: after
+        the line, verbatim, without a level of its own.
+
+        Args:
+            message (str): Text to write, must not contain a credential
+            exc_info (bool): Append the traceback of the exception being
+                handled. Defaults to False.
+        """
+        detail = ''
+        if exc_info:
+            detail = traceback.format_exc()
+            if not detail.endswith('\n'):
+                detail = f'{detail}\n'
+        self._write('ERROR', message, detail)
+
+    def _write(self, level, message, detail=''):
+        """
+        Append one stamped, flushed line.
+
+        Args:
+            level (str): INFO, WARNING or ERROR
+            message (str): Text to write
+            detail (str): Extra block printed after the line, already ending
+                with a newline. Defaults to ''.
+        """
         if self.file is None:
             return
+        text = f'{self.stamp()} | {level} | {message}\n'
+        if detail:
+            text = f'{text}{detail}'
         try:
-            self.file.write(f'{time.strftime("%Y-%m-%d %H:%M:%S")} {message}\n')
+            self.file.write(text)
             self.file.flush()
         except OSError:
+            # a full or removed log file must not stop the update
             self.file = None
+
+    @staticmethod
+    def stamp():
+        """
+        Timestamp prefix of one line.
+
+        Returns:
+            str: Local time with milliseconds, ``yyyy-mm-dd HH:MM:SS.mmm``
+        """
+        return datetime.fromtimestamp(time.time()).isoformat(sep=' ', timespec='milliseconds')
 
     def close(self):
         """Close the file, ignoring every error."""
@@ -472,13 +552,15 @@ class ElectronUpdater:
 
     __slots__ = (
         'dst', 'src', 'temp', 'exe', 'cwd', 'argv', 'targets', 'sha256', 'resume_file',
-        'token', 'timeout', 'log_path', 'env', 'log',
+        'token', 'timeout', 'env', 'log',
     )
 
-    def __init__(self, environ=None):
+    def __init__(self, environ=None, log=None):
         """
         Args:
             environ (Mapping[str, str]): Environment to read, os.environ when
+                omitted. Defaults to None.
+            log (Log): Opened sink of the messages, today's log file when
                 omitted. Defaults to None.
 
         Raises:
@@ -511,7 +593,6 @@ class ElectronUpdater:
             # failure would only show up minutes later as "the tasks stopped"
             raise PreflightError('ALASIO_RESUME_TOKEN is not set')
         self.timeout = self._read_timeout(environ.get('ALASIO_RELAUNCH_TIMEOUT', ''))
-        self.log_path = environ.get('ALASIO_RELAUNCH_LOG', '')
         # The environment of the new chain is inherited, minus every key that
         # describes the old one. It is a subtraction, not a whitelist: this
         # environment came from electron itself (updater is spawned by the
@@ -538,7 +619,19 @@ class ElectronUpdater:
             and name not in ('ALASIO_RESUME_FILE', 'ELECTRON')
         }
         self.env['ALASIO_RESUME_TOKEN'] = self.token
-        self.log = Log(self.log_path)
+        self.log = Log(self.log_path()) if log is None else log
+
+    @staticmethod
+    def log_path():
+        """
+        Name of the log file of today, inside the installation root.
+
+        Returns:
+            str: ``<cwd>/log/{yyyy-mm-dd}_ElectronUpdater.txt``, named like
+                every other log the application writes
+        """
+        name = f'{time.strftime("%Y-%m-%d")}_ElectronUpdater.txt'
+        return os.path.join(os.getcwd(), LOG_DIRECTORY_NAME, name)
 
     @staticmethod
     def _as_path(value, name):
@@ -776,10 +869,10 @@ class ElectronUpdater:
         Wait until every target is done or the budget is spent.
 
         Polling is deliberate: it needs nothing armed before the processes
-        die, so the ready line never has to promise that a handle was opened
-        in time. The first sleep comes before the first probe: the old chain
-        never comes down that fast after the ready line, so probing at once
-        only burns a system call.
+        die, so no handle has to be opened in time and no signal has to be
+        delivered. The first sleep comes before the first probe: the old chain
+        never comes down that fast after the relaunch request, so probing at
+        once only burns a system call.
 
         Args:
             interval (float): Seconds between two probe rounds. Defaults to 0.1.
@@ -926,7 +1019,7 @@ class ElectronUpdater:
 
     def run(self):
         """
-        Carry the relaunch through, from the ready line to the new process.
+        Carry the relaunch through, from the preflight check to the new process.
 
         Returns:
             int: Exit code, see the constants of this module
@@ -936,15 +1029,15 @@ class ElectronUpdater:
         try:
             digest = self.sha256_file(self.src)
         except OSError as e:
-            log.info(f'preflight: cannot read {self.src}: {e}')
+            log.error(f'preflight: cannot read {self.src}: {e}')
             return EXIT_PREFLIGHT
         if digest != self.sha256:
-            log.info(f'preflight: {self.src} is {digest}, expected {self.sha256}, not staging')
+            log.error(f'preflight: {self.src} is {digest}, expected {self.sha256}, not staging')
             return EXIT_PREFLIGHT
 
         pending = self.wait_targets()
         if pending:
-            log.info(f'wait: still running after {self.timeout:.1f}s: {", ".join(pending)}')
+            log.error(f'wait: still running after {self.timeout:.1f}s: {", ".join(pending)}')
             return EXIT_TIMEOUT
         log.info('wait: the old chain is gone')
 
@@ -954,16 +1047,18 @@ class ElectronUpdater:
             log.info(f'go: {self.resume_file} is gone, the relaunch was withdrawn')
             return EXIT_NO_GO
         except OSError as e:
-            log.info(f'go: cannot read {self.resume_file}: {e}')
+            # the answer is unknown, and acting on an unknown answer would
+            # install an archive the user may have cancelled
+            log.warning(f'go: cannot read {self.resume_file}: {e}')
             return EXIT_NO_GO
 
         installed = False
         try:
             temp = self.stage()
         except PreflightError as e:
-            log.info(f'replace: {e}, keeping the installed one')
+            log.warning(f'replace: {e}, keeping the installed one')
         except OSError as e:
-            log.info(f'replace: cannot stage {self.src}: {e}')
+            log.warning(f'replace: cannot stage {self.src}: {e}')
         else:
             if temp is None:
                 # another updater consumed the staged archive: it installed
@@ -974,7 +1069,7 @@ class ElectronUpdater:
                 try:
                     self.replace(temp)
                 except OSError as e:
-                    log.info(f'replace: {temp} -> {self.dst} failed: {e}')
+                    log.warning(f'replace: {temp} -> {self.dst} failed: {e}')
                 else:
                     installed = True
                     log.info(f'replace: installed {self.dst}')
@@ -982,7 +1077,7 @@ class ElectronUpdater:
         try:
             self.relaunch()
         except (OSError, RuntimeError) as e:
-            log.info(f'relaunch: {self.exe} failed: {e}')
+            log.error(f'relaunch: {self.exe} failed: {e}')
             return EXIT_RELAUNCH
         log.info(f'relaunch: started {self.exe}')
         return EXIT_OK if installed else EXIT_REPLACE
@@ -992,27 +1087,34 @@ class ElectronUpdater:
         """
         Entry point of ``python updater.py``.
 
-        The command line carries nothing, the environment is the whole input,
-        and nothing is printed on stdout after the ready line.
+        The command line carries nothing, the environment is the whole input
+        and today's log file is the whole output. stdout and stderr belong to
+        the chain that started this process and has exited by the time the
+        work starts: those pipes have no reader left, so a write would either
+        be lost or block once the pipe buffer is full.
 
         Returns:
             int: Exit code, see the constants of this module
         """
+        log = Log(cls.log_path())
+        log.open()
         try:
-            updater = cls()
-        except PreflightError as e:
-            # nothing is known yet, so there is no log file either
-            sys.stderr.write(f'alasio.updater: {e}\n')
-            sys.stderr.flush()
-            return EXIT_PREFLIGHT
-        updater.log.open()
-        try:
-            return updater.run()
-        except Exception as e:
-            updater.log.info(f'error: {type(e).__name__}: {e}')
-            return EXIT_ERROR
+            try:
+                updater = cls(log=log)
+            except PreflightError as e:
+                # dst and src are unknown without the environment, but the
+                # place to say so is not
+                log.error(f'preflight: {e}')
+                return EXIT_PREFLIGHT
+            try:
+                return updater.run()
+            except Exception as e:
+                # the stack is worth keeping: this is where a bug of the
+                # updater itself ends up, and the process is gone afterwards
+                log.error(f'error: {type(e).__name__}: {e}', exc_info=True)
+                return EXIT_ERROR
         finally:
-            updater.log.close()
+            log.close()
 
 
 if __name__ == '__main__':

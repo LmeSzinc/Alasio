@@ -203,6 +203,7 @@ class TestStandaloneModule:
     ALLOWED = {
         'argparse',
         'ctypes',
+        'datetime',
         'errno',
         'hashlib',
         'json',
@@ -213,6 +214,7 @@ class TestStandaloneModule:
         'subprocess',
         'sys',
         'time',
+        'traceback',
     }
 
     def test_imports_are_stdlib_only(self):

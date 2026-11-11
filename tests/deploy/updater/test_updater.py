@@ -10,9 +10,11 @@ import hashlib
 import io
 import json
 import os
+import re
 import subprocess
 import sys
 import time
+from datetime import date
 
 import pytest
 
@@ -29,11 +31,40 @@ HEX_B = 'b' * 64
 
 # Absolute paths of the in-memory files, outside the repository on posix and on
 # the current drive on windows: the fake filesystem never touches the disk
-WORK = '/'
-DST = '/resources/app.asar'
-SRC = '/resources/new-app.asar'
-RESUME = '/log/resume.json'
-LOG = '/log/updater.log'
+WORK = os.sep
+DST = os.path.join(WORK, 'resources', 'app.asar')
+SRC = os.path.join(os.path.dirname(DST), 'new-app.asar')
+EXE = os.path.join(WORK, 'Alasio.exe')
+RESUME = os.path.join(WORK, 'log', 'resume.json')
+LOG = os.path.join(WORK, 'log', 'updater.log')
+
+# Every logged line starts with the local time; a test that let the real clock
+# through could only assert a suffix of the line
+STAMP = '2000-01-01 00:00:00.000'
+
+
+def freeze_clock(monkeypatch):
+    """
+    Give every logged line the same timestamp.
+
+    Args:
+        monkeypatch (pytest.MonkeyPatch): Fixture of the test
+    """
+    monkeypatch.setattr(updater.Log, 'stamp', staticmethod(lambda: STAMP))
+
+
+def read_text(path):
+    """
+    Read a file of the fake file system.
+
+    Args:
+        path (str): File to read
+
+    Returns:
+        str: Its content, utf-8
+    """
+    with open(path, encoding='utf-8') as f:
+        return f.read()
 
 
 class FakeProcess:
@@ -73,7 +104,7 @@ def make_environ(**overrides):
     """
     environ = {
         'ALASIO_APP_ASAR': DST,
-        'ALASIO_APP_EXE': '/Alasio.exe',
+        'ALASIO_APP_EXE': EXE,
         'ALASIO_APP_CWD': WORK,
         'ALASIO_APP_ARGV': json.dumps(['--foo', 'bar baz']),
         'ALASIO_RELAUNCH_TARGETS': json.dumps({
@@ -93,17 +124,19 @@ def make_environ(**overrides):
     return environ
 
 
-def make_updater(**overrides):
+def make_updater(log=None, **overrides):
     """
     Build an updater from a valid environment.
 
     Args:
+        log (updater.Log): Sink of the messages, the default log of the
+            updater when omitted. Defaults to None.
         overrides ("dict[str, str]"): Values replacing the defaults
 
     Returns:
         "updater.ElectronUpdater": The updater
     """
-    return updater.ElectronUpdater(make_environ(**overrides))
+    return updater.ElectronUpdater(make_environ(**overrides), log=log)
 
 
 class TestTarget:
@@ -224,19 +257,22 @@ class TestElectronUpdater:
         assert instance.sha256 == HEX_A
         assert instance.token == 'token-abc'
         assert instance.timeout == 120.0
-        assert instance.log_path == ''
-        assert instance.log.path == ''
+        assert instance.log.path == updater.ElectronUpdater.log_path()
 
     def test_reads_os_environ_by_default(self, monkeypatch):
         """Without an argument the process environment is read."""
         monkeypatch.setattr(os, 'environ', make_environ())
         assert updater.ElectronUpdater().token == 'token-abc'
 
-    def test_optional_values(self):
-        """The timeout and the log path are optional."""
-        instance = make_updater(ALASIO_RELAUNCH_TIMEOUT='30.5', ALASIO_RELAUNCH_LOG=LOG)
+    def test_optional_value(self):
+        """The timeout is optional."""
+        instance = make_updater(ALASIO_RELAUNCH_TIMEOUT='30.5')
         assert instance.timeout == 30.5
-        assert instance.log_path == LOG
+
+    def test_log_path_is_not_an_input(self):
+        """No variable redirects the log away from today's file."""
+        instance = make_updater(ALASIO_RELAUNCH_LOG=LOG)
+        assert instance.log.path == updater.ElectronUpdater.log_path()
 
     @pytest.mark.parametrize(
         'name',
@@ -527,7 +563,7 @@ class TestRelaunch:
         instance.relaunch(window=0.05, interval=0.01)
         assert time.monotonic() - started >= 0.05
         assert len(spawned) == 1
-        assert spawned[0][0] == ['/Alasio.exe', '--foo', 'bar baz']
+        assert spawned[0][0] == [EXE, '--foo', 'bar baz']
         assert spawned[0][1]['cwd'] == WORK
         assert spawned[0][1]['env']['ALASIO_RESUME_TOKEN'] == 'token-abc'
         assert 'ALASIO_RELAUNCH_TARGETS' not in spawned[0][1]['env']
@@ -570,7 +606,7 @@ class TestRelaunch:
 
 
 class TestRun:
-    """The flow of the updater, from the ready line to the new process."""
+    """The flow of the updater, from the preflight check to the new process."""
 
     def digest_of(self, content):
         """
@@ -582,20 +618,37 @@ class TestRun:
         """
         return hashlib.sha256(content).hexdigest()
 
-    def make_instance(self, tmp_digest=HEX_A):
+    def make_log(self, monkeypatch, path=LOG):
+        """
+        Open a log file of the fake file system at a frozen time.
+
+        Args:
+            monkeypatch (pytest.MonkeyPatch): Fixture of the test
+            path (str): Log file. Defaults to LOG.
+
+        Returns:
+            "updater.Log": The opened log
+        """
+        freeze_clock(monkeypatch)
+        log = updater.Log(path)
+        log.open()
+        return log
+
+    def make_instance(self, tmp_digest=HEX_A, log=None):
         """
         Build an updater configured for the fake file system.
 
         Args:
             tmp_digest (str): Digest the staged archive is expected to have
+            log (updater.Log): Sink of the messages. Defaults to None.
 
         Returns:
             "updater.ElectronUpdater": The updater
         """
         return make_updater(
+            log=log,
             ALASIO_RELAUNCH_SHA256=tmp_digest,
             ALASIO_RELAUNCH_TIMEOUT='1',
-            ALASIO_RELAUNCH_LOG=LOG,
         )
 
     def test_success(self, fs, monkeypatch):
@@ -607,13 +660,17 @@ class TestRun:
         monkeypatch.setattr(updater.ElectronUpdater, 'wait_targets', lambda self, interval=0.1: [])
         monkeypatch.setattr(updater.ElectronUpdater, 'relaunch',
                             lambda self, **kwargs: launched.append(self.env))
-        stdout = io.StringIO()
-        monkeypatch.setattr(sys, 'stdout', stdout)
-        instance = self.make_instance(tmp_digest=self.digest_of(b'new'))
+        log = self.make_log(monkeypatch)
+        instance = self.make_instance(tmp_digest=self.digest_of(b'new'), log=log)
         assert instance.run() == updater.EXIT_OK
+        assert read_text(LOG) == f"""\
+{STAMP} | INFO | preflight: {SRC} -> {DST}
+{STAMP} | INFO | wait: the old chain is gone
+{STAMP} | INFO | replace: installed {DST}
+{STAMP} | INFO | relaunch: started {EXE}
+"""
         with open(DST, 'rb') as f:
             assert f.read() == b'new'
-        assert stdout.getvalue() == ''
         assert not os.path.exists(instance.temp)
         assert not os.path.exists(SRC)
         assert not os.path.exists(DST + '.old')
@@ -621,26 +678,37 @@ class TestRun:
         assert launched[0]['ALASIO_RESUME_TOKEN'] == 'token-abc'
 
     def test_preflight_digest_mismatch(self, fs, monkeypatch):
-        """A staged file that does not match its digest stops before ready."""
+        """A staged file that does not match its digest stops before the wait."""
         fs.create_file(DST, contents=b'old')
         fs.create_file(SRC, contents=b'tampered')
         monkeypatch.setattr(updater.ElectronUpdater, 'wait_targets', lambda self, interval=0.1: [])
-        stdout = io.StringIO()
-        monkeypatch.setattr(sys, 'stdout', stdout)
-        instance = self.make_instance(tmp_digest=self.digest_of(b'new'))
+        log = self.make_log(monkeypatch)
+        instance = self.make_instance(tmp_digest=self.digest_of(b'new'), log=log)
         assert instance.run() == updater.EXIT_PREFLIGHT
-        assert stdout.getvalue() == ''
+        assert read_text(LOG) == f"""\
+{STAMP} | INFO | preflight: {SRC} -> {DST}
+{STAMP} | ERROR | preflight: {SRC} is {self.digest_of(b'tampered')}, expected {self.digest_of(b'new')}, not staging
+"""
         with open(DST, 'rb') as f:
             assert f.read() == b'old'
 
     def test_preflight_missing_source(self, fs, monkeypatch):
-        """A staged archive that never existed stops before ready."""
+        """A staged archive that never existed stops before the wait."""
         fs.create_file(DST, contents=b'old')
         monkeypatch.setattr(updater.ElectronUpdater, 'wait_targets', lambda self, interval=0.1: [])
-        stdout = io.StringIO()
-        monkeypatch.setattr(sys, 'stdout', stdout)
-        assert self.make_instance().run() == updater.EXIT_PREFLIGHT
-        assert stdout.getvalue() == ''
+        try:
+            with open(SRC, 'rb'):
+                pass
+        except OSError as e:
+            missing = e
+        else:
+            raise AssertionError(f'{SRC} must not exist')
+        log = self.make_log(monkeypatch)
+        assert self.make_instance(log=log).run() == updater.EXIT_PREFLIGHT
+        assert read_text(LOG) == f"""\
+{STAMP} | INFO | preflight: {SRC} -> {DST}
+{STAMP} | ERROR | preflight: cannot read {SRC}: {missing}
+"""
 
     def test_timeout_keeps_the_installation(self, fs, monkeypatch):
         """A chain that does not come down leaves the files alone."""
@@ -652,9 +720,13 @@ class TestRun:
         launched = []
         monkeypatch.setattr(updater.ElectronUpdater, 'relaunch',
                             lambda self, **kwargs: launched.append(self.env))
-        monkeypatch.setattr(sys, 'stdout', io.StringIO())
-        instance = self.make_instance(tmp_digest=self.digest_of(b'new'))
+        log = self.make_log(monkeypatch)
+        instance = self.make_instance(tmp_digest=self.digest_of(b'new'), log=log)
         assert instance.run() == updater.EXIT_TIMEOUT
+        assert read_text(LOG) == f"""\
+{STAMP} | INFO | preflight: {SRC} -> {DST}
+{STAMP} | ERROR | wait: still running after 1.0s: electron
+"""
         assert not launched
         with open(DST, 'rb') as f:
             assert f.read() == b'old'
@@ -667,22 +739,51 @@ class TestRun:
         launched = []
         monkeypatch.setattr(updater.ElectronUpdater, 'relaunch',
                             lambda self, **kwargs: launched.append(self.env))
-        monkeypatch.setattr(sys, 'stdout', io.StringIO())
-        instance = self.make_instance(tmp_digest=self.digest_of(b'new'))
+        log = self.make_log(monkeypatch)
+        instance = self.make_instance(tmp_digest=self.digest_of(b'new'), log=log)
         assert instance.run() == updater.EXIT_NO_GO
+        assert read_text(LOG) == f"""\
+{STAMP} | INFO | preflight: {SRC} -> {DST}
+{STAMP} | INFO | wait: the old chain is gone
+{STAMP} | INFO | go: {RESUME} is gone, the relaunch was withdrawn
+"""
         assert not launched
         with open(DST, 'rb') as f:
             assert f.read() == b'old'
         assert os.path.exists(SRC)
 
-    def test_tampered_after_ready_relaunches_the_old_version(self, fs, monkeypatch):
+    def test_unreadable_resume_file_installs_nothing(self, fs, monkeypatch):
+        """An unreadable resume file is treated like a withdrawn relaunch."""
+        fs.create_file(DST, contents=b'old')
+        fs.create_file(SRC, contents=b'new')
+        fs.create_file(RESUME, contents=b'{}')
+        monkeypatch.setattr(updater.ElectronUpdater, 'wait_targets', lambda self, interval=0.1: [])
+        error = PermissionError(13, 'permission denied')
+
+        def denied(path):
+            raise error
+        monkeypatch.setattr(os, 'stat', denied)
+        log = self.make_log(monkeypatch)
+        launched = []
+        monkeypatch.setattr(updater.ElectronUpdater, 'relaunch',
+                            lambda self, **kwargs: launched.append(self.env))
+        instance = self.make_instance(tmp_digest=self.digest_of(b'new'), log=log)
+        assert instance.run() == updater.EXIT_NO_GO
+        assert read_text(LOG) == f"""\
+{STAMP} | INFO | preflight: {SRC} -> {DST}
+{STAMP} | INFO | wait: the old chain is gone
+{STAMP} | WARNING | go: cannot read {RESUME}: {error}
+"""
+        assert not launched
+
+    def test_tampered_after_the_wait_relaunches_the_old_version(self, fs, monkeypatch):
         """A staged file that changes during the wait is not installed."""
         fs.create_file(DST, contents=b'old')
         fs.create_file(SRC, contents=b'new')
         fs.create_file(RESUME, contents=b'{}')
 
         def tamper(instance, interval=0.1):
-            # the preflight read the correct content, the window between ready
+            # the preflight read the correct content, the window between it
             # and the installation is what this test is about
             with open(SRC, 'wb') as f:
                 f.write(b'tampered')
@@ -691,9 +792,95 @@ class TestRun:
         launched = []
         monkeypatch.setattr(updater.ElectronUpdater, 'relaunch',
                             lambda self, **kwargs: launched.append(self.env))
-        monkeypatch.setattr(sys, 'stdout', io.StringIO())
-        instance = self.make_instance(tmp_digest=self.digest_of(b'new'))
+        log = self.make_log(monkeypatch)
+        instance = self.make_instance(tmp_digest=self.digest_of(b'new'), log=log)
         assert instance.run() == updater.EXIT_REPLACE
+        assert read_text(LOG) == f"""\
+{STAMP} | INFO | preflight: {SRC} -> {DST}
+{STAMP} | INFO | wait: the old chain is gone
+{STAMP} | WARNING | replace: {SRC} is {self.digest_of(b'tampered')}, expected {self.digest_of(b'new')}, keeping the installed one
+{STAMP} | INFO | relaunch: started {EXE}
+"""
+        assert len(launched) == 1
+        with open(DST, 'rb') as f:
+            assert f.read() == b'old'
+
+    def test_consumed_staged_archive_is_not_an_error(self, fs, monkeypatch):
+        """Another updater installed the same content: nothing left to do."""
+        fs.create_file(DST, contents=b'new')
+        fs.create_file(SRC, contents=b'new')
+        fs.create_file(RESUME, contents=b'{}')
+
+        def consume(instance, interval=0.1):
+            # the preflight saw the staged archive, the other updater consumed
+            # it while this one was waiting
+            os.remove(SRC)
+            return []
+        monkeypatch.setattr(updater.ElectronUpdater, 'wait_targets', consume)
+        launched = []
+        monkeypatch.setattr(updater.ElectronUpdater, 'relaunch',
+                            lambda self, **kwargs: launched.append(self.env))
+        log = self.make_log(monkeypatch)
+        instance = self.make_instance(tmp_digest=self.digest_of(b'new'), log=log)
+        assert instance.run() == updater.EXIT_OK
+        assert read_text(LOG) == f"""\
+{STAMP} | INFO | preflight: {SRC} -> {DST}
+{STAMP} | INFO | wait: the old chain is gone
+{STAMP} | INFO | replace: {SRC} already consumed, leaving {DST} alone
+{STAMP} | INFO | relaunch: started {EXE}
+"""
+        assert len(launched) == 1
+
+    def test_staging_failure_keeps_the_installation(self, fs, monkeypatch):
+        """A temporary file that cannot be written leaves the old version."""
+        fs.create_file(DST, contents=b'old')
+        fs.create_file(SRC, contents=b'new')
+        fs.create_file(RESUME, contents=b'{}')
+        monkeypatch.setattr(updater.ElectronUpdater, 'wait_targets', lambda self, interval=0.1: [])
+        error = OSError(28, 'no space left on device')
+
+        def broken(self):
+            raise error
+        monkeypatch.setattr(updater.ElectronUpdater, 'stage', broken)
+        launched = []
+        monkeypatch.setattr(updater.ElectronUpdater, 'relaunch',
+                            lambda self, **kwargs: launched.append(self.env))
+        log = self.make_log(monkeypatch)
+        instance = self.make_instance(tmp_digest=self.digest_of(b'new'), log=log)
+        assert instance.run() == updater.EXIT_REPLACE
+        assert read_text(LOG) == f"""\
+{STAMP} | INFO | preflight: {SRC} -> {DST}
+{STAMP} | INFO | wait: the old chain is gone
+{STAMP} | WARNING | replace: cannot stage {SRC}: {error}
+{STAMP} | INFO | relaunch: started {EXE}
+"""
+        assert len(launched) == 1
+        with open(DST, 'rb') as f:
+            assert f.read() == b'old'
+
+    def test_swap_failure_keeps_the_installation(self, fs, monkeypatch):
+        """A file that cannot be swapped in leaves the old version."""
+        fs.create_file(DST, contents=b'old')
+        fs.create_file(SRC, contents=b'new')
+        fs.create_file(RESUME, contents=b'{}')
+        monkeypatch.setattr(updater.ElectronUpdater, 'wait_targets', lambda self, interval=0.1: [])
+        error = PermissionError(13, 'the file is in use')
+
+        def broken(self, temp, attempts=5):
+            raise error
+        monkeypatch.setattr(updater.ElectronUpdater, 'replace', broken)
+        launched = []
+        monkeypatch.setattr(updater.ElectronUpdater, 'relaunch',
+                            lambda self, **kwargs: launched.append(self.env))
+        log = self.make_log(monkeypatch)
+        instance = self.make_instance(tmp_digest=self.digest_of(b'new'), log=log)
+        assert instance.run() == updater.EXIT_REPLACE
+        assert read_text(LOG) == f"""\
+{STAMP} | INFO | preflight: {SRC} -> {DST}
+{STAMP} | INFO | wait: the old chain is gone
+{STAMP} | WARNING | replace: {instance.temp} -> {DST} failed: {error}
+{STAMP} | INFO | relaunch: started {EXE}
+"""
         assert len(launched) == 1
         with open(DST, 'rb') as f:
             assert f.read() == b'old'
@@ -704,28 +891,159 @@ class TestRun:
         fs.create_file(SRC, contents=b'new')
         fs.create_file(RESUME, contents=b'{}')
         monkeypatch.setattr(updater.ElectronUpdater, 'wait_targets', lambda self, interval=0.1: [])
-        monkeypatch.setattr(sys, 'stdout', io.StringIO())
 
         def broken(self, **kwargs):
             raise OSError(2, 'no such program')
         monkeypatch.setattr(updater.ElectronUpdater, 'relaunch', broken)
-        instance = self.make_instance(tmp_digest=self.digest_of(b'new'))
+        log = self.make_log(monkeypatch)
+        instance = self.make_instance(tmp_digest=self.digest_of(b'new'), log=log)
         assert instance.run() == updater.EXIT_RELAUNCH
+        assert read_text(LOG) == f"""\
+{STAMP} | INFO | preflight: {SRC} -> {DST}
+{STAMP} | INFO | wait: the old chain is gone
+{STAMP} | INFO | replace: installed {DST}
+{STAMP} | ERROR | relaunch: {EXE} failed: [Errno 2] no such program
+"""
+
+
+class TestLog:
+    """The log file, the only output of the process."""
+
+    def test_open_creates_the_directory(self, fs, monkeypatch):
+        """log/ does not exist on a fresh installation."""
+        freeze_clock(monkeypatch)
+        path = os.path.join(os.sep, 'log', 'fresh', 'updater.log')
+        log = updater.Log(path)
+        log.open()
+        log.info('hello')
+        log.close()
+        assert read_text(path) == f'{STAMP} | INFO | hello\n'
+
+    def test_levels_use_the_layout_of_the_application_logger(self, fs, monkeypatch):
+        """`stamp | LEVEL | message`, the lines of log/{date}_{name}.txt."""
+        freeze_clock(monkeypatch)
+        log = updater.Log(LOG)
+        log.open()
+        log.info('one')
+        log.warning('two')
+        log.error('three')
+        log.close()
+        assert read_text(LOG) == f"""\
+{STAMP} | INFO | one
+{STAMP} | WARNING | two
+{STAMP} | ERROR | three
+"""
+
+    def test_error_appends_the_traceback_after_the_line(self, fs, monkeypatch):
+        """The stack follows the line, verbatim, like the application logger."""
+        freeze_clock(monkeypatch)
+        log = updater.Log(LOG)
+        log.open()
+        try:
+            raise ValueError('bad value')
+        except ValueError:
+            log.error('boom', exc_info=True)
+        log.close()
+        lines = read_text(LOG).splitlines()
+        assert lines[0] == f'{STAMP} | ERROR | boom'
+        assert lines[1] == 'Traceback (most recent call last):'
+        assert lines[-1] == 'ValueError: bad value'
+        # the frame that raised is named; the source lines are absent because
+        # the fake filesystem shadows the file the code came from
+        assert any('in test_error_appends_the_traceback_after_the_line' in line for line in lines)
+
+    def test_error_without_exc_info_writes_one_line(self, fs, monkeypatch):
+        """An expected failure needs no stack, only its reason."""
+        freeze_clock(monkeypatch)
+        log = updater.Log(LOG)
+        log.open()
+        log.error('boom')
+        log.close()
+        assert read_text(LOG) == f'{STAMP} | ERROR | boom\n'
+
+    def test_stamp_carries_milliseconds(self):
+        """The prefix is the timestamp the application logger writes."""
+        assert re.fullmatch(r'\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}', updater.Log.stamp())
+
+    def test_appends_across_runs(self, fs, monkeypatch):
+        """One file per day, so every run of that day adds to the same file."""
+        freeze_clock(monkeypatch)
+        for word in ('first', 'second'):
+            log = updater.Log(LOG)
+            log.open()
+            log.info(word)
+            log.close()
+        assert read_text(LOG) == f'{STAMP} | INFO | first\n{STAMP} | INFO | second\n'
+
+    def test_silent_without_path(self):
+        """An instance built without a path writes nothing, anywhere."""
+        log = updater.Log('')
+        log.open()
+        log.info('hello')
+        log.close()
+        assert log.file is None
+
+
+class TestLogPath:
+    """The log file is fixed, dated and lives in the installation root."""
+
+    def test_directory_is_under_the_working_directory(self, monkeypatch):
+        """The backend starts the updater in the project root."""
+        root = os.path.join(os.sep, 'root')
+        monkeypatch.setattr(os, 'getcwd', lambda: root)
+        name = f'{date.today()}_ElectronUpdater.txt'
+        assert updater.ElectronUpdater.log_path() == os.path.join(root, 'log', name)
+
+    def test_not_inside_the_package(self, monkeypatch):
+        """The library location is not the installation location."""
+        monkeypatch.setattr(os, 'getcwd', lambda: os.path.join(os.sep, 'somewhere', 'else'))
+        assert 'alasio' not in updater.ElectronUpdater.log_path().split(os.sep)
+
+    def test_name_is_dated_like_every_other_log(self, monkeypatch):
+        """One file per day, in the form the application logger uses."""
+        monkeypatch.setattr(os, 'getcwd', lambda: os.path.join(os.sep, 'root'))
+        name = os.path.basename(updater.ElectronUpdater.log_path())
+        assert name == f'{date.today()}_ElectronUpdater.txt'
 
 
 class TestMain:
     """The entry point."""
 
-    def test_preflight_failure_is_reported_on_stderr(self, monkeypatch):
-        """A missing environment exits 2 without touching stdout."""
+    def test_preflight_failure_is_written_to_the_log(self, fs, monkeypatch):
+        """An unusable environment still leaves its reason in today's log."""
+        freeze_clock(monkeypatch)
         monkeypatch.setattr(os, 'environ', {})
+        monkeypatch.setattr(updater.ElectronUpdater, 'log_path', staticmethod(lambda: LOG))
         stdout = io.StringIO()
         stderr = io.StringIO()
         monkeypatch.setattr(sys, 'stdout', stdout)
         monkeypatch.setattr(sys, 'stderr', stderr)
         assert updater.ElectronUpdater.main() == updater.EXIT_PREFLIGHT
+        assert read_text(LOG) == f'{STAMP} | ERROR | preflight: ALASIO_APP_ASAR is not set\n'
         assert stdout.getvalue() == ''
-        assert 'ALASIO_APP_ASAR' in stderr.getvalue()
+        assert stderr.getvalue() == ''
+
+    def test_an_unexpected_failure_is_written_with_its_stack(self, fs, monkeypatch):
+        """A bug of the updater itself leaves the frame that raised it."""
+        freeze_clock(monkeypatch)
+        monkeypatch.setattr(updater.ElectronUpdater, 'log_path', staticmethod(lambda: LOG))
+        monkeypatch.setattr(os, 'environ', make_environ())
+
+        def broken(self):
+            raise RuntimeError('boom')
+
+        monkeypatch.setattr(updater.ElectronUpdater, 'run', broken)
+        assert updater.ElectronUpdater.main() == updater.EXIT_ERROR
+        content = read_text(LOG)
+        lines = content.splitlines()
+        assert lines[0] == f'{STAMP} | ERROR | error: RuntimeError: boom'
+        assert lines[1] == 'Traceback (most recent call last):'
+        assert lines[-1] == 'RuntimeError: boom'
+        # both frames are named: the entry point and the patched step
+        assert 'in main' in content
+        assert 'in broken' in content
+        # the credential of the new chain never reaches the log
+        assert 'token-abc' not in content
 
 
 def updater_source():
@@ -744,6 +1062,7 @@ class TestStandaloneConstraints:
 
     ALLOWED = {
         'ctypes',
+        'datetime',
         'errno',
         'hashlib',
         'json',
@@ -752,6 +1071,7 @@ class TestStandaloneConstraints:
         'subprocess',
         'sys',
         'time',
+        'traceback',
     }
 
     def test_imports_are_stdlib_only(self):
@@ -781,6 +1101,13 @@ class TestStandaloneConstraints:
         source = updater_source()
         assert 'argparse' not in source
         assert 'sys.argv' not in source
+
+    def test_no_stream_writes(self):
+        """The pipes inherited from the dead chain have no reader left."""
+        source = updater_source()
+        assert 'sys.stdout' not in source
+        assert 'sys.stderr' not in source
+        assert 'print(' not in source
 
     def test_exposed_helpers(self):
         """The entry points other modules and tests rely on."""
