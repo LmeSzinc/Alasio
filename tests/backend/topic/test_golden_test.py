@@ -10,25 +10,32 @@ poll loop of the module dispatches one scan to both of them.
 """
 from types import SimpleNamespace
 
+import msgspec
 import pytest
 import trio
 from trio.testing import wait_all_tasks_blocked
 
 import alasio.backend.topic.golden_test as golden_test_module
-from alasio.backend.reactive.event import RpcValueError
+from alasio.backend.mpipe.token_backend import token_table
+from alasio.backend.reactive.event import RequestEvent, RpcValueError
 from alasio.backend.topic.golden_test import (
     WATCH_INTERVAL, GoldenTestEntry, GoldenTestFile, GoldenTestFileData, GoldenTestFileSource, GoldenTestPathError,
     GoldenTestPathWatcher, GoldenTestTree, GoldenTestTreeData, GoldenTestTreeSource, GoldenTestWatchSource,
     resolve_collection_image, resolve_test_file, snapshot_dirs
 )
+from alasio.backend.ws.ws_server import WebsocketTopicServer
 from alasio.config.entry.loader import MOD_LOADER
 from alasio.ext.path import PathStr
 from alasio.testing.filesystem import fs  # noqa: F401
 from tests.backend.reactive.test_source_base import MockTopic, decode as decode_payload
+from tests.backend.ws.helpers import FakeWebSocket
 
 MOD_NAME = 'test_mod'
 OTHER_MOD = 'other_mod'
 CONN_ID = 'conn_golden_test'
+# The topics of the review page are electron only: the desktop client carries
+# this token in its handshake, and the server checks it on the subscribe
+TOKEN = 'tok_golden_test'
 
 TEST_SOURCE = """\
 from alasio.testing.screenshot import image
@@ -101,6 +108,31 @@ class RecordingServer:
         self.sent.append(event)
 
 
+class GoldenTestServer(WebsocketTopicServer):
+    """
+    The websocket server of the review page, serving its two real topics
+
+    `endpoint()` is the connection lifecycle of the backend: `serve()` while the
+    socket is open and `cleanup()` (which unsubscribes every topic) in its
+    finally when the connection drops.
+    """
+    ALL_TOPIC_CLASS = {
+        GoldenTestTree.TOPIC_NAME: GoldenTestTree,
+        GoldenTestFile.TOPIC_NAME: GoldenTestFile,
+    }
+    DEFAULT_TOPIC_CLASS = {}
+    # Servers served by endpoint(), which builds the instance itself
+    instances = []
+
+    def __init__(self, ws):
+        """
+        Args:
+            ws (FakeWebSocket): The socket of the connection
+        """
+        super().__init__(ws)
+        type(self).instances.append(self)
+
+
 @pytest.fixture
 def project(fs, monkeypatch):
     """
@@ -157,6 +189,27 @@ async def settle():
     checkpoint, exactly like a real connection.
     """
     await wait_all_tasks_blocked()
+
+
+async def wait_for(predicate, description, timeout=5.0):
+    """
+    Wait until the served connection produced the expected state
+
+    The server handles the messages of a connection in other tasks, so a message
+    sent just now is not processed yet: this returns as soon as the state is
+    there and fails loudly when it never is.
+
+    Args:
+        predicate (callable): Returns True once the state is there
+        description (str): What is waited for, used in the error
+        timeout (float): Seconds to wait at most
+    """
+    deadline = trio.current_time() + timeout
+    while trio.current_time() < deadline:
+        if predicate():
+            return
+        await trio.sleep(0.01)
+    raise AssertionError(f'Timeout waiting for {description}')
 
 
 async def subscribe_tree():
@@ -427,6 +480,83 @@ class TestSharedWatcher:
         assert str(file) not in watched()
 
     @pytest.mark.trio
+    async def test_a_closed_file_topic_keeps_the_tree_watch(self, fs, tests_root):
+        """The two topics leave independently: one releases only its own paths"""
+        file = tests_root.joinpath('map/test_a.py')
+        fs.create_file(file, contents=TEST_SOURCE)
+        tree, tree_sub = await subscribe_tree()
+        await tree.set_mod(MOD_NAME)
+        await tree.sub_folder('map')
+        selected, file_sub = await subscribe_file()
+        await selected.set_file(MOD_NAME, 'map/test_a.py')
+        assert watched() == {str(tests_root), str(tests_root.joinpath('map')), str(file)}
+
+        # the page closes the file topic, the tree stays open
+        selected.unsubscribe(file_sub)
+
+        assert selected._paths == frozenset()
+        assert selected.abs_file == ''
+        assert watched() == {str(tests_root), str(tests_root.joinpath('map'))}
+        # the tree is still served, so its folders are still scanned
+        tree_sub.sent.clear()
+        fs.create_file(tests_root.joinpath('map/test_new.py'))
+        await golden_test_module.poll_once()
+        await settle()
+        assert entry_shape(tree.dirs['map']) == [('map/test_a.py', False), ('map/test_new.py', False)]
+
+    @pytest.mark.trio
+    async def test_a_departing_subscriber_keeps_the_watch(self, fs, tests_root):
+        """The watch belongs to the last subscriber of the view, not the first"""
+        fs.create_file(tests_root.joinpath('map/test_a.py'))
+        source, first = await subscribe_tree()
+        await source.set_mod(MOD_NAME)
+        await source.sub_folder('map')
+        await settle()
+        # a second window subscribes the open view of the one source
+        again, second = await subscribe_tree()
+        assert again is source
+        paths = {str(tests_root), str(tests_root.joinpath('map'))}
+        assert source._paths == paths
+
+        source.unsubscribe(first)
+        await settle()
+
+        # the view and its paths stay for the subscriber that is still there
+        assert source._paths == paths
+        assert watched() == paths
+        assert list(source.dirs) == ['', 'map']
+        # the remaining subscriber still receives the changes of the page
+        second.sent.clear()
+        fs.create_file(tests_root.joinpath('map/test_new.py'))
+        await golden_test_module.poll_once()
+        await settle()
+        assert decode(second.sent[-1]).k == ('dirs', 'map')
+
+        source.unsubscribe(second)
+        assert source._paths == frozenset()
+        assert watched() == set()
+
+    @pytest.mark.trio
+    async def test_the_last_subscriber_releases_every_folder(self, fs, tests_root):
+        """A page that expanded folders releases all of them, not the root only"""
+        fs.create_file(tests_root.joinpath('map/fleet/test_a.py'))
+        source, sub = await subscribe_tree()
+        await source.set_mod(MOD_NAME)
+        await source.sub_folder('map')
+        await source.sub_folder('map/fleet')
+        assert watched() == {
+            str(tests_root),
+            str(tests_root.joinpath('map')),
+            str(tests_root.joinpath('map/fleet')),
+        }
+
+        source.unsubscribe(sub)
+
+        assert source._paths == frozenset()
+        assert watched() == set()
+        assert source.dirs == {}
+
+    @pytest.mark.trio
     async def test_the_last_subscriber_leaves_the_watch(self, fs, tests_root):
         fs.create_file(tests_root.joinpath('map/test_a.py'))
         source, sub = await subscribe_tree()
@@ -470,6 +600,64 @@ class TestSharedWatcher:
         assert GoldenTestFileSource().file == ''
 
     @pytest.mark.trio
+    async def test_a_disconnect_releases_the_watch(self, fs, tests_root, monkeypatch):
+        """A dropped connection releases both views through endpoint()"""
+        file = tests_root.joinpath('map/test_a.py')
+        fs.create_file(file, contents=TEST_SOURCE)
+        # the desktop client connects with the electron token of the process
+        monkeypatch.setattr(token_table, '_tokens', {TOKEN: 1.0})
+        # the shutdown flag of the ws suite is process wide: a stale set value
+        # would close this connection at the first heartbeat
+        monkeypatch.setattr(WebsocketTopicServer, 'server_terminated', trio.Event())
+        GoldenTestServer.instances.clear()
+        fake_ws = FakeWebSocket()
+        fake_ws.headers = {'X-Alasio-Token': TOKEN}
+        closed = trio.Event()
+
+        async def run_endpoint():
+            try:
+                await GoldenTestServer.endpoint(fake_ws)
+            finally:
+                closed.set()
+
+        async with trio.open_nursery() as nursery:
+            nursery.start_soon(run_endpoint)
+            await wait_for(lambda: bool(GoldenTestServer.instances), 'the connection')
+            server = GoldenTestServer.instances[0]
+
+            fake_ws.send_message(msgspec.json.encode(RequestEvent(t=GoldenTestTree.TOPIC_NAME)))
+            fake_ws.send_message(msgspec.json.encode(RequestEvent(t=GoldenTestFile.TOPIC_NAME)))
+            await wait_for(
+                lambda: set(server.subscribed) == set(GoldenTestServer.ALL_TOPIC_CLASS),
+                'the subscriptions',
+            )
+
+            # the page browses the mod, opens a folder and selects a file
+            fake_ws.send_message(msgspec.json.encode(RequestEvent(
+                t=GoldenTestTree.TOPIC_NAME, o='rpc', f='set_mod', v={'mod_name': MOD_NAME}, i='r1')))
+            fake_ws.send_message(msgspec.json.encode(RequestEvent(
+                t=GoldenTestTree.TOPIC_NAME, o='rpc', f='sub_folder', v={'path': 'map'}, i='r2')))
+            fake_ws.send_message(msgspec.json.encode(RequestEvent(
+                t=GoldenTestFile.TOPIC_NAME, o='rpc', f='set_file',
+                v={'mod_name': MOD_NAME, 'file': 'map/test_a.py'}, i='r3')))
+            await wait_for(
+                lambda: 'map' in GoldenTestTreeSource().dirs and GoldenTestFileSource().abs_file == str(file),
+                'the view of the page',
+            )
+            assert watched() == {str(tests_root), str(tests_root.joinpath('map')), str(file)}
+
+            # the socket drops: endpoint() runs cleanup() in its finally
+            fake_ws.close_inbox()
+            with trio.fail_after(5):
+                await closed.wait()
+
+        assert GoldenTestTreeSource()._paths == frozenset()
+        assert GoldenTestFileSource()._paths == frozenset()
+        assert watched() == set()
+        assert GoldenTestTreeSource().mod_name == ''
+        assert GoldenTestFileSource().file == ''
+
+    @pytest.mark.trio
     async def test_a_poll_without_a_subscriber_does_not_scan(self, fs, tests_root, monkeypatch):
         """No subscriber, no scan: the worker thread is not started at all"""
 
@@ -483,6 +671,24 @@ class TestSharedWatcher:
         monkeypatch.setattr(GoldenTestWatchSource.WATCHER, 'update', fail)
 
         await golden_test_module.poll_once()
+
+    @pytest.mark.trio
+    async def test_a_path_left_without_a_subscriber_does_not_scan(self, fs, tests_root, monkeypatch):
+        """The poll guard is the subscribers, not the paths of the watcher"""
+
+        def fail(*args, **kwargs):
+            pytest.fail('a path without a subscriber must not be scanned')
+
+        fs.create_file(tests_root.joinpath('map/test_a.py'))
+        # a view driven without a subscriber (no connection, so no page)
+        source = GoldenTestTreeSource()
+        await source.set_mod(MOD_NAME)
+        assert source._paths == {str(tests_root)}
+        assert not source._subscribers
+        monkeypatch.setattr(GoldenTestWatchSource.WATCHER, 'update', fail)
+
+        assert await golden_test_module.poll_once() is False
+        assert watched() == {str(tests_root)}
 
     @pytest.mark.trio
     async def test_a_new_page_starts_from_the_empty_view(self, fs, tests_root):
