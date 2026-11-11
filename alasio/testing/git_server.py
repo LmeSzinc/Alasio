@@ -24,6 +24,7 @@ without a user identity of the machine.
 import contextlib
 import dataclasses
 import os
+import signal
 import socket
 import stat
 import subprocess
@@ -195,6 +196,12 @@ def serve_repository(repo):
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
+            # The `git` process behind the handle only starts git-daemon and
+            # waits for it, so the tree has to be killed as a whole (see
+            # stop()): a session of its own makes the group of the handle the
+            # tree, and keeps it out of the group of the test run (windows
+            # ignores the flag and kills the tree with taskkill /T instead)
+            start_new_session=not env.WINDOWS,
         )
         if wait_until_listening(process, port):
             try:
@@ -251,25 +258,37 @@ def stop(process):
     """
     Stop a daemon and the children it started.
 
-    `git daemon` re-executes itself: the process behind the handle listens on
-    nothing, the listening socket belongs to a process it started (on windows
-    the fork of git is a re-exec), so the whole tree has to be killed. Killing
-    only the handle leaves a daemon behind, and the port of that test stays
-    bound for the rest of the run.
+    `git daemon` is a dashed command: the `git` process behind the handle
+    starts `git-daemon`, waits for it, and it is the child that listens and
+    serves the connections. Killing the process behind the handle therefore
+    leaves the listener behind, and the port of that test stays bound for the
+    rest of the run (the daemon also starts a child per connection, which the
+    same kill takes down). On windows the tree is taken down by taskkill; on
+    POSIX the daemon is started in a session of its own (see serve_repository),
+    so the group of the handle is the tree.
 
     Args:
         process (subprocess.Popen): The daemon
     """
     if env.WINDOWS:
-        # The tree is what holds the socket, and taskkill reports a pid that is
-        # already gone as an error instead of failing the test
+        # taskkill reports a pid that is already gone as an error instead of
+        # failing the test
         subprocess.run(
             ('taskkill', '/F', '/T', '/PID', str(process.pid)),
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
-    elif process.poll() is None:
-        process.kill()
+    else:
+        # The daemon leads a session of its own (see serve_repository), so its
+        # pid is the id of the group that holds the whole tree, and the group
+        # outlives the leader for as long as a child of it is alive
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            # no group of that id: the tree is already gone, or the daemon was
+            # started without a session of its own
+            if process.poll() is None:
+                process.kill()
     process.wait()
 
 

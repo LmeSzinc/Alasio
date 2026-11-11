@@ -25,7 +25,11 @@ pytestmark = [
     pytest.mark.parallel,
 ]
 
-WORK = os.sep
+# The install context is only read from absolute paths, and os.path.isabs()
+# stopped counting a rooted path without a drive ("\root") as absolute on
+# windows in python 3.13: the root of the fake file system is the drive of the
+# real working directory, so the paths of the test are absolute everywhere
+WORK = os.path.abspath(os.sep)
 ROOT = os.path.join(WORK, 'root')
 ASAR = os.path.join(ROOT, 'resources', 'app.asar')
 SRC = os.path.join(ROOT, 'resources', 'new-app.asar')
@@ -283,8 +287,8 @@ INFO | [Shell] No install context: the electron archive is not managed by this p
         monkeypatch.setattr(shell_module, 'start_time', boom)
         with logger.mock_capture_writer() as capture:
             assert ShellUpdate().configure(make_environ()) is True
-        assert capture.concat() == """\
-INFO | [Shell] Install context: \\root\\resources\\app.asar (exe=\\root\\Alasio.exe, host pid=4242)
+        assert capture.concat() == f"""\
+INFO | [Shell] Install context: {ASAR} (exe={EXE}, host pid=4242)
 """
 
 
@@ -469,10 +473,13 @@ class TestDigestCache:
         state = {'mtime': 1}
         real_stat = shell_module.os.stat
 
-        def fake_stat(path):
+        # os.stat is replaced for the whole process, so the stand-in takes the
+        # same arguments as the original: other callers (pathlib in pytest, the
+        # modules of the fake file system) keep using their own keywords
+        def fake_stat(path, *args, **kwargs):
             if str(path) == str(shell.bundled):
                 return SimpleNamespace(st_mtime_ns=state['mtime'], st_size=len(NEW))
-            return real_stat(path)
+            return real_stat(path, *args, **kwargs)
 
         monkeypatch.setattr(shell_module.os, 'stat', fake_stat)
         assert shell.pending() is True
