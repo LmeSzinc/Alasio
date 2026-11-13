@@ -1,4 +1,10 @@
+import pytest
+
 from alasio.base.timer import timer
+
+pytestmark = [
+    pytest.mark.parallel,
+]
 
 
 class TestTimerDecorator:

@@ -4,8 +4,14 @@ Tests for the when() method on state classes (moved to _StateMeta).
 when() is available on all state classes (GlobalState, TaskState, GameStateBase, etc.)
 through the _StateMeta metaclass.
 """
+import pytest
+
 from alasio.base.state import GameStateBase, _StateDispatcher
 from alasio.logger import logger
+
+pytestmark = [
+    pytest.mark.parallel,
+]
 
 
 class TestGameStateWhen:

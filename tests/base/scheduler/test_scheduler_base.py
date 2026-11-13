@@ -21,6 +21,10 @@ from alasio.ext.cache import InstanceCacheOperation
 from alasio.logger import logger
 from alasio.testing.patch_time import PatchTime
 
+pytestmark = [
+    pytest.mark.parallel,
+]
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------

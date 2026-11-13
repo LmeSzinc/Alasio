@@ -8,6 +8,10 @@ import pytest
 
 from alasio.base.state import GlobalState, TaskState
 
+pytestmark = [
+    pytest.mark.parallel,
+]
+
 
 class TestBasicState:
     """Test basic state class definition and default values"""

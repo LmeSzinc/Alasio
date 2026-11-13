@@ -6,6 +6,10 @@ from alasio.device.base import DeviceBase
 from alasio.device.config import DeviceConfig
 from alasio.testing.patch_time import PatchTime
 
+pytestmark = [
+    pytest.mark.parallel,
+]
+
 
 class FakeImage:
     """

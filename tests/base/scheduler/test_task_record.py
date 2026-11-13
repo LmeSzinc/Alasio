@@ -5,6 +5,10 @@ import pytest
 from alasio.base.scheduler.task_record import TaskRecord, TaskTooManyExecutionsError, TaskTooManyFailuresError
 from alasio.testing.patch_time import PatchTime
 
+pytestmark = [
+    pytest.mark.parallel,
+]
+
 
 class TestTaskRecord:
     """Test TaskRecord class that replaces old FailureRecord."""

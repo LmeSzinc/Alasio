@@ -11,6 +11,10 @@ from alasio.base.servertime import (
 )
 from alasio.testing.patch_time import PatchTime
 
+pytestmark = [
+    pytest.mark.parallel,
+]
+
 
 class TestParseTimezone:
     @pytest.mark.parametrize("input_val, expected_offset_hours, expected_offset_minutes", [

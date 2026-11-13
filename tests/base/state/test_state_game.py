@@ -13,6 +13,10 @@ import trio
 
 from alasio.base.state import GameStateBase
 
+pytestmark = [
+    pytest.mark.parallel,
+]
+
 
 class TestGameStateDefaults:
     """Tests for default values of GameStateBase."""

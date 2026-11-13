@@ -24,6 +24,10 @@ from alasio.db.conn import SQLITE_POOL
 from alasio.ext import env
 from alasio.logger import logger
 
+pytestmark = [
+    pytest.mark.parallel,
+]
+
 # The mod the tests of this file run on
 entry = ModEntry(env.ALASIO_ROOT.joinpath('ExampleMod'))
 

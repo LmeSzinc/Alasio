@@ -13,6 +13,10 @@ import pytest
 from alasio.base.scheduler.scheduler import AlasioScheduler
 from alasio.base.scheduler.scheduler_task import SchedulerTask
 
+pytestmark = [
+    pytest.mark.parallel,
+]
+
 # scheduler tasks of alasio, sorted by name
 SCHEDULER_TASK = [
     'GotoMain',

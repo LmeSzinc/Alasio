@@ -12,6 +12,10 @@ import pytest
 from alasio.base.background import BackgroundClosed, BackgroundManager, DropPolicy
 from alasio.logger import logger
 
+pytestmark = [
+    pytest.mark.parallel,
+]
+
 
 @pytest.fixture(autouse=True)
 def _mute_logs():
@@ -141,8 +145,9 @@ class TestSubmitRun:
         """The thread is named after the manager and the channel."""
         gate = Gate()
         manager.submit(gate, name='oil')
-        gate.wait()
+        assert gate.entered.wait(5)
         gate.release.set()
+        assert gate.finished.wait(5)
         assert gate.thread_names == ['test-bg-oil']
 
 

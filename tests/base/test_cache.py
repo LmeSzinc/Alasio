@@ -9,6 +9,10 @@ from alasio.device.base import DeviceBase
 from alasio.device.config import DeviceConfig
 from alasio.logger import logger
 
+pytestmark = [
+    pytest.mark.parallel,
+]
+
 
 class FakeImage:
     """

@@ -1,5 +1,11 @@
+import pytest
+
 from alasio.base.timer import Timer
 from alasio.testing.patch_time import PatchTime
+
+pytestmark = [
+    pytest.mark.parallel,
+]
 
 
 class TestTimerInitialization:

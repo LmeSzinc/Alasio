@@ -3,6 +3,10 @@ import pytest
 
 from alasio.base.image.imfile import crop
 
+pytestmark = [
+    pytest.mark.parallel,
+]
+
 # Test image is a gradient with unique uint8 pixels (IMAGE_W * IMAGE_H < 256),
 # pixel value at (y, x) is y * IMAGE_W + x, so max value is IMAGE_W * IMAGE_H - 1
 IMAGE_W = 20

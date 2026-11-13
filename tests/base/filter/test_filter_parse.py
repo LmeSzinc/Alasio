@@ -2,6 +2,10 @@ import pytest
 
 from alasio.base.filter import parse_filter, remove_hash_comment
 
+pytestmark = [
+    pytest.mark.parallel,
+]
+
 # -----------------------------------------------------------------------------
 # Tests for remove_hash_comment
 # -----------------------------------------------------------------------------

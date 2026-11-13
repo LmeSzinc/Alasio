@@ -9,6 +9,10 @@ from alasio.base.state import Config, _ConfigDispatcher
 from alasio.ext.cache import cached_property
 from alasio.logger import logger
 
+pytestmark = [
+    pytest.mark.parallel,
+]
+
 
 class SimpleConfig:
     """Simple config class for testing."""
