@@ -5,6 +5,8 @@ Uses mock data to cover all code paths in scheduler.py without
 depending on actual config/database infrastructure.
 """
 
+import threading
+import time
 from datetime import datetime, timedelta, timezone
 from unittest import mock
 
@@ -111,6 +113,18 @@ def _cache_device(scheduler):
     return device
 
 
+def _wait_until_timeout(timeout=None):
+    """
+    Event.wait() stub for the scheduler_stopping event.
+
+    The scheduler polls the event with wait(timeout) instead of sleeping, so the
+    stub has to advance the PatchTime clock the way time.sleep() does and report
+    a timeout.
+    """
+    time.sleep(timeout)
+    return False
+
+
 def _patch_backend(**attrs):
     """Patch BackendBridge on the scheduler module and return the mock instance."""
     patcher = mock.patch("alasio.base.scheduler.scheduler.BackendBridge")
@@ -119,6 +133,7 @@ def _patch_backend(**attrs):
     mock_instance = mock_cls.return_value
     # Set default attribute values
     mock_instance.scheduler_stopping.is_set.return_value = False
+    mock_instance.scheduler_stopping.wait.side_effect = _wait_until_timeout
     mock_instance.inited = False
     for key, value in attrs.items():
         # Handle dotted attribute paths like 'scheduler_stopping__is_set'
@@ -147,20 +162,47 @@ class TestInterruptableSleep:
             with mock.patch(
                 "alasio.base.scheduler.scheduler.BackendBridge"
             ) as mock_bridge:
-                mock_bridge.return_value.scheduler_stopping.is_set.return_value = False
+                mock_bridge.return_value.scheduler_stopping.wait.side_effect = (
+                    _wait_until_timeout
+                )
                 result = interruptable_sleep(0.01)
                 assert result is True
+                mock_bridge.return_value.scheduler_stopping.wait.assert_called_with(
+                    timeout=0.5
+                )
 
     def test_sleep_raises_scheduler_stop(self):
         """Sleep raises SchedulerStop when backend signals stop."""
         backend = mock.MagicMock()
-        backend.scheduler_stopping.is_set.side_effect = [False, True]
+        backend.scheduler_stopping.wait.side_effect = [False, True]
         with mock.patch(
             "alasio.base.scheduler.scheduler.BackendBridge", return_value=backend
         ):
             with PatchTime():
                 with pytest.raises(SchedulerStop):
                     interruptable_sleep(5)
+
+    def test_stop_wakes_before_the_poll_timeout(self):
+        """A stop request wakes the sleep instead of waiting for the next poll."""
+        event = threading.Event()
+        backend = mock.MagicMock()
+        backend.scheduler_stopping = event
+
+        with mock.patch(
+            "alasio.base.scheduler.scheduler.BackendBridge", return_value=backend
+        ):
+            timer = threading.Timer(0.05, event.set)
+            timer.start()
+            start = time.perf_counter()
+            try:
+                with pytest.raises(SchedulerStop):
+                    interruptable_sleep(5)
+            finally:
+                timer.cancel()
+                timer.join()
+
+        # the 0.5s poll interval is the upper bound of the old implementation
+        assert time.perf_counter() - start < 0.45
 
 
 # ---------------------------------------------------------------------------
@@ -808,7 +850,7 @@ class TestAlasioSchedulerWaitFuture:
         _cache_device(scheduler)
 
         backend = _patch_backend()
-        backend.scheduler_stopping.is_set.side_effect = [False, True]
+        backend.scheduler_stopping.wait.side_effect = [False, True]
 
         with PatchTime():
             future = datetime.now(timezone.utc).replace(microsecond=0) + timedelta(

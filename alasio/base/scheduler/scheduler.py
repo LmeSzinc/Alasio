@@ -53,9 +53,10 @@ def interruptable_sleep(second):
     end = time.perf_counter() + second
     backend = BackendBridge()
     while 1:
-        if backend.scheduler_stopping.is_set():
+        # a scheduler-stopping request wakes this wait immediately, while the
+        # timeout keeps the 0.5s poll interval
+        if backend.scheduler_stopping.wait(timeout=0.5):
             raise SchedulerStop
-        time.sleep(0.5)
         if time.perf_counter() >= end:
             return True
 
@@ -285,12 +286,12 @@ class AlasioScheduler(SchedulerTask):
         backend.send_worker_state('scheduler-waiting')
         count = 0
         while 1:
-            time.sleep(0.5)
-            count += 1
-            # check scheduler_stopping every 0.5s
-            if backend.scheduler_stopping.is_set():
+            # a scheduler-stopping request wakes this wait immediately, while the
+            # timeout keeps the 0.5s poll interval of the checks below
+            if backend.scheduler_stopping.wait(timeout=0.5):
                 logger.info('SchedulerStop: backend request scheduler-stopping')
                 raise SchedulerStop
+            count += 1
             # check if reached future
             if getnow() > future:
                 reached = True
