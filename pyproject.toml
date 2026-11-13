@@ -9,7 +9,9 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "alasio"
-version = "2.0.2"
+# The version lives in alasio/__init__.py, see [tool.setuptools.dynamic]. A
+# project that declares a field dynamic must not also define it here.
+dynamic = ["version"]
 description = "Mobile game bot framework abstracted from AzurLaneAutoScript and StarRailCopilot"
 readme = "README.md"
 requires-python = ">=3.8"
@@ -108,6 +110,12 @@ all = ["alasio[image,backend,pack,test]"]
 
 [tool.setuptools]
 packages = ["alasio"]
+
+[tool.setuptools.dynamic]
+# The version is read from the package source and normalized by PEP 440. The
+# wheel builder parses alasio/__init__.py with ast instead of importing it, so
+# __version__ has to stay a plain string literal there.
+version = {attr = "alasio.__version__"}
 
 [tool.pytest.ini_options]
 # Disable the pyfakefs pytest plugin globally: the project implements its own
