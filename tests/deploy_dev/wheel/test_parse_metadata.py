@@ -168,10 +168,220 @@ class TestRepoStandardMetadata:
             _ = RepoStandardMetadata(repo, 'demo_pkg').metaname
 
     def test_empty_version(self, make_repo):
-        """A missing version fails with ValueError."""
+        """A version that is absent and not declared dynamic fails."""
         repo = make_repo({'pyproject.toml': b'[project]\nname = "demo-pkg"\n'})
+        with pytest.raises(ValueError, match='project.version is missing'):
+            _ = RepoStandardMetadata(repo, 'demo_pkg').version
+
+
+PYPROJECT_DYNAMIC = b'''\
+[project]
+name = "demo-pkg"
+dynamic = ["version"]
+'''
+
+PYPROJECT_DYNAMIC_ATTR = PYPROJECT_DYNAMIC + b'''\
+[tool.setuptools.dynamic]
+version = {attr = "demo_pkg.__version__"}
+'''
+
+
+class TestDynamicVersion:
+    """Tests for the version of a project that declares it dynamic."""
+
+    def test_static_version_wins(self, make_repo):
+        """A static project.version is used, the rule is not read."""
+        repo = make_repo({
+            'pyproject.toml': (
+                b'[project]\nname = "demo-pkg"\nversion = "1.0.0"\n'
+                b'\n[tool.setuptools.dynamic]\nversion = {file = ["VERSION"]}\n'
+            ),
+            'VERSION': b'9.9.9\n',
+        })
+        assert RepoStandardMetadata(repo, 'demo_pkg').version == '1.0.0'
+
+    def test_attr(self, make_repo):
+        """version = {attr} reads a plain string of the module, never imports it."""
+        repo = make_repo({
+            'pyproject.toml': PYPROJECT_DYNAMIC_ATTR,
+            # The import would fail if the module was executed
+            'demo_pkg/__init__.py': b'"""demo."""\nfrom .missing import x\n\n__version__ = "2.3.4"\n',
+        })
+        metadata = RepoStandardMetadata(repo, 'demo_pkg')
+        assert metadata.version == '2.3.4'
+        assert 'Version: 2.3.4' in metadata.data_metadata.decode('utf-8')
+        assert metadata.version_files == []
+
+    def test_attr_submodule(self, make_repo):
+        """An attr path may name a submodule of the package."""
+        repo = make_repo({
+            'pyproject.toml': (
+                PYPROJECT_DYNAMIC
+                + b'[tool.setuptools.dynamic]\nversion = {attr = "demo_pkg.__about__.version"}\n'
+            ),
+            'demo_pkg/__init__.py': b'',
+            'demo_pkg/__about__.py': b'version = "2.3.4"\n',
+        })
+        assert RepoStandardMetadata(repo, 'demo_pkg').version == '2.3.4'
+
+    def test_attr_package_init(self, make_repo):
+        """An attr path may name the __init__.py of a subpackage."""
+        repo = make_repo({
+            'pyproject.toml': (
+                PYPROJECT_DYNAMIC
+                + b'[tool.setuptools.dynamic]\nversion = {attr = "demo_pkg.version.VERSION"}\n'
+            ),
+            'demo_pkg/version/__init__.py': b'VERSION = "2.3.4"\n',
+        })
+        assert RepoStandardMetadata(repo, 'demo_pkg').version == '2.3.4'
+
+    def test_attr_annotated_assignment(self, make_repo):
+        """__version__: str = "..." is a plain string assignment too."""
+        repo = make_repo({
+            'pyproject.toml': PYPROJECT_DYNAMIC_ATTR,
+            'demo_pkg/__init__.py': b'__version__: str = "2.3.4"\n',
+        })
+        assert RepoStandardMetadata(repo, 'demo_pkg').version == '2.3.4'
+
+    def test_attr_normalized(self, make_repo):
+        """The attr value is normalized by PEP 440."""
+        repo = make_repo({
+            'pyproject.toml': PYPROJECT_DYNAMIC_ATTR,
+            'demo_pkg/__init__.py': b'__version__ = "2.3.4-alpha"\n',
+        })
+        assert RepoStandardMetadata(repo, 'demo_pkg').version == '2.3.4a0'
+
+    def test_attr_computed(self, make_repo):
+        """A computed attribute is not read, the module is not imported."""
+        repo = make_repo({
+            'pyproject.toml': PYPROJECT_DYNAMIC_ATTR,
+            'demo_pkg/__init__.py': b'from setuptools_scm import get_version\n__version__ = get_version()\n',
+        })
+        with pytest.raises(ValueError, match='not a plain string assignment'):
+            _ = RepoStandardMetadata(repo, 'demo_pkg').version
+
+    def test_attr_missing_attribute(self, make_repo):
+        """A module that does not assign the attribute fails."""
+        repo = make_repo({
+            'pyproject.toml': PYPROJECT_DYNAMIC_ATTR,
+            'demo_pkg/__init__.py': b'x = 1\n',
+        })
+        with pytest.raises(ValueError, match='not a plain string assignment'):
+            _ = RepoStandardMetadata(repo, 'demo_pkg').version
+
+    def test_attr_missing_module(self, make_repo):
+        """An attr of a module the commit does not have fails."""
+        repo = make_repo({
+            'pyproject.toml': PYPROJECT_DYNAMIC_ATTR,
+            'demo_pkg/core.py': b'a = 1\n',
+        })
+        with pytest.raises(ValueError, match='is not in the commit'):
+            _ = RepoStandardMetadata(repo, 'demo_pkg').version
+
+    def test_attr_malformed(self, make_repo):
+        """An attr without a module path fails."""
+        repo = make_repo({
+            'pyproject.toml': (
+                PYPROJECT_DYNAMIC
+                + b'[tool.setuptools.dynamic]\nversion = {attr = "__version__"}\n'
+            ),
+        })
+        with pytest.raises(ValueError, match='expected a dotted path'):
+            _ = RepoStandardMetadata(repo, 'demo_pkg').version
+
+    def test_file(self, make_repo):
+        """version = {file} reads the file of the commit."""
+        repo = make_repo({
+            'pyproject.toml': (
+                PYPROJECT_DYNAMIC
+                + b'[tool.setuptools.dynamic]\nversion = {file = ["VERSION"]}\n'
+            ),
+            'VERSION': b'3.1.4\n',
+        })
+        metadata = RepoStandardMetadata(repo, 'demo_pkg')
+        assert metadata.version == '3.1.4'
+        assert metadata.version_files == ['VERSION']
+
+    def test_file_string(self, make_repo):
+        """version = {file = "VERSION"} is the single file form."""
+        repo = make_repo({
+            'pyproject.toml': (
+                PYPROJECT_DYNAMIC
+                + b'[tool.setuptools.dynamic]\nversion = {file = "VERSION"}\n'
+            ),
+            'VERSION': b'3.1.4\n',
+        })
+        metadata = RepoStandardMetadata(repo, 'demo_pkg')
+        assert metadata.version == '3.1.4'
+        assert metadata.version_files == ['VERSION']
+
+    def test_file_list(self, make_repo):
+        """The files are joined with a newline, PEP 440 drops the whitespace."""
+        repo = make_repo({
+            'pyproject.toml': (
+                PYPROJECT_DYNAMIC
+                + b'[tool.setuptools.dynamic]\nversion = {file = ["VERSION", "EXTRA"]}\n'
+            ),
+            'VERSION': b'2.3.4\n',
+            'EXTRA': b'',
+        })
+        metadata = RepoStandardMetadata(repo, 'demo_pkg')
+        assert metadata.version == '2.3.4'
+        assert metadata.version_files == ['VERSION', 'EXTRA']
+
+    def test_file_missing(self, make_repo):
+        """A version file the commit does not have fails."""
+        repo = make_repo({
+            'pyproject.toml': (
+                PYPROJECT_DYNAMIC
+                + b'[tool.setuptools.dynamic]\nversion = {file = ["VERSION"]}\n'
+            ),
+        })
+        with pytest.raises(ValueError, match='is not in the commit'):
+            _ = RepoStandardMetadata(repo, 'demo_pkg').version
+
+    def test_file_empty(self, make_repo):
+        """An empty version file fails."""
+        repo = make_repo({
+            'pyproject.toml': (
+                PYPROJECT_DYNAMIC
+                + b'[tool.setuptools.dynamic]\nversion = {file = ["VERSION"]}\n'
+            ),
+            'VERSION': b'\n',
+        })
         with pytest.raises(ValueError, match='Empty version'):
             _ = RepoStandardMetadata(repo, 'demo_pkg').version
+
+    def test_unknown_rule(self, make_repo):
+        """A rule this builder does not read fails instead of guessing."""
+        repo = make_repo({
+            'pyproject.toml': (
+                PYPROJECT_DYNAMIC
+                + b'[tool.setuptools.dynamic]\nversion = {glob = "VERSION"}\n'
+            ),
+            'VERSION': b'3.1.4\n',
+        })
+        with pytest.raises(ValueError, match='Invalid'):
+            _ = RepoStandardMetadata(repo, 'demo_pkg').version
+
+    def test_undeclared_dynamic(self, make_repo):
+        """A version only in __init__.py has to be declared dynamic."""
+        repo = make_repo({
+            'pyproject.toml': b'[project]\nname = "demo-pkg"\n',
+            'demo_pkg/__init__.py': b'__version__ = "5.0.0"\n',
+        })
+        with pytest.raises(ValueError, match='project.version is missing'):
+            _ = RepoStandardMetadata(repo, 'demo_pkg').version
+
+    def test_declared_without_rule(self, make_repo):
+        """A declared dynamic version without a rule is read from __init__.py."""
+        repo = make_repo({
+            'pyproject.toml': PYPROJECT_DYNAMIC,
+            'demo_pkg/__init__.py': b'__version__ = "2.3.4"\n',
+        })
+        metadata = RepoStandardMetadata(repo, 'demo_pkg')
+        assert metadata.version == '2.3.4'
+        assert metadata.version_files == []
 
 
 PYPROJECT_ENTRY_POINTS = b'''\

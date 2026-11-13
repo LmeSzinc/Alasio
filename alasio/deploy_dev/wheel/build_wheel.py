@@ -284,6 +284,8 @@ class BuildWheel:
         license_file = deep_get(self.project_data, keys='project.license.file', default='')
         if license_file:
             extra.append(license_file)
+        # The files a dynamic version is read from are build inputs too
+        extra.extend(self.repo_metadata.version_files)
 
         for path in extra:
             entry = self.all_repo_files.get(path)

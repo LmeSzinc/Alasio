@@ -1,6 +1,6 @@
 import pytest
 
-from alasio.deploy_dev.get_version import get_version_from_source
+from alasio.deploy_dev.get_version import get_attr_from_source, get_version_from_source
 
 
 class TestGetVersionFromSource:
@@ -117,6 +117,16 @@ class TestGetVersionFromSource:
         source = '__version__, _ = "1.0", "extra"\n'
         assert get_version_from_source(source) is None
 
+    def test_annotated_assignment(self):
+        """An annotated assignment is a plain assignment too."""
+        source = '__version__: str = "1.2.3"\n'
+        assert get_version_from_source(source) == '1.2.3'
+
+    def test_bare_annotation_skipped(self):
+        """A bare annotation assigns no version."""
+        source = '__version__: str\n'
+        assert get_version_from_source(source) is None
+
     def test_list_unpack_skipped(self):
         """List unpacking assignment is ignored."""
         source = '[__version__] = ["1.0"]\n'
@@ -138,3 +148,53 @@ class TestGetVersionFromSource:
         """version = __verion__ = 'xxx' yields 'xxx' via version fallback."""
         source = 'version = __verion__ = "3.0"\n'
         assert get_version_from_source(source) == '3.0'
+
+
+class TestGetAttrFromSource:
+    """Tests for get_attr_from_source with Python source code."""
+
+    def test_plain_assignment(self):
+        """The named attribute is read."""
+        source = '__version__ = "1.2.3"\n'
+        assert get_attr_from_source(source, '__version__') == '1.2.3'
+
+    def test_any_name(self):
+        """Any attribute name is readable, not only the version names."""
+        source = 'VERSION = "1.2.3"\n'
+        assert get_attr_from_source(source, 'VERSION') == '1.2.3'
+
+    def test_missing_attribute(self):
+        """A module that does not assign the attribute returns None."""
+        source = '__version__ = "1.2.3"\n'
+        assert get_attr_from_source(source, 'version') is None
+
+    def test_annotated_assignment(self):
+        """An annotated assignment is read."""
+        source = 'version: str = "1.2.3"\n'
+        assert get_attr_from_source(source, 'version') == '1.2.3'
+
+    def test_bare_annotation(self):
+        """A bare annotation assigns nothing."""
+        source = 'version: str\n'
+        assert get_attr_from_source(source, 'version') is None
+
+    def test_first_assignment_taken(self):
+        """The first plain assignment of the attribute wins."""
+        source = 'version = "1.0"\nversion = "2.0"\n'
+        assert get_attr_from_source(source, 'version') == '1.0'
+
+    def test_call_result_skipped(self):
+        """A computed value is not read, the module is never executed."""
+        source = '__version__ = get_version()\n'
+        assert get_attr_from_source(source, '__version__') is None
+
+    def test_concatenation(self):
+        """Concatenated string literals are merged."""
+        source = 'version = "1." "2.3"\n'
+        assert get_attr_from_source(source, 'version') == '1.2.3'
+
+    def test_syntax_error(self):
+        """Invalid Python raises SyntaxError."""
+        source = 'version = \n'
+        with pytest.raises(SyntaxError):
+            get_attr_from_source(source, 'version')

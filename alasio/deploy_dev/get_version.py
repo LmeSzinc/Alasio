@@ -23,22 +23,76 @@ def get_version_from_source(source):
 
     found_version = None
 
-    for node in ast.iter_child_nodes(tree):
-        if not isinstance(node, ast.Assign):
-            continue
-        for target in node.targets:
-            if not isinstance(target, ast.Name):
-                continue
-            if target.id == '__version__':
-                candidate = _try_extract_string(node.value)
-                if candidate is not None:
-                    return candidate
-            elif target.id == 'version' and found_version is None:
-                candidate = _try_extract_string(node.value)
-                if candidate is not None:
-                    found_version = candidate
+    for name, value in _iter_assignments(tree):
+        if name == '__version__':
+            candidate = _try_extract_string(value)
+            if candidate is not None:
+                return candidate
+        elif name == 'version' and found_version is None:
+            candidate = _try_extract_string(value)
+            if candidate is not None:
+                found_version = candidate
 
     return found_version
+
+
+def get_attr_from_source(source, name):
+    """
+    Read a module attribute assigned to a plain string, without importing
+    the module.
+
+    This is the reader of setuptools ``version = {attr = "module.attribute"}``:
+    the source of the module is parsed instead of executed, so a module that
+    imports a dependency the build does not have still yields its version.
+    Only plain string assignments (including concatenated strings) are
+    supported, the same subset as ``get_version_from_source()``.
+
+    Args:
+        source (str): Python source code to parse
+        name (str): Attribute name, e.g. ``__version__``
+
+    Returns:
+        str | None: Value of the first plain string assignment of the
+            attribute, None if the module assigns it no plain string
+
+    Raises:
+        SyntaxError: source contains invalid Python syntax
+    """
+    tree = ast.parse(source)
+
+    for attr, value in _iter_assignments(tree):
+        if attr != name:
+            continue
+        candidate = _try_extract_string(value)
+        if candidate is not None:
+            return candidate
+
+    return None
+
+
+def _iter_assignments(tree):
+    """
+    Iter the module level assignments of a syntax tree.
+
+    A name assigned more than once is yielded once per assignment, the caller
+    keeps the first value it accepts. Both ``name = value`` and
+    ``name: type = value`` are read, a bare annotation assigns nothing and is
+    skipped.
+
+    Args:
+        tree (ast.Module): Parsed module
+
+    Yields:
+        tuple[str, ast.AST]: Attribute name, and the assigned value node
+    """
+    for node in ast.iter_child_nodes(tree):
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    yield target.id, node.value
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            if isinstance(node.target, ast.Name):
+                yield node.target.id, node.value
 
 
 def _try_extract_string(node):

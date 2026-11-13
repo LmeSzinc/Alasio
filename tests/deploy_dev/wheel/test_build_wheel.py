@@ -129,6 +129,45 @@ def wheel_entry_points(repo_entry_points, fs):
     return make_build_wheel(repo_entry_points)
 
 
+PYPROJECT_DYNAMIC_VERSION = b'''\
+[project]
+name = "demo-pkg"
+dynamic = ["version"]
+readme = "README.md"
+
+[tool.setuptools.dynamic]
+version = {file = ["VERSION"]}
+'''
+
+
+@pytest.fixture
+def repo_dynamic_version(make_repo):
+    """
+    The commit of a project that reads its version from a file.
+
+    Returns:
+        MockGitRepo:
+    """
+    return make_repo(
+        {**FILES, 'pyproject.toml': PYPROJECT_DYNAMIC_VERSION, 'VERSION': b'1.2.3\n'},
+        time=COMMIT_TIME,
+    )
+
+
+@pytest.fixture
+def wheel_dynamic_version(repo_dynamic_version, fs):
+    """
+    A BuildWheel of a project that reads its version from a file.
+
+    The fs fixture is requested here so every artifact is written to the
+    in-memory filesystem, never to the real disk.
+
+    Returns:
+        BuildWheel:
+    """
+    return make_build_wheel(repo_dynamic_version)
+
+
 class TestCommitTime:
     def test_commit_time(self, make_repo):
         """The committer time of the head is the timestamp of the build."""
@@ -279,3 +318,40 @@ INFO | Building demo_pkg==1.0.0 commit=c1 time=1609459200
 INFO | Wheel built at: /repo/dist/demo_pkg-1.0.0-py3-none-any.whl
 INFO | Source distribution built at: /repo/dist/demo-pkg-1.0.0.tar.gz
 """
+
+
+class TestDynamicVersion:
+    def test_build(self, wheel_dynamic_version):
+        """The artifact names carry the version read from the file."""
+        with logger.mock_capture_writer() as capture:
+            assert wheel_dynamic_version.build() is True
+        assert capture.concat() == """\
+INFO | Building demo_pkg==1.2.3 commit=c1 time=1609459200
+INFO | Wheel built at: /repo/dist/demo_pkg-1.2.3-py3-none-any.whl
+INFO | Source distribution built at: /repo/dist/demo-pkg-1.2.3.tar.gz
+"""
+
+    def test_wheel_metadata(self, wheel_dynamic_version):
+        """The wheel METADATA carries the version read from the file."""
+        with zipfile.ZipFile(wheel_dynamic_version._build_wheel()) as zf:
+            metadata = zf.read('demo_pkg-1.2.3.dist-info/METADATA').decode('utf-8')
+        assert 'Version: 1.2.3' in metadata
+
+    def test_sdist_carries_version_file(self, wheel_dynamic_version):
+        """The sdist carries the version file, so the version can be rebuilt."""
+        data = atomic_read_bytes(wheel_dynamic_version._build_targz())
+        with tarfile.open(fileobj=io.BytesIO(data), mode='r:gz') as tar:
+            assert tar.extractfile('demo-pkg-1.2.3/VERSION').read() == b'1.2.3\n'
+            sources = tar.extractfile('demo-pkg-1.2.3/demo_pkg.egg-info/SOURCES.txt').read()
+        assert sources == b'''\
+PKG-INFO
+README.md
+VERSION
+demo_pkg.egg-info/PKG-INFO
+demo_pkg.egg-info/SOURCES.txt
+demo_pkg.egg-info/requires.txt
+demo_pkg.egg-info/top_level.txt
+demo_pkg/__init__.py
+demo_pkg/core.py
+demo_pkg/empty.py
+pyproject.toml'''

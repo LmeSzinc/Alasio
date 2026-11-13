@@ -4,7 +4,7 @@ from threading import Lock
 from packaging.utils import canonicalize_name
 from packaging.version import Version
 
-from alasio.deploy_dev.get_version import get_version_from_source
+from alasio.deploy_dev.get_version import get_attr_from_source, get_version_from_source
 from alasio.deploy_dev.wheel.repo_path import RepoPath
 from alasio.ext.cache import cached_property
 from alasio.ext.deep import deep_get
@@ -106,31 +106,274 @@ class RepoStandardMetadata:
         return self.canonical_name.replace('-', '_')
 
     @cached_property
+    def dynamic_version(self):
+        """
+        The rule that reads the version, from the [tool.setuptools.dynamic]
+        table of the commit.
+
+        This is the table setuptools reads when a project declares its version
+        dynamic, see https://setuptools.pypa.io/en/latest/userguide/pyproject_config.html
+
+        Returns:
+            dict | None: The rule, e.g. {"attr": "demo_pkg.__version__"} or
+                {"file": ["VERSION"]}, None if the project declares no rule
+        """
+        return deep_get(self.project_data, keys='tool.setuptools.dynamic.version', default=None)
+
+    @cached_property
+    def version_files(self):
+        """
+        Files the dynamic version is read from, the build inputs an sdist has
+        to carry so the version can be rebuilt from it.
+
+        Returns:
+            list[str]: Paths relative to the repo root, empty when the version
+                is read from an attribute or from a module
+        """
+        return self._dynamic_version_files() or []
+
+    @cached_property
     def version(self):
         """
-        PEP 440 normalized project version, from project.version or
-        {folder}/__init__.py.
+        PEP 440 normalized project version.
+
+        The version is project.version, or, when the project declares the
+        version dynamic, the rule of [tool.setuptools.dynamic].version:
+
+        - ``version = {attr = "module.attribute"}`` reads a plain string
+          assignment of the attribute, the module is never imported;
+        - ``version = {file = ["VERSION"]}`` reads the files, joined with a
+          newline the way setuptools joins them.
+
+        A project that declares the version dynamic without a rule in
+        [tool.setuptools.dynamic] is read from {folder}/__init__.py.
 
         Returns:
             str: Normalized version string
+
+        Raises:
+            ValueError: If project.version is missing and not declared
+                dynamic, if the declared rule is unknown, or if the rule does
+                not yield a version from the commit
         """
         version = deep_get(self.project_data, keys='project.version', default='')
         if version:
             return str(Version(str(version)))
 
+        self._require_dynamic_version()
+
+        rule = self.dynamic_version
+        if rule:
+            return self._version_from_dynamic(rule)
+
         # try to get from __init__.py of the commit
         if self.folder:
-            try:
-                content = self.project_dir.joinpath(f'{self.folder}/__init__.py').read_bytes()
-            except FileNotFoundError:
-                pass
-            else:
-                version = get_version_from_source(content.decode('utf-8'))
+            source = self._read_commit_text(f'{self.folder}/__init__.py')
+            if source is not None:
+                version = self._read_version(path=f'{self.folder}/__init__.py', source=source)
                 if version:
                     return str(Version(str(version)))
 
         detail = f' and {self.folder}/__init__.py' if self.folder else ''
         raise ValueError(f'Empty version in pyproject.toml{detail} at commit {self.commit}')
+
+    def _require_dynamic_version(self):
+        """
+        Check that the project declares the version dynamic.
+
+        A version that is neither declared nor in project.version can not be
+        read by any build backend: setuptools rejects the pyproject.toml with
+        "project must contain ['version'] properties".
+
+        Raises:
+            ValueError: If project.dynamic does not declare version
+        """
+        dynamic = deep_get(self.project_data, keys='project.dynamic', default=[])
+        if isinstance(dynamic, list) and 'version' in dynamic:
+            return
+        raise ValueError(
+            f'Field project.version is missing at commit {self.commit}: '
+            f'declare it in [project], or list "version" in project.dynamic'
+        )
+
+    def _version_from_dynamic(self, rule):
+        """
+        Read the version by the rule of [tool.setuptools.dynamic].version.
+
+        Args:
+            rule: The rule, {"attr": str} or {"file": str | list[str]}
+
+        Returns:
+            str: Normalized version string
+
+        Raises:
+            ValueError: If the rule is not one this builder reads, or its
+                target does not yield a version from the commit
+        """
+        if isinstance(rule, dict) and isinstance(rule.get('attr'), str):
+            return self._version_from_attr(rule['attr'])
+        files = self._dynamic_version_files()
+        if files is not None:
+            return self._version_from_file(files)
+        raise self._invalid_dynamic_version(rule)
+
+    def _dynamic_version_files(self):
+        """
+        The files of the [tool.setuptools.dynamic].version rule, if it reads
+        files.
+
+        Returns:
+            list[str] | None: Paths of the rule, None if the rule reads an
+                attribute or is not shaped like the setuptools table
+        """
+        rule = self.dynamic_version
+        if not isinstance(rule, dict):
+            return None
+        files = rule.get('file')
+        if isinstance(files, str):
+            return [files]
+        if isinstance(files, list) and all(isinstance(file, str) for file in files):
+            return files
+        return None
+
+    def _invalid_dynamic_version(self, rule):
+        """
+        Build the error of a rule this builder does not read.
+
+        Args:
+            rule: The rule read from the commit
+
+        Returns:
+            ValueError: The error to raise
+        """
+        return ValueError(
+            f'Invalid [tool.setuptools.dynamic].version at commit {self.commit}: {rule!r}, '
+            f'expected {{attr = "module.attribute"}} or {{file = ["path"]}}'
+        )
+
+    def _version_from_attr(self, attr):
+        """
+        Read the version from a module attribute of the commit, the reader of
+        setuptools ``version = {attr = "module.attribute"}``.
+
+        The module is parsed, never imported: the build reads the commit, and
+        an import would run code the build environment does not have.
+
+        Args:
+            attr (str): Dotted path, e.g. "demo_pkg.__version__"
+
+        Returns:
+            str: Normalized version string
+
+        Raises:
+            ValueError: If the path is malformed, the module is not in the
+                commit, or the attribute is not a plain string assignment
+        """
+        module, _, name = attr.rpartition('.')
+        if not module or not name:
+            raise ValueError(
+                f'Invalid [tool.setuptools.dynamic].version attr "{attr}" at commit {self.commit}: '
+                f'expected a dotted path like "demo_pkg.__version__"'
+            )
+
+        base = module.replace('.', '/')
+        in_commit = False
+        for path in (f'{base}.py', f'{base}/__init__.py'):
+            source = self._read_commit_text(path)
+            if source is None:
+                continue
+            in_commit = True
+            version = self._read_version(path=path, source=source, name=name)
+            if version is not None:
+                return str(Version(str(version)))
+
+        if in_commit:
+            raise ValueError(
+                f'Attribute "{name}" of the module "{module}" is not a plain string assignment '
+                f'at commit {self.commit}, so the version can not be read statically'
+            )
+        raise ValueError(
+            f'Module "{module}" of [tool.setuptools.dynamic].version attr "{attr}" is not in the '
+            f'commit {self.commit}'
+        )
+
+    def _version_from_file(self, files):
+        """
+        Read the version from files of the commit, joined with a newline the
+        way setuptools reads ``version = {file = ["VERSION"]}``.
+
+        Args:
+            files (list[str]): Paths relative to the repo root
+
+        Returns:
+            str: Normalized version string
+
+        Raises:
+            ValueError: If a file is not in the commit, or the content is empty
+        """
+        contents = []
+        for path in files:
+            source = self._read_commit_text(path)
+            if source is None:
+                raise ValueError(
+                    f'File "{path}" of [tool.setuptools.dynamic].version is not in the commit '
+                    f'{self.commit}'
+                )
+            contents.append(source)
+
+        version = '\n'.join(contents)
+        if not version.strip():
+            raise ValueError(
+                f'Empty version in the files of [tool.setuptools.dynamic].version at commit '
+                f'{self.commit}: {files!r}'
+            )
+        return str(Version(version))
+
+    def _read_commit_text(self, path):
+        """
+        Read a file of the commit as text.
+
+        Args:
+            path (str): Path relative to the repo root
+
+        Returns:
+            str | None: Content of the file, None if the commit has no such
+                file
+
+        Raises:
+            ValueError: If the file is not UTF-8 text
+        """
+        try:
+            content = self.project_dir.joinpath(path).read_bytes()
+        except FileNotFoundError:
+            return None
+        try:
+            return content.decode('utf-8')
+        except UnicodeDecodeError as e:
+            raise ValueError(f'"{path}" of the commit {self.commit} is not UTF-8: {e}') from e
+
+    def _read_version(self, path, source, name=None):
+        """
+        Read the version of a module of the commit, without importing it.
+
+        Args:
+            path (str): Path of the module, for the error message
+            source (str): Source code of the module
+            name (str): Attribute to read. Defaults to None, the
+                ``__version__`` / ``version`` assignment
+
+        Returns:
+            str | None: The value, None if the module assigns no plain string
+
+        Raises:
+            ValueError: If the source is not valid Python
+        """
+        try:
+            if name is None:
+                return get_version_from_source(source)
+            return get_attr_from_source(source, name)
+        except SyntaxError as e:
+            raise ValueError(f'Can not parse "{path}" at commit {self.commit}: {e}') from e
 
     @cached_property
     def standard_metadata(self):
