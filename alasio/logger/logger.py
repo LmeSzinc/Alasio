@@ -562,19 +562,19 @@ INFO | Hello Info
         """
         Log at ERROR level with exception info.
 
+        The message is rendered like the one of `error()`, and the traceback
+        is the one of the exception being handled, unless `exc_info` names an
+        exception. An exception group carries its own traceback, so a group
+        logged after the block that raised it still shows where it was raised.
+
         Args:
             event: Log message or exception
             exc_info (bool | tuple | Exception): Exception info. Defaults to True.
             **kwargs: Log context
         """
-        if isinstance(event, Exception):
-            if isinstance(event, (BaseExceptionGroup, ExceptionGroup)):
-                exc_info = (type(event), event, event.__traceback__)
-            msg = str(event)
-            if msg:
-                event = f'{type(event).__name__}: {msg}'
-            else:
-                event = type(event).__name__
+        if isinstance(event, (BaseExceptionGroup, ExceptionGroup)):
+            exc_info = (type(event), event, event.__traceback__)
+        event = stringify_event(event)
         # see structlog._native.exception()
         self._msg('EXCEPTION', event, kwargs, exc_info=exc_info)
 
