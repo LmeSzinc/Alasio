@@ -20,7 +20,10 @@ if WINDOWS:
 
 from tests.device.search._registry_stub import FakeWinreg  # noqa: E402
 
-pytestmark = pytest.mark.skipif(not WINDOWS, reason='The Windows registry is not available on this platform')
+pytestmark = [
+    pytest.mark.parallel,
+    pytest.mark.skipif(not WINDOWS, reason='The Windows registry is not available on this platform'),
+]
 
 
 class TestExtractUninstallPath:

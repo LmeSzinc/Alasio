@@ -6,6 +6,10 @@ from alasio.device.search.base import (
 from alasio.ext.path import PathStr
 from alasio.testing.filesystem import fs  # noqa: F401
 
+pytestmark = [
+    pytest.mark.parallel,
+]
+
 DATA = PathStr.new(__file__).uppath().joinpath('data')
 
 

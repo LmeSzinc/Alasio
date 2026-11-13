@@ -2,6 +2,10 @@ import pytest
 
 from alasio.device.serialstr import SerialStr
 
+pytestmark = [
+    pytest.mark.parallel,
+]
+
 
 class TestSerialStr:
     @pytest.mark.parametrize("input_serial, expected", [

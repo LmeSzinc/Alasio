@@ -11,7 +11,10 @@ if WINDOWS:
     from alasio.device.search import windows
     from alasio.device.search.windows import EmulatorSearchWindows, list_adb_binaries, list_instances
 
-pytestmark = pytest.mark.skipif(not WINDOWS, reason='Windows only')
+pytestmark = [
+    pytest.mark.parallel,
+    pytest.mark.skipif(not WINDOWS, reason='Windows only'),
+]
 
 VBOX_FORWARDING = (
     '<Forwarding name="port2" proto="1" hostip="127.0.0.1" '
