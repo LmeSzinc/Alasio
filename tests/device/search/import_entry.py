@@ -62,6 +62,10 @@ def import_as_windows():
     """
     Import the entry point on a simulated Windows platform.
 
+    Runs on a Windows host only: `windows.py` imports `winreg`, which a posix
+    host does not have, and standing in for that module would replace exactly
+    the absence the posix test relies on.
+
     Raises:
         AssertionError: If the entry point is not the Windows implementation
     """

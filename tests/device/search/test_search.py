@@ -13,6 +13,7 @@ import sys
 
 import pytest
 
+from alasio.ext.env import WINDOWS
 from tests.backend.import_testing import run_import_test_isolated
 from tests.device.search.import_entry import import_as_posix, import_as_windows
 
@@ -33,7 +34,6 @@ class TestEmulatorSearchEntryPoint:
     def test_the_entry_point_is_the_implementation_of_this_platform(self):
         from alasio.device.search.base import EmulatorSearchBase
         from alasio.device.search.search import EmulatorSearch
-        from alasio.ext.env import WINDOWS
 
         if WINDOWS:
             from alasio.device.search.windows import EmulatorSearchWindows
@@ -73,8 +73,17 @@ class TestPlatformModuleIsolation:
         )
         assert violations is None
 
+    @pytest.mark.skipif(
+        not WINDOWS,
+        reason='The Windows entry point imports winreg, which exists on Windows only',
+    )
     def test_windows_import_does_not_load_a_forbidden_module(self):
-        """The windows entry point is selected, with nothing else pulled in."""
+        """The windows entry point is selected, with nothing else pulled in.
+
+        This runs on a Windows host only. On posix the requirement is the
+        opposite one, and `test_posix_import_does_not_load_the_windows_modules`
+        holds it: the entry point must never reach a module that needs winreg.
+        """
         violations = run_import_test_isolated(
             import_as_windows,
             set(),
@@ -85,7 +94,6 @@ class TestPlatformModuleIsolation:
     def test_the_windows_modules_are_loaded_here_only_on_windows(self):
         """The same rule holds for this process, which imported the entry point."""
         from alasio.device.search import search  # noqa: F401
-        from alasio.ext.env import WINDOWS
 
         for name in WINDOWS_MODULES:
             assert (name in sys.modules) is WINDOWS
