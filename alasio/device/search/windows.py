@@ -6,7 +6,7 @@ from alasio.device.search.windows_reg import *
 from alasio.ext.cache import cached_property
 from alasio.ext.concurrent.threadpool import THREAD_POOL
 from alasio.ext.path import PathStr
-from alasio.ext.path.iter import CachePathExists
+from alasio.ext.path.iter import CachePathExists, iter_entry
 from alasio.ext.proc import process_iter
 
 
@@ -152,11 +152,12 @@ def iter_adb_binaries(emu: EmuStr):
     Yields:
         PathStr: Filepath to adb binaries found in this emulator
     """
-    if emu == EmuType.NoxPlayerFamily:
+    emutype = emu.emutype()
+    if emutype in EmuType.NoxPlayerFamily:
         exe = emu.with_name('nox_adb.exe')
         if exe.exists():
             yield exe
-    if emu == EmuType.MuMuPlayerFamily:
+    if emutype in EmuType.MuMuPlayerFamily:
         # From MuMu9\emulator\nemu9\EmulatorShell\nemuplayer.exe
         # to MuMu9\emulator\nemu9\vmonitor\bin\adb_server.exe
         exe = emu.uppath(2).joinpath('vmonitor/bin/adb_server.exe')
@@ -204,20 +205,35 @@ class EmulatorSearchWindows(EmulatorSearchBase, CachePathExists):
         for uninstall in iter_uninstall_registry():
             has_emulator_shell = False
             has_shell = False
-            # Find emulator executable from uninstaller
-            for file in uninstall.uppath().iter_files(ext='.exe'):
-                name = file.name
-                if name == 'EmulatorShell':
-                    has_emulator_shell = True
-                if name == 'shell':
-                    has_shell = True
+            # One scandir for both the executables and the sub folders: a
+            # DirEntry caches the file type, and a folder that does not exist
+            # is simply not in the listing, so the detection costs no extra io
+            for entry in iter_entry(uninstall.uppath()):
+                try:
+                    is_dir = entry.is_dir(follow_symlinks=False)
+                except FileNotFoundError:
+                    continue
+                if is_dir:
+                    if entry.name == 'EmulatorShell':
+                        has_emulator_shell = True
+                    elif entry.name == 'shell':
+                        has_shell = True
+                    continue
+                if not entry.name.endswith('.exe'):
+                    continue
+                # Find emulator executable from uninstaller
+                file = EmuStr.new(entry.path)
                 if file.emutype():
                     output.add(file)
             # Find from parent directory
             for file in uninstall.uppath(2).iter_files(ext='.exe'):
                 if file.emutype():
                     output.add(file)
-            # MuMu specific directory
+            # MuMu specific directory, scanned only when the folder was seen in
+            # the listing above. The names are checked as directories now: the
+            # older check compared a `.exe` filename with the folder name, so
+            # this branch never ran and a newer major version that drops the
+            # marker files kept its player invisible.
             if has_emulator_shell:
                 for file in uninstall.with_name('EmulatorShell').iter_files(ext='.exe'):
                     if file.emutype():
@@ -232,7 +248,9 @@ class EmulatorSearchWindows(EmulatorSearchBase, CachePathExists):
     def search_running_emulator(self) -> "set[PathStr]":
         output = set()
         for pid, cmdline in process_iter():
-            file = EmuStr(cmdline[0])
+            # cmdline comes from the OS with backslashes on Windows,
+            # EmuStr.new() normalizes separators before emutype() parses it
+            file = EmuStr.new(cmdline[0])
             if file.emutype() and self.path_exists(file):
                 output.add(file)
         return output
@@ -299,7 +317,7 @@ if __name__ == '__main__':
 
     count = 1000000
     start = time.perf_counter()
-    o = EmulatorSearchWindows().all_adb_binaries
+    o = EmulatorSearchWindows().all_emulator_instances
     print(time.perf_counter() - start)
 
     # start = time.perf_counter()

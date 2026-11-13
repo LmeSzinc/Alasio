@@ -228,9 +228,8 @@ def iter_uninstall_registry():
         'leidian14',
         'Nemu',
         'Nemu9',
-        'MuMuPlayer-12.0'
-        'MuMuPlayer',
         'MuMuPlayer-12.0',
+        'MuMuPlayer',
         'MuMu Player 12.0',
         'MEmu',
     ]

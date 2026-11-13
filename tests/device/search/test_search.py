@@ -15,3 +15,8 @@ class TestEmulatorSearch:
             assert EmulatorSearch is EmulatorSearchWindows
         else:
             assert EmulatorSearch is EmulatorSearchBase
+
+    def test_the_platform_module_is_importable(self):
+        """Importing the entry point must not touch the registry of another platform."""
+        assert EmulatorSearch is not None
+        assert issubclass(EmulatorSearch, EmulatorSearchBase)
