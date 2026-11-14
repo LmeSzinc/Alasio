@@ -40,6 +40,7 @@ from tests.deploy.simple_pip.conftest import build_wheel
 from tests.deploy_dev.pack.conftest import MemoryLock, MockServerFile
 from tests.deploy_dev.pack_server.conftest import join_path, run_dir  # noqa: F401
 from tests.deploy_dev.pack_server.test_fetch_wheel import MockMirror
+from tests.deploy_dev.pack_server.test_repo import DEPLOY_TEMPLATE, DEPLOY_TEMPLATE_TEXT
 
 pytestmark = [
     pytest.mark.parallel,
@@ -71,10 +72,12 @@ TREE = {
     't1': {
         'module/main.py': b'print("t1")\n',
         'requirements.txt': f'demo==1.0\n    # from {PIN_INDEX}\n'.encode(),
+        DEPLOY_TEMPLATE: DEPLOY_TEMPLATE_TEXT.encode(),
     },
     't2': {
         'module/main.py': b'print("t2")\n',
         'requirements.txt': f'demo==2.0\n    # from {PIN_INDEX}\n'.encode(),
+        DEPLOY_TEMPLATE: DEPLOY_TEMPLATE_TEXT.encode(),
     },
 }
 

@@ -11,7 +11,6 @@ are the index packs the client validates its files with.
 """
 import pytest
 
-from alasio.deploy.config.model import DeployModel
 from alasio.deploy.pack.decode_base import PackDecodeBase
 from alasio.deploy.pack.job_base import DeployTarget, JobBase
 from alasio.deploy.pack.packdep import PACKDEP_PATH, decode_packdep
@@ -20,15 +19,16 @@ from alasio.deploy_dev.pack_server import repo_export
 from alasio.deploy_dev.pack_server.pack_check import PackChecksum
 from alasio.deploy_dev.pack_server.repo import Repo
 from alasio.deploy_dev.pack_server.repo_export import (
-    DEP_DIR, DEPLOY_CONFIG, REPO_DIR, ReleaseExportError, ReleaseExportJob
+    DEP_DIR, DEPLOY_CONFIG, DEPLOY_TEMPLATE, REPO_DIR, ReleaseExportError, ReleaseExportJob
 )
-from alasio.ext.file.yamlconfig import YamlConfig
 from alasio.ext.path.atomic import file_read_bytes, file_write
 from alasio.git.mock.mock_repo import MockGitRepo
+from alasio.logger import logger
 from alasio.testing.filesystem import fs  # noqa: F401
 from tests.deploy_dev.pack_server.conftest import join_path
 from tests.deploy_dev.pack_server.test_repo import (
-    DEP_FOLDER, WORKSPACE, make_config, make_repo, read_tree, register_wheels, repo_file, run_commit
+    DEP_FOLDER, DEPLOY_TEMPLATE_TEXT, WORKSPACE, make_config, make_repo, read_tree, register_wheels, repo_file,
+    run_commit
 )
 
 pytestmark = [
@@ -113,6 +113,8 @@ def make_duplicate_repo(content=DUPLICATE_CONTENT):
     """
     repo = MockGitRepo()
     repo.register_file(COMMIT_DUPLICATE, 'requirements.txt', b'httpx==0.28.1\n')
+    repo.register_file(
+        COMMIT_DUPLICATE, DEPLOY_TEMPLATE, DEPLOY_TEMPLATE_TEXT.encode('utf-8'))
     repo.register_file(COMMIT_DUPLICATE, 'module/dup_a.py', content)
     repo.register_file(COMMIT_DUPLICATE, 'module/dup_b.py', content)
     repo.register_commit(COMMIT_DUPLICATE, author_name='Author', message='')
@@ -202,16 +204,53 @@ class TestTree:
         assert entries[DIST].version == DIST_VERSION
 
     def test_deploy_config(self, fs, run_dir, mirror):
-        """The deploy config of the tree is the default config of the backend."""
+        """The deploy config of the tree is a copy of the template of the version."""
         register_wheels(mirror)
         run_commit(make_repo(), make_config(), mirror.client)
-        config = YamlConfig(repo_root(run_dir).joinpath(DEPLOY_CONFIG), model=DeployModel)
-        data = config.data
-        assert config.errors == []
-        assert data.Python.PythonExecutable == './toolkit/python.exe'
-        assert data.Adb.AdbExecutable == \
-            './toolkit/Lib/site-packages/adbutils/binaries/adb.exe'
-        assert data.Update.AutoUpdate is True
+        tree = repo_root(run_dir)
+        template = file_read_bytes(tree.joinpath(DEPLOY_TEMPLATE))
+        assert file_read_bytes(tree.joinpath(DEPLOY_CONFIG)) == template
+        # the template is the file the webapp locates the project by, it stays
+        assert template == DEPLOY_TEMPLATE_TEXT.encode('utf-8')
+
+    def test_deploy_config_is_idempotent(self, fs, run_dir, mirror):
+        """A second run over a tree whose copy is current writes nothing."""
+        register_wheels(mirror)
+        repo = make_repo()
+        config = make_config()
+        run_commit(repo, config, mirror.client)
+        file = repo_root(run_dir).joinpath(DEPLOY_CONFIG)
+        stat = file.stat()
+        with logger.mock_capture_writer() as capture:
+            run_commit(repo, config, mirror.client)
+        assert f'Deploy config exists, skipped: "{file}"' in capture.concat()
+        assert file.stat().st_mtime_ns == stat.st_mtime_ns
+
+    def test_deploy_template_is_required(self, fs, run_dir, mirror):
+        """A version without the template fails the run, no release can be made."""
+        register_wheels(mirror)
+        repo = make_repo()
+        config = make_config()
+        # a version that drops the template of the previous one
+        repo.register_file('c4', 'requirements.txt', b'httpx==0.28.1\n')
+        repo.register_commit('c4', parents=['c3'], author_name='Author', message='')
+        repo.register_branch('master', 'c4')
+        repo.register_head('c4')
+        gen = Repo(repo, config, client=mirror.client)
+        with pytest.raises(ReleaseExportError, match='has no config/deploy.template.yaml'):
+            gen.run()
+        assert not repo_file(run_dir, 'latest.pack').exists()
+
+    def test_deploy_config_of_an_older_export_removed(self, fs, run_dir, mirror):
+        """A deploy config a previous export wrote is replaced by the copy."""
+        register_wheels(mirror)
+        repo = make_repo()
+        config = make_config()
+        run_commit(repo, config, mirror.client)
+        file = repo_root(run_dir).joinpath(DEPLOY_CONFIG)
+        file_write(file, b'Python:\n  PythonExecutable: ./elsewhere.exe\n')
+        run_commit(repo, config, mirror.client)
+        assert file_read_bytes(file) == DEPLOY_TEMPLATE_TEXT.encode('utf-8')
 
     def test_file_of_an_older_version_removed(self, fs, run_dir, mirror):
         """A file the version does not have is removed, a changed file is written back."""
@@ -344,9 +383,16 @@ class TestReuse:
 
         monkeypatch.setattr(repo_export, 'atomic_read_bytes', spy)
         Repo(make_repo(), make_config(), client=mirror.client).run()
-        # the pack of the tree is in the memory of the encoder, the only pack
-        # read is the full pack of the dependency
-        assert reads == [str(join_path(run_dir, DEP_FOLDER, DIST_VERSION, 'full.pack'))]
+        # the pack of the tree is in the memory of the encoder: the packs read
+        # are the full pack of the dependency and the deploy config of the
+        # export, never the pack of the tree
+        tree_pack_file = str(repo_file(run_dir, 'c3', 'full.pack'))
+        assert tree_pack_file not in reads
+        assert reads == [
+            str(repo_root(run_dir).joinpath(DEPLOY_TEMPLATE)),
+            str(repo_root(run_dir).joinpath(DEPLOY_CONFIG)),
+            str(join_path(run_dir, DEP_FOLDER, DIST_VERSION, 'full.pack')),
+        ]
 
     def test_kept_pack_is_read_once(self, fs, run_dir, mirror, monkeypatch):
         """A pack kept from an earlier run was not encoded by this one and is read once."""

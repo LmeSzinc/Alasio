@@ -90,6 +90,23 @@ REQUIREMENTS = {
 # a pack channel of, see entry_source
 DEFAULT_ENTRY = "Mod:\n  name: m\nUpdate:\n  pack_deps:\n  - httpx\n"
 
+# the deployment config template of the mock repo, the file the export copies to
+# config/deploy.yaml. The webapp locates a project by it, and a mod declares the
+# values of its own runtime here, so it is a file of the version and not
+# generated from a model of this library
+DEPLOY_TEMPLATE = 'config/deploy.template.yaml'
+DEPLOY_TEMPLATE_TEXT = """\
+Repo:
+  Repository: https://github.com/Author/Repo
+  Branch: master
+Python:
+  PythonExecutable: ./toolkit/python.exe
+Adb:
+  AdbExecutable: ./toolkit/Lib/site-packages/adbutils/binaries/adb.exe
+Update:
+  AutoUpdate: true
+"""
+
 # folder of the workspace of the config in the run directory
 WORKSPACE = 'pack/Author_Repo_master'
 
@@ -164,6 +181,8 @@ def make_repo(requirements=None, branch='master', entry=DEFAULT_ENTRY):
     parent = None
     for index, (commit, content) in enumerate(requirements.items()):
         repo.register_file(commit, 'requirements.txt', content.encode('utf-8'))
+        repo.register_file(
+            commit, DEPLOY_TEMPLATE, DEPLOY_TEMPLATE_TEXT.encode('utf-8'))
         source = entry.get(commit) if isinstance(entry, dict) else entry
         if source is not None:
             repo.register_file(commit, MOD_ENTRY_PATH, source.encode('utf-8'))
@@ -611,8 +630,8 @@ INFO | Unpacking the tree of c3 to "{run_dir}/pack/Author_Repo_master/.repo"
 INFO | Unpacking data to "{run_dir}/pack/Author_Repo_master/.repo"
 INFO | Replacing files to "{run_dir}/pack/Author_Repo_master/.repo"
 INFO | Unpack done
-INFO | Touched 3 release files of "{run_dir}/pack/Author_Repo_master/.repo"
-INFO | Write config {run_dir}/pack/Author_Repo_master/.repo/config/deploy.yaml
+INFO | Touched 4 release files of "{run_dir}/pack/Author_Repo_master/.repo"
+INFO | Copy deploy config of the version: "{run_dir}/pack/Author_Repo_master/.repo/config/deploy.template.yaml" -> "{run_dir}/pack/Author_Repo_master/.repo/config/deploy.yaml"
 INFO | No dependency to export for "Author_Repo_master", skipped
 """.replace('{run_dir}', str(run_dir))
         assert gen.dep.published == {}
@@ -1015,6 +1034,7 @@ class TestCleanup:
         # the workspace of the previous one
         repo.register_file('c4', 'requirements.txt', REQUIREMENTS['c3'].encode('utf-8'))
         repo.register_file('c4', MOD_ENTRY_PATH, DEFAULT_ENTRY.encode('utf-8'))
+        repo.register_file('c4', DEPLOY_TEMPLATE, DEPLOY_TEMPLATE_TEXT.encode('utf-8'))
         repo.register_commit(
             'c4', parents=['c3'], author_name='Author', author_time=3, message='commit c4')
         repo.register_branch('master', 'c4')

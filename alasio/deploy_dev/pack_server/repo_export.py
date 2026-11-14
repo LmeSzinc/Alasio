@@ -6,8 +6,9 @@ the mod as a client runs it, with the files a pack channel would otherwise
 download on the first start. The run writes the two trees into the workspace:
 
     {workspace}/.repo    the working tree of the latest version, with
-                         config/deploy.yaml and the pack area: index.pack, the
-                         history of the version and the dependency snapshot
+                         config/deploy.yaml (the copy of the template of the
+                         version) and the pack area: index.pack, the history of
+                         the version and the dependency snapshot
     {workspace}/.dep     the install tree of every dependency pack channel,
                          the content of a site-packages folder, with the ledger
                          of every distribution (.pack/{dist}/index.pack)
@@ -53,7 +54,6 @@ Usage:
 
 import trio
 
-from alasio.deploy.config.model import DeployModel
 from alasio.deploy.pack.decode_base import PackDecodeBase
 from alasio.deploy.pack.job_base import DeployTarget
 from alasio.deploy.pack.job_unpack import UnpackJob
@@ -62,8 +62,7 @@ from alasio.deploy.pack.server_file import LatestInfo
 from alasio.deploy_dev.pack_server.pack_check import PackChecksum
 from alasio.deploy_dev.pack_server.repo_dep import FULL_PACK_FILE
 from alasio.ext.cache import InstanceCacheOperation, cached_property
-from alasio.ext.file.yamlconfig import YamlConfig
-from alasio.ext.path.atomic import atomic_failure_cleanup, atomic_read_bytes
+from alasio.ext.path.atomic import atomic_failure_cleanup, atomic_read_bytes, atomic_write
 from alasio.logger import logger
 
 # folder of the working tree of the release, the subfolder of the workspace. The
@@ -74,9 +73,16 @@ REPO_DIR = '.repo'
 # folder of the site-packages tree of the release, the subfolder of the workspace
 DEP_DIR = '.dep'
 
-# file of the deployment config of the release, relative to the root of the
-# working tree. It is not in the git repo (config/*.yaml is ignored), and a
-# release does not start without it: electron refuses a release that has no
+# the template of the deployment config, relative to the root of the working
+# tree: a file of the version, copied to DEPLOY_CONFIG by the export. The webapp
+# locates the project root by it and offers the first time setup page when only
+# the template is there, so a release always ships both
+DEPLOY_TEMPLATE = 'config/deploy.template.yaml'
+
+# the deployment config of the release, relative to the root of the working
+# tree: the copy of DEPLOY_CONFIG of the version. It is not in the version
+# itself (config/*.yaml is ignored by the git repo), and a release does not
+# start without it: the electron client refuses a config without
 # PythonExecutable, and the backend creates the file on the first start
 # otherwise
 DEPLOY_CONFIG = 'config/deploy.yaml'
@@ -332,8 +338,8 @@ class ReleaseExport:
             info (LatestInfo): Version and index pack checksum of the run
 
         Raises:
-            ReleaseExportError: If the tree cannot be exported, or its ledger
-                is not the one of the version
+            ReleaseExportError: If the tree cannot be exported, the version has
+                no deploy template, or the ledger is not the one of the version
         """
         decoder = self._repo_decoder()
         logger.info(f'Unpacking the tree of {info.version} to "{self.repo_root}"')
@@ -414,24 +420,39 @@ class ReleaseExport:
 
     def _write_deploy_config(self):
         """
-        Write config/deploy.yaml of the exported tree.
+        Copy config/deploy.template.yaml of the version to config/deploy.yaml.
 
-        The file is written from the model the backend writes it from, so the
-        first start of a release finds the content it would have written itself
-        and writes nothing.
+        The template is a file of the version, not a file generated from a model
+        of this library: it is the config of the mod, the mod owns its content
+        and may declare keys this library does not know yet. The release ships
+        the copy so a first start finds a deploy config, and the template stays
+        next to it, the file the webapp locates the project root by and offers
+        the first time setup page from.
+
+        The copy is written only when its content differs, so a second export of
+        the version touches no file.
 
         Raises:
-            ReleaseExportError: If the file cannot be read back with the model
+            ReleaseExportError: If the version has no template
+            OSError: If the template cannot be read or the config written
         """
-        file = self.repo_root.joinpath(DEPLOY_CONFIG)
-        config = YamlConfig(file, model=DeployModel)
-        config.write(template=True)
-        # the file a release reads back, not the object it was written from
-        _ = config.data
-        if config.errors:
+        template = self.repo_root.joinpath(DEPLOY_TEMPLATE)
+        try:
+            content = atomic_read_bytes(template)
+        except FileNotFoundError:
             raise ReleaseExportError(
-                f'Failed to write the deploy config of the release: "{file}": '
-                f'{config.errors}')
+                f'The version has no {DEPLOY_TEMPLATE}, a release needs it to '
+                f'locate the project and to write {DEPLOY_CONFIG}: "{template}"') from None
+        file = self.repo_root.joinpath(DEPLOY_CONFIG)
+        try:
+            current = atomic_read_bytes(file)
+        except FileNotFoundError:
+            current = None
+        if current == content:
+            logger.info(f'Deploy config exists, skipped: "{file}"')
+            return
+        logger.info(f'Copy deploy config of the version: "{template}" -> "{file}"')
+        atomic_write(file, content)
 
     def _check_ledger(self, root, name, version, checksum):
         """
