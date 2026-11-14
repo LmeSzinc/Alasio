@@ -20,18 +20,24 @@ on the disk.
     4. the packs of the repo tree are generated to `packrepo/{commit}/` (see
        repo_pack), the full pack of the latest commit carries the dependency
        snapshot of the step above
-    5. the pages of the pip index of the wheel folder are written (see
+    5. the release trees are exported to `.repo` and `.dep` (see repo_export),
+       the folders an operator copies into a release: the working tree of the
+       version and the site-packages tree of its dependencies, both with the
+       ledger a client validates against, so the release starts without
+       downloading a pack
+    6. the pages of the pip index of the wheel folder are written (see
        repo_pypi): the simple page of every name, the find-links page of the
        folder, and the flat page a person reads. They are written with the
        barrier below, never before: the page of a distribution lists the
        wheels of the version latest.pack names
-    6. latest.pack is written (see repo_latest), the version a client reads:
+    7. latest.pack is written (see repo_latest), the version a client reads:
        the barrier of the run, a client that reads it finds every pack of the
        version on the disk
-    7. the record of the generation is written (see repo_manifest): the
+    8. the record of the generation is written (see repo_manifest): the
        version of the barrier, the files the run publishes (manifest.json) and
-       the files it keeps private, e.g. the wheel cache (.manifest.json)
-    8. every file of the workspace the run did not touch is removed
+       the files it keeps private, e.g. the wheel cache and the release trees
+       (.manifest.json)
+    9. every file of the workspace the run did not touch is removed
        (RepoBase.cleanup()), after the barrier, so a client that still runs the
        previous version keeps working until its next check
 
@@ -58,6 +64,7 @@ Usage:
 from alasio.deploy_dev.pack_server.gate import check_run_dir
 from alasio.deploy_dev.pack_server.repo_base import RepoBase
 from alasio.deploy_dev.pack_server.repo_dep import RepoDep
+from alasio.deploy_dev.pack_server.repo_export import ReleaseExport
 from alasio.deploy_dev.pack_server.repo_latest import RepoLatest
 from alasio.deploy_dev.pack_server.repo_manifest import RepoManifest
 from alasio.deploy_dev.pack_server.repo_pack import RepoPack
@@ -109,6 +116,7 @@ class Repo:
         self.pypi = RepoPypi(self.base, self.wheel, find_links_url=find_links_url)
         self.dep = RepoDep(self.base)
         self.pack = RepoPack(self.base, self.dep)
+        self.export = ReleaseExport(self.base, self.pack, self.dep)
         self.latest = RepoLatest(self.base, self.pack)
         self.manifest = RepoManifest(self.base, self.latest)
         # whether run() completed, the precondition of commit(): a failed run
@@ -132,8 +140,10 @@ class Repo:
             WheelNotFoundError: If a wheel of a dependency cannot be fetched,
                 the target and the historical versions alike: every update
                 path of the published channel must be complete
+            ReleaseExportError: If a release tree cannot be exported, see
+                repo_export
             httpx2.HTTPError: If a wheel cannot be fetched
-            OSError: If a wheel or a pack cannot be written
+            OSError: If a wheel, a pack or a release tree cannot be written
         """
         self._generated = False
         check_run_dir()
@@ -164,6 +174,11 @@ class Repo:
         # 3. the packs of the repo tree
         logger.hr('Packs', level=2)
         self.pack.run()
+        # 4. the release trees of this run, the folders a release is copied
+        # from: exported before the barrier and the cleanup, which keep and
+        # record every file they write
+        logger.hr('Release export', level=2)
+        self.export.run()
         self._generated = True
 
     def commit(self):

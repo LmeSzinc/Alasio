@@ -604,6 +604,16 @@ INFO | Writing update pack: c2 -> c3, "{run_dir}/pack/Author_Repo_master/packrep
 INFO | [2/2] Packing update pack from c1
 INFO | Writing update pack: c1 -> c3, "{run_dir}/pack/Author_Repo_master/packrepo/c3/update_c1.pack"
 INFO | Packs of "Author_Repo_master" generated, latest=c3
+------------------------------------------ RELEASE EXPORT ------------------------------------------
+INFO | RELEASE EXPORT
+INFO | Exporting the release trees of "Author_Repo_master": version=c3
+INFO | Unpacking the tree of c3 to "{run_dir}/pack/Author_Repo_master/.repo"
+INFO | Unpacking data to "{run_dir}/pack/Author_Repo_master/.repo"
+INFO | Replacing files to "{run_dir}/pack/Author_Repo_master/.repo"
+INFO | Unpack done
+INFO | Touched 3 release files of "{run_dir}/pack/Author_Repo_master/.repo"
+INFO | Write config {run_dir}/pack/Author_Repo_master/.repo/config/deploy.yaml
+INFO | No dependency to export for "Author_Repo_master", skipped
 """.replace('{run_dir}', str(run_dir))
         assert gen.dep.published == {}
         assert not join_path(run_dir, DEP_FOLDER).exists()
@@ -1034,11 +1044,11 @@ class TestWheelCache:
         assert not join_path(run_dir, WORKSPACE, 'wheel').exists()
 
     def test_cache_is_not_published(self, fs, run_dir, mirror):
-        """The cache folder is private: the name starts with '.'."""
+        """The cache and the release trees are private: the name starts with '.'."""
         register_wheels(mirror)
         Repo(make_repo(), make_config(), client=mirror.client).run()
         folders = list(join_path(run_dir, WORKSPACE).iter_foldernames())
-        assert sorted(folders) == ['.wheel_cache', 'packdep', 'packrepo']
+        assert sorted(folders) == ['.dep', '.repo', '.wheel_cache', 'packdep', 'packrepo']
 
     def test_wheel_sync_is_idempotent(self, fs, run_dir, mirror):
         """A second run keeps the published wheels, the copies are not rewritten."""

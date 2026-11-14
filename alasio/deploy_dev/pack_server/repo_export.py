@@ -1,0 +1,498 @@
+"""
+Export the release trees of a run: .repo and .dep.
+
+A release folder is a copy of the workspace, not a mirror: the working tree of
+the mod as a client runs it, with the files a pack channel would otherwise
+download on the first start. The run writes the two trees into the workspace:
+
+    {workspace}/.repo    the working tree of the latest version, with
+                         config/deploy.yaml and the pack area: index.pack, the
+                         history of the version and the dependency snapshot
+    {workspace}/.dep     the install tree of every dependency pack channel,
+                         the content of a site-packages folder, with the ledger
+                         of every distribution (.pack/{dist}/index.pack)
+
+An operator copies them into the folders of a release:
+
+    .repo/*  ->  {release}/
+    .dep/*   ->  {release}/toolkit/Lib/site-packages/
+
+and the release starts without downloading a pack: the ledgers name the
+version latest.pack serves, so the client validates the files it already has
+(ResetJob) instead of rebuilding the tree of the server.
+
+The files are written by the unpack job of the client, not by a writer of this
+module: UnpackJob is the flow a client runs, so an export yields the tree a
+client would have built, and a run over a tree that is already current writes
+nothing (every record is checked against the file on the disk before it is
+written). The one part of the job that is skipped is the copy of the pack into
+the job file, see ReleaseExportJob.
+
+The tree is decoded from the encoder of this run when the run wrote the full
+pack (PackFullView): the records and their encoded data are still in the
+memory, so the pack of the version is not read back from the disk. A pack that
+was kept from an earlier run was not encoded by this run and is read once
+(PackDecodeBase).
+
+The export is a step of the generation (repo.Repo.run), not of the
+publication: a tree that cannot be exported fails the run, latest.pack keeps
+naming the previous version, and nothing of the run is uploaded.
+
+Every file the export writes is touched (RepoBase.touch), the set the cleanup
+of the workspace keeps and the local manifest of the run records. The touched
+files are the records of the version and the ledgers, not a walk of the
+exported folder: a file an earlier export left that the version does not have
+is removed by the cleanup of the run.
+
+Usage:
+    from alasio.deploy_dev.pack_server.repo_export import ReleaseExport
+
+    export = ReleaseExport(base, pack, dep)
+    export.run()
+"""
+
+import trio
+
+from alasio.deploy.config.model import DeployModel
+from alasio.deploy.pack.decode_base import PackDecodeBase
+from alasio.deploy.pack.job_base import DeployTarget
+from alasio.deploy.pack.job_unpack import UnpackJob
+from alasio.deploy.pack.pack_model import FileInfo
+from alasio.deploy.pack.server_file import LatestInfo
+from alasio.deploy_dev.pack_server.pack_check import PackChecksum
+from alasio.deploy_dev.pack_server.repo_dep import FULL_PACK_FILE
+from alasio.ext.cache import InstanceCacheOperation, cached_property
+from alasio.ext.file.yamlconfig import YamlConfig
+from alasio.ext.path.atomic import atomic_failure_cleanup, atomic_read_bytes
+from alasio.logger import logger
+
+# folder of the working tree of the release, the subfolder of the workspace. The
+# leading '.' marks a private folder: the workspace mirrors to the server as it
+# is, and a path segment that starts with '.' is not published
+REPO_DIR = '.repo'
+
+# folder of the site-packages tree of the release, the subfolder of the workspace
+DEP_DIR = '.dep'
+
+# file of the deployment config of the release, relative to the root of the
+# working tree. It is not in the git repo (config/*.yaml is ignored), and a
+# release does not start without it: electron refuses a release that has no
+# PythonExecutable, and the backend creates the file on the first start
+# otherwise
+DEPLOY_CONFIG = 'config/deploy.yaml'
+
+
+class ReleaseExportError(RuntimeError):
+    """
+    Raised when a release tree is not exported.
+
+    The export is a step of the generation: the caller records the run as
+    failed, latest.pack keeps naming the previous version, and nothing of the
+    run is uploaded.
+    """
+
+
+class ReleaseExportJob(UnpackJob):
+    """
+    An unpack job of a release tree: the pack is not copied to the job file.
+
+    UnpackJob.write() stores the whole pack to {ledger}/workspace/job.pack
+    before it unpacks, a copy of the pack the job is about to read: the flow it
+    serves has the pack in the memory of a download, and the copy is the resume
+    base of an interrupted run. Neither applies to an export: the pack of the
+    tree is packrepo/{version}/full.pack on the disk of this run, and a run of
+    the export rebuilds the tree from it (the tmp files of an interrupted run
+    are reused by content, see TmpManager).
+    """
+
+    def write(self):
+        """
+        Skip the job file: the pack of the export is already on the disk.
+        """
+
+    @cached_property
+    def old_fileinfo(self):
+        """
+        The records of the previous export, the deletion base of the run.
+
+        A target without a ledger is the normal case of the first export: the
+        folder is created by this job, and every file of it that the version
+        does not have is a leftover the cleanup of the run removes
+        (RepoBase.cleanup). The client flow reports a target without a ledger as
+        a warning, an export has nothing to report.
+
+        Returns:
+            dict[str, IdxInfo]: Records of the local ledger, {} when the tree
+                was never exported
+        """
+        index = self.local_index
+        if index.exists:
+            return index.fileinfo()
+        return {}
+
+
+class PackFullView:
+    """
+    The decoder-shaped view over the encoder of a full pack of this run.
+
+    The members are the ones UnpackJob reads of a PackDecodeBase: fileinfo,
+    extract_index_pack() and catfile(). The records are the FileInfo objects of
+    PackFull.fileinfo, which carry the encoded data of their content
+    (FileInfo.data): a record is decoded from the memory, not from the pack
+    file.
+
+    A C (copied) record carries no data of its own: it references the record it
+    duplicates (source_lookback), whose content is identical. catfile()
+    resolves that record and decodes its data with the line ending of the copy.
+
+    data is empty: the serialized pack is never assembled in the memory, only
+    the records are. The job of an export never reads it, see
+    ReleaseExportJob.
+    """
+
+    def __init__(self, pack):
+        """
+        Args:
+            pack (PackFull): The encoder of a pack this run wrote, its fileinfo
+                is the record set of the version
+        """
+        self.pack = pack
+        # list of the records in the encoded order and {path: index} of them,
+        # the source of a copied record is a 1-based lookback into the list.
+        # None until the first copied record needs them
+        self._ordered = None
+        self._index_of = None
+
+    @property
+    def current_version(self):
+        """
+        Returns:
+            str: Version the pack packs, e.g. the commit sha1
+        """
+        return self.pack.current_version
+
+    @property
+    def data(self):
+        """
+        Returns:
+            bytes: Empty, the pack is not assembled in the memory
+        """
+        return b''
+
+    @property
+    def fileinfo(self):
+        """
+        Returns:
+            dict[str, FileInfo]: The records of the version in the encoded order
+        """
+        return self.pack.fileinfo
+
+    def extract_index_pack(self):
+        """
+        Returns:
+            bytes: The index pack of the version, header and index section
+        """
+        return self.pack.index_pack
+
+    def catfile(self, info):
+        """
+        The working tree content of a record.
+
+        Args:
+            info (FileInfo): Record of the version
+
+        Returns:
+            memoryview: Content of the file, the checkout line ending applied
+
+        Raises:
+            PackDecodeError: If the content does not match the record
+        """
+        source = self._source_of(info)
+        if source is info:
+            return memoryview(PackDecodeBase.decode_content(info, info.data))
+        # the content is verified with the encoding of the source record and
+        # written with the line ending of the copy: the two records share their
+        # content, not their eol
+        probe = FileInfo(
+            path=info.path, size=source.size, sha1=source.sha1,
+            algo=source.algo, data_size=source.data_size, eol=info.eol,
+        )
+        return memoryview(PackDecodeBase.decode_content(probe, source.data))
+
+    def _source_of(self, info):
+        """
+        The record a record without data of its own takes its content from.
+
+        Args:
+            info (FileInfo): Record of the version
+
+        Returns:
+            FileInfo: The record itself when it carries data, otherwise the
+                record its source_lookback chain ends at
+        """
+        if info.data or not info.source_lookback:
+            return info
+        if self._ordered is None:
+            self._ordered = list(self.pack.fileinfo.values())
+            self._index_of = {record.path: i for i, record in enumerate(self._ordered)}
+        index = self._index_of[info.path]
+        while not info.data and info.source_lookback:
+            index -= info.source_lookback
+            info = self._ordered[index]
+        return info
+
+
+class ReleaseExport:
+    """
+    Export the two trees of a release, see the module docstring.
+
+    Usage:
+        export = ReleaseExport(base, pack, dep)
+        export.run()
+    """
+
+    def __init__(self, base, pack, dep):
+        """
+        Args:
+            base (RepoBase): Workspace and declarations of the repo
+            pack (RepoPack): The repo tree packs of the run after its run()
+            dep (RepoDep): The dependency packs of the run after its run(), its
+                published snapshots are the versions of the .dep tree
+        """
+        self.base = base
+        self.pack = pack
+        self.dep = dep
+
+    @cached_property
+    def repo_root(self):
+        """
+        Folder of the working tree of the release: {workspace}/.repo
+
+        Returns:
+            PathStr: Absolute path of the folder
+        """
+        return self.base.workspace.joinpath(REPO_DIR)
+
+    @cached_property
+    def dep_root(self):
+        """
+        Folder of the site-packages tree of the release: {workspace}/.dep
+
+        Returns:
+            PathStr: Absolute path of the folder
+        """
+        return self.base.workspace.joinpath(DEP_DIR)
+
+    def run(self):
+        """
+        Export the two trees of the release.
+
+        The version is the one latest.pack of this run carries, read from the
+        encoder and the kept checksum of RepoPack, never from the file on the
+        disk: latest.pack is written after this step, and a client of the
+        previous version must not read an index of this one.
+
+        Raises:
+            ReleaseExportError: If the packs of the repo tree were not
+                generated, a tree cannot be exported, or a check of the result
+                fails
+            OSError: If a file cannot be read or written
+        """
+        pack = self.pack.pack
+        if pack is None:
+            raise ReleaseExportError(
+                'The packs of the repo tree were not generated, see RepoPack.run()')
+        # the identity latest.pack is built from: the version and the checksum
+        # a client compares its local ledger against
+        info = LatestInfo.parse(pack.latest_pack(self.pack.kept_checksum))
+        logger.info(
+            f'Exporting the release trees of "{self.base.workspace.name}": '
+            f'version={info.version}')
+        # the tmp files of an interrupted write of a previous run are ours
+        atomic_failure_cleanup(self.repo_root, recursive=True)
+        atomic_failure_cleanup(self.dep_root, recursive=True)
+        trio.run(self._run, info)
+
+    async def _run(self, info):
+        """
+        Unpack the two trees, one job after another.
+
+        Args:
+            info (LatestInfo): Version and index pack checksum of the run
+        """
+        await self._export_repo(info)
+        await self._export_dep()
+
+    async def _export_repo(self, info):
+        """
+        Unpack the working tree of the version, touch it and write its deploy
+        config.
+
+        Args:
+            info (LatestInfo): Version and index pack checksum of the run
+
+        Raises:
+            ReleaseExportError: If the tree cannot be exported, or its ledger
+                is not the one of the version
+        """
+        decoder = self._repo_decoder()
+        logger.info(f'Unpacking the tree of {info.version} to "{self.repo_root}"')
+        job = ReleaseExportJob(decoder, root=self.repo_root, name='')
+        if not await job.run():
+            raise ReleaseExportError(
+                f'Failed to export the tree to "{self.repo_root}", '
+                f'the workspace is kept for the next run')
+        self._touch_target(self.repo_root, '', decoder)
+        self._write_deploy_config()
+        self.base.touch(self.repo_root.joinpath(DEPLOY_CONFIG))
+        self._check_ledger(self.repo_root, '', info.version, bytes.fromhex(info.checksum))
+
+    async def _export_dep(self):
+        """
+        Unpack the install tree of every dependency pack channel.
+
+        The versions are the published snapshots of RepoDep, the entries the
+        tree pack carries as .pack/packdep.pack: the export of a channel is the
+        one a client reads from the tree, whatever the dependency file of the
+        repo pins.
+
+        Raises:
+            ReleaseExportError: If a full pack does not match the snapshot, a
+                tree cannot be exported, or its ledger is not the one of the
+                version
+            OSError: If a pack cannot be read
+        """
+        published = self.dep.published
+        total = len(published)
+        if not total:
+            logger.info(
+                f'No dependency to export for "{self.base.workspace.name}", skipped')
+            return
+        logger.info(
+            f'Unpacking {total} dependencies of "{self.base.workspace.name}" '
+            f'to "{self.dep_root}"')
+        for index, (name, (version, checksum)) in enumerate(published.items(), start=1):
+            file = self.base.packdep_folder.joinpath(name).joinpath(version).joinpath(FULL_PACK_FILE)
+            # the snapshot is the source of the tree: a full pack that is not
+            # the one the snapshot names is a broken run, and the export must
+            # not bake it into a release
+            actual = PackChecksum.from_file(file).index_checksum
+            if actual != checksum:
+                raise ReleaseExportError(
+                    f'The full pack of "{name}=={version}" does not match the '
+                    f'dependency snapshot of the run: "{file}"')
+            decoder = PackDecodeBase(atomic_read_bytes(file))
+            decoder.validate()
+            logger.info(
+                f'[{index}/{total}] Unpacking "{name}=={version}" to "{self.dep_root}"')
+            job = ReleaseExportJob(decoder, root=self.dep_root, name=name)
+            if not await job.run():
+                raise ReleaseExportError(
+                    f'Failed to export the dependency "{name}=={version}" to '
+                    f'"{self.dep_root}", the workspace is kept for the next run')
+            self._touch_target(self.dep_root, name, decoder)
+            self._check_ledger(self.dep_root, name, version, checksum)
+
+    def _repo_decoder(self):
+        """
+        The decoder of the full pack of the version.
+
+        A pack this run wrote is decoded from the encoder, which still holds
+        every record and its encoded data (see PackFullView); a kept pack was
+        not encoded by this run and is read once.
+
+        Returns:
+            PackFullView | PackDecodeBase: The decoder of the version
+
+        Raises:
+            OSError: If a kept pack cannot be read
+        """
+        pack = self.pack.pack
+        if pack is not None and InstanceCacheOperation.has(pack, 'fileinfo'):
+            return PackFullView(pack)
+        return PackDecodeBase(atomic_read_bytes(self.pack.full_pack_file))
+
+    def _write_deploy_config(self):
+        """
+        Write config/deploy.yaml of the exported tree.
+
+        The file is written from the model the backend writes it from, so the
+        first start of a release finds the content it would have written itself
+        and writes nothing.
+
+        Raises:
+            ReleaseExportError: If the file cannot be read back with the model
+        """
+        file = self.repo_root.joinpath(DEPLOY_CONFIG)
+        config = YamlConfig(file, model=DeployModel)
+        config.write(template=True)
+        # the file a release reads back, not the object it was written from
+        _ = config.data
+        if config.errors:
+            raise ReleaseExportError(
+                f'Failed to write the deploy config of the release: "{file}": '
+                f'{config.errors}')
+
+    def _check_ledger(self, root, name, version, checksum):
+        """
+        Check that a tree carries the ledger of the version it exports.
+
+        The ledger is the file the client reads of a target: its version tells
+        an update is not needed, and its checksum is what the client compares
+        with latest.pack (the tree) or with the dependency snapshot (a
+        distribution). The path is the one DeployTarget gives, the path the
+        client's own job resolves, so a tree copied into a release is read
+        where the export wrote it.
+
+        Args:
+            root (str): Root of the exported tree
+            name (str): Ledger key of the target, '' for the tree
+            version (str): Version the ledger must name
+            checksum (bytes): Index pack checksum the ledger must carry
+
+        Raises:
+            ReleaseExportError: If the ledger is missing, of another version or
+                of another checksum
+            OSError: If the ledger cannot be read
+        """
+        file = DeployTarget(root=root, name=name).index_file
+        try:
+            ledger = PackChecksum.from_file(file)
+        except (OSError, ValueError) as e:
+            raise ReleaseExportError(
+                f'Failed to read the ledger of the exported tree: "{file}": {e}') from e
+        if ledger.current_version != version or ledger.index_checksum != checksum:
+            raise ReleaseExportError(
+                f'The ledger of the exported tree is not the one of the version: '
+                f'"{file}", version={ledger.current_version}, '
+                f'checksum={ledger.index_checksum.hex()}, '
+                f'expected version={version}, checksum={checksum.hex()}')
+
+    def _touch_target(self, root, name, decoder):
+        """
+        Touch the files of an exported tree: the records of the version and its
+        ledger.
+
+        The touched set is the exact set the export writes, never a walk of the
+        folder (RepoBase.touch): the cleanup of the workspace keeps what is
+        touched and removes everything else, so a file an earlier export left
+        and the version does not have is removed by the cleanup of this run
+        instead of being kept forever.
+
+        Args:
+            root (str): Root of the exported tree
+            name (str): Ledger key of the target, '' for the tree
+            decoder (PackFullView | PackDecodeBase): The decoder the tree was
+                exported with, its records are the paths of the files
+        """
+        files = 0
+        for path, info in decoder.fileinfo.items():
+            if info.edit == 2:
+                continue
+            # the decoder is localized by the job: the paths are the local
+            # paths of the target, the ones the job wrote
+            self.base.touch(root.joinpath(path))
+            files += 1
+        self.base.touch(DeployTarget(root=root, name=name).index_file)
+        logger.info(
+            f'Touched {files + 1} release files of "{root}"')
