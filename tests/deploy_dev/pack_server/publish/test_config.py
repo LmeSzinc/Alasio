@@ -63,7 +63,7 @@ class TestPublishModel:
         assert PackRepoModel().Publish == {}
 
     def test_the_settings_are_per_remote(self):
-        """Grace, concurrency and timeout belong to the remote, not to the repo."""
+        """Grace, concurrency and timeout belong to the remote."""
         remote = make_remote()
         assert remote.Concurrency == 4
         assert remote.GraceSeconds == 3600

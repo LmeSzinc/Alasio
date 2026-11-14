@@ -24,6 +24,7 @@ from alasio.deploy_dev.pack_server.publish.common import (
     BARRIER_KEY, MANIFEST_KEY, IncompleteStore, PublishError, PublishRunError
 )
 from alasio.deploy_dev.pack_server.publish.local import LocalGeneration, UploadItem
+from alasio.deploy_dev.pack_server.publish.retire import MAX_RETENTION
 from alasio.deploy_dev.pack_server.publish.upload import UploadRun
 from alasio.deploy_dev.store import Capabilities, ObjectInfo, ObjectListing
 from alasio.ext.path import PathStr
@@ -112,7 +113,8 @@ class OpaqueStore:
         return getattr(self.inner, name)
 
 
-def make_upload(generation, store, remote_name='cos-main', concurrency=1, local=None):
+def make_upload(generation, store, remote_name='cos-main', concurrency=1, local=None,
+                grace=3600, max_retention=MAX_RETENTION):
     """
     A ChannelUpload of the workspace of the test.
 
@@ -126,13 +128,18 @@ def make_upload(generation, store, remote_name='cos-main', concurrency=1, local=
         concurrency (int): Transfers in flight. Defaults to 1
         local (LocalGeneration): The generation to share with another mirror of
             the same channel. Defaults to None: one of its own
+        grace (int): Seconds a replaced generation keeps its grace. Defaults to
+            3600, the default of the config
+        max_retention (int): Upper bound of the retire wait. Defaults to
+            MAX_RETENTION, the constant of the tool
 
     Returns:
         ChannelUpload: The upload, ready to run
     """
     local = local or LocalGeneration(generation.workspace, concurrency)
     return ChannelUpload(
-        local, store, remote_name=remote_name, concurrency=concurrency)
+        local, store, remote_name=remote_name, concurrency=concurrency,
+        grace=grace, max_retention=max_retention)
 
 
 def keys_of(service):
@@ -335,6 +342,27 @@ class TestGrace:
                 ChannelUpload(
                     LocalGeneration(workspace.workspace), store,
                     remote_name='cos-main', grace=grace)
+        finally:
+            await store.aclose()
+
+    @pytest.mark.trio
+    async def test_the_retention_is_a_constant_of_the_tool(self, workspace, credentials_env):
+        """The disk bound is not a setting: the channel takes it from the module.
+
+        The grace is the operator's window; how long a superseded generation may
+        sit on the disk before it is waste is not. A grace larger than the
+        constant raises the bound, so the two rules never contradict each other.
+        """
+        store = make_store(make_remote(), CHANNEL, credentials_env)
+        try:
+            def upload(**kwargs):
+                return ChannelUpload(
+                    LocalGeneration(workspace.workspace), store, remote_name='cos-main', **kwargs)
+
+            assert upload().max_retention == MAX_RETENTION
+            assert upload(grace=MAX_RETENTION * 2).max_retention == MAX_RETENTION * 2
+            assert upload(grace=3600, max_retention=60).max_retention == 3600
+            assert upload(grace=3600, max_retention=7200).max_retention == 7200
         finally:
             await store.aclose()
 
@@ -1047,13 +1075,14 @@ class TestRetire:
         assert f'{PREFIX}packrepo/bbbbbbbb/full.pack' in credentials_env.objects
 
     @pytest.mark.trio
-    async def test_the_switch_retires_the_generation_it_replaced(self, workspace, credentials_env):
-        """A run that switches the version still retires, in the same run.
+    async def test_the_switch_leaves_the_generation_it_replaced_alone(
+            self, workspace, credentials_env):
+        """A run that switches the version retires nothing: its grace starts now.
 
-        The plan is built from the listing taken before the writes, so the
-        barrier it names is the one being replaced: the generation is retired
-        once IT has been live for the grace. Waiting for a later run would never
-        retire anything on a channel whose content changes every run.
+        The keys of the replaced generation stopped being current when this run
+        wrote the barrier, so a client that read the previous barrier still has
+        the grace to finish its update. The next run, which finds the barrier in
+        place for the grace, retires them.
         """
         store = make_store(make_remote(), CHANNEL, credentials_env)
         try:
@@ -1062,6 +1091,13 @@ class TestRetire:
             workspace.write('bbbbbbbb', {
                 'packrepo/bbbbbbbb/full.pack': b'full pack of bbbbbbbb',
             })
+            switched = await make_upload(workspace, store).run()
+            assert switched.deleted == 0
+            assert f'{PREFIX}packrepo/aaaaaaaa/full.pack' in credentials_env.objects
+
+            # the barrier this run wrote has been in place for the grace: the
+            # next run retires what it replaced
+            age_objects(credentials_env, 3600 + 1)
             result = await make_upload(workspace, store).run()
         finally:
             await store.aclose()
@@ -1069,9 +1105,57 @@ class TestRetire:
         assert result.deleted == 3
         assert f'{PREFIX}packrepo/aaaaaaaa/full.pack' not in credentials_env.objects
         assert f'{PREFIX}packrepo/aaaaaaaa/update_00000001.pack' not in credentials_env.objects
+        assert f'{PREFIX}packrepo/bbbbbbbb/full.pack' in credentials_env.objects
         # the wheel is not served by the new generation either: it goes too
         assert f'{PREFIX}wheel/msgspec/0.22.0/msgspec-0.22.0-py3-none-any.whl' \
             not in credentials_env.objects
+
+    @pytest.mark.trio
+    async def test_a_young_barrier_retires_nothing(self, workspace, credentials_env):
+        """A generation that stopped being current less than the grace ago stays.
+
+        The run writes nothing here (the version did not change), so the barrier
+        of the listing is the current one: its age is how long the keys the
+        manifest does not list have been out of service.
+        """
+        store = make_store(make_remote(), CHANNEL, credentials_env)
+        try:
+            await make_upload(workspace, store).run()
+            workspace.write('bbbbbbbb', {
+                'packrepo/bbbbbbbb/full.pack': b'full pack of bbbbbbbb',
+            })
+            await make_upload(workspace, store).run()
+            result = await make_upload(workspace, store).run()
+        finally:
+            await store.aclose()
+        assert result.deleted == 0
+        assert f'{PREFIX}packrepo/aaaaaaaa/full.pack' in credentials_env.objects
+
+    @pytest.mark.trio
+    async def test_a_key_past_the_retention_is_retired_within_the_grace(
+            self, workspace, credentials_env):
+        """The retention deletes an old key while the replacement keeps its grace.
+
+        A channel whose content changes on every run rewrites its barrier on
+        every run, so the grace alone would never let a generation go: the
+        retention is the upper bound of that wait.
+        """
+        store = make_store(make_remote(), CHANNEL, credentials_env)
+        try:
+            await make_upload(workspace, store).run()
+            # only the key of the replaced generation is old: the barrier this
+            # run writes is new, so the grace still protects the other keys
+            age_objects(
+                credentials_env, 7200 + 1, keys=[f'{PREFIX}packrepo/aaaaaaaa/full.pack'])
+            workspace.write('bbbbbbbb', {
+                'packrepo/bbbbbbbb/full.pack': b'full pack of bbbbbbbb',
+            })
+            result = await make_upload(workspace, store, max_retention=7200).run()
+        finally:
+            await store.aclose()
+        assert result.deleted == 1
+        assert f'{PREFIX}packrepo/aaaaaaaa/full.pack' not in credentials_env.objects
+        assert f'{PREFIX}packrepo/aaaaaaaa/update_00000001.pack' in credentials_env.objects
 
     @pytest.mark.trio
     async def test_a_failed_delete_is_not_counted_as_freed(self, workspace, credentials_env):

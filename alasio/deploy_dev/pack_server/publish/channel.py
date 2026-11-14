@@ -49,7 +49,7 @@ from alasio.deploy_dev.pack_server.publish.common import (
     BARRIER_KEY, MANIFEST_KEY, MAX_CONCURRENCY, MD5_HEX, IncompleteStore, PublishError, SkipChannel, cache_control,
     content_type, find_skip, first_failure, require_capabilities
 )
-from alasio.deploy_dev.pack_server.publish.retire import DeletePlan, SkipRetire, build_delete_plan
+from alasio.deploy_dev.pack_server.publish.retire import MAX_RETENTION, DeletePlan, SkipRetire, build_delete_plan
 from alasio.deploy_dev.store import BucketNotFound, ObjectNotFound, StoreError
 from alasio.ext.cache import cached_property_async_trio_lock
 from alasio.logger import logger
@@ -217,17 +217,20 @@ class ChannelUpload:
         result = await upload.run()
     """
 
-    def __init__(self, local, store, remote_name='', grace=3600, concurrency=MAX_CONCURRENCY):
+    def __init__(self, local, store, remote_name='', grace=3600, concurrency=MAX_CONCURRENCY,
+                 max_retention=MAX_RETENTION):
         """
         Args:
             local (LocalGeneration): The generation to publish, shared by every
                 mirror of the channel
             store (ObjectStore): The store bound to the workspace
             remote_name (str): Name of the remote, for the log and the result
-            grace (int): Seconds the barrier of this remote must have been in
-                place before a key of an older generation is removed. Defaults
-                to 3600
+            grace (int): Seconds a generation must have stopped being the
+                current one before its keys are removed. Defaults to 3600
             concurrency (int): Requests in flight at once, 1 to MAX_CONCURRENCY
+            max_retention (int): Upper bound of the wait, raised to the grace
+                when it is smaller. Defaults to MAX_RETENTION: the disk is
+                bounded by the tool, not by the config
         """
         self.local = local
         self.store = store
@@ -240,6 +243,10 @@ class ChannelUpload:
             # as well; this is the same refusal for a caller that builds the
             # channel by hand
             raise ValueError(f'grace must be > 0 seconds, got {self.grace}')
+        # The retention is the upper bound of the wait, so a value below the
+        # grace would undercut the floor: it is raised to it instead of being
+        # refused, the two rules cannot contradict each other
+        self.max_retention = max(int(max_retention), self.grace)
         # the cap is a property of the tool, not of the config: more requests in
         # flight than this only move the queue into the connection pool
         self.concurrency = max(1, min(int(concurrency), MAX_CONCURRENCY))
@@ -677,7 +684,7 @@ class ChannelUpload:
             write_contract = contract_outcome == COMPARE_UPLOAD
 
             content = [relative for relative in manifest.files if relative != BARRIER_KEY]
-            retire = self._retire_plan(manifest, listing)
+            retire = self._retire_plan(manifest, listing, write_barrier)
             # the report is a progress bar: the entry of a line is its position
             # in the report, taken when the line is about to be written. A
             # position fixed by the queue would print out of order, because the
@@ -732,21 +739,24 @@ class ChannelUpload:
                 deleted=len(deleted_keys), deleted_size=deleted_size,
             )
 
-    def _retire_plan(self, manifest, listing):
+    def _retire_plan(self, manifest, listing, write_barrier):
         """
         The keys of the mirror the generation being published no longer serves.
 
         The plan is built from the listing taken before the writes, so a key
-        written by this run is never a candidate, and the age of the generation
-        is the age of the barrier in that listing: the barrier the run is
-        replacing. A generation is therefore retired when IT has been live for
-        the grace, whether or not this run switches the version:
+        written by this run is never a candidate. Whether those keys may go now
+        depends on when they stopped being current:
 
-        - the run switches: the predecessor was live for the grace, so its keys
-          go now instead of waiting for a run that may never come (a channel
-          whose content changes every run would otherwise never retire);
-        - the run does not switch: the barrier of the listing is the live one,
-          and the same rule applies.
+        - this run writes the barrier: the replaced generation stops being
+          current now, so its keys stay for the grace -- a client may have read
+          the old barrier a moment ago;
+        - this run writes nothing: the barrier of the listing is the current
+          one, so the keys stopped being current when it was written, and the
+          grace has run since then.
+
+        A key older than the retention is retired in either case: a channel
+        whose content changes on every run would otherwise never retire
+        anything.
 
         A first publication has no barrier in the listing and nothing to
         retire; a listing that lost the barrier is refused by the same rule.
@@ -754,19 +764,26 @@ class ChannelUpload:
         Args:
             manifest (Manifest): The generation that was published
             listing (ObjectListing): The mirror as it was before the writes
+            write_barrier (bool): Whether this run writes the barrier
 
         Returns:
-            DeletePlan: The keys to delete, empty when nothing is old enough
+            DeletePlan: The keys to delete, empty when nothing may go yet
         """
         try:
-            return build_delete_plan(
-                manifest.files, listing, self.grace, listing.server_date,
-                self.store.CAPABILITIES.dirs)
+            plan = build_delete_plan(
+                manifest.files, listing, self.grace, listing.server_date, write_barrier,
+                max_retention=self.max_retention,
+                capabilities_dirs=self.store.CAPABILITIES.dirs)
         except SkipRetire as e:
             # a mirror without the barrier of its manifest is not one this run
             # may delete from, and it is not a failure of the publication
             logger.debug(f'{self._where()}: no retire, {e}')
             return DeletePlan()
+        if plan.within_grace and not plan.keys:
+            logger.debug(
+                f'{self._where()}: no retire, the replaced generation has served less '
+                f'than the grace of {self.grace}s')
+        return plan
 
     async def _retire(self, retire, listing, first_number, dry_run=False):
         """
