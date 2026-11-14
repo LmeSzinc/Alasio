@@ -654,7 +654,7 @@ class PackDecodeBase:
             )
         try:
             if info.algo == 1:
-                return lzma_decompress(data)
+                return lzma_decompress(data, length=info.size)
             if info.algo == 2:
                 return zstd_decompress(data, source)
         except Exception as e:

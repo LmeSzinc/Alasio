@@ -1,6 +1,12 @@
 import pytest
 
-from alasio.ext.compress.algo_lzma import _lzma_dictsize, lzma_compress, lzma_decompress
+from alasio.ext.compress.algo_lzma import (
+    MAX_DICT_SIZE, _lzma_dictsize, lzma2_uncompressed_size, lzma_compress, lzma_decompress
+)
+
+pytestmark = [
+    pytest.mark.parallel,
+]
 
 
 class TestLzmaDictsize:
@@ -190,3 +196,238 @@ class TestLzmaMemoryview:
         compressed = lzma_compress(view)
         assert lzma_decompress(memoryview(compressed)) == bytes(view)
         assert lzma_decompress(compressed) == b"Hello Alasio LZMA! " * 100
+
+
+def _pseudo_random(size, seed=b'Alasio'):
+    """
+    Deterministic pseudo random bytes, a sha256 chain.
+
+    Args:
+        size (int): Number of bytes
+        seed (bytes): Seed of the chain
+
+    Returns:
+        bytes: The bytes
+    """
+    import hashlib
+
+    out = bytearray()
+    digest = hashlib.sha256(seed).digest()
+    while len(out) < size:
+        out += digest
+        digest = hashlib.sha256(digest).digest()
+    return bytes(out[:size])
+
+
+@pytest.fixture(scope='module')
+def large_stream():
+    """
+    A content and its stream whose matches reach past the default dictionary.
+
+    A raw LZMA2 decoder is given a dictionary size, and the default of 8MB
+    fails this stream: the copy of the head at the end matches at a distance
+    above 8MB, which only the 16MB dictionary of the stream holds.
+
+    Returns:
+        tuple[bytes, bytes]: (content, compressed stream)
+    """
+    data = _pseudo_random(8 * 1024 * 1024 + 1024)
+    # the repeat of the head at the end, the match is further than 8MB
+    data += data[:2048]
+    return data, lzma_compress(data)
+
+
+def _chunk_count(data):
+    """
+    Number of chunks of a raw LZMA2 stream, a helper of the tests.
+
+    Args:
+        data (bytes): The stream
+
+    Returns:
+        int: The chunks, the end marker excluded
+    """
+    count = 0
+    offset = 0
+    end = len(data)
+    while offset < end:
+        control = data[offset]
+        if control == 0x00:
+            return count
+        if control >= 0x80:
+            packed = ((data[offset + 3] << 8) | data[offset + 4]) + 1
+            offset += (6 if control >= 0xC0 else 5) + packed
+        else:
+            packed = ((data[offset + 1] << 8) | data[offset + 2]) + 1
+            offset += 3 + packed
+        count += 1
+    raise AssertionError('no end marker')
+
+
+class TestLzma2UncompressedSize:
+    """The size of a stream read from its chunk headers."""
+
+    @pytest.mark.parametrize('data', [
+        pytest.param(b'', id='empty'),
+        pytest.param(b'a', id='one-byte'),
+        pytest.param(b'abc' * 100, id='one-lzma-chunk'),
+        pytest.param(b'\x00' * (5 * 1024 * 1024), id='large-compressible'),
+        pytest.param(b'some repeated line of text\n' * 120000, id='multi-chunk'),
+        pytest.param(_pseudo_random(300000), id='incompressible'),
+    ])
+    def test_reads_the_length(self, data):
+        """The walk reports the length of the content, without a decode."""
+        assert lzma2_uncompressed_size(lzma_compress(data)) == len(data)
+
+    def test_reads_a_memoryview(self):
+        """A memoryview of the stream, the shape of a pack data section."""
+        data = b'abc' * 100
+        compressed = lzma_compress(data)
+        assert lzma2_uncompressed_size(memoryview(compressed)) == len(data)
+
+    def test_uncompressed_chunk(self):
+        """Incompressible content is stored as it is, its header names the size."""
+        data = _pseudo_random(5000)
+        compressed = lzma_compress(data)
+        assert compressed[0] <= 0x02
+        assert lzma2_uncompressed_size(compressed) == len(data)
+
+    def test_truncated_header(self):
+        """A chunk header the stream ends in the middle of is refused."""
+        with pytest.raises(ValueError, match='Truncated LZMA2 chunk header'):
+            lzma2_uncompressed_size(b'\xe0\x01')
+
+    def test_invalid_control(self):
+        """A control byte of no chunk kind is refused."""
+        with pytest.raises(ValueError, match='Invalid LZMA2 control byte'):
+            lzma2_uncompressed_size(b'\x03\x00\x00')
+
+    def test_invalid_control_in_a_long_stream(self):
+        """The control byte is refused even when the stream has bytes behind it."""
+        with pytest.raises(ValueError, match='Invalid LZMA2 control byte'):
+            lzma2_uncompressed_size(b'\x40' + b'\x00' * 16)
+
+    def test_chunk_out_of_range(self):
+        """A chunk that names more bytes than the stream holds is refused."""
+        with pytest.raises(ValueError, match='out of range'):
+            lzma2_uncompressed_size(b'\x01\x00\x63abc')
+
+    def test_no_end_marker(self):
+        """A stream without the end marker is refused."""
+        # one chunk of three bytes, and no 0x00 behind it
+        with pytest.raises(ValueError, match='no end marker'):
+            lzma2_uncompressed_size(b'\x01\x00\x02abc')
+
+    def test_truncated_properties(self):
+        """An LZMA chunk whose sizes are past the end is refused."""
+        with pytest.raises(ValueError, match='Truncated LZMA2 chunk header'):
+            lzma2_uncompressed_size(b'\x80\x00')
+
+    def test_a_multi_chunk_stream(self):
+        """Every chunk of a stream of many chunks is walked, not the first only."""
+        data = b'some repeated line of text\n' * 120000
+        compressed = lzma_compress(data)
+        assert _chunk_count(compressed) > 1
+        assert lzma2_uncompressed_size(compressed) == len(data)
+
+    def test_an_uncompressed_chunk_among_lzma_chunks(self):
+        """An uncompressed chunk is skipped by its own size field."""
+        # an LZMA chunk of one byte (properties present, so 5 header bytes
+        # behind the control), then an uncompressed chunk of three, then the end
+        compressed = b'\xe0\x00\x00\x00\x00\x5dX\x02\x00\x02abc\x00'
+        assert lzma2_uncompressed_size(compressed) == 1 + 3
+
+
+class TestLzmaLargeContent:
+    """A content whose dictionary is larger than the default of the decoder."""
+
+    def test_the_default_dictionary_is_too_small(self, large_stream):
+        """
+        The default 8MB dictionary of the raw decoder fails such a stream.
+
+        The precondition of the class: the stream is coded with a 16MB
+        dictionary, and the raw stream itself does not carry it.
+        """
+        import lzma
+
+        data, compressed = large_stream
+        with pytest.raises(lzma.LZMAError):
+            lzma.decompress(
+                compressed, format=lzma.FORMAT_RAW, filters=[{'id': lzma.FILTER_LZMA2}])
+
+    def test_roundtrip(self, large_stream):
+        """lzma_decompress decodes a stream whose matches reach past 8MB."""
+        data, compressed = large_stream
+        assert lzma_decompress(compressed) == data
+
+    def test_roundtrip_with_a_known_length(self, large_stream):
+        """The length of the content, the input of a pack record, decodes too."""
+        data, compressed = large_stream
+        assert lzma_decompress(compressed, length=len(data)) == data
+
+
+class TestLzmaDictionary:
+    """The dictionary of a decode is the one of the encoder."""
+
+    def _spy(self, monkeypatch):
+        """
+        Record the dictionary size of every decoder the decode builds.
+
+        Returns:
+            list[int]: The sizes, in the order they were built
+        """
+        import lzma as lzma_module
+
+        import alasio.ext.compress.algo_lzma as algo_lzma
+
+        sizes = []
+        original = lzma_module.decompress
+
+        def spy(data, format=None, filters=None):
+            sizes.append(filters[0]['dict_size'])
+            return original(data, format=format, filters=filters)
+
+        monkeypatch.setattr(algo_lzma.lzma, 'decompress', spy)
+        return sizes
+
+    def test_the_dictionary_is_derived_from_the_length(self, monkeypatch):
+        """A small content is decoded once, with the dictionary of its length."""
+        data = b'Hello Alasio! ' * 100
+        sizes = self._spy(monkeypatch)
+        assert lzma_decompress(lzma_compress(data)) == data
+        assert sizes == [_lzma_dictsize(len(data))]
+
+    def test_a_big_content_gets_the_dictionary_it_needs(self, monkeypatch, large_stream):
+        """The dictionary follows the content, one decode and no retry."""
+        data, compressed = large_stream
+        sizes = self._spy(monkeypatch)
+        assert lzma_decompress(compressed) == data
+        assert sizes == [_lzma_dictsize(len(data))]
+        # the dictionary of the stream, not the largest one of the decoder
+        assert sizes[0] < MAX_DICT_SIZE
+
+    def test_a_known_length_skips_the_walk(self, monkeypatch):
+        """A caller that knows the length does not read the stream for it."""
+        import alasio.ext.compress.algo_lzma as algo_lzma
+
+        data = b'Hello Alasio! ' * 100
+        compressed = lzma_compress(data)
+
+        def fail(data):
+            raise AssertionError('the size of the stream was read')
+
+        monkeypatch.setattr(algo_lzma, 'lzma2_uncompressed_size', fail)
+        assert lzma_decompress(compressed, length=len(data)) == data
+
+    def test_a_wrong_length_falls_back(self, monkeypatch, large_stream):
+        """A length the content does not have falls back to the largest dictionary."""
+        data, compressed = large_stream
+        declared = len(data) // 4096
+        sizes = self._spy(monkeypatch)
+        assert lzma_decompress(compressed, length=declared) == data
+        assert sizes == [_lzma_dictsize(declared), MAX_DICT_SIZE]
+
+    def test_a_broken_stream_raises(self):
+        """Data that is not a stream is refused, never decoded into junk."""
+        with pytest.raises(ValueError):
+            lzma_decompress(b'\xff' * 64)
