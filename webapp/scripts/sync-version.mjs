@@ -1,35 +1,33 @@
 #!/usr/bin/env node
-// Keep this package version in sync with the repository pyproject.toml.
+// Keep this package version in sync with __version__ of alasio/__init__.py.
 // Run with --check to verify without writing (used by the `check` script).
+//
+// The package source is the single owner of the version: pyproject.toml reads
+// it with [tool.setuptools.dynamic] version = {attr = "alasio.__version__"},
+// and so does the wheel builder, which parses the file from the git commit.
 import { readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repoRoot = resolve(projectRoot, "..");
-const pyproject = join(repoRoot, "pyproject.toml");
+const versionFile = join(repoRoot, "alasio", "__init__.py");
 const manifestFile = join(projectRoot, "package.json");
 
 /**
- * Read [project].version from pyproject.toml without a TOML dependency.
+ * Read __version__ of the package source, without importing the package.
  *
- * The project table is small and the version is a plain string, so the
- * table is isolated first and the version key is matched inside it.
+ * Only a plain string assignment is accepted: that is what the wheel builder
+ * reads statically from the commit, so a computed value would leave the wheel
+ * and this manifest disagreeing.
  *
- * @returns {string} The project version
+ * @returns {string} The package version
  */
-function readProjectVersion() {
-  const text = readFileSync(pyproject, "utf-8").replace(/^\uFEFF/, "");
-  const header = /^\[project\]\s*$/m.exec(text);
-  if (!header) {
-    throw new Error(`${relative(repoRoot, pyproject)}: [project] table not found`);
-  }
-  const body = text.slice(header.index + header[0].length);
-  const nextHeader = /^\[/m.exec(body);
-  const table = nextHeader ? body.slice(0, nextHeader.index) : body;
-  const match = /^\s*version\s*=\s*["']([^"']+)["']/m.exec(table);
+function readPackageVersion() {
+  const source = readFileSync(versionFile, "utf-8");
+  const match = /^__version__[ \t]*(?::[^=\n]+)?=[ \t]*["']([^"']+)["']/m.exec(source);
   if (!match) {
-    throw new Error(`${relative(repoRoot, pyproject)}: [project].version not found`);
+    throw new Error(`${relative(repoRoot, versionFile)}: no plain string __version__ assignment`);
   }
   return match[1];
 }
@@ -54,9 +52,9 @@ function writeJsonAtomic(file, data) {
 const check = process.argv.includes("--check");
 let version;
 try {
-  version = readProjectVersion();
+  version = readPackageVersion();
 } catch (err) {
-  console.error(err.message);
+  console.error(err instanceof Error ? err.message : String(err));
   process.exit(1);
 }
 
@@ -65,7 +63,7 @@ const name = relative(repoRoot, manifestFile);
 if (manifest.version === version) {
   console.log(`${name}: ${version}`);
 } else if (check) {
-  console.error(`${name}: version ${manifest.version} does not match pyproject.toml ${version}`);
+  console.error(`${name}: version ${manifest.version} does not match alasio/__init__.py ${version}`);
   console.error("Run `node scripts/sync-version.mjs` to update the package version.");
   process.exit(1);
 } else {
