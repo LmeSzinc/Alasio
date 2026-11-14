@@ -10,5 +10,5 @@ Keep the assignments plain literals. The builds read this file by parsing it,
 never by importing the package, and a computed value can not be read
 statically: the wheel builder reads the git commit instead of running it.
 """
-__version__ = "2.0.2"
-__version_tuple__ = (2, 0, 2)
+__version__ = "2.0.3"
+__version_tuple__ = (2, 0, 3)
