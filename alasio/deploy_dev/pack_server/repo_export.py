@@ -7,8 +7,10 @@ download on the first start. The run writes the two trees into the workspace:
 
     {workspace}/.repo    the working tree of the latest version, with
                          config/deploy.yaml (the copy of the template of the
-                         version) and the pack area: index.pack, the history of
-                         the version and the dependency snapshot
+                         version), resources/app.asar (the archive of the
+                         client the library channel carries) and the pack area:
+                         index.pack, the history of the version and the
+                         dependency snapshot
     {workspace}/.dep     the install tree of every dependency pack channel,
                          the content of a site-packages folder, with the ledger
                          of every distribution (.pack/{dist}/index.pack)
@@ -52,6 +54,8 @@ Usage:
     export.run()
 """
 
+from hashlib import sha256
+
 import trio
 
 from alasio.deploy.pack.decode_base import PackDecodeBase
@@ -62,7 +66,7 @@ from alasio.deploy.pack.server_file import LatestInfo
 from alasio.deploy_dev.pack_server.pack_check import PackChecksum
 from alasio.deploy_dev.pack_server.repo_dep import FULL_PACK_FILE
 from alasio.ext.cache import InstanceCacheOperation, cached_property
-from alasio.ext.path.atomic import atomic_failure_cleanup, atomic_read_bytes, atomic_write
+from alasio.ext.path.atomic import CHUNK_SIZE, atomic_copy, atomic_failure_cleanup, atomic_open, atomic_read_bytes
 from alasio.logger import logger
 
 # folder of the working tree of the release, the subfolder of the workspace. The
@@ -86,6 +90,42 @@ DEPLOY_TEMPLATE = 'config/deploy.template.yaml'
 # PythonExecutable, and the backend creates the file on the first start
 # otherwise
 DEPLOY_CONFIG = 'config/deploy.yaml'
+
+# the electron archive of the library, relative to the site-packages tree of the
+# export (.dep): the layout is the one the wheel build writes
+# (alasio/deploy_dev/wheel/alasio_wheel.py) and the shell update stages into a
+# packaged client (alasio/backend/app/restart/shell_update.py)
+BUNDLED_APP_ASAR = 'alasio/deploy_data/webapp/app.asar'
+
+# the electron archive of the release, relative to the root of the working tree:
+# the client loads the app from it, and it sits next to the executable of a
+# release. The export copies the archive of the library here, see
+# ReleaseExport._run()
+APP_ASAR = 'resources/app.asar'
+
+
+def _file_sha256(file, chunk_size=CHUNK_SIZE):
+    """
+    sha256 of a file, read in chunks so a large file costs no large buffer.
+
+    Args:
+        file (str): File to hash
+        chunk_size (int): Bytes read per chunk. Defaults to CHUNK_SIZE
+
+    Returns:
+        bytes: The 32 bytes digest
+
+    Raises:
+        FileNotFoundError: If the file does not exist
+        OSError: If the file cannot be read
+    """
+    digest = sha256()
+    with atomic_open(file, 'rb') as f:
+        while True:
+            chunk = f.read(chunk_size)
+            if not chunk:
+                return digest.digest()
+            digest.update(chunk)
 
 
 class ReleaseExportError(RuntimeError):
@@ -321,25 +361,49 @@ class ReleaseExport:
 
     async def _run(self, info):
         """
-        Unpack the two trees, one job after another.
+        Unpack the two trees and copy the files a release needs besides them.
+
+        Neither file is a record of the version, so both are copied after the
+        trees are unpacked: the deploy config from the template of the version,
+        and the client archive from the library the .dep tree now carries.
 
         Args:
             info (LatestInfo): Version and index pack checksum of the run
         """
         await self._export_repo(info)
         await self._export_dep()
+        # The template is a file of the version, not a file generated from a
+        # model of this library: the mod owns its content and may declare keys
+        # this library does not know yet. The release ships the copy so a first
+        # start finds a deploy config, and the template stays next to it, the
+        # file the webapp locates the project root by and offers the first time
+        # setup page from
+        self._lazy_copy_file(
+            self.repo_root.joinpath(DEPLOY_TEMPLATE), self.repo_root.joinpath(DEPLOY_CONFIG),
+            missing=f'The version has no {DEPLOY_TEMPLATE}, a release needs it to '
+                    f'locate the project and to write {DEPLOY_CONFIG}',
+            what='deploy config')
+        # The archive is the client the mod runs on: a release folder loads it
+        # from resources/ next to its executable, and a tree copied over such a
+        # folder replaces the archive with this one. The source is the copy the
+        # .dep tree carries, the same file the shell update stages into a
+        # packaged client, never a file of the machine of the run
+        self._lazy_copy_file(
+            self.dep_root.joinpath(BUNDLED_APP_ASAR), self.repo_root.joinpath(APP_ASAR),
+            missing='The dependency packs of the run carry no app.asar: the library '
+                    'is not a pack dep of this mod, or its wheel was built without one',
+            what='app asar')
 
     async def _export_repo(self, info):
         """
-        Unpack the working tree of the version, touch it and write its deploy
-        config.
+        Unpack the working tree of the version and touch every file of it.
 
         Args:
             info (LatestInfo): Version and index pack checksum of the run
 
         Raises:
-            ReleaseExportError: If the tree cannot be exported, the version has
-                no deploy template, or the ledger is not the one of the version
+            ReleaseExportError: If the tree cannot be exported or its ledger is
+                not the one of the version
         """
         decoder = self._repo_decoder()
         logger.info(f'Unpacking the tree of {info.version} to "{self.repo_root}"')
@@ -349,8 +413,6 @@ class ReleaseExport:
                 f'Failed to export the tree to "{self.repo_root}", '
                 f'the workspace is kept for the next run')
         self._touch_target(self.repo_root, '', decoder)
-        self._write_deploy_config()
-        self.base.touch(self.repo_root.joinpath(DEPLOY_CONFIG))
         self._check_ledger(self.repo_root, '', info.version, bytes.fromhex(info.checksum))
 
     async def _export_dep(self):
@@ -418,41 +480,43 @@ class ReleaseExport:
             return PackFullView(pack)
         return PackDecodeBase(atomic_read_bytes(self.pack.full_pack_file))
 
-    def _write_deploy_config(self):
+    def _lazy_copy_file(self, source, file, missing, what):
         """
-        Copy config/deploy.template.yaml of the version to config/deploy.yaml.
+        Copy a file to a path of the exported tree, unless it is already there.
 
-        The template is a file of the version, not a file generated from a model
-        of this library: it is the config of the mod, the mod owns its content
-        and may declare keys this library does not know yet. The release ships
-        the copy so a first start finds a deploy config, and the template stays
-        next to it, the file the webapp locates the project root by and offers
-        the first time setup page from.
+        The copy is skipped when the target holds the content of the source, so
+        a second export of the same version writes nothing: both files are
+        hashed (sha256, read in chunks) and the copy runs only when the digests
+        differ.
 
-        The copy is written only when its content differs, so a second export of
-        the version touches no file.
+        The target is touched either way: it is a file of the run, the cleanup
+        of the workspace keeps it and the local manifest records it, whether
+        this run wrote it or found it current.
+
+        Args:
+            source (str): File to copy
+            file (str): Target path of the tree
+            missing (str): Head of the error raised when the source is not there
+            what (str): Name of the file in the log lines, e.g. 'app asar'
 
         Raises:
-            ReleaseExportError: If the version has no template
-            OSError: If the template cannot be read or the config written
+            ReleaseExportError: If the source does not exist
+            OSError: If a file cannot be read, copied or written
         """
-        template = self.repo_root.joinpath(DEPLOY_TEMPLATE)
         try:
-            content = atomic_read_bytes(template)
+            digest = _file_sha256(source)
         except FileNotFoundError:
-            raise ReleaseExportError(
-                f'The version has no {DEPLOY_TEMPLATE}, a release needs it to '
-                f'locate the project and to write {DEPLOY_CONFIG}: "{template}"') from None
-        file = self.repo_root.joinpath(DEPLOY_CONFIG)
+            raise ReleaseExportError(f'{missing}: "{source}"') from None
         try:
-            current = atomic_read_bytes(file)
+            current = _file_sha256(file)
         except FileNotFoundError:
             current = None
-        if current == content:
-            logger.info(f'Deploy config exists, skipped: "{file}"')
-            return
-        logger.info(f'Copy deploy config of the version: "{template}" -> "{file}"')
-        atomic_write(file, content)
+        if current == digest:
+            logger.info(f'{what.capitalize()} exists, skipped: "{file}"')
+        else:
+            logger.info(f'Copy {what}: "{source}" -> "{file}"')
+            atomic_copy(source, file)
+        self.base.touch(file)
 
     def _check_ledger(self, root, name, version, checksum):
         """

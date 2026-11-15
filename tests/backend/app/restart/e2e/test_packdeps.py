@@ -41,7 +41,9 @@ from alasio.testing.filesystem import fs  # noqa: F401
 from tests.deploy.simple_pip.conftest import build_wheel, list_folders, site_packages
 from tests.deploy_dev.pack_server.conftest import join_path
 from tests.deploy_dev.pack_server.test_fetch_wheel import MockMirror
-from tests.deploy_dev.pack_server.test_repo import DEPLOY_TEMPLATE, DEPLOY_TEMPLATE_TEXT
+from tests.deploy_dev.pack_server.test_repo import (
+    DEPLOY_TEMPLATE, DEPLOY_TEMPLATE_TEXT, LIBRARY_REQUIREMENT, register_library
+)
 
 from .conftest import GENERATED_HOST, assert_logs, at
 
@@ -69,22 +71,31 @@ def requirement(pin):
 
 # The trees of the scenario: the requirements file is part of the tree, so an
 # update of the tree brings the pins of its dependencies. t1 pins demo 1.0,
-# t2 pins demo 2.0; stable stays at 1.0 in both versions.
+# t2 pins demo 2.0; stable stays at 1.0 in both versions. The library is pinned
+# by both versions and declared a pack dep: the export of a release ships the
+# archive of the client from its channel.
 TREE = {
     't1': {
         'module/main.py': b'print("t1")\n',
-        'requirements.txt': (requirement('demo==1.0') + requirement('stable==1.0')).encode(),
+        'requirements.txt': (
+            requirement('demo==1.0') + requirement('stable==1.0')
+            + LIBRARY_REQUIREMENT).encode(),
         DEPLOY_TEMPLATE: DEPLOY_TEMPLATE_TEXT.encode(),
     },
     't2': {
         'module/main.py': b'print("t2")\n',
-        'requirements.txt': (requirement('demo==2.0') + requirement('stable==1.0')).encode(),
+        'requirements.txt': (
+            requirement('demo==2.0') + requirement('stable==1.0')
+            + LIBRARY_REQUIREMENT).encode(),
         DEPLOY_TEMPLATE: DEPLOY_TEMPLATE_TEXT.encode(),
     },
 }
 # The mod entry of the tree: the pack server builds the channel of every name
 # the entry declares pack_deps of, from the pins of the requirements file above
-ENTRY = 'Mod:\n  name: DepsMod\nUpdate:\n  pack_deps:\n  - demo\n  - stable\n'
+ENTRY = (
+    'Mod:\n  name: DepsMod\nUpdate:\n  pack_deps:\n  - demo\n  - stable\n'
+    '  - alasio\n'
+)
 
 # The config of the pack server run: the window is unlimited, the dependency
 # file and the pack names are declared by the mod entry of the repo
@@ -156,6 +167,8 @@ def register_wheels(mirror):
             name=name, version=version,
         )
         mirror.register(name, version, content=file_read_bytes(path))
+    # the library is a pack dep of the scenario, the export needs its archive
+    register_library(mirror)
 
 
 def generate(repo, mirror):

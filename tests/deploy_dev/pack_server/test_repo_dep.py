@@ -37,8 +37,8 @@ from alasio.testing.filesystem import fs  # noqa: F401
 from tests.deploy.simple_pip.conftest import build_wheel
 from tests.deploy_dev.pack_server.conftest import join_path
 from tests.deploy_dev.pack_server.test_repo import (
-    CORE_V1, CORE_V2, PROXY, make_config, make_proxy_config, make_repo, pack_file, read_tree, register_wheel,
-    register_wheels, requirement
+    CORE_V1, CORE_V2, PROXY, make_config, make_proxy_config, make_repo as make_flow_repo, pack_file, read_tree,
+    register_wheel, register_wheels, requirement
 )
 
 pytestmark = [
@@ -53,6 +53,41 @@ CACHE_ROOT = f'{WORKSPACE}/.wheel_cache'
 
 # folder of the channels of the dependencies
 CHANNEL_ROOT = f'{WORKSPACE}/packdep'
+
+# the dependency file of the repo of the step: the window of the pack server
+# tests without the library, which only the export of a release needs
+REQUIREMENTS = {
+    'c1': requirement('httpx==0.27.7'),
+    'c2': requirement('httpx==0.27.8'),
+    'c3': requirement('httpx==0.28.1'),
+}
+
+# the entry of the repo of the step, it declares the dependency the tests pack
+ENTRY = "Mod:\n  name: m\nUpdate:\n  pack_deps:\n  - httpx\n"
+
+
+def make_repo(requirements=None, branch='master', entry=ENTRY):
+    """
+    Build the repo of the step, its entry declares the dependency under test.
+
+    A repo of the pack server flow pins and declares the library too, so that
+    the export of its release ships the archive of the client. This module runs
+    the dependency step on its own and tests the packs of one dependency, so
+    its repo declares that dependency only.
+
+    Args:
+        requirements (dict): {commit: content of the dependency file}, the
+            oldest commit first. Defaults to REQUIREMENTS
+        branch (str): Branch of the head. Defaults to 'master'
+        entry (str | dict | None): Source of the mod entry, None for a repo
+            without an entry. Defaults to ENTRY
+
+    Returns:
+        MockGitRepo: Repo, the head of the branch is the newest commit
+    """
+    return make_flow_repo(
+        REQUIREMENTS if requirements is None else requirements,
+        branch=branch, entry=entry)
 
 
 @pytest.fixture(autouse=True)

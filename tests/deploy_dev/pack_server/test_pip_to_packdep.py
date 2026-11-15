@@ -40,7 +40,9 @@ from tests.deploy.simple_pip.conftest import build_wheel
 from tests.deploy_dev.pack.conftest import MemoryLock, MockServerFile
 from tests.deploy_dev.pack_server.conftest import join_path, run_dir  # noqa: F401
 from tests.deploy_dev.pack_server.test_fetch_wheel import MockMirror
-from tests.deploy_dev.pack_server.test_repo import DEPLOY_TEMPLATE, DEPLOY_TEMPLATE_TEXT
+from tests.deploy_dev.pack_server.test_repo import (
+    DEPLOY_TEMPLATE, DEPLOY_TEMPLATE_TEXT, LIBRARY_REQUIREMENT, register_library
+)
 
 pytestmark = [
     pytest.mark.parallel,
@@ -57,7 +59,8 @@ WORKSPACE = 'pack/Author_Repo_master'
 DEP = 'demo'
 
 # t1: the dependency is a wheel of the provided index, installed by pip. t2:
-# the same dependency is a pack dep, served from its own channel
+# the same dependency is a pack dep, served from its own channel. The library is
+# a pack dep of both versions: the export of a release ships its client archive
 ENTRY = {
     't1': (
         'Mod:\n  name: DepsMod\n'
@@ -65,18 +68,20 @@ ENTRY = {
         '  provide_wheel:\n'
         f"  - '{PIN_INDEX}'\n"
     ),
-    't2': 'Mod:\n  name: DepsMod\nUpdate:\n  pack_deps:\n  - demo\n',
+    't2': 'Mod:\n  name: DepsMod\nUpdate:\n  pack_deps:\n  - demo\n  - alasio\n',
 }
 
 TREE = {
     't1': {
         'module/main.py': b'print("t1")\n',
-        'requirements.txt': f'demo==1.0\n    # from {PIN_INDEX}\n'.encode(),
+        'requirements.txt': (
+            f'demo==1.0\n    # from {PIN_INDEX}\n' + LIBRARY_REQUIREMENT).encode(),
         DEPLOY_TEMPLATE: DEPLOY_TEMPLATE_TEXT.encode(),
     },
     't2': {
         'module/main.py': b'print("t2")\n',
-        'requirements.txt': f'demo==2.0\n    # from {PIN_INDEX}\n'.encode(),
+        'requirements.txt': (
+            f'demo==2.0\n    # from {PIN_INDEX}\n' + LIBRARY_REQUIREMENT).encode(),
         DEPLOY_TEMPLATE: DEPLOY_TEMPLATE_TEXT.encode(),
     },
 }
@@ -136,6 +141,9 @@ def register_wheels(mirror):
             name=DEP, version=version,
         )
         mirror.register(DEP, version, content=file_read_bytes(path))
+    # the library is the pack dep the export of the release ships the client
+    # archive of, so the repo pins it like a real mod does
+    register_library(mirror)
 
 
 def generate(repo, mirror):

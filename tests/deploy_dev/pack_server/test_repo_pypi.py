@@ -23,7 +23,8 @@ from alasio.logger import logger
 from alasio.testing.filesystem import fs  # noqa: F401
 from tests.deploy_dev.pack_server.conftest import join_path
 from tests.deploy_dev.pack_server.test_repo import (
-    PROVIDED_URL, Repo as RepoFlow, entry_source, make_config, make_repo, register_wheels, requirement, run_commit
+    LIBRARY_REQUIREMENT, PROVIDED_URL, Repo as RepoFlow, entry_source, make_config, make_repo, register_wheels,
+    requirement, run_commit
 )
 
 pytestmark = [
@@ -55,6 +56,7 @@ REQUIREMENTS = {
     'c3': (
         requirement('httpx==0.28.1', f'{PROVIDED_URL}/')
         + requirement('msgspec==0.22.0', f'{PROVIDED_URL}/')
+        + LIBRARY_REQUIREMENT
     ),
 }
 
@@ -72,7 +74,7 @@ def make_provided_repo(requirements=None):
     """
     return make_repo(
         requirements if requirements is not None else REQUIREMENTS,
-        entry=entry_source(provide=(PROVIDED_URL,)))
+        entry=entry_source('alasio', provide=(PROVIDED_URL,)))
 
 
 def register_provided_wheels(mirror):
@@ -360,10 +362,12 @@ class TestFlow:
             'c2': requirement('httpx==0.27.8'),
             'c3': (
                 requirement('httpx==0.28.1')
-                + requirement('msgspec==0.22.0', f'{PROVIDED_URL}/')),
+                + requirement('msgspec==0.22.0', f'{PROVIDED_URL}/')
+                + LIBRARY_REQUIREMENT),
             'c4': (
                 requirement('httpx==0.28.1')
-                + requirement('msgspec==0.23.0', f'{PROVIDED_URL}/')),
+                + requirement('msgspec==0.23.0', f'{PROVIDED_URL}/')
+                + LIBRARY_REQUIREMENT),
         }
         gen = RepoFlow(make_provided_repo(requirements), make_config(), client=mirror.client)
 
@@ -399,7 +403,7 @@ class TestFlow:
         requirements = {
             'c1': requirement('httpx==0.27.7'),
             'c2': requirement('httpx==0.27.8'),
-            'c3': requirement('httpx==0.28.1', f'{PROVIDED_URL}/'),
+            'c3': requirement('httpx==0.28.1', f'{PROVIDED_URL}/') + LIBRARY_REQUIREMENT,
         }
         with logger.mock_capture_writer() as capture:
             run_commit(make_provided_repo(requirements), make_config(), mirror.client)

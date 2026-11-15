@@ -19,16 +19,17 @@ from alasio.deploy_dev.pack_server import repo_export
 from alasio.deploy_dev.pack_server.pack_check import PackChecksum
 from alasio.deploy_dev.pack_server.repo import Repo
 from alasio.deploy_dev.pack_server.repo_export import (
-    DEP_DIR, DEPLOY_CONFIG, DEPLOY_TEMPLATE, REPO_DIR, ReleaseExportError, ReleaseExportJob
+    APP_ASAR, BUNDLED_APP_ASAR, DEP_DIR, DEPLOY_CONFIG, DEPLOY_TEMPLATE, REPO_DIR, ReleaseExportError, ReleaseExportJob
 )
 from alasio.ext.path.atomic import file_read_bytes, file_write
 from alasio.git.mock.mock_repo import MockGitRepo
 from alasio.logger import logger
 from alasio.testing.filesystem import fs  # noqa: F401
-from tests.deploy_dev.pack_server.conftest import join_path
+from tests.deploy.simple_pip.conftest import build_wheel
+from tests.deploy_dev.pack_server.conftest import BUNDLED_APP_ASAR_CONTENT, join_path
 from tests.deploy_dev.pack_server.test_repo import (
-    DEP_FOLDER, DEPLOY_TEMPLATE_TEXT, WORKSPACE, make_config, make_repo, read_tree, register_wheels, repo_file,
-    run_commit
+    DEP_FOLDER, DEPLOY_TEMPLATE_TEXT, LIBRARY_REQUIREMENT, WORKSPACE, entry_source, make_config, make_repo, read_tree,
+    register_wheels, repo_file, requirement, run_commit
 )
 
 pytestmark = [
@@ -44,6 +45,13 @@ DEP_ROOT = f'{WORKSPACE}/{DEP_DIR}'
 # the dependency of the tests, and the version its pack channel publishes
 DIST = 'httpx'
 DIST_VERSION = '0.28.1'
+
+# the version of the library the tests pack, see TestAppAsar
+ALASIO_VERSION = '2.0.3'
+
+# the distribution name of the library, the pack dep whose wheel carries the
+# electron archive of the client
+LIBRARY = 'alasio'
 
 # the content of the two files of the copied record test, the version of the
 # repo that carries them
@@ -112,7 +120,9 @@ def make_duplicate_repo(content=DUPLICATE_CONTENT):
         MockGitRepo: Repo, the head of the branch is the only commit
     """
     repo = MockGitRepo()
-    repo.register_file(COMMIT_DUPLICATE, 'requirements.txt', b'httpx==0.28.1\n')
+    repo.register_file(
+        COMMIT_DUPLICATE, 'requirements.txt',
+        (requirement('httpx==0.28.1') + LIBRARY_REQUIREMENT).encode())
     repo.register_file(
         COMMIT_DUPLICATE, DEPLOY_TEMPLATE, DEPLOY_TEMPLATE_TEXT.encode('utf-8'))
     repo.register_file(COMMIT_DUPLICATE, 'module/dup_a.py', content)
@@ -173,9 +183,10 @@ class TestTree:
         run_commit(make_repo(), make_config(), mirror.client)
         expected = working_tree(tree_pack(run_dir))
         tree = read_tree(repo_root(run_dir))
-        # the two files the export writes besides the records
+        # the files the export writes besides the records
         del tree['.pack/index.pack']
         del tree[DEPLOY_CONFIG]
+        del tree[APP_ASAR]
         assert tree == expected
 
     def test_index_pack_is_the_version(self, fs, run_dir, mirror):
@@ -200,7 +211,7 @@ class TestTree:
         for path in ('.pack/history.pack', PACKDEP_PATH):
             assert file_read_bytes(tree.joinpath(path)) == bytes(full.catfile(full.fileinfo[path]))
         entries = decode_packdep(file_read_bytes(tree.joinpath(PACKDEP_PATH)))
-        assert list(entries) == [DIST]
+        assert list(entries) == ['alasio', DIST]
         assert entries[DIST].version == DIST_VERSION
 
     def test_deploy_config(self, fs, run_dir, mirror):
@@ -232,7 +243,9 @@ class TestTree:
         repo = make_repo()
         config = make_config()
         # a version that drops the template of the previous one
-        repo.register_file('c4', 'requirements.txt', b'httpx==0.28.1\n')
+        repo.register_file(
+            'c4', 'requirements.txt',
+            (requirement('httpx==0.28.1') + LIBRARY_REQUIREMENT).encode())
         repo.register_commit('c4', parents=['c3'], author_name='Author', message='')
         repo.register_branch('master', 'c4')
         repo.register_head('c4')
@@ -278,6 +291,7 @@ class TestCopiedRecord:
 
     def test_copied_record_is_unpacked(self, fs, run_dir, mirror):
         """A C (copied) record of the encoder is written to its own path."""
+        register_wheels(mirror)
         run_commit(make_duplicate_repo(), make_config(), mirror.client)
         root = repo_root(run_dir)
         assert file_read_bytes(root.joinpath('module/dup_a.py')) == DUPLICATE_CONTENT
@@ -289,6 +303,118 @@ class TestCopiedRecord:
         assert copied.source_path == 'module/dup_a.py'
 
 
+class TestAppAsar:
+    """The client archive the exported tree ships."""
+
+    def _library_wheel(self, mirror, content=BUNDLED_APP_ASAR_CONTENT, version=ALASIO_VERSION):
+        """
+        Build the wheel of the library and register it in the mirror.
+
+        The wheel carries the electron archive at the path the wheel build of
+        the library writes it, so the dependency channel of the library ships it
+        like the real one does.
+
+        Args:
+            mirror (MockMirror): Mirror to register the wheel in
+            content (bytes): Content of the archive
+            version (str): Version of the library
+
+        Returns:
+            str: The pin of the library, e.g. 'alasio==2.0.3'
+        """
+        pin = f'{LIBRARY}=={version}'
+        path = f'/w/{LIBRARY}-{version}-py3-none-any.whl'
+        build_wheel(path, {
+            f'{LIBRARY}/__init__.py': b'VERSION = "2.0.3"\n',
+            BUNDLED_APP_ASAR: content,
+        }, name=LIBRARY, version=version)
+        mirror.register(LIBRARY, version, content=file_read_bytes(path))
+        return pin
+
+    def _repo(self, pin):
+        """
+        The repo of the tests, with the library as its pack dependency.
+
+        Returns:
+            MockGitRepo: Repo
+        """
+        return make_repo(
+            {'c1': requirement(pin) + requirement('demo==1.0')},
+            entry=entry_source(LIBRARY))
+
+    def test_shipped(self, fs, run_dir, mirror):
+        """The archive of the library channel is a file of the tree, at the release path."""
+        pin = self._library_wheel(mirror)
+        gen = run_commit(self._repo(pin), make_config(), mirror.client)
+        file = repo_root(run_dir).joinpath(APP_ASAR)
+        assert file_read_bytes(file) == BUNDLED_APP_ASAR_CONTENT
+        # a private file of the run: the record names it, a mirror never gets it
+        files, private = gen.base.repo_manifest()
+        assert f'{REPO_DIR}/{APP_ASAR}' in private
+        assert f'{REPO_DIR}/{APP_ASAR}' not in files
+
+    def test_a_run_without_the_library_fails(self, fs, run_dir, mirror):
+        """A run that does not pack the library has no archive, the export fails."""
+        register_wheels(mirror)
+        repo = make_repo(
+            {'c1': requirement('httpx==0.28.1')}, entry=entry_source('httpx'))
+        gen = Repo(repo, make_config(), client=mirror.client)
+        with pytest.raises(ReleaseExportError, match='carry no app.asar'):
+            gen.run()
+        assert not repo_root(run_dir).joinpath(APP_ASAR).exists()
+        assert not repo_file(run_dir, 'latest.pack').exists()
+
+    def test_missing_archive_fails(self, fs, run_dir, mirror):
+        """A library wheel without the archive fails the run, nothing is published."""
+        # the wheel carries the library only, no archive
+        pin = f'{LIBRARY}=={ALASIO_VERSION}'
+        path = f'/w/{LIBRARY}-{ALASIO_VERSION}-py3-none-any.whl'
+        build_wheel(
+            path, {f'{LIBRARY}/__init__.py': b''},
+            name=LIBRARY, version=ALASIO_VERSION)
+        mirror.register(LIBRARY, ALASIO_VERSION, content=file_read_bytes(path))
+
+        gen = Repo(self._repo(pin), make_config(), client=mirror.client)
+        with pytest.raises(ReleaseExportError, match='carry no app.asar'):
+            gen.run()
+        assert not repo_root(run_dir).joinpath(APP_ASAR).exists()
+        assert not repo_file(run_dir, 'latest.pack').exists()
+
+    def test_skipped_when_current(self, fs, run_dir, mirror):
+        """A second run over the archive it already shipped writes nothing."""
+        pin = self._library_wheel(mirror)
+        repo = self._repo(pin)
+        config = make_config()
+        run_commit(repo, config, mirror.client)
+        file = repo_root(run_dir).joinpath(APP_ASAR)
+        stat = file.stat()
+        with logger.mock_capture_writer() as capture:
+            run_commit(repo, config, mirror.client)
+        assert f'App asar exists, skipped: "{file}"' in capture.concat()
+        assert file.stat().st_mtime_ns == stat.st_mtime_ns
+
+    def test_updated_when_the_library_changes(self, fs, run_dir, mirror):
+        """A new version of the library replaces the archive of the tree."""
+        pin = self._library_wheel(mirror)
+        repo = self._repo(pin)
+        config = make_config()
+        run_commit(repo, config, mirror.client)
+        file = repo_root(run_dir).joinpath(APP_ASAR)
+        assert file_read_bytes(file) == BUNDLED_APP_ASAR_CONTENT
+
+        # a second version of the library, with another archive
+        new_pin = self._library_wheel(mirror, b'NEW-ASAR-CONTENT', version='2.0.4')
+        repo.register_file(
+            COMMIT_DUPLICATE, 'requirements.txt',
+            (requirement(new_pin) + requirement('demo==1.0')).encode())
+        repo.register_commit(
+            COMMIT_DUPLICATE, parents=['c1'], author_name='Author', message='')
+        repo.register_branch('master', COMMIT_DUPLICATE)
+        repo.register_head(COMMIT_DUPLICATE)
+        run_commit(repo, config, mirror.client)
+        assert file_read_bytes(file) == b'NEW-ASAR-CONTENT'
+
+
 class TestDep:
     """The site-packages tree of the dependency channels."""
 
@@ -298,8 +424,13 @@ class TestDep:
         run_commit(make_repo(), make_config(), mirror.client)
         expected = working_tree(dep_pack(run_dir))
         tree = read_tree(dep_root(run_dir))
+        # the tree carries every dependency channel, the library among them
         del tree[f'.pack/{DIST}/index.pack']
-        assert tree == expected
+        files = {
+            path: content for path, content in tree.items()
+            if path.split('/')[0] in (DIST, f'{DIST}-{DIST_VERSION}.dist-info')
+        }
+        assert files == expected
 
     def test_ledger_is_the_channel(self, fs, run_dir, mirror):
         """The ledger of a distribution is the index pack its channel published."""
@@ -351,9 +482,10 @@ class TestIdempotent:
 
         monkeypatch.setattr(JobBase, 'replace_data', spy)
         run_commit(repo, config, mirror.client)
-        # the tree job and the dependency job, neither has a change to apply
-        # (the ledger is committed by replace_index, not by the data pass)
-        assert writes == [[], []]
+        # the job of the tree and the two jobs of the dependencies, neither of
+        # them has a change to apply (the ledger is committed by
+        # replace_index, not by the data pass)
+        assert writes == [[], [], []]
 
     def test_content_is_unchanged(self, fs, run_dir, mirror):
         """The trees of the second run are the trees of the first one."""
@@ -376,22 +508,36 @@ class TestReuse:
         register_wheels(mirror)
         reads = []
         atomic_read_bytes = repo_export.atomic_read_bytes
+        atomic_open = repo_export.atomic_open
 
-        def spy(path):
+        def spy_read(path):
             reads.append(str(path))
             return atomic_read_bytes(path)
 
-        monkeypatch.setattr(repo_export, 'atomic_read_bytes', spy)
+        def spy_open(file, *args, **kwargs):
+            reads.append(str(file))
+            return atomic_open(file, *args, **kwargs)
+
+        monkeypatch.setattr(repo_export, 'atomic_read_bytes', spy_read)
+        monkeypatch.setattr(repo_export, 'atomic_open', spy_open)
         Repo(make_repo(), make_config(), client=mirror.client).run()
-        # the pack of the tree is in the memory of the encoder: the packs read
-        # are the full pack of the dependency and the deploy config of the
-        # export, never the pack of the tree
+        # the pack of the tree is in the memory of the encoder, so its file is
+        # never opened: neither by the decoder nor by the digest of the files
+        # the export copies
         tree_pack_file = str(repo_file(run_dir, 'c3', 'full.pack'))
         assert tree_pack_file not in reads
+        # the files the export reads: the two dependency packs it decodes, the
+        # template it copies and its target (not there yet), then the archive
+        # of the client and the target of the tree. The pack of the tree is
+        # never opened: its records are in the memory of the encoder
         assert reads == [
+            str(join_path(run_dir, DEP_FOLDER, DIST_VERSION, 'full.pack')),
+            str(join_path(
+                run_dir, WORKSPACE, 'packdep', LIBRARY, ALASIO_VERSION, 'full.pack')),
             str(repo_root(run_dir).joinpath(DEPLOY_TEMPLATE)),
             str(repo_root(run_dir).joinpath(DEPLOY_CONFIG)),
-            str(join_path(run_dir, DEP_FOLDER, DIST_VERSION, 'full.pack')),
+            str(dep_root(run_dir).joinpath(BUNDLED_APP_ASAR)),
+            str(repo_root(run_dir).joinpath(APP_ASAR)),
         ]
 
     def test_kept_pack_is_read_once(self, fs, run_dir, mirror, monkeypatch):

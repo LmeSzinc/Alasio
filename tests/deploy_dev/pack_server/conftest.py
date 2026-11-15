@@ -24,6 +24,12 @@ from tests.deploy_dev.pack_server.test_fetch_wheel import MockMirror
 # by the run_dir fixture, see GitAttributes
 BUILTIN_GITATTRIBUTES = env.ALASIO_ROOT.joinpath('.gitattributes').atomic_read_bytes()
 
+# the stand-in content of the electron archive a wheel of the library carries,
+# the member the wheel build writes at
+# alasio.deploy_dev.pack_server.repo_export.BUNDLED_APP_ASAR. The tests that
+# pack the library register this content inside its wheel
+BUNDLED_APP_ASAR_CONTENT = b'APP-ASAR-CONTENT'
+
 # the sheet a flat page inlines into its head, read before the fake filesystem
 # replaces the disk, see run_dir
 PAGE_SHEET = PathStr.new(STYLE_FILE).atomic_read_text()

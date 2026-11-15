@@ -28,6 +28,7 @@ from alasio.deploy_dev.pack_server.manifest import LocalManifest, Manifest, is_p
 from alasio.deploy_dev.pack_server.model import LookbackConfig, PackRepoModel, RepoConfig
 from alasio.deploy_dev.pack_server.repo import Repo
 from alasio.deploy_dev.pack_server.repo_base import DEFAULT_INDEX
+from alasio.deploy_dev.pack_server.repo_export import ReleaseExportError
 from alasio.ext.path.atomic import file_read_bytes
 from alasio.ext.path.iter import iter_files
 from alasio.git.mock.mock_repo import MockGitRepo
@@ -77,18 +78,36 @@ def requirement(pin, source=MIRROR_URL):
     return f'{pin}\n    # from {source}\n'
 
 
+# the library the mock repo packs, and the electron archive its wheel carries:
+# the export copies the archive into resources/app.asar of the tree, so every
+# run of the mock repo needs the library to be one of its pack deps
+ALASIO_VERSION = '2.0.3'
+ALASIO_ASAR = b'APP-ASAR-CONTENT'
+
+# the pin line of the library: the archive of the client is a file of its pack
+# channel, so every repo that exports a release pins the library
+LIBRARY_REQUIREMENT = requirement(f'alasio=={ALASIO_VERSION}')
+
+
 REQUIREMENTS = {
-    'c1': requirement('httpx==0.27.7') + requirement('demo==1.0'),
-    'c2': requirement('httpx==0.27.8') + requirement('demo==1.0'),
+    'c1': (
+        requirement('httpx==0.27.7') + requirement('demo==1.0')
+        + LIBRARY_REQUIREMENT
+    ),
+    'c2': (
+        requirement('httpx==0.27.8') + requirement('demo==1.0')
+        + LIBRARY_REQUIREMENT
+    ),
     'c3': (
         requirement('httpx==0.28.1') + requirement('demo==1.0')
         + requirement('msgspec==0.22.0', f'{PROVIDED_URL}/')
+        + LIBRARY_REQUIREMENT
     ),
 }
 
 # entry of the mock repo: by default it declares the dependency the tests build
 # a pack channel of, see entry_source
-DEFAULT_ENTRY = "Mod:\n  name: m\nUpdate:\n  pack_deps:\n  - httpx\n"
+DEFAULT_ENTRY = "Mod:\n  name: m\nUpdate:\n  pack_deps:\n  - httpx\n  - alasio\n"
 
 # the deployment config template of the mock repo, the file the export copies to
 # config/deploy.yaml. The webapp locates a project by it, and a mod declares the
@@ -266,9 +285,29 @@ def register_wheel(mirror, version, core):
     return content
 
 
+def register_library(mirror, version=ALASIO_VERSION, asar=ALASIO_ASAR):
+    """
+    Build the wheel of the library and register it in the mirror.
+
+    The wheel carries the electron archive the export copies into the tree, so
+    every run of the mock repo has a client to ship like a real mod does.
+
+    Args:
+        mirror (MockMirror): Mirror to register the wheel in
+        version (str): Version of the library
+        asar (bytes): Content of app.asar inside the wheel
+    """
+    path = f'/w/alasio-{version}-py3-none-any.whl'
+    build_wheel(path, {
+        'alasio/__init__.py': f'VERSION = "{version}"\n'.encode(),
+        'alasio/deploy_data/webapp/app.asar': asar,
+    }, name='alasio', version=version)
+    mirror.register('alasio', version, content=file_read_bytes(path))
+
+
 def register_wheels(mirror):
     """
-    Register the three versions of the wheel of the mock repo.
+    Register the wheels of the mock repo.
 
     Args:
         mirror (MockMirror): Mirror to register the wheels in
@@ -276,6 +315,7 @@ def register_wheels(mirror):
     register_wheel(mirror, '0.27.7', CORE_V1)
     register_wheel(mirror, '0.27.8', CORE_V1)
     register_wheel(mirror, '0.28.1', CORE_V2)
+    register_library(mirror)
 
 
 def cache_file(run_dir, version, name='httpx'):
@@ -366,7 +406,7 @@ class TestDeps:
         deps = gen.base.deps
         # demo is pinned by the files but is neither declared nor provided: no
         # entry, nothing to build of it
-        assert list(deps) == ['httpx']
+        assert list(deps) == ['httpx', 'alasio']
         info = deps['httpx']
         assert info.name == 'httpx'
         assert info.latest.version == '0.28.1'
@@ -375,6 +415,13 @@ class TestDeps:
         # the entry declares httpx for pack updates, its source is not provided
         assert info.pack_dep is True
         assert info.provide_wheel is False
+        # the library is declared by the entry and pinned by the files, and it
+        # is the channel the export ships the archive of the client from
+        library = deps['alasio']
+        assert library.latest.version == ALASIO_VERSION
+        assert library.lookbacks == {}
+        assert library.pack_dep is True
+        assert library.provide_wheel is False
 
     def test_undeclared_name(self, fs, run_dir, mirror):
         """A pinned name the mod entry does not declare is not in the mapping."""
@@ -412,10 +459,9 @@ WARNING | Dependency "requests" is not pinned to a version in the lookback windo
         """A repo without an entry gets the defaults: the library updated by pack."""
         with logger.mock_capture_writer() as capture:
             gen = Repo(make_repo(entry=None), make_config())
-            assert gen.base.deps == {}
+            assert list(gen.base.deps) == ['alasio']
         assert capture.concat() == """\
 INFO | Using pack_deps of module/config/_index/mod_entry.yaml at c3: alasio, msgspecerror
-WARNING | Dependency "alasio" is not pinned to a version in the lookback window, nothing is built of it; a dependency of the mod entry pack_deps must be pinned with "==" in the dependency file of the repo
 WARNING | Dependency "msgspecerror" is not pinned to a version in the lookback window, nothing is built of it; a dependency of the mod entry pack_deps must be pinned with "==" in the dependency file of the repo
 """
 
@@ -432,7 +478,7 @@ WARNING | Dependency "msgspecerror" is not pinned to a version in the lookback w
             'c1': requirement('httpx==0.27.7'),
             'c2': requirement('demo==1.0'),
         }
-        gen = Repo(make_repo(requirements), make_config())
+        gen = Repo(make_repo(requirements, entry=entry_source('httpx')), make_config())
         with logger.mock_capture_writer() as capture:
             assert gen.base.deps == {}
         assert capture.concat() == """\
@@ -448,11 +494,13 @@ class TestFetchIndex:
         """A pin is fetched from its own index, not from a mirror of the entry."""
         mirror.alias(OTHER_URL)
         register_wheels(mirror)
-        requirements = {'c1': requirement('httpx==0.28.1', f'{OTHER_URL}/')}
+        requirements = {'c1': requirement('httpx==0.28.1', f'{OTHER_URL}/') + LIBRARY_REQUIREMENT}
         run_commit(make_repo(requirements), make_config(), mirror.client)
         assert mirror.requests == [
             f'{OTHER_URL}/httpx/',
             'https://other.example/packages/httpx-0.28.1-py3-none-any.whl',
+            'http://mirror/alasio/',
+            'http://mirror/packages/alasio-2.0.3-py3-none-any.whl',
         ]
         assert cache_file(run_dir, '0.28.1').isfile()
 
@@ -460,18 +508,23 @@ class TestFetchIndex:
         """A pin without an annotation is fetched from the official PyPI index."""
         mirror.alias(DEFAULT_INDEX)
         register_wheels(mirror)
-        requirements = {'c1': 'httpx==0.28.1\n'}
+        requirements = {'c1': 'httpx==0.28.1\n' + LIBRARY_REQUIREMENT}
         run_commit(make_repo(requirements), make_config(), mirror.client)
         assert mirror.requests == [
             f'{DEFAULT_INDEX}/httpx/',
             'https://pypi.org/packages/httpx-0.28.1-py3-none-any.whl',
+            'http://mirror/alasio/',
+            'http://mirror/packages/alasio-2.0.3-py3-none-any.whl',
         ]
 
     def test_pin_index_is_normalized(self, fs, run_dir, mirror):
         """The case of the host and the trailing slash of the annotation do not change the index."""
         mirror.alias(OTHER_URL)
         register_wheels(mirror)
-        requirements = {'c1': requirement('httpx==0.28.1', 'https://Other.Example/simple/')}
+        requirements = {
+            'c1': requirement('httpx==0.28.1', 'https://Other.Example/simple/')
+            + LIBRARY_REQUIREMENT,
+        }
         run_commit(make_repo(requirements), make_config(), mirror.client)
         # the index is requested as the annotation normalized it
         assert mirror.requests[0] == f'{OTHER_URL}/httpx/'
@@ -577,7 +630,7 @@ class TestRun:
         full.validate()
         assert full.current_version == 'c3'
         entries = decode_packdep(bytes(full.catfile(full.fileinfo[PACKDEP_PATH])))
-        assert list(entries) == ['httpx']
+        assert list(entries) == ['alasio', 'httpx']
         assert entries['httpx'].version == '0.28.1'
         assert entries['httpx'].index_checksum == \
             bytes(decoder.extract_index_pack())[-20:]
@@ -587,8 +640,11 @@ class TestRun:
 
         gen.commit()
         assert repo_file(run_dir, 'latest.pack').isfile()
+        library = PackDecodeBase(file_read_bytes(join_path(
+            run_dir, WORKSPACE, 'packdep', 'alasio', ALASIO_VERSION, 'full.pack')))
         assert gen.dep.published == {
             'httpx': ('0.28.1', bytes(decoder.extract_index_pack())[-20:]),
+            'alasio': (ALASIO_VERSION, bytes(library.extract_index_pack())[-20:]),
         }
 
     def test_no_pip_index_without_provided_pins(self, fs, run_dir, mirror):
@@ -598,45 +654,19 @@ class TestRun:
         assert not join_path(run_dir, WORKSPACE, 'wheel').exists()
 
     def test_no_dependency(self, fs, run_dir, mirror):
-        """A repo whose entry declares no pin still publishes the tree packs."""
-        with logger.mock_capture_writer() as capture:
-            # the client of the mirror: the step has no wheel to fetch, and a
-            # real client would be built against the real filesystem the fake
-            # one hides (its version lookup reads the site-packages)
-            gen = Repo(make_repo(entry=None), make_config(), client=mirror.client)
-            assert gen.run() is None
-        assert capture.concat() == """\
----------------------------------------------- WHEELS ----------------------------------------------
-INFO | WHEELS
-INFO | Using pack_deps of module/config/_index/mod_entry.yaml at c3: alasio, msgspecerror
-WARNING | Dependency "alasio" is not pinned to a version in the lookback window, nothing is built of it; a dependency of the mod entry pack_deps must be pinned with "==" in the dependency file of the repo
-WARNING | Dependency "msgspecerror" is not pinned to a version in the lookback window, nothing is built of it; a dependency of the mod entry pack_deps must be pinned with "==" in the dependency file of the repo
------------------------------------------ DEPENDENCY PACKS -----------------------------------------
-INFO | DEPENDENCY PACKS
-INFO | No dependency to build of "Author_Repo_master", skipped
----------------------------------------------- PACKS -----------------------------------------------
-INFO | PACKS
-INFO | Generating packs of "Author_Repo_master": 3 versions, latest=c3
-INFO | Writing full pack: "{run_dir}/pack/Author_Repo_master/packrepo/c3/full.pack"
-INFO | [1/2] Packing update pack from c2
-INFO | Writing update pack: c2 -> c3, "{run_dir}/pack/Author_Repo_master/packrepo/c3/update_c2.pack"
-INFO | [2/2] Packing update pack from c1
-INFO | Writing update pack: c1 -> c3, "{run_dir}/pack/Author_Repo_master/packrepo/c3/update_c1.pack"
-INFO | Packs of "Author_Repo_master" generated, latest=c3
------------------------------------------- RELEASE EXPORT ------------------------------------------
-INFO | RELEASE EXPORT
-INFO | Exporting the release trees of "Author_Repo_master": version=c3
-INFO | Unpacking the tree of c3 to "{run_dir}/pack/Author_Repo_master/.repo"
-INFO | Unpacking data to "{run_dir}/pack/Author_Repo_master/.repo"
-INFO | Replacing files to "{run_dir}/pack/Author_Repo_master/.repo"
-INFO | Unpack done
-INFO | Touched 4 release files of "{run_dir}/pack/Author_Repo_master/.repo"
-INFO | Copy deploy config of the version: "{run_dir}/pack/Author_Repo_master/.repo/config/deploy.template.yaml" -> "{run_dir}/pack/Author_Repo_master/.repo/config/deploy.yaml"
-INFO | No dependency to export for "Author_Repo_master", skipped
-""".replace('{run_dir}', str(run_dir))
+        """A repo without a dependency channel ships no client archive: no release."""
+        requirements = {'c1': requirement('httpx==0.28.1')}
+        gen = Repo(
+            make_repo(requirements, entry=entry_source()), make_config(),
+            client=mirror.client)
+        assert gen.base.deps == {}
+        with pytest.raises(ReleaseExportError, match='carry no app.asar'):
+            gen.run()
+        # the packs of the tree are on the disk, the barrier of the version is
+        # not: a run that cannot export a release publishes nothing
+        assert repo_file(run_dir, 'c1', 'full.pack').isfile()
+        assert not repo_file(run_dir, 'latest.pack').exists()
         assert gen.dep.published == {}
-        assert not join_path(run_dir, DEP_FOLDER).exists()
-        assert mirror.requests == []
 
     def test_full_pack_is_the_install_tree(self, fs, run_dir, mirror):
         """The full pack of a version unpacks to the install tree of its wheel."""
@@ -690,14 +720,15 @@ class TestProvidedIndex:
         mirror.register('msgspec', '0.22.0', tags='cp38-cp38-win_amd64')
         mirror.register('msgspec', '0.22.0', tags='cp38-cp38-manylinux_2_17_x86_64')
         requirements = {
-            'c1': requirement('httpx==0.27.7'),
-            'c2': requirement('httpx==0.27.8'),
+            'c1': requirement('httpx==0.27.7') + LIBRARY_REQUIREMENT,
+            'c2': requirement('httpx==0.27.8') + LIBRARY_REQUIREMENT,
             'c3': (
                 requirement('httpx==0.28.1')
                 + requirement('msgspec==0.22.0', f'{PROVIDED_URL}/')
+                + LIBRARY_REQUIREMENT
             ),
         }
-        entry = entry_source('httpx', provide=(PROVIDED_URL,))
+        entry = entry_source('httpx', 'alasio', provide=(PROVIDED_URL,))
         run_commit(make_repo(requirements, entry=entry), make_config(), mirror.client)
 
         # the provided pin is in the cache and in the pip index, one file per
@@ -717,11 +748,11 @@ class TestProvidedIndex:
         mirror.alias(PROVIDED_URL)
         register_wheels(mirror)
         requirements = {
-            'c1': requirement('httpx==0.27.7'),
-            'c2': requirement('httpx==0.27.8'),
-            'c3': requirement('httpx==0.28.1', f'{PROVIDED_URL}/'),
+            'c1': requirement('httpx==0.27.7') + LIBRARY_REQUIREMENT,
+            'c2': requirement('httpx==0.27.8') + LIBRARY_REQUIREMENT,
+            'c3': requirement('httpx==0.28.1', f'{PROVIDED_URL}/') + LIBRARY_REQUIREMENT,
         }
-        entry = entry_source('httpx', provide=(PROVIDED_URL,))
+        entry = entry_source('httpx', 'alasio', provide=(PROVIDED_URL,))
         run_commit(make_repo(requirements, entry=entry), make_config(), mirror.client)
 
         assert f'{PROVIDED_URL}/httpx/' in mirror.requests
@@ -735,8 +766,8 @@ class TestProvidedIndex:
         """A pin of an index the repo does not provide is fetched, not published."""
         mirror.alias(OTHER_URL)
         register_wheels(mirror)
-        requirements = {'c1': requirement('httpx==0.28.1', f'{OTHER_URL}/')}
-        entry = entry_source('httpx', provide=(PROVIDED_URL,))
+        requirements = {'c1': requirement('httpx==0.28.1', f'{OTHER_URL}/') + LIBRARY_REQUIREMENT}
+        entry = entry_source('httpx', 'alasio', provide=(PROVIDED_URL,))
         run_commit(make_repo(requirements, entry=entry), make_config(), mirror.client)
 
         assert cache_file(run_dir, '0.28.1').isfile()
@@ -1075,9 +1106,9 @@ class TestWheelCache:
         mirror.alias(PROVIDED_URL)
         register_wheels(mirror)
         requirements = {
-            'c1': f'httpx==0.28.1\n    # from {PROVIDED_URL}/\n',
+            'c1': f'httpx==0.28.1\n    # from {PROVIDED_URL}/\n' + LIBRARY_REQUIREMENT,
         }
-        entry = entry_source(provide=(PROVIDED_URL,))
+        entry = entry_source('alasio', provide=(PROVIDED_URL,))
         repo = make_repo(requirements, entry=entry)
         run_commit(repo, make_config(), mirror.client)
         file = wheel_file(run_dir, '0.28.1')
@@ -1093,9 +1124,9 @@ class TestWheelCache:
         mirror.alias(PROVIDED_URL)
         register_wheels(mirror)
         requirements = {
-            'c1': f'httpx==0.28.1\n    # from {PROVIDED_URL}/\n',
+            'c1': f'httpx==0.28.1\n    # from {PROVIDED_URL}/\n' + LIBRARY_REQUIREMENT,
         }
-        entry = entry_source(provide=(PROVIDED_URL,))
+        entry = entry_source('alasio', provide=(PROVIDED_URL,))
         repo = make_repo(requirements, entry=entry)
         run_commit(repo, make_config(), mirror.client)
         file = wheel_file(run_dir, '0.28.1')
