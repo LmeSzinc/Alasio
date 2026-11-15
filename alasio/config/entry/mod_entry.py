@@ -735,7 +735,7 @@ class ModEntry:
             data=ModEntryModel(
                 Mod=ModModel(
                     name='alasio',
-                    gui_language=['zh-CN', 'en-US', 'ja-JP', 'zh-TW', 'en-ES'],
+                    gui_language=['zh-CN', 'en-US', 'ja-JP', 'zh-TW', 'es-ES'],
                 ),
             ),
         )

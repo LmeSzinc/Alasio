@@ -5,14 +5,14 @@
       "en-US": {"name": "DashboardBase", "help": ""},
       "ja-JP": {"name": "DashboardBase", "help": ""},
       "zh-TW": {"name": "DashboardBase", "help": ""},
-      "en-ES": {"name": "DashboardBase", "help": ""}
+      "es-ES": {"name": "DashboardBase", "help": ""}
     },
     "Time": {
       "zh-CN": {"name": "DashboardBase.Time", "help": ""},
       "en-US": {"name": "DashboardBase.Time", "help": ""},
       "ja-JP": {"name": "DashboardBase.Time", "help": ""},
       "zh-TW": {"name": "DashboardBase.Time", "help": ""},
-      "en-ES": {"name": "DashboardBase.Time", "help": ""}
+      "es-ES": {"name": "DashboardBase.Time", "help": ""}
     }
   },
   "DashboardAmount": {
@@ -21,14 +21,14 @@
       "en-US": {"name": "DashboardAmount", "help": ""},
       "ja-JP": {"name": "DashboardAmount", "help": ""},
       "zh-TW": {"name": "DashboardAmount", "help": ""},
-      "en-ES": {"name": "DashboardAmount", "help": ""}
+      "es-ES": {"name": "DashboardAmount", "help": ""}
     },
     "Value": {
       "zh-CN": {"name": "DashboardAmount.Value", "help": ""},
       "en-US": {"name": "DashboardAmount.Value", "help": ""},
       "ja-JP": {"name": "DashboardAmount.Value", "help": ""},
       "zh-TW": {"name": "DashboardAmount.Value", "help": ""},
-      "en-ES": {"name": "DashboardAmount.Value", "help": ""}
+      "es-ES": {"name": "DashboardAmount.Value", "help": ""}
     }
   },
   "DashboardTotal": {
@@ -37,7 +37,7 @@
       "en-US": {"name": "DashboardTotal", "help": ""},
       "ja-JP": {"name": "DashboardTotal", "help": ""},
       "zh-TW": {"name": "DashboardTotal", "help": ""},
-      "en-ES": {"name": "DashboardTotal", "help": ""}
+      "es-ES": {"name": "DashboardTotal", "help": ""}
     }
   },
   "DashboardRemain": {
@@ -46,7 +46,7 @@
       "en-US": {"name": "DashboardRemain", "help": ""},
       "ja-JP": {"name": "DashboardRemain", "help": ""},
       "zh-TW": {"name": "DashboardRemain", "help": ""},
-      "en-ES": {"name": "DashboardRemain", "help": ""}
+      "es-ES": {"name": "DashboardRemain", "help": ""}
     }
   },
   "DashboardDynamicTotal": {
@@ -55,14 +55,14 @@
       "en-US": {"name": "DashboardDynamicTotal", "help": ""},
       "ja-JP": {"name": "DashboardDynamicTotal", "help": ""},
       "zh-TW": {"name": "DashboardDynamicTotal", "help": ""},
-      "en-ES": {"name": "DashboardDynamicTotal", "help": ""}
+      "es-ES": {"name": "DashboardDynamicTotal", "help": ""}
     },
     "Total": {
       "zh-CN": {"name": "DashboardDynamicTotal.Total", "help": ""},
       "en-US": {"name": "DashboardDynamicTotal.Total", "help": ""},
       "ja-JP": {"name": "DashboardDynamicTotal.Total", "help": ""},
       "zh-TW": {"name": "DashboardDynamicTotal.Total", "help": ""},
-      "en-ES": {"name": "DashboardDynamicTotal.Total", "help": ""}
+      "es-ES": {"name": "DashboardDynamicTotal.Total", "help": ""}
     }
   },
   "DashboardProgress": {
@@ -71,14 +71,14 @@
       "en-US": {"name": "DashboardProgress", "help": ""},
       "ja-JP": {"name": "DashboardProgress", "help": ""},
       "zh-TW": {"name": "DashboardProgress", "help": ""},
-      "en-ES": {"name": "DashboardProgress", "help": ""}
+      "es-ES": {"name": "DashboardProgress", "help": ""}
     },
     "Value": {
       "zh-CN": {"name": "DashboardProgress.Value", "help": ""},
       "en-US": {"name": "DashboardProgress.Value", "help": ""},
       "ja-JP": {"name": "DashboardProgress.Value", "help": ""},
       "zh-TW": {"name": "DashboardProgress.Value", "help": ""},
-      "en-ES": {"name": "DashboardProgress.Value", "help": ""}
+      "es-ES": {"name": "DashboardProgress.Value", "help": ""}
     }
   },
   "DashboardPlanner": {
@@ -87,21 +87,21 @@
       "en-US": {"name": "DashboardPlanner", "help": ""},
       "ja-JP": {"name": "DashboardPlanner", "help": ""},
       "zh-TW": {"name": "DashboardPlanner", "help": ""},
-      "en-ES": {"name": "DashboardPlanner", "help": ""}
+      "es-ES": {"name": "DashboardPlanner", "help": ""}
     },
     "Progress": {
       "zh-CN": {"name": "DashboardPlanner.Progress", "help": ""},
       "en-US": {"name": "DashboardPlanner.Progress", "help": ""},
       "ja-JP": {"name": "DashboardPlanner.Progress", "help": ""},
       "zh-TW": {"name": "DashboardPlanner.Progress", "help": ""},
-      "en-ES": {"name": "DashboardPlanner.Progress", "help": ""}
+      "es-ES": {"name": "DashboardPlanner.Progress", "help": ""}
     },
     "Eta": {
       "zh-CN": {"name": "DashboardPlanner.Eta", "help": ""},
       "en-US": {"name": "DashboardPlanner.Eta", "help": ""},
       "ja-JP": {"name": "DashboardPlanner.Eta", "help": ""},
       "zh-TW": {"name": "DashboardPlanner.Eta", "help": ""},
-      "en-ES": {"name": "DashboardPlanner.Eta", "help": ""}
+      "es-ES": {"name": "DashboardPlanner.Eta", "help": ""}
     }
   }
 }

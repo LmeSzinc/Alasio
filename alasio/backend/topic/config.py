@@ -51,7 +51,8 @@ class ConfigNav(BaseTopic):
     async def get_source(self):
         state = ConnState(self.conn_id, self.server)
         mod_name = await state.mod_name
-        lang = await state.lang
+        # the mod resolves the interface language against its own translations
+        lang = await state.content_lang
         if not mod_name or not lang:
             return None
         source = ConfigNavSource.get(mod_name, lang)
@@ -86,7 +87,7 @@ class ConfigArg(BaseTopic):
         mod_name = await state.mod_name
         config_name = await state.config_name
         nav_name = await state.nav_name
-        lang = await state.lang
+        lang = await state.content_lang
         if not mod_name or not config_name or not nav_name or not lang:
             return None
         source = ConfigArgSource.get(mod_name, config_name, nav_name, lang)
@@ -106,7 +107,7 @@ class ConfigArg(BaseTopic):
         mod_name = nav.mod_name
         config_name = nav.config_name
         nav_name = nav.nav_name
-        lang = await state.lang
+        lang = await state.content_lang
         if not config_name:
             return
 
@@ -218,7 +219,7 @@ class ConfigArg(BaseTopic):
         mod_name = nav.mod_name
         config_name = nav.config_name
         nav_name = nav.nav_name
-        lang = await state.lang
+        lang = await state.content_lang
         if not config_name or not nav_name:
             return
 

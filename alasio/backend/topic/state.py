@@ -7,10 +7,14 @@ from alasio.backend.reactive.rx_trio import async_reactive, async_reactive_sourc
 from alasio.backend.topic.scan import ConfigScanSource
 from alasio.backend.ws.ws_topic import BaseTopic
 from alasio.config.const import Const
+from alasio.config.entry.loader import MOD_LOADER
 from alasio.config.table.scan import validate_config_name
 
 
 class NavState(Struct):
+    # Language of the alasio interface, chosen by the user and always one of
+    # Const.GUI_LANGUAGE. The language the content of a mod is rendered in is
+    # derived from it, see ConnState.content_lang.
     lang: str = 'en-US'
     config_name: str = ''
     mod_name: str = ''
@@ -37,6 +41,24 @@ class ConnState(BaseTopic):
         return state.lang
 
     @async_reactive
+    async def content_lang(self) -> str:
+        """
+        Language the content of the opened config is rendered in.
+
+        ``lang`` is the language of the alasio interface; the names, helps and
+        task titles of a config come from its mod, which translates its own
+        ``gui_language`` only. This resolves the interface language against
+        that set, so a mod that does not carry the user's language still shows
+        its content in a language it does (see ModBase.resolve_gui_lang).
+        """
+        state = await self.nav_state
+        mod = MOD_LOADER.dict_mod.get(state.mod_name)
+        if mod is None:
+            # no config opened, nothing is rendered from a mod yet
+            return state.lang
+        return mod.resolve_gui_lang(state.lang)
+
+    @async_reactive
     async def config_name(self) -> str:
         state = await self.nav_state
         return state.config_name
@@ -56,9 +78,12 @@ class ConnState(BaseTopic):
         use = negotiate_accept_language(lang, Const.GUI_LANGUAGE)
         if not use:
             raise RpcValueError(f'Language "{lang}" does not match any available languages')
-        # set
+        # set the negotiated tag, not the requested one: 'zh-Hans' resolves to
+        # 'zh-CN' and every lookup of the interface language keyed by it
         state: NavState = await self.nav_state
-        state.lang = lang
+        if state.lang == use:
+            return
+        state.lang = use
         await self.nav_state.mutate()
 
     @rpc

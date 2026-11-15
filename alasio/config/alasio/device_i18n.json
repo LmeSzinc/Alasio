@@ -8,7 +8,7 @@
         "help": "Emulator._info.help"
       },
       "zh-TW": {"name": "模擬器設定", "help": ""},
-      "en-ES": {"name": "Ajustes de emulador", "help": ""}
+      "es-ES": {"name": "Ajustes de emulador", "help": ""}
     },
     "Serial": {
       "zh-CN": {
@@ -74,7 +74,7 @@
           "如果你使用了模擬器的多開功能，他們的 Serial 將不是預設的，可以在 console.bat 中執行 `adb devices` 查詢，或根據模擬器官方的教程填寫"
         ]
       },
-      "en-ES": {
+      "es-ES": {
         "name": "Serial",
         "help": [
           "Los serial de emuladores comunes pueden ser consultados aquí:",
@@ -172,7 +172,7 @@
           "ldopengl": "ldopengl"
         }
       },
-      "en-ES": {
+      "es-ES": {
         "name": "Método de captura",
         "help": [
           "Cuando seleccionas detectar auto, se ejecutará una prueba para determinar el método más rápido.",
@@ -247,7 +247,7 @@
           "MaaTouch": "MaaTouch"
         }
       },
-      "en-ES": {
+      "es-ES": {
         "name": "Método de control",
         "help": [
           "Velocidad: MaaTouch = minitouch >>> uiautomator2 ~= ADB",
@@ -267,7 +267,7 @@
       "en-US": {"name": "Emulator.ScreenshotDedithering", "help": ""},
       "ja-JP": {"name": "Emulator.ScreenshotDedithering", "help": ""},
       "zh-TW": {"name": "Emulator.ScreenshotDedithering", "help": ""},
-      "en-ES": {"name": "Emulator.ScreenshotDedithering", "help": ""}
+      "es-ES": {"name": "Emulator.ScreenshotDedithering", "help": ""}
     },
     "AdbRestart": {
       "zh-CN": {"name": "在检测不到设备的时候尝试重启adb", "help": ""},
@@ -277,7 +277,7 @@
         "help": "Emulator.AdbRestart.help"
       },
       "zh-TW": {"name": "在檢測不到設備的時候嘗試重啟adb", "help": ""},
-      "en-ES": {"name": "Intentar reiniciar el ADB cuando no se encuentre ninguno.", "help": ""}
+      "es-ES": {"name": "Intentar reiniciar el ADB cuando no se encuentre ninguno.", "help": ""}
     }
   },
   "EmulatorInfo": {
@@ -298,7 +298,7 @@
         "name": "模擬器設定",
         "help": "下列數值是根據Serial自動填充的，如果不懂請不要隨意修改"
       },
-      "en-ES": {
+      "es-ES": {
         "name": "Ajustes de emulador",
         "help": "Los siguientes ajustes son rellenados de manera automática de acuerdo al \"Serial\", si no lo entiendes, por favor no los modifiques."
       }
@@ -384,7 +384,7 @@
           "MEmuPlayer": "逍遙模擬器"
         }
       },
-      "en-ES": {
+      "es-ES": {
         "name": "Tipo de emulador",
         "help": "",
         "option_i18n": {
@@ -410,14 +410,14 @@
       "en-US": {"name": "EmulatorInfo.Name", "help": ""},
       "ja-JP": {"name": "EmulatorInfo.Name", "help": ""},
       "zh-TW": {"name": "EmulatorInfo.Name", "help": ""},
-      "en-ES": {"name": "EmulatorInfo.Name", "help": ""}
+      "es-ES": {"name": "EmulatorInfo.Name", "help": ""}
     },
     "Path": {
       "zh-CN": {"name": "EmulatorInfo.Path", "help": ""},
       "en-US": {"name": "EmulatorInfo.Path", "help": ""},
       "ja-JP": {"name": "EmulatorInfo.Path", "help": ""},
       "zh-TW": {"name": "EmulatorInfo.Path", "help": ""},
-      "en-ES": {"name": "EmulatorInfo.Path", "help": ""}
+      "es-ES": {"name": "EmulatorInfo.Path", "help": ""}
     }
   },
   "Error": {
@@ -429,14 +429,14 @@
         "help": "Error._info.help"
       },
       "zh-TW": {"name": "除錯設定", "help": ""},
-      "en-ES": {"name": "Ajustes de depuración", "help": ""}
+      "es-ES": {"name": "Ajustes de depuración", "help": ""}
     },
     "HandleError": {
       "zh-CN": {"name": "Error.HandleError", "help": ""},
       "en-US": {"name": "Error.HandleError", "help": ""},
       "ja-JP": {"name": "Error.HandleError", "help": ""},
       "zh-TW": {"name": "Error.HandleError", "help": ""},
-      "en-ES": {"name": "Error.HandleError", "help": ""}
+      "es-ES": {"name": "Error.HandleError", "help": ""}
     },
     "SaveError": {
       "zh-CN": {"name": "出错时，保存 Log 和截图", "help": ""},
@@ -449,7 +449,7 @@
         "help": "Error.SaveError.help"
       },
       "zh-TW": {"name": "出錯時，保存 Log 和截圖", "help": ""},
-      "en-ES": {
+      "es-ES": {
         "name": "Guardar errores",
         "help": "Graba los errores y los guarda automáticamente en la carpeta de logs para que puedas compartirlos fácilmente."
       }
@@ -474,7 +474,7 @@
         "name": "錯誤推送設定",
         "help": "發生無法處理的異常後，使用 Onepush 推送错误消息。設定參考文檔：https://github.com/LmeSzinc/AzurLaneAutoScript/wiki/Onepush-configuration-%5BCN%5D"
       },
-      "en-ES": {
+      "es-ES": {
         "name": "Configuración para notificar errores",
         "help": [
           "Cuando SRC no puede manejar un error, envía un mensaje automáticamente. Puedes leer más información sobre este ajuste aquí:",
@@ -493,7 +493,7 @@
         "help": "Error.ScreenshotLength.help"
       },
       "zh-TW": {"name": "出錯時，保留最後 X 張截圖", "help": ""},
-      "en-ES": {
+      "es-ES": {
         "name": "Tomar capturas de pantalla",
         "help": "Número de capturas de pantalla tomadas cuando ocurra un error"
       }
@@ -508,7 +508,7 @@
         "help": "Optimization._info.help"
       },
       "zh-TW": {"name": "優化設定", "help": ""},
-      "en-ES": {"name": "Ajustes de optimización", "help": ""}
+      "es-ES": {"name": "Ajustes de optimización", "help": ""}
     },
     "ScreenshotInterval": {
       "zh-CN": {
@@ -527,7 +527,7 @@
         "name": "放慢截圖速度至 X 秒一張",
         "help": "執行兩次截圖之間的最小間隔，限制在 0.1 ~ 0.3，對於高配置電腦能降低 CPU 佔用"
       },
-      "en-ES": {
+      "es-ES": {
         "name": "Tomar capturas cada X segundos",
         "help": "El intervalo mínimo entre 2 capturas, limitarlo a 0.1 ~ 0.3, puede ayudar a reducir el consumo de CPU."
       }
@@ -549,7 +549,7 @@
         "name": "戰鬥中放慢截圖速度至 X 秒一張",
         "help": "執行兩次截圖之間的最小間隔，限制在 0.1 ~ 1.0，能降低戰鬥時的 CPU 佔用"
       },
-      "en-ES": {
+      "es-ES": {
         "name": "Tomar capturas cada X segundos en combate",
         "help": "El intervalo mínimo entre 2 capturas, limitarlo a 0.1 ~ 1.0, puede ayudar a reducir el consumo de CPU."
       }
@@ -559,7 +559,7 @@
       "en-US": {"name": "Optimization.TaskHoardingDuration", "help": ""},
       "ja-JP": {"name": "Optimization.TaskHoardingDuration", "help": ""},
       "zh-TW": {"name": "Optimization.TaskHoardingDuration", "help": ""},
-      "en-ES": {"name": "Optimization.TaskHoardingDuration", "help": ""}
+      "es-ES": {"name": "Optimization.TaskHoardingDuration", "help": ""}
     },
     "WhenTaskQueueEmpty": {
       "zh-CN": {
@@ -598,7 +598,7 @@
           "stop_game": "關閉遊戲"
         }
       },
-      "en-ES": {
+      "es-ES": {
         "name": "Cuando no haya tareas",
         "help": "Cerrar Honkai: Star Rail cuando no haya tareas puede ayudar a reducir el consumo de CPU.",
         "option_i18n": {
@@ -615,7 +615,7 @@
       "en-US": {"name": "RestartDevice", "help": ""},
       "ja-JP": {"name": "RestartDevice", "help": ""},
       "zh-TW": {"name": "RestartDevice", "help": ""},
-      "en-ES": {"name": "RestartDevice", "help": ""}
+      "es-ES": {"name": "RestartDevice", "help": ""}
     }
   },
   "RestartGame": {
@@ -624,7 +624,7 @@
       "en-US": {"name": "RestartGame", "help": ""},
       "ja-JP": {"name": "RestartGame", "help": ""},
       "zh-TW": {"name": "RestartGame", "help": ""},
-      "en-ES": {"name": "RestartGame", "help": ""}
+      "es-ES": {"name": "RestartGame", "help": ""}
     }
   }
 }

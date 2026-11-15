@@ -25,7 +25,7 @@ Mod:
   - en-US
   - ja-JP
   - zh-TW
-  - en-ES
+  - es-ES
 # What the scheduler of the mod runs
 Scheduler:
   # Folders scanned for task entry functions, relative to the mod root

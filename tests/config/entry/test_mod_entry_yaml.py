@@ -636,7 +636,7 @@ class TestAlasioEntry:
         assert entry.name == 'alasio'
         assert entry.root == env.ALASIO_ROOT
         assert entry.path_config == ALASIO_CONFIG
-        assert list(entry.gui_language) == ['zh-CN', 'en-US', 'ja-JP', 'zh-TW', 'en-ES']
+        assert list(entry.gui_language) == ['zh-CN', 'en-US', 'ja-JP', 'zh-TW', 'es-ES']
         assert tuple(parse_filter(entry.scheduler_priority)) == ('RestartDevice', 'RestartGame')
 
     def test_the_library_is_not_a_mod(self):

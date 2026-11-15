@@ -38,3 +38,7 @@ class Const:
     ASSETS_SEARCH_OUTSET = 20
 
     GUI_LANGUAGE = ['zh-CN', 'zh-TW', 'en-US', 'ja-JP', 'es-ES']
+    # Language a mod's content falls back to when it does not carry the one the
+    # user asked for, see ModBase.resolve_gui_lang().
+    # The frontend uses the same tag as the default of its own language list.
+    GUI_LANGUAGE_DEFAULT = 'en-US'

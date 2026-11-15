@@ -4,6 +4,7 @@ import os
 from msgspec import DecodeError
 from msgspec.json import decode as json_decode
 
+from alasio.config.const import Const
 from alasio.config.entry.mod_entry import ALASIO_CONFIG, ModEntry
 from alasio.config.entry.model import (
     DECODER_CACHE, JSON_PACK_CACHE, MOD_JSON_CACHE, MODEL_CONFIG_INDEX, MODEL_MODEL_INDEX, MODEL_TASK_INDEX
@@ -38,6 +39,35 @@ class ModBase:
 
     def __bool__(self):
         return True
+
+    def resolve_gui_lang(self, lang):
+        """
+        Resolve a requested GUI language against the ones the mod declares.
+
+        A connection asks for the language the user picked for the alasio
+        interface, but a mod carries translations of its own ``gui_language``
+        only: it may support fewer languages than the interface, or other ones.
+        The content is rendered in the declared language nearest to the
+        request, silently, without asking the user again:
+
+        1. the requested language, when the mod declares it
+        2. ``Const.GUI_LANGUAGE_DEFAULT``, when the mod declares it
+        3. the first language the mod declares
+        4. ``Const.GUI_LANGUAGE_DEFAULT`` when the mod declares none
+
+        Args:
+            lang (str): Requested GUI language, e.g. "es-ES"
+
+        Returns:
+            str: A language the mod translates, so the caller may look it up
+                in the index files of the mod
+        """
+        available = self.entry.gui_language
+        if lang in available:
+            return lang
+        if Const.GUI_LANGUAGE_DEFAULT in available:
+            return Const.GUI_LANGUAGE_DEFAULT
+        return next(iter(available), Const.GUI_LANGUAGE_DEFAULT)
 
     """
     Index json

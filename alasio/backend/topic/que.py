@@ -695,7 +695,8 @@ class TaskQueueI18n(BaseTopic):
     async def get_source(self):
         state = ConnState(self.conn_id, self.server)
         mod_name = await state.mod_name
-        lang = await state.lang
+        # task titles come from the mod, which translates its own languages
+        lang = await state.content_lang
         if not mod_name or not lang:
             return None
         source = TaskQueueI18nSource.get(mod_name, lang)

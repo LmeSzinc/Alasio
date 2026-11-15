@@ -28,7 +28,7 @@ class Dashboard(BaseTopic):
         state = ConnState(self.conn_id, self.server)
         mod_name = await state.mod_name
         config_name = await state.config_name
-        lang = await state.lang
+        lang = await state.content_lang
         if not mod_name or not config_name or not lang:
             return None
         source = DashboardSource.get(mod_name, config_name, lang)

@@ -4,13 +4,13 @@
     "en-US": "Restart Device",
     "ja-JP": "デバイスを再起動",
     "zh-TW": "重啟設備",
-    "en-ES": "Reiniciar dispositivo"
+    "es-ES": "Reiniciar dispositivo"
   },
   "RestartGame": {
     "zh-CN": "重启游戏",
     "en-US": "Restart Game",
     "ja-JP": "ゲームを再起動",
     "zh-TW": "重啟遊戲",
-    "en-ES": "Reiniciar juego"
+    "es-ES": "Reiniciar juego"
   }
 }
