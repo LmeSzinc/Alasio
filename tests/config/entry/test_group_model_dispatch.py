@@ -16,15 +16,19 @@ imported under the same name a deployed mod uses.
 """
 import os
 import sys
+from types import SimpleNamespace
 
 import pytest
 
+from alasio.config.alasio import device_model
 from alasio.config.alasio.group_proxy import GroupProxy
 from alasio.config.base import AlasioConfigBase
+from alasio.config.entry import mod_base
 from alasio.config.entry.mod_base import ModBase
 from alasio.config.entry.mod_entry import ModEntry, ModEntryModel
 from alasio.ext import env
 from alasio.ext.path import PathStr
+from alasio.logger import logger
 
 MODEL_FILE = 'main/main_model.py'
 MODULE_NAME = 'module.config.main.main_model'
@@ -115,6 +119,92 @@ class TestWorkerRole:
         # a different class object, but a working model
         assert model is not worker_package.Campaign
         assert model.__name__ == 'Campaign'
+
+
+class TestAlasioModel:
+    """A group of alasio is the class of the library, not a copy of the file."""
+
+    def test_is_the_class_of_the_library(self, monkeypatch):
+        """A group of alasio is imported through the package of the library."""
+        monkeypatch.setattr(env, 'PROCESS_ROLE', 'worker')
+        model = make_mod().get_group_model('alasio/device_model.py', 'Emulator')
+        assert model is device_model.Emulator
+
+    def test_inside_the_mod_root_is_the_class_of_the_library(self, monkeypatch):
+        """A release ships the library inside the root of the mod.
+
+        The file of an alasio group is then inside the root of the mod but not
+        in the package of the mod: the root of the mod alone reports it as
+        foreign and falls back to a second copy of the classes.
+        """
+        monkeypatch.setattr(env, 'PROCESS_ROLE', 'worker')
+        # the mod root holds the library, the way a release lays it out under
+        # toolkit/lib/site-packages
+        mod = ModBase(ModEntry(
+            root=env.ALASIO_ROOT.uppath(1),
+            data=ModEntryModel.build(name='alasio', path_main='module/main.py')))
+        with logger.mock_capture_writer() as capture:
+            model = mod.get_group_model('alasio/device_model.py', 'Emulator')
+        assert capture.concat() == ''
+        assert model is device_model.Emulator
+
+    def test_library_nested_in_the_release_root(self, monkeypatch):
+        """A release keeps the library below toolkit/lib/site-packages of its root.
+
+        The name of the module comes from the index, never from where the
+        library sits relative to the root of the mod: the nesting of a release
+        must not turn the file of the library into a file of the mod, which
+        would load a second set of classes.
+        """
+        site_packages = PathStr.new(os.path.abspath('/release')).joinpath('toolkit/lib/site-packages')
+        monkeypatch.setattr(env, 'ALASIO_ROOT', site_packages)
+        monkeypatch.setattr(env, 'PROCESS_ROLE', 'worker')
+        mod = ModBase(ModEntry(
+            root=site_packages.uppath(3),
+            data=ModEntryModel.build(name='release_mod', path_main='module/main.py')))
+        path = mod.resolve_config_path('alasio/device_model.py')
+        assert path == site_packages.joinpath('alasio/config/alasio/device_model.py')
+        # the stub answers the import of that file, the test process keeps its
+        # own sys.modules
+        imported = []
+        module = SimpleNamespace(__file__=str(path))
+
+        def import_module(name):
+            imported.append(name)
+            return module
+
+        monkeypatch.setattr(mod_base, 'importlib', SimpleNamespace(import_module=import_module))
+        with logger.mock_capture_writer() as capture:
+            assert mod.import_model_module('alasio/device_model.py') is module
+        assert capture.concat() == ''
+        assert imported == ['alasio.config.alasio.device_model']
+
+    def test_file_in_no_package_is_reported(self, monkeypatch):
+        """A file outside the package of path_main is reported, not imported.
+
+        path_main names the package of the mod, the config folder sits in
+        another folder: an import would execute the file a second time, under
+        a name the game script never uses.
+        """
+        monkeypatch.setattr(env, 'PROCESS_ROLE', 'worker')
+        mod = ModBase(ModEntry(
+            root=PathStr.new('ExampleMod'), data=ModEntryModel.build(name='example_mod', path_main='app/main.py')))
+        path = mod.resolve_config_path('main/main_model.py')
+        with logger.mock_capture_writer() as capture:
+            assert mod.import_model_module('main/main_model.py') is None
+        assert capture.concat() == (
+            f'WARNING | DataInconsistent: model file "{path}" is not in the package "app" of the mod\n'
+        )
+
+    def test_non_python_file_is_reported(self):
+        """An index that names another file is reported, never imported."""
+        mod = make_mod()
+        path = mod.resolve_config_path('main/main_model.json')
+        with logger.mock_capture_writer() as capture:
+            assert mod.import_model_module('main/main_model.json') is None
+        assert capture.concat() == (
+            f'WARNING | DataInconsistent: model file "{path}" is not a python file\n'
+        )
 
 
 class TestBackendRole:

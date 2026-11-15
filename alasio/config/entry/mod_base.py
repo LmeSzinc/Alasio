@@ -13,6 +13,7 @@ from alasio.ext.cache import cached_property
 from alasio.ext.file.loadpy import LOADPY_CACHE
 from alasio.ext.path import PathStr
 from alasio.ext.path.atomic import atomic_read_bytes
+from alasio.ext.path.calc import to_python_import
 from alasio.logger import logger
 
 
@@ -181,14 +182,18 @@ class ModBase:
 
     def import_model_module(self, file):
         """
-        Import a model file as a module of this mod, in a worker process.
+        Import a model file as a module of its package, in a worker process.
 
         Returns the same module object the game script gets from
-        ``from module.config.main.main_model import Campaign``, so the class of
-        a config group is the class the script checks against.
+        ``from module.config.main.main_model import Campaign``, or from
+        ``from alasio.config.alasio.device_model import Emulator`` for a group
+        of alasio, so the class of a config group is the class the script
+        checks against.
 
         Args:
-            file (PathStr): Absolute path to {nav}_model.py
+            file (str): Relative path to {nav}_model.py from path_config, e.g.
+                "gems/gems_model.py", or "alasio/device_model.py" for a model
+                of alasio
 
         Returns:
             ModuleType | None: None when the file is not part of a package
@@ -197,33 +202,36 @@ class ModBase:
         name = self.package_name
         if not name:
             return None
-        # the path of the model file from the mod root, e.g.
-        # module/config/main/main_model.py, is already the dotted name of the
-        # package the worker imports the game script with
-        relative = os.path.relpath(str(file), str(self.root))
-        if relative.startswith(os.pardir):
+        path = self.resolve_config_path(file)
+        if not file.endswith('.py'):
+            logger.warning(f'DataInconsistent: model file "{path}" is not a python file')
             return None
-        relative = relative.replace(os.sep, '/')
-        if not relative.endswith('.py'):
-            return None
-        parts = relative[:-3].split('/')
-        if parts[0] != name:
-            # the mod root and path_main disagree on the package layout
+        # A model file is imported through the package that holds it: the
+        # package of the mod for a file of the mod, the package of the library
+        # for a file of alasio. An index names a file of the library with an
+        # "alasio/" prefix, so the library answers for it wherever the file is
+        # laid out, a release may ship the library inside the root of the mod.
+        if file.startswith('alasio/'):
+            package = ALASIO_CONFIG
+        elif self.entry.path_config.partition('/')[0] == name:
+            # the config folder is the first folder below the root of the mod,
+            # it must be the package path_main imports the script with
+            package = self.entry.path_config
+        else:
             logger.warning(
-                f'DataInconsistent: model file "{file}" is not in the package "{name}"')
+                f'DataInconsistent: model file "{path}" is not in the package "{name}" of the mod')
             return None
-        module_name = '.'.join(parts)
+        module_name = to_python_import(f'{package}/{file}')
         try:
             module = importlib.import_module(module_name)
         except ImportError as e:
             logger.warning(f'DataInconsistent: failed to import "{module_name}": {e}')
             return None
         module_file = getattr(module, '__file__', None)
-        if not module_file or os.path.normcase(os.path.abspath(module_file)) != \
-                os.path.normcase(os.path.abspath(str(file))):
+        if not module_file or os.path.normcase(os.path.abspath(module_file)) != os.path.normcase(path):
             # the package resolved to another file, importing it again would
             # give a second set of classes
-            logger.warning(f'DataInconsistent: module "{module_name}" is not "{file}"')
+            logger.warning(f'DataInconsistent: module "{module_name}" is not "{path}"')
             return None
         return module
 
@@ -308,10 +316,9 @@ class ModBase:
         Returns:
             Type[msgspec.Struct] | None:
         """
-        path = self.resolve_config_path(file)
         module = None
         if env.PROCESS_ROLE != 'backend':
-            module = self.import_model_module(path)
+            module = self.import_model_module(file)
         if module is None:
             try:
                 module = self.load_model(file)
