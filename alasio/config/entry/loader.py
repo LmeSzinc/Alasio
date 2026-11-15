@@ -2,7 +2,6 @@ from collections import defaultdict
 
 from msgspec import ValidationError
 
-from alasio.config.const import Const
 from alasio.config.entry.mod import Mod
 from alasio.config.entry.mod_entry import MOD_FOLDERS, ModEntry
 from alasio.config.entry.model import ConfigSetEvent
@@ -13,29 +12,6 @@ from alasio.ext.deep import *
 from alasio.ext.file.msgspecfile import deepcopy_msgpack
 from alasio.ext.path.calc import joinnormpath
 from alasio.logger import logger
-
-
-def get_i18n_data(i18n, keys, lang):
-    """
-    Read the translations of one arg, falling back to the default language.
-
-    A mod declares the languages its generated i18n carries, and the caller
-    resolved the request against them (ModBase.resolve_gui_lang), so the
-    lookup misses only when a single arg was never translated. Falling back
-    the way the nav names do keeps the label readable instead of blank.
-
-    Args:
-        i18n (dict): Translations of the nav, {group}.{arg}.{lang}.{field}
-        keys (list[str]): Group and arg of the translations
-        lang (str): Resolved GUI language of the request
-
-    Returns:
-        dict: Translations of the arg, empty when neither language has them
-    """
-    data = deep_get(i18n, [*keys, lang], default=None)
-    if not data:
-        data = deep_get(i18n, [*keys, Const.GUI_LANGUAGE_DEFAULT], default=None)
-    return data or {}
 
 
 class ModLoader:
@@ -148,8 +124,7 @@ class ModLoader:
 
         Args:
             mod_name (str):
-            lang (str): Requested GUI language, resolved against the
-                gui_language of the mod, see ModBase.resolve_gui_lang()
+            lang (str): GUI language to read, taken as is
 
         Returns:
             dict[str, dict[str, dict]]:
@@ -167,24 +142,16 @@ class ModLoader:
             # raise KeyError(f'No such mod: "{mod_name}"') from None
             return {}
 
-        lang = mod.resolve_gui_lang(lang)
-
         data = mod.nav_index_data()
         out = defaultdict(dict)
         for nav_name, card_name, meta in deep_iter_depth2(data):
             # Copy the whole meta, so scheduler and future attributes pass
             # through unchanged, only the i18n gets flattened.
             row = dict_copy(meta)
-            # no such language, try "en-US", then use keypath
             name = deep_get(row, ['i18n', lang])
             if name is None:
-                name = deep_get(row, ['i18n', 'en-US'])
-                # still no luck, use key as name
-                if name is None:
-                    if card_name == '_info':
-                        name = nav_name
-                    else:
-                        name = card_name
+                # no such language, use key as name
+                name = nav_name if card_name == '_info' else card_name
             # flatten i18n: keep the name of the requested language only
             row['i18n'] = name
             out[nav_name][card_name] = row
@@ -196,8 +163,8 @@ class ModLoader:
             mod_name (str):
             config_name (str):
             nav_name (str):
-            lang (str): Requested GUI language, resolved against the
-                gui_language of the mod, see ModBase.resolve_gui_lang()
+            lang (str): GUI language to read, taken as is: the caller resolves
+                it against the gui_language of the mod
 
         Returns:
 
@@ -210,8 +177,6 @@ class ModLoader:
         if not validate_nav_name(nav_name):
             # raise KeyError(f'Nav name format invalid: "{nav_name}"')
             return {}
-
-        lang = mod.resolve_gui_lang(lang)
 
         # prepare output dict
         config_index_data = mod.config_index_data()
@@ -244,13 +209,14 @@ class ModLoader:
                 except KeyError:
                     # this shouldn't happen
                     continue
-                # insert i18n
-                i18n_data = get_i18n_data(i18n, [group_name, arg_name], lang)
-                try:
-                    group_data.update(i18n_data)
-                except TypeError:
-                    # this shouldn't happen, as i18n_data should be dict
-                    continue
+                # insert i18n, a missing translation leaves the row as it is
+                i18n_data = deep_get(i18n, [group_name, arg_name, lang])
+                if i18n_data:
+                    try:
+                        group_data.update(i18n_data)
+                    except TypeError:
+                        # this shouldn't happen, as i18n_data should be dict
+                        pass
                 continue
 
             # normal args
@@ -263,13 +229,14 @@ class ModLoader:
                     # this shouldn't happen
                     continue
                 i18n_group = arg_data.get('i18ngroup', group_name)
-                # insert i18n
-                i18n_data = get_i18n_data(i18n, [i18n_group, arg_name], lang)
-                try:
-                    arg_data.update(i18n_data)
-                except TypeError:
-                    # this shouldn't happen, as i18n_data should be dict
-                    continue
+                # insert i18n, a missing translation leaves the row as it is
+                i18n_data = deep_get(i18n, [i18n_group, arg_name, lang])
+                if i18n_data:
+                    try:
+                        arg_data.update(i18n_data)
+                    except TypeError:
+                        # this shouldn't happen, as i18n_data should be dict
+                        pass
 
                 # insert config
                 if arg_name == '_info':

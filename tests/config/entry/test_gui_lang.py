@@ -14,7 +14,7 @@ from collections import defaultdict
 import pytest
 
 from alasio.config.const import Const
-from alasio.config.entry.loader import ModLoader, get_i18n_data
+from alasio.config.entry.loader import ModLoader
 from alasio.ext import env
 from alasio.ext.deep import deep_iter_depth2
 from alasio.ext.path import PathStr
@@ -102,10 +102,16 @@ class TestResolveGuiLang:
 
 
 class TestGetGuiNav:
-    """The nav of a mod is built in a language the mod translates."""
+    """
+    The nav of a mod is read in the requested language, without a fallback.
+
+    The loader takes the language as is: a card the requested language has no
+    name for is named by its key, so the caller decides which language to ask
+    for (ConnState.content_lang) and the loader never picks one itself.
+    """
 
     def test_names_of_an_unsupported_language(self, monkeypatch):
-        """A language ExampleMod does not translate still names every card."""
+        """A language ExampleMod does not translate names the cards by key."""
         # the mod folders resolve against PROJECT_ROOT, which other tests move
         monkeypatch.setattr(env, 'PROJECT_ROOT', env.ALASIO_ROOT)
         loader = ModLoader(env.ALASIO_ROOT, mod_folders=('ExampleMod',))
@@ -115,12 +121,21 @@ class TestGetGuiNav:
         nav = loader.get_gui_nav('example_mod', 'es-ES')
 
         assert nav
-        for cards in nav.values():
+        for nav_name, cards in nav.items():
             for card_name, card in cards.items():
-                assert isinstance(card['i18n'], str)
-                assert card['i18n'], f'empty name of {card_name}'
-                # the name of the fallback language, not the raw key
-                assert card['i18n'] != card_name
+                expected = nav_name if card_name == '_info' else card_name
+                assert card['i18n'] == expected
+
+    def test_no_fallback_to_the_default_language(self, monkeypatch):
+        """The names of en-US are not borrowed for another language."""
+        monkeypatch.setattr(env, 'PROJECT_ROOT', env.ALASIO_ROOT)
+        loader = ModLoader(env.ALASIO_ROOT, mod_folders=('ExampleMod',))
+
+        es = loader.get_gui_nav('example_mod', 'es-ES')
+        en = loader.get_gui_nav('example_mod', 'en-US')
+
+        assert es['alas']['card-Alas-Emulator']['i18n'] == 'card-Alas-Emulator'
+        assert en['alas']['card-Alas-Emulator']['i18n'] == 'Emulator Settings'
 
     def test_names_of_a_supported_language(self, monkeypatch):
         """The translated name of a supported language is used as is."""
@@ -133,7 +148,13 @@ class TestGetGuiNav:
 
 
 class TestGetGuiConfig:
-    """The config view of a mod is built in a language the mod translates."""
+    """
+    The config view is read in exactly the requested language.
+
+    The loader carries no language choice of its own: the caller resolves the
+    request against the gui_language of the mod (ModBase.resolve_gui_lang) and
+    the loader answers what the data of that language holds, nothing else.
+    """
 
     @pytest.fixture
     def loader(self, monkeypatch):
@@ -155,62 +176,69 @@ class TestGetGuiConfig:
         monkeypatch.setattr(mod, 'config_read', lambda config_name, ref: nested())
         return loader
 
-    @pytest.mark.parametrize('nav', ['alas', 'general', 'main'])
-    def test_a_language_the_mod_does_not_translate(self, loader, nav):
-        """An unsupported language renders exactly the default one, not blanks."""
-        loader_mod = loader.dict_mod['example_mod']
-        assert 'es-ES' not in loader_mod.entry.gui_language
+    def test_a_mod_nav_without_the_language_has_no_names(self, loader):
+        """A nav built from the mod's own translations answers no name at all.
 
-        view = loader.get_gui_config('example_mod', 'alas', nav, 'es-ES')
-        reference = loader.get_gui_config('example_mod', 'alas', nav, 'en-US')
+        No fallback is applied: the translations of one arg are an open set of
+        fields (name, help, option_i18n and custom ones), so there is nothing
+        the loader could synthesize for a language the data does not carry.
+        Choosing another language belongs to the caller.
+        """
+        view = loader.get_gui_config('example_mod', 'alas', 'general', 'es-ES')
+        reference = loader.get_gui_config('example_mod', 'alas', 'general', 'en-US')
 
         assert view
-        assert view == reference
+        assert view != reference
+        names = [data.get('name') for _, name, data in deep_iter_depth2(view) if name == '_info']
+        assert names
+        assert all(name is None for name in names), names
 
-    def test_names_are_never_empty(self, loader):
-        """Every row keeps a readable name instead of an empty label."""
+    def test_the_library_part_keeps_its_own_translations(self, loader):
+        """A view merging several i18n files reads each one as the data holds it.
+
+        The alasio groups of the 'alas' nav ship Spanish, the groups of the mod
+        do not: the view is the faithful read of both, not one language forced
+        onto the whole nav.
+        """
         view = loader.get_gui_config('example_mod', 'alas', 'alas', 'es-ES')
 
-        rows = [group_data for _, name, group_data in deep_iter_depth2(view) if name == '_info']
-        assert rows
-        for row in rows:
-            assert isinstance(row['name'], str)
-            assert row['name']
+        names = [data.get('name') for _, name, data in deep_iter_depth2(view) if name == '_info']
+        assert 'Ajustes de emulador' in names
+        assert None in names
 
+    def test_the_default_language_names_every_row(self, loader):
+        """en-US is complete, which is why the caller falls back to it."""
+        view = loader.get_gui_config('example_mod', 'alas', 'general', 'en-US')
 
-class TestGetI18nData:
-    """The translations of one arg fall back to the default language."""
+        names = [data.get('name') for _, name, data in deep_iter_depth2(view) if name == '_info']
+        assert names
+        assert all(isinstance(name, str) and name for name in names), names
 
-    # {group}.{arg}.{lang}.{field}
-    I18N = {
-        'Group': {
-            'Arg': {
-                'zh-CN': {'name': '参数', 'help': '说明'},
-                'en-US': {'name': 'Argument', 'help': 'Help'},
-            },
-            'Untranslated': {'en-US': {'name': 'Only English'}},
-        }
-    }
+    def test_the_requested_language_is_the_one_read(self, loader):
+        """A translated language answers its own strings."""
+        view = loader.get_gui_config('example_mod', 'alas', 'alas', 'zh-CN')
 
-    def test_exact_language(self):
-        """The translations of the requested language are used."""
-        assert get_i18n_data(self.I18N, ['Group', 'Arg'], 'zh-CN') == {'name': '参数', 'help': '说明'}
+        names = [group_data['name'] for _, name, group_data in deep_iter_depth2(view) if name == '_info']
+        assert '模拟器设置' in names
 
-    def test_falls_back_to_the_default_language(self):
-        """An arg without the requested language uses en-US."""
-        assert get_i18n_data(self.I18N, ['Group', 'Arg'], 'es-ES') == {
-            'name': 'Argument',
-            'help': 'Help',
-        }
+    def test_every_resolved_language_names_every_row(self, loader):
+        """Resolving first, the way the topic does, never yields a blank row.
 
-    def test_an_arg_the_default_language_misses_is_empty(self):
-        """Nothing is invented when neither language carries the arg."""
-        assert get_i18n_data(self.I18N, ['Group', 'Missing'], 'zh-CN') == {}
-        assert get_i18n_data(self.I18N, ['Missing', 'Arg'], 'en-US') == {}
+        This is the contract the connection relies on: the caller passes a
+        language the mod declares (ConnState.content_lang), so the names are
+        present.
+        """
+        mod = loader.dict_mod['example_mod']
 
-    def test_the_result_is_always_a_dict(self):
-        """A lookup miss answers a dict, so update() cannot fail on a str."""
-        assert get_i18n_data({}, ['Group', 'Arg'], 'en-US') == {}
+        for lang in ('zh-CN', 'en-US', 'es-ES', 'ko-KR'):
+            resolved = mod.resolve_gui_lang(lang)
+            view = loader.get_gui_config('example_mod', 'alas', 'alas', resolved)
+            rows = [group_data for _, name, group_data in deep_iter_depth2(view) if name == '_info']
+
+            assert rows, f'no rows for {lang}'
+            for row in rows:
+                assert isinstance(row.get('name'), str)
+                assert row['name'], f'blank name for {lang} at {resolved}'
 
 
 class TestShippedLanguages:

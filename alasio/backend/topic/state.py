@@ -47,9 +47,10 @@ class ConnState(BaseTopic):
 
         ``lang`` is the language of the alasio interface; the names, helps and
         task titles of a config come from its mod, which translates its own
-        ``gui_language`` only. This resolves the interface language against
-        that set, so a mod that does not carry the user's language still shows
-        its content in a language it does (see ModBase.resolve_gui_lang).
+        ``gui_language`` only. The loader reads its data in exactly the
+        language it is given, so picking the language a mod carries is decided
+        here, once: the interface language resolved against that set (see
+        ModBase.resolve_gui_lang).
         """
         state = await self.nav_state
         mod = MOD_LOADER.dict_mod.get(state.mod_name)
