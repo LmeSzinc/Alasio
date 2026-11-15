@@ -348,22 +348,29 @@ class ModLoader:
                   for task_group in list_task_group]
         return mod.config_group_batch_reset(config_name, events)
 
-    def get_queue_i18n(self, mod_name):
+    def get_queue_i18n(self, mod_name, lang):
         """
+        Get the display name of every task of the task queue.
+
         Args:
             mod_name (str):
+            lang (str): GUI language to read, taken as is: the caller resolves
+                it against the gui_language of the mod
 
         Returns:
-            dict[str, dict[str, str]]:
-                key: {task_name}.{lang}
-                value: i18n translation
+            dict[str, str]:
+                key: {task_name}
+                value: name of the task in the requested language, the task
+                    name itself when the language has no translation
         """
         try:
             mod = self.dict_mod[mod_name]
         except KeyError:
             logger.warning(f'No such mod: "{mod_name}"')
-            return []
-        return mod.queue_index_data()
+            return {}
+        # {task_name}.{lang}=i18n -> {task_name}=i18n
+        data = mod.queue_index_data()
+        return {task: i18n.get(lang, task) for task, i18n in deep_iter_depth1(data)}
 
 
 MOD_LOADER = ModLoader(env.PROJECT_ROOT)

@@ -9,15 +9,18 @@ asking the user again -- the requested language, else en-US, else the first
 language the mod declares -- so a mod that does not carry the user's language
 still renders readable content.
 """
+import json
 from collections import defaultdict
 
 import pytest
 
 from alasio.config.const import Const
 from alasio.config.entry.loader import ModLoader
+from alasio.config.entry.model import JSON_PACK_CACHE, MOD_JSON_CACHE
 from alasio.ext import env
 from alasio.ext.deep import deep_iter_depth2
 from alasio.ext.path import PathStr
+from alasio.logger import logger
 from alasio.testing.filesystem import fs  # noqa: F401
 
 MOD_ENTRY_FILE = 'module/config/_index/mod_entry.yaml'
@@ -239,6 +242,63 @@ class TestGetGuiConfig:
             for row in rows:
                 assert isinstance(row.get('name'), str)
                 assert row['name'], f'blank name for {lang} at {resolved}'
+
+
+class TestGetQueueI18n:
+    """The task queue is read in exactly the requested language."""
+
+    # {task_name}.{lang}=name
+    QUEUE = {
+        'Farming': {'zh-CN': '刷宝石', 'en-US': 'Gems'},
+        'RestartDevice': {'en-US': 'Restart Device'},
+    }
+
+    @pytest.fixture(autouse=True)
+    def clean_caches(self):
+        """The json caches are global: leave them as found."""
+        JSON_PACK_CACHE.gc()
+        MOD_JSON_CACHE.gc(-1)
+        yield
+        JSON_PACK_CACHE.gc()
+        MOD_JSON_CACHE.gc(-1)
+
+    @pytest.fixture
+    def loader(self, fs, monkeypatch):
+        """A loader over a mod whose task queue carries the fixed names."""
+        root = PathStr.new(fs.root_dir.path).joinpath('project')
+        fs.create_dir(root)
+        monkeypatch.setattr(env, 'PROJECT_ROOT', root)
+        mod_root = write_mod(fs, root, 'mod_a', 'a', ('zh-CN', 'en-US'))
+        fs.create_file(
+            mod_root.joinpath('module/config/_index/queue.index.json'),
+            contents=json.dumps(self.QUEUE),
+        )
+        return ModLoader(root, mod_folders=('mod_a',))
+
+    def test_flattens_to_the_requested_language(self, loader):
+        """The output is {task: name}, the shape the topic serves as is."""
+        assert loader.get_queue_i18n('a', 'zh-CN') == {
+            'Farming': '刷宝石',
+            # no zh-CN translation: named by its key
+            'RestartDevice': 'RestartDevice',
+        }
+        assert loader.get_queue_i18n('a', 'en-US') == {
+            'Farming': 'Gems',
+            'RestartDevice': 'Restart Device',
+        }
+
+    def test_a_language_the_data_does_not_carry_names_every_task(self, loader):
+        """An untranslated language answers keys, never a borrowed name."""
+        assert loader.get_queue_i18n('a', 'es-ES') == {
+            'Farming': 'Farming',
+            'RestartDevice': 'RestartDevice',
+        }
+
+    def test_an_unknown_mod_answers_an_empty_dict(self, loader):
+        """A mod the loader does not know has no queue."""
+        with logger.mock_capture_writer() as capture:
+            assert loader.get_queue_i18n('ghost_mod', 'en-US') == {}
+        assert capture.fd.any_contains('No such mod: "ghost_mod"')
 
 
 class TestShippedLanguages:

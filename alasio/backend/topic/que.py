@@ -12,7 +12,6 @@ from alasio.backend.topic.state import ConnState
 from alasio.backend.ws.ws_topic import BaseTopic
 from alasio.config.entry.loader import MOD_LOADER
 from alasio.config.entry.model import TaskItem
-from alasio.ext.deep import deep_iter_depth1
 from alasio.ext.singleton import Singleton
 from alasio.logger import logger
 
@@ -680,13 +679,7 @@ class TaskQueueI18nSource(KeyedSource, DiskCache):
                 key: {task_name}
                 value: i18n translation
         """
-        data = MOD_LOADER.get_queue_i18n(self.mod_name)
-        # {task_name}.{lang}=i18n -> {task_name}=i18n
-        i18n_dict = {}
-        for task, i18n in deep_iter_depth1(data):
-            value = i18n.get(self.lang, task)
-            i18n_dict[task] = value
-        return i18n_dict
+        return MOD_LOADER.get_queue_i18n(self.mod_name, self.lang)
 
 
 class TaskQueueI18n(BaseTopic):
