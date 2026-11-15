@@ -435,6 +435,13 @@ jobs:
         run: pnpm run smoke:csp
         working-directory: webapp
 
+      # the locale packs are part of the electron distribution, which the webapp
+      # job deliberately does not download: the guard over them runs here, where
+      # the binary the client ships is installed
+      - name: Locale packs
+        run: pnpm exec vitest run main/locales.test.ts
+        working-directory: webapp
+
   wheel:
     name: wheel
     needs: [python-tests, minimum, frontend, webapp, smoke]
