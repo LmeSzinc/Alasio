@@ -16,11 +16,15 @@
   // already matches the host display theme (mode-watcher alone cannot
   // know it: in this SPA build its FOUC script is absent from the served
   // HTML, and its initial mode only comes from localStorage/system
-  // preference). Deliberately captured once, not reactive: rewriting the
-  // src would reload the iframe. Theme changes after load are propagated
-  // through the alasio:theme downlink instead.
+  // preference). The language pair mirrors the `alasio:lang` downlink
+  // (display value + config value) so the first paint already renders in
+  // the host's language instead of the language the frontend guesses from
+  // the browser until the downlink arrives. Deliberately captured once,
+  // not reactive: rewriting the src would reload the iframe. Changes
+  // after load are propagated through the alasio:* downlinks instead.
   let iframeSrc = $state(
-    `http://127.0.0.1:${sharedState.backendPort}/?embedded=electron&theme=${sharedState.displayTheme}`,
+    `http://127.0.0.1:${sharedState.backendPort}/?embedded=electron&theme=${sharedState.displayTheme}` +
+      `&lang=${sharedState.displayLang}&langConfig=${sharedState.configLang}`,
   );
 
   // The embedded frontend origin. Downlink messages are only sent to this

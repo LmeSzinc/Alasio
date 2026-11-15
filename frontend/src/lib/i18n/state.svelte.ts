@@ -84,6 +84,31 @@ function applyLang(lang: Lang, config?: ConfigLang) {
 }
 
 /**
+ * Apply the language pair the host passes in the iframe URL of an embedded
+ * session. The pair mirrors the `alasio:lang` downlink (display language plus
+ * config value), so the first paint already uses the host's language instead
+ * of the browser-guessed one the module fell back to above. The downlink
+ * repeats the same values once the host is reachable, which then applies
+ * nothing (applyLang no-ops on identical values).
+ *
+ * Only the ?embedded=electron contract is honored: a remote visitor who edits
+ * the query keeps the per-client behavior.
+ */
+function applyEmbeddedUrlLang() {
+  const params = new URLSearchParams(location.search);
+  const lang = params.get("lang");
+  if (!lang || !(SUPPORTED_LANGS as readonly string[]).includes(lang)) return;
+  const config = params.get("langConfig");
+  const validConfig =
+    config !== null && (config === "system" || (SUPPORTED_LANGS as readonly string[]).includes(config));
+  applyLang(lang as Lang, validConfig ? (config as ConfigLang) : undefined);
+}
+
+if (browser && isElectronSession) {
+  applyEmbeddedUrlLang();
+}
+
+/**
  * Report the user-chosen config value to the host (webapp main process).
  * The host is the source of truth: it derives the display language and
  * sends it back through the downlink. Remote browser sessions have no
