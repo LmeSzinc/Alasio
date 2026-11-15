@@ -46,10 +46,11 @@ export function createWindow(): BrowserWindow {
     title: "Alasio",
     show: showImmediately,
     // Match the native window background to the display theme (values are
-    // the renderer's --background tokens) so no white flash appears while
-    // the renderer is still loading. The renderer paints its own themed
+    // the renderer's --background tokens from renderer/app.css: #f3f3f3 for
+    // :root and #161618 for .dark) so no white flash appears while the
+    // renderer is still loading. The renderer paints its own themed
     // background as soon as it is up.
-    backgroundColor: appState.displayTheme === "dark" ? "#18181b" : "#f3f3f3",
+    backgroundColor: appState.displayTheme === "dark" ? "#161618" : "#f3f3f3",
     webPreferences: {
       preload: path.join(__dirname, "../preload/index.js"),
       contextIsolation: true,
