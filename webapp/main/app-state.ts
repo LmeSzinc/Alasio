@@ -144,6 +144,21 @@ class AppState {
       this.configLang === "system"
         ? matchSystemLanguage(app.getLocale(), app.getPreferredSystemLanguages())
         : this.configLang;
+
+    // Drive Chromium's own light/dark state as well. The renderer paints
+    // itself from the display theme (the `.dark` class + colorScheme), but the
+    // native parts Chromium renders (devtools, context menus on Linux/Windows)
+    // and `prefers-color-scheme` inside the renderer follow `themeSource`.
+    // Without this the app could be dark while the embedded page still reports
+    // the OS preference. Assigning 'system' restores the OS default, so a
+    // config value of 'system' needs no special case.
+    //
+    // Order matters when the config is 'system': themeSource must be settled
+    // first, otherwise shouldUseDarkColors below would answer for the previous
+    // override. The 'updated' listener is filtered on configTheme, so this
+    // assignment cannot feed back into deriveDisplay while the override is a
+    // concrete value.
+    nativeTheme.themeSource = this.configTheme;
     this.displayTheme =
       this.configTheme === "system" ? (nativeTheme.shouldUseDarkColors ? "dark" : "light") : this.configTheme;
   }
