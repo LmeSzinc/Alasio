@@ -21,23 +21,30 @@
     %sveltekit.head%
     <script>
       // Embedded sessions: the host (webapp) passes its display theme in the
-      // iframe URL (?theme=dark|light). Apply it before the first paint so
-      // the embedded app opens already themed. This is needed because
-      // mode-watcher's FOUC script is not present in this SPA build
-      // (ssr/prerender disabled), and even when present it only knows
-      // localStorage/system preference, which can differ from the host
-      // config on first run. Persist the value to mode-watcher's storage key
-      // (its default modeStorageKey) so ModeWatcher's onMount initialization
-      // keeps the same mode. Remote sessions without the theme param are
-      // unaffected (per-client behavior preserved).
+      // iframe URL (?theme=dark|light) together with the config value it
+      // resolves to (?themeConfig=system|light|dark). Apply the display value
+      // before the first paint so the embedded app opens already themed, and
+      // persist the config value to mode-watcher's storage key (its default
+      // modeStorageKey) so ModeWatcher's onMount initialization keeps the same
+      // mode. Persisting the resolved value instead would pin the page to one
+      // mode: a 'system' preference has to keep following the os.
+      //
+      // The display value is needed because mode-watcher's FOUC script is not
+      // present in this SPA build (ssr/prerender disabled), and even when
+      // present it only knows localStorage/system preference, which can differ
+      // from the host config on first run. Remote sessions without the theme
+      // param are unaffected (per-client behavior preserved).
       (() => {
         try {
-          const theme = new URLSearchParams(window.location.search).get("theme");
+          const params = new URLSearchParams(window.location.search);
+          const theme = params.get("theme");
           if (theme === "light" || theme === "dark") {
             const root = document.documentElement;
             root.classList.toggle("dark", theme === "dark");
             root.style.colorScheme = theme;
-            localStorage.setItem("mode-watcher-mode", theme);
+            const config = params.get("themeConfig");
+            const stored = config === "system" || config === "light" || config === "dark" ? config : theme;
+            localStorage.setItem("mode-watcher-mode", stored);
           }
         } catch {}
       })();

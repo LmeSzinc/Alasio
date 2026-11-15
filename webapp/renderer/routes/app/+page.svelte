@@ -24,6 +24,7 @@
   // after load are propagated through the alasio:* downlinks instead.
   let iframeSrc = $state(
     `http://127.0.0.1:${sharedState.backendPort}/?embedded=electron&theme=${sharedState.displayTheme}` +
+      `&themeConfig=${sharedState.configTheme}` +
       `&lang=${sharedState.displayLang}&langConfig=${sharedState.configLang}`,
   );
 
@@ -42,11 +43,14 @@
   let iframeLoaded = $state(false);
 
   // Send the current display values down to the embedded frontend.
-  // The lang message also carries the host config value so the frontend's
-  // configLang converges with the host (its own guess from cookie/browser
-  // may differ on first run). Sending the same value again is harmless:
-  // the frontend no-ops on identical values. Dpi scaling has a single
-  // value (no config/display split) and is sent as-is.
+  // Both the lang and the theme message also carry the host config value, so
+  // the frontend converges with the host instead of keeping its own guess
+  // (its config may differ on first run), and so a 'system' preference is
+  // not flattened into the concrete value it currently resolves to -- the
+  // page has to keep following the os when the user picked 'system'.
+  // Sending the same value again is harmless: the frontend no-ops on
+  // identical values. Dpi scaling has a single value (no config/display
+  // split) and is sent as-is.
   function sendDownlink() {
     const frame = iframe;
     if (!frame?.contentWindow) return;
@@ -55,7 +59,10 @@
       { type: "alasio:lang", lang: sharedState.displayLang, configLang: sharedState.configLang },
       origin,
     );
-    frame.contentWindow.postMessage({ type: "alasio:theme", theme: sharedState.displayTheme }, origin);
+    frame.contentWindow.postMessage(
+      { type: "alasio:theme", theme: sharedState.displayTheme, configTheme: sharedState.configTheme },
+      origin,
+    );
     frame.contentWindow.postMessage({ type: "alasio:dpi-scaling", dpiScaling: sharedState.dpiScaling }, origin);
   }
 
