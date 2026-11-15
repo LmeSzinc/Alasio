@@ -649,6 +649,17 @@ class TestRequest:
         await site.warm_up()
         resp = await get(site, '/')
         assert resp.headers['content-security-policy'] == CSP
+        # the fallback allows no inline script, so the page cannot boot
+        assert 'sha256-' not in resp.headers['content-security-policy']
+
+    @pytest.mark.trio
+    async def test_page_without_meta_warns_at_warm_up(self, fs):
+        """The page will not boot: the operator has to see why."""
+        site = make_site(fs, files=dict(FILES, **{INDEX_HTML: HTML_NO_META.encode()}))
+        with logger.mock_capture_writer() as capture:
+            await site.warm_up()
+        assert capture.fd.any_contains('carries no CSP meta')
+        assert capture.fd.any_contains('its inline scripts will not run')
 
     @pytest.mark.trio
     async def test_asgi_call_serves_the_response(self, site):
@@ -718,6 +729,9 @@ class TestHtmlCsp:
     (intersection), so a page whose meta is not recognized would fall back to
     the constant policy, which has no script hashes: every inline script of
     the page would be blocked.
+
+    Parsing and building are separate steps: the server parses the page once
+    and derives the header from that value.
     """
 
     # The meta SvelteKit writes (kit.csp, hash mode): lower case http-equiv, no
@@ -732,7 +746,7 @@ class TestHtmlCsp:
     )
 
     def test_mirrors_the_meta_sveltekit_writes(self):
-        csp = frontend._html_csp(self.KIT_META.encode())
+        csp = frontend._csp_header(frontend._csp_meta(self.KIT_META))
         assert csp == (
             "default-src 'self'; script-src 'self' "
             "'sha256-mL/IynlYM0zue3qVlMFwZZ3c3sKlBu2qUk0jGKeiung=' "
@@ -745,7 +759,18 @@ class TestHtmlCsp:
             '<meta http-equiv="content-security-policy" '
             'content="script-src \'self\'; frame-ancestors \'none\'">'
         )
-        assert frontend._html_csp(page.encode()) == "script-src 'self'; frame-ancestors 'none'"
+        assert frontend._csp_header(frontend._csp_meta(page)) == "script-src 'self'; frame-ancestors 'none'"
 
     def test_falls_back_without_a_meta(self):
-        assert frontend._html_csp(HTML_NO_META.encode()) == CSP
+        assert frontend._csp_header(frontend._csp_meta(HTML_NO_META)) == CSP
+
+    def test_fallback_allows_no_inline_script(self):
+        """A hash frozen in the constant could only be stale.
+
+        The fallback is reached by a page that lost its meta, and no hash
+        written here can name that page's scripts: the build writes them into
+        the meta instead. A hash in the constant would suggest a coverage that
+        does not exist.
+        """
+        assert 'sha256-' not in CSP
+        assert "script-src 'self'" in CSP
