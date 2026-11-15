@@ -16,8 +16,6 @@ from alasio.logger.utils import (
 from alasio.logger.writer import CaptureWriter, LogWriter
 
 patch_startup()
-patch_rich_traceback_extract()
-patch_rich_traceback_links()
 
 
 def rich_formatter(exc_info):
@@ -31,6 +29,12 @@ def rich_formatter(exc_info):
     # wrap structlog.dev.RichTracebackFormatter().__call__() as an input to ExceptionRenderer
     from rich.console import Console
     from rich.traceback import Traceback
+
+    # Patching rich.traceback imports the whole rich renderer stack, about 100ms.
+    # Both patches only matter when a traceback is formatted, so apply them here
+    # instead of on import: a process without an exception never pays for them.
+    patch_rich_traceback_extract()
+    patch_rich_traceback_links()
 
     tb = Traceback.from_exception(
         # see structlog.dev.RichTracebackFormatter()
