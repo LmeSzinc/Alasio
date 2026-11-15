@@ -51,6 +51,11 @@ whose file is already in the folder and matches the hash of its link is
 skipped, a downloaded file is checked against the hash of its link before it is
 put at the final path (a mismatch raises WheelHashError and no file is written).
 
+`get_metadata(url)` fetches the PEP 658 metadata file of one wheel, the
+`METADATA` the index serves next to it: a caller that only needs the headers of
+a distribution, e.g. its `Requires-Dist` lines, reads a few KB instead of the
+whole wheel.
+
 The files of a distribution are never extracted or installed here: the caller
 decides what happens to them (install, keep, delete), the fetcher only writes
 them and returns their paths.
@@ -75,7 +80,7 @@ from alasio.deploy.pip_download._specifiers import InvalidSpecifier
 from alasio.deploy.pip_download._target_python import TargetPython
 from alasio.deploy.pip_download._utils import InvalidWheelFilename, canonicalize_name, check_requires_python
 from alasio.deploy.pip_download._version import InvalidVersion, Version
-from alasio.deploy.pip_download._wheel import Wheel
+from alasio.deploy.pip_download._wheel import Wheel, is_pure_wheel
 from alasio.ext.path import PathStr
 from alasio.ext.path.atomic import atomic_read_bytes_stream
 from alasio.logger import logger
@@ -200,26 +205,6 @@ class WheelInfo(msgspec.Struct):
     hashes: Dict[str, str]
 
 
-def _is_pure_python3(wheel):
-    """
-    Whether the wheel is a pure python wheel of python 3.
-
-    The equivalent of `fetch_wheel._is_pure_python3`: the ABI and the platform
-    tags are `none-any`, so the file has no environment constraint, and the
-    python tag covers python 3 ('py3', 'py2.py3', 'py38', ...).
-
-    Args:
-        wheel (Wheel): The wheel to check
-
-    Returns:
-        bool: True for a pure python wheel of python 3
-    """
-    return any(
-        tag.abi == 'none' and tag.platform == 'any' and tag.interpreter.startswith('py3')
-        for tag in wheel.file_tags
-    )
-
-
 def _requires_python_ok(link, target):
     """
     Whether the target interpreter satisfies the `Requires-Python` of a link.
@@ -307,7 +292,7 @@ def select_wheels(links, name, version, mode: DownloadMode, target=None):
     elif mode == DOWNLOAD_MODE_PY3_ANY:
         eligible = [
             candidate for candidate in candidates
-            if _is_pure_python3(candidate.wheel)
+            if is_pure_wheel(candidate.wheel.file_tags)
         ]
     else:
         # DOWNLOAD_MODE_ALL: every wheel of the version
@@ -663,3 +648,81 @@ class PypiFile(AsyncHttpProbe):
         await self._http.stream(source, consume, follow_redirects=True)
         await trio.to_thread.run_sync(file.atomic_write, b''.join(collected))
         return WheelInfo(file, computed)
+
+    async def get_metadata(self, url, expected=''):
+        """
+        Download the PEP 658 metadata file of a wheel.
+
+        The file is the `METADATA` of the wheel served next to it
+        (`{wheel_url}.metadata`), so a caller that only needs the headers of a
+        distribution, e.g. its `Requires-Dist` lines, downloads a few KB
+        instead of the whole wheel. Nothing is written: the bytes are returned.
+
+        The transfer does not go through the probe layer either, for the same
+        reason as get_wheel(): a file is served by the host of its url.
+
+        Args:
+            url (str): Url of the metadata file, the `#sha256=` fragment of
+                the link included, see Link.metadata_url
+            expected (str): sha256 hex the index declares for the file, '' when
+                it declares none (TOFU, like a link without a hash)
+
+        Returns:
+            bytes: Content of the metadata file
+
+        Raises:
+            WheelHashError: If the bytes do not match the declared sha256
+            httpx2.HTTPError: If the request fails
+        """
+        logger.info(f'Download metadata: "{url.split("#", 1)[0]}"')
+        return await self.get_bytes(url, expected)
+
+    async def get_bytes(self, url, expected=''):
+        """
+        Download one file into memory, checked against a digest of its link.
+
+        A caller that only needs part of a file reads it here instead of
+        get_wheel(): the index files of a distribution that publishes no PEP 658
+        metadata, where the METADATA of a wheel has to be read out of the wheel
+        itself, are one case. Nothing is written to the disk, so there is no
+        temporary file to clean up.
+
+        Args:
+            url (str): Absolute url of the file, the fragment of its link
+                included (`#sha256=...`)
+            expected (str): sha256 hex the index declares for the file, '' when
+                it declares none (TOFU, like a link without a hash). The
+                fragment of the url is read the same way when it carries a
+                sha256 and this value is ''
+
+        Returns:
+            bytes: Content of the file
+
+        Raises:
+            WheelHashError: If the bytes do not match the declared sha256
+            httpx2.HTTPError: If the request fails
+        """
+        link = Link(url)
+        source = link.url_without_fragment
+        digest_name, digest_value = _expected_hash(link)
+        if not expected and digest_name == 'sha256':
+            expected = digest_value
+        collected = []
+
+        async def consume(response):
+            digest = hashlib.sha256()
+            chunks = []
+            async for chunk in response.aiter_bytes():
+                chunks.append(chunk)
+                digest.update(chunk)
+            value = digest.hexdigest()
+            if expected and value != expected:
+                raise WheelHashError(
+                    f'Hash of "{source}" does not match the index: {value} != {expected}')
+            # the buffer is local until the transfer completes: a failed
+            # attempt leaves nothing behind for the retry
+            collected.clear()
+            collected.extend(chunks)
+
+        await self._http.stream(source, consume, follow_redirects=True)
+        return b''.join(collected)

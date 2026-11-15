@@ -8,16 +8,39 @@ are the source implementation. The filename parse itself lives in
 sibling `_utils` module.
 
 Usage:
-    from alasio.deploy.pip_download._wheel import Wheel
+    from alasio.deploy.pip_download._wheel import Wheel, is_pure_wheel
 
     wheel = Wheel('httpx-0.28.1-py3-none-any.whl')
     wheel.name                      # 'httpx'
     wheel.supported(supported_tags) # True
+    is_pure_wheel(wheel.file_tags)  # True
 """
 
 from alasio.deploy.pip_download._utils import InvalidWheelFilename, parse_wheel_filename
 
-__all__ = ['InvalidWheelFilename', 'Wheel']
+__all__ = ['InvalidWheelFilename', 'Wheel', 'is_pure_wheel']
+
+
+def is_pure_wheel(tags):
+    """
+    Whether a set of tags describes a pure python wheel of python 3.
+
+    The ABI and the platform tags are `none-any`, so the file installs on any
+    system, and the python tag covers python 3 ('py3', 'py2.py3', 'py38', ...).
+    This is the rule of the pack channel: the dependency packs are built from
+    the one wheel a version ships that matches it, see
+    alasio.deploy_dev.pack_server.repo_dep.
+
+    Args:
+        tags (Iterable[Tag]): The tags of a wheel, e.g. Wheel.file_tags
+
+    Returns:
+        bool: True for a pure python wheel of python 3
+    """
+    return any(
+        tag.abi == 'none' and tag.platform == 'any' and tag.interpreter.startswith('py3')
+        for tag in tags
+    )
 
 
 class Wheel:

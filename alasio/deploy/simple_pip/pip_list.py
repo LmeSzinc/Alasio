@@ -499,14 +499,68 @@ class PipList:
         return version
 
 
+def iter_metadata_headers(content):
+    """
+    Iter the headers of a metadata file, METADATA or PKG-INFO.
+
+    The file is an email style header block (PEP 566): one ``Name: value`` per
+    line, the block ends at the empty line before the body, and a line that
+    starts with a space or a tab continues the value of the header above it
+    (RFC 822, joined with a space). A line of the width only is a continuation
+    too: the License of a METADATA written by a build backend holds them, and
+    the headers after it, ``Requires-Dist`` included, still belong to the
+    block.
+
+    The headers are yielded in the order of the file, a repeated name several
+    times: ``Requires-Dist`` repeats once per dependency, so a reader that
+    wants all of them must not collect the block in a dict (see the callers).
+
+    Args:
+        content (str): Content of the metadata file, the body included: the
+            read stops at the empty line that ends the header block
+
+    Yields:
+        tuple[str, str]: (lowercase header name, value), the continuation lines
+            of a value already joined
+    """
+    key = ''
+    value = ''
+    for line in content.splitlines():
+        if not line:
+            # the empty line that ends the header block, RFC 822. A line of the
+            # width only is a continuation, not that line
+            break
+        if line[0] in ' \t':
+            # a folded continuation of the header above
+            if key:
+                value = ' '.join(part for part in (value, line.strip()) if part)
+            continue
+        if key:
+            yield key, value
+        key, sep, value = line.partition(':')
+        key = key.strip().lower()
+        if not sep or not key:
+            # a line that holds no header, e.g. of a broken metadata file: the
+            # continuation lines after it fold into nothing
+            key = ''
+            continue
+        value = value.strip()
+    if key:
+        yield key, value
+
+
 def _read_headers(file):
     """
     Read the headers of a metadata file, METADATA or PKG-INFO.
 
-    Only the headers are read: the body of the file holds the description
-    of a distribution and can be hundreds of KB, the listing needs two
-    headers. The header block ends at the first empty line, RFC 822, so
-    the read stops there and the body is never read.
+    The file is sliced to its header block and parsed by
+    iter_metadata_headers(), the parser the release side and the pack_deps
+    tool use, so every caller reads a header the same way. The slice here is
+    the one difference between this caller and the others: the parser takes a
+    text, this one has a path, and the body of the file (the description of
+    the distribution, a few hundred KB to a few MB) must not be read for a
+    listing that needs two headers. The boundary is the same one the parser
+    stops at, an empty line, RFC 822.
 
     Args:
         file (str): Path of the metadata file
@@ -519,7 +573,7 @@ def _read_headers(file):
             file can not be read, e.g. a missing or a broken file
     """
     headers = {}
-    key = ''
+    block = []
     try:
         # The metadata of a distribution is UTF-8, PEP 566, a file written
         # by hand or edited by a tool may hold a byte order mark or other
@@ -527,24 +581,15 @@ def _read_headers(file):
         # byte in them must not fail the whole listing
         with open(file, 'r', encoding='utf-8-sig', errors='replace') as f:
             for line in f:
-                if not line.strip():
-                    # The empty line that ends the header block, RFC 822
+                if not line.strip('\r\n'):
+                    # the empty line that ends the header block, RFC 822: the
+                    # body below it is not read, it can be hundreds of KB and
+                    # the listing needs two headers
                     break
-                if line[0] in ' \t':
-                    # A folded continuation of the value of the header above
-                    if key:
-                        headers[key] = ' '.join(part for part in (headers[key], line.strip()) if part)
-                    continue
-                key, sep, value = line.partition(':')
-                key = key.strip().lower()
-                if not sep or not key:
-                    # A line that holds no header, e.g. of a broken metadata
-                    # file: the next continuation folds into nothing
-                    key = ''
-                    continue
-                if key not in headers:
-                    headers[key] = value.strip()
+                block.append(line)
     except OSError:
         # Missing, unreadable, a directory, ...
         return {}
+    for key, value in iter_metadata_headers(''.join(block)):
+        headers.setdefault(key, value)
     return headers

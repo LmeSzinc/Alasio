@@ -6,12 +6,13 @@ Ported from `pip/_internal/models/link.py` (pip, MIT): the `Link` class, the
 `HTMLLinkParser` and `parse_links` are ported from
 `pip/_internal/index/collector.py` (pip, MIT).
 
-The parts of the source the fetcher does not use are not copied: the metadata
-file of PEP 658, the upload time, the egg fragment of a legacy index and the
-vcs/file links. `_ensure_quoted_url` is simplified: the path is unquoted and
-quoted back with quote(), instead of the reserved character walk of the source
-(a PEP 503 page of a mirror carries http/https links, a local file url never
-reaches the fetcher).
+The parts of the source the fetcher does not use are not copied: the upload
+time, the egg fragment of a legacy index and the vcs/file links. The metadata
+file of PEP 658 is read as the raw attribute only (`Link.metadata`), the
+caller that fetches it is the one that parses the value. `_ensure_quoted_url`
+is simplified: the path is unquoted and quoted back with quote(), instead of
+the reserved character walk of the source (a PEP 503 page of a mirror carries
+http/https links, a local file url never reaches the fetcher).
 
 Usage:
     from alasio.deploy.pip_download._link import HTMLLinkParser, parse_links
@@ -169,15 +170,19 @@ class Link:
             link carries none
         yanked_reason (str): Value of `data-yanked`, None when the file is not
             yanked
+        metadata (str | dict | bool): Value of `data-dist-info-metadata`
+            (`dist-info-metadata` of a JSON page), the PEP 658 declaration of
+            the metadata file of the wheel: True, a `sha256=<hex>` string, or a
+            hash dict. None when the index serves no separate metadata
     """
 
     __slots__ = [
         '_parsed_url', '_url', '_path', '_hashes',
-        'comes_from', 'requires_python', 'yanked_reason',
+        'comes_from', 'requires_python', 'yanked_reason', 'metadata',
     ]
 
     def __init__(self, url, comes_from=None, requires_python=None, yanked_reason=None,
-                 hashes=None):
+                 hashes=None, metadata=None):
         """
         Args:
             url (str): Url of the link, the href of the anchor
@@ -186,6 +191,8 @@ class Link:
             yanked_reason (str, optional): Value of `data-yanked`
             hashes (dict[str, str], optional): Hashes of the file whose source
                 is not the fragment of the url
+            metadata (str | dict | bool, optional): Value of
+                `data-dist-info-metadata`, see the class attributes
         """
         self._parsed_url = urllib.parse.urlsplit(url)
         self._url = url
@@ -202,6 +209,7 @@ class Link:
         self.comes_from = comes_from
         self.requires_python = requires_python if requires_python else None
         self.yanked_reason = yanked_reason
+        self.metadata = metadata
 
     @classmethod
     def from_json(cls, file_data, page_url):
@@ -239,6 +247,7 @@ class Link:
             requires_python=pyrequire,
             yanked_reason=yanked_reason,
             hashes=hashes,
+            metadata=file_data.get('dist-info-metadata'),
         )
 
     @classmethod
@@ -269,6 +278,7 @@ class Link:
             comes_from=page_url,
             requires_python=pyrequire,
             yanked_reason=yanked_reason,
+            metadata=anchor_attribs.get('data-dist-info-metadata'),
         )
 
     def __str__(self):
@@ -426,6 +436,41 @@ class Link:
             bool: True when the file is yanked
         """
         return self.yanked_reason is not None
+
+    @property
+    def metadata_url(self):
+        """
+        The url of the PEP 658 metadata file of the wheel.
+
+        PEP 658 serves the METADATA of a wheel next to it, at the url of the
+        wheel with `.metadata` appended.
+
+        Returns:
+            str: The url, '' when the index serves no separate metadata
+        """
+        if not self.metadata:
+            return ''
+        return f'{self.url_without_fragment}.metadata'
+
+    @property
+    def metadata_hashes(self):
+        """
+        The hashes the PEP 658 declaration carries.
+
+        The attribute is `true` or `sha256=<hex>` in an HTML page, and `true`
+        or a hash dict in a JSON page (PEP 691), so the two shapes meet here.
+
+        Returns:
+            dict[str, str]: {hash name: lowercase hex digest}, empty when the
+                declaration carries no digest
+        """
+        value = self.metadata
+        if isinstance(value, dict):
+            return {name: digest for name, digest in value.items() if isinstance(digest, str)}
+        if isinstance(value, str) and '=' in value:
+            name, _, digest = value.partition('=')
+            return {name.strip().lower(): digest.strip()}
+        return {}
 
 
 class HTMLLinkParser(HTMLParser):

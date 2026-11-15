@@ -75,6 +75,7 @@ from msgspec import Struct
 from alasio.backport import removeprefix, removesuffix
 from alasio.deploy.pack.pack_model import FileInfo
 from alasio.deploy.simple_pip.pip_install import DATA_CATEGORIES, SimplePip, zip_item_is_executable
+from alasio.deploy.simple_pip.pip_list import iter_metadata_headers
 from alasio.deploy.simple_pip.whl_record import RecordManager
 from alasio.deploy_dev.pack._pack_cache import PACK_POOL, PackCache, PlainCache
 from alasio.deploy_dev.pack.encode_base import PACK_AREA, PACK_AREA_DIR, PackEncodeBase
@@ -119,10 +120,12 @@ def _parse_metadata_headers(content, wheel):
     """
     Parse the headers of the METADATA of a wheel.
 
-    The file is an email style header block (PEP 566): one ``Name: value``
-    per line, the block ends at the first empty line, and a line that starts
-    with a space or a tab is a folded continuation of the header before it.
-    The names of the headers are lowercased, the values are stripped.
+    The file is an email style header block (PEP 566), read by the parser of
+    the client installer (alasio.deploy.simple_pip.pip_list), so the release
+    side and the client agree on what one header is. The names are lowercased
+    and the repeated ones keep their last value: this reads the identity of a
+    distribution only, a caller that needs every ``Requires-Dist`` iterates
+    the parser itself.
 
     Args:
         content (bytes): Content of the METADATA file
@@ -141,17 +144,8 @@ def _parse_metadata_headers(content, wheel):
         raise ValueError(f'Invalid wheel, the METADATA is not UTF-8: "{wheel}", {e}') from e
 
     headers = {}
-    for line in text.splitlines():
-        if not line.strip():
-            # the header block ends at the first empty line
-            break
-        if line[0] in ' \t':
-            # a folded continuation of the header before
-            continue
-        name, sep, value = line.partition(':')
-        if not sep:
-            continue
-        headers[name.strip().lower()] = value.strip()
+    for name, value in iter_metadata_headers(text):
+        headers[name] = value
     return headers
 
 

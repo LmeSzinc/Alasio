@@ -727,6 +727,72 @@ class TestLogging:
         assert capture.backend.logs == []
 
 
+class TestIterMetadataHeaders:
+    """The header parser the client, the release side and the pack_deps tool share."""
+
+    def test_repeated_headers_are_kept(self):
+        """Requires-Dist repeats once per dependency, a dict would lose all but one."""
+        content = (
+            'Metadata-Version: 2.1\n'
+            'Name: demo\n'
+            'Requires-Dist: a>=1\n'
+            'Requires-Dist: b\n'
+        )
+
+        assert list(pip_list.iter_metadata_headers(content)) == [
+            ('metadata-version', '2.1'),
+            ('name', 'demo'),
+            ('requires-dist', 'a>=1'),
+            ('requires-dist', 'b'),
+        ]
+
+    def test_the_body_is_not_read(self):
+        """The body holds the long description, the headers end at the empty line."""
+        content = 'Name: demo\n\nRequires-Dist: not-a-header\n'
+
+        assert list(pip_list.iter_metadata_headers(content)) == [('name', 'demo')]
+
+    def test_a_folded_continuation_is_joined(self):
+        content = 'Name: demo\nSummary: a summary\n  continued here\nVersion: 1.0\n'
+
+        assert list(pip_list.iter_metadata_headers(content)) == [
+            ('name', 'demo'),
+            ('summary', 'a summary continued here'),
+            ('version', '1.0'),
+        ]
+
+    def test_a_width_only_continuation(self):
+        """A line of the width only continues a folded value, it is not the body."""
+        content = 'Name: demo\nLicense: The MIT License\n        \n        Copyright 2020\n        \nVersion: 1.0\n'
+
+        assert list(pip_list.iter_metadata_headers(content)) == [
+            ('name', 'demo'),
+            ('license', 'The MIT License Copyright 2020'),
+            ('version', '1.0'),
+        ]
+
+    def test_the_line_endings(self):
+        """A file written on Windows is read, the line endings dropped."""
+        content = 'Name: demo\r\nVersion: 1.0\r\n\r\nbody\r\n'
+
+        assert list(pip_list.iter_metadata_headers(content)) == [
+            ('name', 'demo'),
+            ('version', '1.0'),
+        ]
+
+    def test_a_header_without_a_value(self):
+        content = 'X-Empty:\n part\nName: demo\n'
+
+        assert list(pip_list.iter_metadata_headers(content)) == [
+            ('x-empty', 'part'),
+            ('name', 'demo'),
+        ]
+
+    def test_an_empty_content(self):
+        assert list(pip_list.iter_metadata_headers('')) == []
+        assert list(pip_list.iter_metadata_headers('\n')) == []
+
+
 class TestReadHeaders:
     def test_headers(self, fs):
         """The headers are read as a lower-cased name -> value mapping."""
@@ -754,6 +820,23 @@ class TestReadHeaders:
             'name': 'demo',
             'x-long': 'part 1 part 2',
             'x-empty': 'part 3',
+        }
+
+    def test_width_only_continuation(self, fs):
+        """A continuation line of the width only keeps the headers after it.
+
+        The License of a built METADATA is a long folded value, and the blank
+        lines inside it are written as spaces: the headers after it, e.g.
+        Requires-Dist, are still headers of the block.
+        """
+        file = f'{SITE}/demo-1.0.dist-info/METADATA'
+        fs.create_file(file, contents=(
+            'Name: demo\nLicense: The MIT License\n        \n        Copyright (c) 2020\n        \n'
+            'Requires-Dist: hpack<5,>=4.2\n\nbody\n'))
+        assert pip_list._read_headers(file) == {
+            'name': 'demo',
+            'license': 'The MIT License Copyright (c) 2020',
+            'requires-dist': 'hpack<5,>=4.2',
         }
 
     def test_duplicate_header(self, fs):
