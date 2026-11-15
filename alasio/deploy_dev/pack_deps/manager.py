@@ -35,18 +35,18 @@ channel (a conservative miss, not a break).
 """
 
 import sys
-from collections import deque
 
+import httpx2
 from packaging.requirements import InvalidRequirement, Requirement
 from packaging.utils import canonicalize_name
-from trio import CapacityLimiter, open_nursery, run as trio_run
+from trio import open_nursery, run as trio_run
 
 from alasio.config.entry.mod_entry import ModEntry
 from alasio.deploy.httpclient.probe_mirrors import AllMirrorsFailedError
 from alasio.deploy.pip_download._target_python import TargetPython
-from alasio.deploy.pip_download.pypi_file import PypiFile, WheelNotFoundError
+from alasio.deploy.pip_download.pypi_file import WheelNotFoundError
 from alasio.deploy.simple_pip.parse_req import Requirements
-from alasio.deploy_dev.pack_deps.closure import read_metadata, requirement_names, requires_dist
+from alasio.deploy_dev.metadata import ClosureRoot, MetadataProvider
 from alasio.deploy_dev.pack_deps.resolve import (
     DECISION_PACK, DECISION_PIP, REASON_FORCED, REASON_INDEX, REASON_NO_WHEEL, PackDepDecision, decide, decision_text,
     wheels_of
@@ -59,11 +59,6 @@ from alasio.ext.path.atomic import atomic_read_text
 from alasio.logger import logger
 
 __all__ = ['PackDepsError', 'PackDepsManager']
-
-# The index a pin without a '# from' annotation is read from: the official PyPI
-# simple index, the value of RepoBase.DEFAULT_INDEX. The requirements file is
-# the only source of an index, see PackDepsManager._fetcher_of
-DEFAULT_INDEX = 'https://pypi.org/simple'
 
 
 class PackDepsError(ValueError):
@@ -114,8 +109,9 @@ class PackDepsManager:
         dest (PathStr): Folder a fetcher would write a wheel into, see __init__
     """
 
-    # Index pages in flight of one resolution: the closure of a mod is a few
-    # tens of distributions, one page each, and a page is a small request
+    # Requests in flight of one resolution (see alasio.deploy_dev.metadata):
+    # the closure of a mod is a few tens of distributions, each one page and one
+    # metadata, and both are small requests
     CONCURRENT = 8
 
     def __init__(self, entry=None, client=None, proxy=''):
@@ -145,16 +141,13 @@ class PackDepsManager:
         self.client = client
         self.proxy = proxy
         # The folder a fetcher would write a wheel into. The tool reads every
-        # file in memory (see closure.read_metadata), so nothing is written
-        # today; the fetcher still takes the folder, and the mod's own temp is
-        # the place a future full-wheel read would use
+        # file in memory (see alasio.deploy_dev.metadata), so nothing is written
+        # today; the fetcher still takes the folder
         self.dest = PathStr.new(entry.root or env.PROJECT_ROOT).joinpath('temp/pack_deps')
         self._roots = []
-        # the state of the run in progress, see resolve_async()
-        self._client = None
-        self._fetchers = {}
-        self._limiter = None
-        self._pages = {}
+        # the state of the run in progress, see _resolve()
+        self._provider = None
+        self._states = {}
 
     def __repr__(self):
         return f'{self.__class__.__name__}(root="{self.entry.root}")'
@@ -308,10 +301,11 @@ class PackDepsManager:
         """
         Walk the closure and decide every distribution of it.
 
-        A breadth first walk: the names of a level are decided together, the
-        dependencies of each decided name are read from its METADATA and become
-        the next level. A name reached twice with a new extra is read again, so
-        the dependencies of that extra are in the closure.
+        The walk is the one of the metadata provider: a name expands its
+        dependencies as soon as its METADATA is read, so the rounds of requests
+        follow the depth of the closure rather than its width, and the pages
+        and the METADATA of the run are shared with the tool that reads them
+        next (see alasio.deploy_dev.metadata).
 
         Returns:
             dict[str, PackDepDecision]: PEP 503 name -> decision
@@ -322,28 +316,32 @@ class PackDepsManager:
             f'Resolving the pack_deps of "{self.entry.name}" for python '
             f'{self.target.py_version} ({len(self._roots)} registered)')
 
-        self._pages = {}
-        self._fetchers = {}
         self._errors = {}
-        self._limiter = CapacityLimiter(self.CONCURRENT)
-
+        # the roots merged per name: a name is decided once, whatever the
+        # number of roots that asked for it
         states = {}
-        expanded = {}
-        queue = deque()
         for root in self._roots:
-            if self._merge(states, root):
-                queue.append(root.name)
+            self._merge(states, root)
+        self._states = states
 
         own = self.client is None
         # the client of the pack server of the domain: a direct connection, or
         # the proxy the operator gives (the backport indexes serve their wheels
         # from GitHub releases, which some networks cannot reach)
         client = create_client(self.proxy) if own else self.client
-        self._client = client
+        provider = MetadataProvider(client=client, concurrency=self.CONCURRENT, dest=self.dest)
+        self._provider = provider
         try:
-            decisions = await self._walk(queue, states, expanded)
+            roots = [
+                ClosureRoot(node.name, frozenset(node.extras), node.recursive)
+                for node in self._roots
+            ]
+            closure = await provider.closure(roots, self._pin_of, self.target)
+            self._errors = dict(closure.errors)
+            self._report_missing(closure.missing)
+            decisions = await self._decide_all(closure.names)
         finally:
-            self._client = None
+            self._provider = None
             if own:
                 await client.aclose()
         if self._errors:
@@ -351,6 +349,35 @@ class PackDepsManager:
                 f'The closure of {len(self._errors)} distribution(s) is incomplete, write() '
                 f'refuses it: {", ".join(sorted(self._errors))}')
         return decisions
+
+    def _pin_of(self, name):
+        """
+        The pin of a distribution, the shape the closure walk asks for.
+
+        Args:
+            name (str): PEP 503 name
+
+        Returns:
+            tuple[str, str] | None: (version, index) of the pin, None when the
+                requirements file does not pin the name
+        """
+        pin = self.pins.get(name)
+        if pin is None:
+            return None
+        return pin.version, pin.source
+
+    def _report_missing(self, missing):
+        """
+        Report the dependencies the requirements file does not pin.
+
+        Args:
+            missing (Iterable[str]): PEP 503 names
+        """
+        if not missing:
+            return
+        logger.warning(
+            f'Dependencies of the closure are not pinned in "{self.path_requirements}", '
+            f'skipped: {", ".join(sorted(missing))}')
 
     @staticmethod
     def _merge(states, node):
@@ -374,83 +401,15 @@ class PackDepsManager:
         state.force = state.force or node.force
         return len(state.extras) != before
 
-    async def _walk(self, queue, states, expanded):
+    async def _decide_all(self, names):
         """
-        Drain the work list of the walk.
+        Decide the distributions of the closure, their index pages in parallel.
+
+        The pages are the ones the closure already read when it needed them, so
+        a decision costs no request of its own for a name the closure expanded.
 
         Args:
-            queue (deque[str]): Names to decide, then to expand
-            states (dict[str, _Node]): The state of every name seen so far
-            expanded (dict[str, set[str]]): {name: extras already expanded}
-
-        Returns:
-            dict[str, PackDepDecision]: PEP 503 name -> decision
-        """
-        decisions = {}
-        while queue:
-            batch = []
-            while queue:
-                name = queue.popleft()
-                state = states[name]
-                undecided = name not in decisions
-                unexpanded = state.recursive and not state.extras <= expanded.get(name, set())
-                if undecided or unexpanded:
-                    batch.append(name)
-            if not batch:
-                break
-
-            pending = [name for name in batch if name not in decisions]
-            if pending:
-                decisions.update(await self._decide_many(pending, states))
-
-            for children in await self._expand_many(batch, states, expanded):
-                for child in children:
-                    if self._merge(states, child):
-                        queue.append(child.name)
-        return decisions
-
-    async def _expand_many(self, names, states, expanded):
-        """
-        Expand the dependencies of a level, the metadata reads in parallel.
-
-        A name whose extras grew since its last expansion is read again, so the
-        dependencies of a new extra join the closure; the bookkeeping is done
-        before the reads, so a name is never expanded twice for one extra.
-
-        Args:
-            names (list[str]): The names of the level
-            states (dict[str, _Node]): The state of every name seen so far
-            expanded (dict[str, set[str]]): {name: extras already expanded}
-
-        Returns:
-            list[list[_Node]]: The dependencies of every name that was
-                expanded, in the order of the level
-        """
-        todo = []
-        for name in names:
-            state = states[name]
-            new = state.extras - expanded.get(name, set())
-            expanded.setdefault(name, set()).update(state.extras)
-            if state.recursive and new:
-                todo.append((name, new))
-
-        out = {}
-
-        async def one(name, extras):
-            out[name] = await self._children_of(name, extras)
-
-        async with open_nursery() as nursery:
-            for name, extras in todo:
-                nursery.start_soon(one, name, extras)
-        return [out[name] for name, _ in todo]
-
-    async def _decide_many(self, names, states):
-        """
-        Decide a level of the walk, its index pages in parallel.
-
-        Args:
-            names (list[str]): The names to decide
-            states (dict[str, _Node]): The state of every name seen so far
+            names (Iterable[str]): The PEP 503 names of the closure
 
         Returns:
             dict[str, PackDepDecision]: PEP 503 name -> decision
@@ -458,41 +417,36 @@ class PackDepsManager:
         out = {}
 
         async def one(name):
-            out[name] = await self._decide(name, states[name])
+            out[name] = await self._decide(name)
 
         async with open_nursery() as nursery:
             for name in names:
                 nursery.start_soon(one, name)
 
-        # the log of a level is sorted, the answers of the requests are not
+        # the log of the run is sorted, the answers of the requests are not
         for name in sorted(out):
             logger.info(decision_text(out[name]))
         return out
 
-    async def _decide(self, name, state):
+    async def _decide(self, name):
         """
         Decide one distribution.
 
         Args:
             name (str): PEP 503 name
-            state (_Node): What the caller asked for the name
 
         Returns:
             PackDepDecision: The decision, ``pip`` with the reason when the
                 index cannot be read (the write refuses those, see write_async)
         """
         pin = self.pins[name]
-        if state.force:
+        state = self._states.get(name)
+        if state is not None and state.force:
             return PackDepDecision(
                 name=name, version=pin.version, decision=DECISION_PACK, reason=REASON_FORCED)
 
-        # httpx2 is imported lazily in the places that catch its errors, see
-        # the note of alasio.deploy.simple_pip.install_base
-        import httpx2
-
         try:
-            async with self._limiter:
-                page = await self._page_of(name, pin.source)
+            page = await self._provider.page(name, pin.source)
         except (ValueError, AllMirrorsFailedError, httpx2.HTTPError) as e:
             logger.warning(f'Failed to read the index of "{name}": {e}')
             return PackDepDecision(
@@ -508,109 +462,6 @@ class PackDepsManager:
                 reason=REASON_NO_WHEEL, source=page.url)
 
         return decide(name, pin.version, page.url, candidates, self.target)
-
-    async def _children_of(self, name, extras):
-        """
-        The dependencies of one decided distribution, for some extras.
-
-        A read that fails is recorded in the errors of the run: the closure of
-        a distribution is unknown then, and an unknown closure must not shrink
-        the declaration silently, see write_async().
-
-        Args:
-            name (str): PEP 503 name
-            extras (set[str]): The extras to expand, the empty one is the base
-
-        Returns:
-            list[_Node]: The dependencies pinned by the requirements file. A
-                dependency the lock does not pin is reported and dropped
-        """
-        pin = self.pins[name]
-        # httpx2 is imported lazily, the metadata fallback downloads a wheel
-        import httpx2
-
-        try:
-            async with self._limiter:
-                page = await self._page_of(name, pin.source)
-                candidates = wheels_of(page.links, name, pin.version)
-                content, origin = await read_metadata(
-                    self._fetcher_of(pin.source), candidates)
-        except (ValueError, AllMirrorsFailedError, httpx2.HTTPError) as e:
-            logger.error(
-                f'Failed to read the dependencies of "{name}=={pin.version}", the closure '
-                f'is incomplete: {e}')
-            self._errors[name] = str(e)
-            return []
-
-        logger.debug(f'Metadata of "{name}=={pin.version}": "{origin}"')
-        children = requirement_names(requires_dist(content), extras, self.target)
-        missing = [child for child in children if child not in self.pins]
-        if missing:
-            logger.warning(
-                f'Dependencies of "{name}=={pin.version}" are not pinned in '
-                f'"{self.path_requirements}", skipped: {", ".join(sorted(missing))}')
-        return [
-            _Node(child, wanted, recursive=True)
-            for child, wanted in children.items()
-            if child in self.pins
-        ]
-
-    """
-    The index
-    """
-
-    async def _page_of(self, name, source):
-        """
-        The index page of a distribution, read once per run.
-
-        Args:
-            name (str): PEP 503 name
-            source (str): Index the pin came from, '' for a pin without a
-                '# from' annotation
-
-        Returns:
-            PackageIndex: The page and its links
-
-        Raises:
-            ValueError: If the index has no page of the distribution, or the
-                page does not parse
-            AllMirrorsFailedError: If no mirror is usable
-            httpx2.HTTPError: If a request fails
-        """
-        key = (name, source)
-        page = self._pages.get(key)
-        if page is None:
-            page = await self._fetcher_of(source).get_package_index(name)
-            self._pages[key] = page
-        return page
-
-    def _fetcher_of(self, source):
-        """
-        The fetcher of one index, created once per run.
-
-        The index of a pin is the one its '# from' annotation names, and the
-        official PyPI when the pin has none: the same rule the pack server
-        follows (see RepoBase.DEFAULT_INDEX). The requirements file is the only
-        source of that, the pypi_mirrors of the mod entry is not read: that is
-        the source a client installs from, and it may point at the pack server
-        of this very mod, so the tool would read a mirror of its own output.
-
-        A pin with a source gets that index alone, so no probe selects between
-        candidates and the record of the machine is not used.
-
-        Args:
-            source (str): Normalized base url of an index, '' for the pin
-                without an annotation
-
-        Returns:
-            PypiFile: The fetcher
-        """
-        fetcher = self._fetchers.get(source)
-        if fetcher is not None:
-            return fetcher
-        fetcher = PypiFile(source or DEFAULT_INDEX, self.dest, client=self._client)
-        self._fetchers[source] = fetcher
-        return fetcher
 
     """
     The declaration

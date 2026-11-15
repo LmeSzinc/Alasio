@@ -206,13 +206,13 @@ class TestResolve:
     @pytest.mark.trio
     async def test_the_source_of_the_pin(self, mod_root, index, monkeypatch):
         """A '# from' annotation is the index of that pin, whatever else is declared."""
-        from alasio.deploy_dev.pack_deps import manager as manager_module
+        from alasio.deploy_dev.metadata import provider as provider_module
 
         write_requirements(mod_root, {'demo': '1.0'})
         index.add('demo', '1.0')
         # the pin names the mock, the default index names another host: only
         # the requirements file is asked
-        monkeypatch.setattr(manager_module, 'DEFAULT_INDEX', UNREACHABLE_INDEX)
+        monkeypatch.setattr(provider_module, 'DEFAULT_INDEX', UNREACHABLE_INDEX)
         manager = PackDepsManager(client=index.client)
         manager.register('demo')
 
@@ -230,11 +230,11 @@ class TestResolve:
         may point at the pack server of the mod itself, so it is not the source
         the decision is read from (the rule of the pack server).
         """
-        from alasio.deploy_dev.pack_deps import manager as manager_module
+        from alasio.deploy_dev.metadata import provider as provider_module
 
         write_requirements(mod_root, {'demo': '1.0'}, source='')
         index.add('demo', '1.0')
-        monkeypatch.setattr(manager_module, 'DEFAULT_INDEX', INDEX_URL)
+        monkeypatch.setattr(provider_module, 'DEFAULT_INDEX', INDEX_URL)
         # the entry names UNREACHABLE_INDEX in its pypi_mirrors, nothing reaches it
         manager = PackDepsManager(client=index.client)
         manager.register('demo')
@@ -316,7 +316,8 @@ class TestWrite:
                 await manager.write_async()
 
         assert list(manager.errors) == ['demo']
-        assert capture.fd.any_contains('the closure is incomplete')
+        assert capture.fd.any_contains('Failed to read the dependencies of "demo==1.0"')
+        assert capture.fd.any_contains('is incomplete')
         assert ModEntry(mod_root).data.Update.pack_deps == ()
 
     @pytest.mark.trio

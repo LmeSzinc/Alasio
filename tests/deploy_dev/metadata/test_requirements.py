@@ -1,27 +1,24 @@
 """
-Tests for the dependency closure of a distribution
-(alasio/deploy_dev/pack_deps/closure.py).
+Tests for the header block of a METADATA and the dependency names it declares
+(alasio/deploy_dev/metadata/requirements.py).
 
-The closure is read from the METADATA of a version, so the tests cover the
-header block (a repeated header is a dependency), the fallback to the wheel when
-an index serves no PEP 658 metadata, and the marker evaluation that decides
-which dependency belongs to a client.
+The tests cover the header block (a repeated header is a dependency), the
+reading of a wheel held in memory, and the marker evaluation that decides which
+dependency belongs to a client. The reading of a version from its index is
+tested in tests/deploy_dev/metadata/test_provider.py, where the provider lives.
 """
 import io
-import os
 import zipfile
 
 import pytest
 
 from alasio.deploy.pip_download._target_python import TargetPython
-from alasio.deploy.pip_download.pypi_file import PypiFile
-from alasio.deploy_dev.pack_deps.closure import (
-    PLATFORMS, marker_environments, read_metadata, requirement_names, requires_dist, wheel_metadata
+from alasio.deploy_dev.metadata.requirements import (
+    PLATFORMS, marker_environments, requirement_names, requires_dist, wheel_metadata
 )
-from alasio.deploy_dev.pack_deps.resolve import wheels_of
 from alasio.logger import logger
 from alasio.testing.filesystem import fs  # noqa: F401
-from tests.deploy_dev.pack_deps.conftest import make_wheel, metadata_text
+from tests.deploy_dev.pypi_mock import make_wheel, metadata_text
 
 pytestmark = [
     pytest.mark.parallel,
@@ -83,14 +80,8 @@ class TestRequiresDist:
 
         assert requires_dist(content) == ['hyperframe<7,>=6.1', 'hpack<5,>=4.2']
 
-    def test_no_dependency(self):
-        assert requires_dist(metadata_text('demo', '1.0')) == []
-
-
-class TestRequiresDist:
-    """The dependency lines of a METADATA file."""
-
-    def test_values(self):
+    def test_a_marker_is_kept_as_it_is_written(self):
+        """The reader splits no marker: it is evaluated later, per platform."""
         content = metadata_text('demo', '1.0', ['a>=1', 'b; extra == "x"'])
 
         assert requires_dist(content) == ['a>=1', 'b; extra == "x"']
@@ -170,63 +161,3 @@ class TestRequirementNames:
 
         assert names == {}
         assert capture.fd.any_contains('Skipped a requirement of a distribution')
-
-
-class TestReadMetadata:
-    """The METADATA of a version, read from its index."""
-
-    @pytest.mark.trio
-    async def test_the_pep658_file(self, index, fs):
-        """The metadata file is a few KB: the wheel is never downloaded."""
-        index.add('demo', '1.0', requires=['sniffio'], metadata='sha256')
-        fetcher = PypiFile(index.base, '/cache', client=index.client)
-
-        page = await fetcher.get_package_index('demo')
-        content, origin = await read_metadata(fetcher, wheels_of(page.links, 'demo', '1.0'))
-
-        assert requires_dist(content) == ['sniffio']
-        assert origin.endswith('demo-1.0-py3-none-any.whl.metadata')
-        assert not any(url.endswith('.whl') for url in index.requests)
-        await fetcher.aclose()
-
-    @pytest.mark.trio
-    async def test_the_plain_declaration(self, index, fs):
-        """`data-dist-info-metadata="true"` carries no hash to check."""
-        index.add('demo', '1.0', requires=['sniffio'], metadata='true')
-        fetcher = PypiFile(index.base, '/cache', client=index.client)
-
-        page = await fetcher.get_package_index('demo')
-        content, _ = await read_metadata(fetcher, wheels_of(page.links, 'demo', '1.0'))
-
-        assert requires_dist(content) == ['sniffio']
-        await fetcher.aclose()
-
-    @pytest.mark.trio
-    async def test_the_wheel_fallback(self, index, fs):
-        """An index without PEP 658: the wheel is downloaded into memory."""
-        index.add('demo', '1.0', requires=['sniffio'], content=make_wheel('demo', '1.0', ['sniffio']))
-        fetcher = PypiFile(index.base, '/cache', client=index.client)
-
-        page = await fetcher.get_package_index('demo')
-        content, origin = await read_metadata(fetcher, wheels_of(page.links, 'demo', '1.0'))
-
-        assert requires_dist(content) == ['sniffio']
-        assert origin.endswith('demo-1.0-py3-none-any.whl')
-        assert any(url.endswith('.whl') for url in index.requests)
-        # nothing is written: the wheel was read in memory
-        assert not os.path.exists('/cache')
-        await fetcher.aclose()
-
-    @pytest.mark.trio
-    async def test_the_pure_wheel_is_read_first(self, index, fs):
-        """A version with several wheels is read from its pure wheel."""
-        index.add('demo', '1.0', tag='cp38-cp38-win_amd64', content=archive({}))
-        index.add('demo', '1.0', requires=['sniffio'], content=make_wheel('demo', '1.0', ['sniffio']))
-        fetcher = PypiFile(index.base, '/cache', client=index.client)
-
-        page = await fetcher.get_package_index('demo')
-        content, origin = await read_metadata(fetcher, wheels_of(page.links, 'demo', '1.0'))
-
-        assert requires_dist(content) == ['sniffio']
-        assert origin.endswith('demo-1.0-py3-none-any.whl')
-        await fetcher.aclose()
