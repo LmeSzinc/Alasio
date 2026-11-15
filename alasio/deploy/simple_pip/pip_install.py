@@ -474,6 +474,11 @@ class SimplePip:
         under their real location ("../../Scripts/xxx"), so pip can uninstall
         the installation.
 
+        The wheel is validated as a whole before the environment is touched:
+        every member is resolved to its target first, so an invalid wheel is
+        refused while the previous installation of the distribution is still
+        in place.
+
         Args:
             wheel (str | PathStr): Path of the .whl file
 
@@ -496,29 +501,21 @@ class SimplePip:
                 package_name, _, _ = package_version.partition('-')
                 data_folder = f'{package_version}.data'
 
-                # 3. Uninstall the previous installation of the package
-                self.uninstall(package_name)
+                # 3. Plan the installation before the environment is touched,
+                #    a wheel that is refused leaves the installed version in place
+                members = self._plan_members(zf, dist_info_folder, data_folder, package_name, wheel)
 
-                # 4. Warn about the files that are not installed
+                # 4. Warn about the files that are not installed, before the
+                #    installation can no longer be undone
                 self._warn_entry_points(zf, dist_info_folder)
 
-                # 5. Extract files
+                # 5. Uninstall the previous installation of the package
+                self.uninstall(package_name)
+
+                # 6. Extract files
                 logger.info(f'Installing {package_name} to {self.site_packages}')
                 record = RecordManager()
-                for member in zf.infolist():
-                    if member.is_dir():
-                        continue
-
-                    rel_path = member.filename
-                    # Skip RECORD, the RECORD of the installation is written
-                    # at the end, it lists the files created at install time
-                    if rel_path == f'{dist_info_folder}/RECORD':
-                        continue
-
-                    target = self._member_target(rel_path, data_folder, package_name, wheel)
-                    if target is None:
-                        continue
-
+                for member, target in members:
                     data = zf.read(member)
                     pool.start_thread_soon(self._write_file, target, data, zip_item_is_executable(member))
 
@@ -527,19 +524,19 @@ class SimplePip:
                     record_rel_path = to_posix(os.path.relpath(target, self.site_packages))
                     record.add_content(record_rel_path, data)
 
-        # 6. Compile .py files
+        # 7. Compile .py files
         files = list(record.iter_py_files())
         logger.info(f'Compiling {len(files)} py files')
         with THREAD_POOL.wait_jobs() as pool:
             for entry in files:
                 pool.start_thread_soon(self._create_pyc, record, entry.path)
 
-        # 7. Write INSTALLER
+        # 8. Write INSTALLER
         installer_rel_path = f'{dist_info_folder}/INSTALLER'
         record.add_content(installer_rel_path, b'pip\n')
         (self.site_packages / installer_rel_path).file_write(b'pip\n')
 
-        # 8. Write updated RECORD
+        # 9. Write updated RECORD
         record.add_content(f'{dist_info_folder}/RECORD', None)
         record_file = self.site_packages / dist_info_folder / 'RECORD'
         record_file.file_write(record.dump_bytes())
@@ -573,6 +570,50 @@ class SimplePip:
         if f'{dist_info_folder}/METADATA' not in names:
             raise ValueError(f'Invalid wheel, missing .dist-info/METADATA: {wheel}')
         return dist_info_folder
+
+    def _plan_members(self, zf, dist_info_folder, data_folder, package_name, wheel):
+        """
+        Resolve the install path of every file of a wheel before installing it.
+
+        The wheel is read as a whole before the environment is touched, so a
+        member that would be installed outside of the install directory, or an
+        unknown .data category, aborts the installation while the previous
+        installation of the distribution is still in place. Resolving the
+        targets in the middle of the installation used to remove the previous
+        version first, leaving a half installed tree with no .dist-info to
+        uninstall it by.
+
+        Args:
+            zf (zipfile.ZipFile): Opened wheel
+            dist_info_folder (str): Name of the .dist-info directory
+            data_folder (str): Name of the .data directory, "<name>-<version>.data"
+            package_name (str): Name of the distribution
+            wheel (str): Path of the wheel, for error messages
+
+        Returns:
+            list[tuple[zipfile.ZipInfo, PathStr]]: The members to install and
+                their target, in the order of the wheel
+
+        Raises:
+            ValueError: If a member holds an unknown .data category, or
+                would be installed outside of the install directory
+        """
+        out = []
+        for member in zf.infolist():
+            if member.is_dir():
+                continue
+
+            rel_path = member.filename
+            # Skip RECORD, the RECORD of the installation is written at the
+            # end, it lists the files created at install time
+            if rel_path == f'{dist_info_folder}/RECORD':
+                continue
+
+            target = self._member_target(rel_path, data_folder, package_name, wheel)
+            if target is None:
+                continue
+            out.append((member, target))
+        return out
 
     @staticmethod
     def _warn_entry_points(zf, dist_info_folder):

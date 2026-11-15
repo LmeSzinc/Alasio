@@ -708,6 +708,75 @@ demo-1.0.dist-info/top_level.txt,sha256=65wmuu5H8Z5Jk6d7ypNtD_CeNVqC09t5vxVOv_Go
         assert list_folders(abs_path(fs, '/env')) == sorted(site_branch() + [SCRIPTS_DIR])
 
 
+class TestInstallInvalidWheel:
+    """
+    A refused wheel leaves the installed version untouched.
+
+    The wheel is validated as a whole before the previous installation is
+    removed: an invalid member used to abort the installation after the
+    uninstallation, which removed the distribution from the environment.
+    """
+
+    @staticmethod
+    def install_current(fs):
+        """
+        Install demo 1.0, the version an invalid wheel must not remove.
+
+        Args:
+            fs (FakeFilesystem): Active fake filesystem
+
+        Returns:
+            tuple[str, list[str]]: Path of site-packages, and the files of
+                the environment after the installation
+        """
+        site = site_packages(fs)
+        wheel = build_wheel('/w/demo-1.0-py3-none-any.whl', {
+            'demo/__init__.py': b'a = 1\n',
+            'demo/old.py': b'a = 2\n',
+        })
+        SimplePip(site).install(wheel)
+        return site, list_files(abs_path(fs, '/env'))
+
+    def test_unknown_data_category(self, fs, pyc_compile):
+        """A .data directory that is not an install scheme key."""
+        site, installed = self.install_current(fs)
+        wheel = build_wheel('/w/demo-2.0-py3-none-any.whl', {
+            'demo/__init__.py': b'a = 3\n',
+            'demo-2.0.data/nope/x.py': b'x\n',
+        }, version='2.0')
+        with pytest.raises(ValueError, match='unsupported .data directory "nope"'):
+            SimplePip(site).install(wheel)
+        assert list_files(abs_path(fs, '/env')) == installed
+        assert SimplePip(site).get_dist_info('demo') == f'{site}/demo-1.0.dist-info'
+        with open(f'{site}/demo/__init__.py', 'rb') as f:
+            assert f.read() == b'a = 1\n'
+
+    @pytest.mark.parametrize("member", ['../evil.py', '/evil.py', 'demo/../../evil.py'])
+    def test_traversal_member(self, fs, pyc_compile, member):
+        """A member outside of the install directory."""
+        site, installed = self.install_current(fs)
+        wheel = build_wheel('/w/demo-2.0-py3-none-any.whl', {
+            'demo/__init__.py': b'a = 3\n',
+            member: b'evil\n',
+        }, version='2.0')
+        with pytest.raises(ValueError, match='outside of the install directory'):
+            SimplePip(site).install(wheel)
+        assert list_files(abs_path(fs, '/env')) == installed
+        # The member is not written to any of the directories it could escape to
+        for path in ['/evil.py', '/env/evil.py', '/env/Lib/evil.py', '/env/Lib/site-packages/evil.py']:
+            assert not os.path.exists(abs_path(fs, path)), path
+
+    def test_entry_points_not_utf8(self, fs, pyc_compile):
+        """The entry points are read before the uninstallation, an unreadable wheel changes nothing."""
+        site, installed = self.install_current(fs)
+        wheel = build_wheel('/w/demo-2.0-py3-none-any.whl', {
+            'demo-2.0.dist-info/entry_points.txt': b'[console_scripts]\ndemo = demo:main\n\xff\n',
+        }, version='2.0')
+        with pytest.raises(UnicodeDecodeError):
+            SimplePip(site).install(wheel)
+        assert list_files(abs_path(fs, '/env')) == installed
+
+
 class TestPipConformance:
     """
     The installation has to be usable by pip.
