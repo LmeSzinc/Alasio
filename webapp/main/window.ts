@@ -5,7 +5,9 @@ import {
   IPC_SHUTDOWN_STAGE,
   IPC_WINDOW_CONFIRM_CLOSE,
   IPC_WINDOW_HIDE,
+  IPC_WINDOW_IS_MAXIMIZED,
   IPC_WINDOW_MAXIMIZE,
+  IPC_WINDOW_MAXIMIZED_CHANGE,
   IPC_WINDOW_MINIMIZE,
 } from "../shared/ipc";
 import { appState } from "./app-state";
@@ -82,6 +84,15 @@ export function createWindow(): BrowserWindow {
       showWindow(windowMode);
     });
   }
+
+  // Report the maximize state of the window to the renderer. The title bar
+  // derives its maximize/restore button from it, and the state can be
+  // changed by paths other than those buttons: double-clicking the drag
+  // region, window shortcuts, `--window=maximize` at startup. Keeping the
+  // renderer in the loop instead of toggling a local flag there means the
+  // button always matches the real window.
+  mainWindow.on("maximize", notifyMaximizedState);
+  mainWindow.on("unmaximize", notifyMaximizedState);
 
   // Load renderer
   if (process.env.VITE_DEV_SERVER_URL) {
@@ -163,6 +174,17 @@ export function getMainWindow(): BrowserWindow | null {
   return mainWindow;
 }
 
+/**
+ * Push the current maximize state of the main window to the renderer.
+ */
+function notifyMaximizedState() {
+  const target = mainWindow;
+  if (!target || target.isDestroyed()) {
+    return;
+  }
+  target.webContents.send(IPC_WINDOW_MAXIMIZED_CHANGE, target.isMaximized());
+}
+
 export function setupWindowIPC() {
   ipcMain.on(IPC_WINDOW_MINIMIZE, () => {
     mainWindow?.minimize();
@@ -175,6 +197,10 @@ export function setupWindowIPC() {
       mainWindow?.maximize();
     }
   });
+
+  // The renderer reads the state on mount: the window may already be
+  // maximized before the title bar subscribes to the push channel.
+  ipcMain.handle(IPC_WINDOW_IS_MAXIMIZED, () => mainWindow?.isMaximized() ?? false);
 
   ipcMain.on(IPC_WINDOW_HIDE, () => {
     mainWindow?.hide();

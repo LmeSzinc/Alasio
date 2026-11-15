@@ -1,0 +1,37 @@
+{
+  "HideToTray": {
+    "en-US": "Hide to tray",
+    "zh-CN": "隐藏到托盘",
+    "ja-JP": "トレイに隠す",
+    "zh-TW": "隱藏到系統匣",
+    "es-ES": "Ocultar en la bandeja"
+  },
+  "Minimize": {
+    "en-US": "Minimize",
+    "zh-CN": "最小化",
+    "ja-JP": "最小化",
+    "zh-TW": "最小化",
+    "es-ES": "Minimizar"
+  },
+  "Restore": {
+    "en-US": "Restore",
+    "zh-CN": "还原",
+    "ja-JP": "元のサイズに戻す",
+    "zh-TW": "還原",
+    "es-ES": "Restaurar"
+  },
+  "Maximize": {
+    "en-US": "Maximize",
+    "zh-CN": "最大化",
+    "ja-JP": "最大化",
+    "zh-TW": "最大化",
+    "es-ES": "Maximizar"
+  },
+  "Close": {
+    "en-US": "Close",
+    "zh-CN": "关闭",
+    "ja-JP": "閉じる",
+    "zh-TW": "關閉",
+    "es-ES": "Cerrar"
+  }
+}

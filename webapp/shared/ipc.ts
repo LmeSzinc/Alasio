@@ -12,6 +12,10 @@ export const IPC_SHARED_STATE_SET_DPI_SCALING = "shared-state:set-dpi-scaling";
 
 // Renderer -> Main, request/response (ipcRenderer.invoke / ipcMain.handle)
 export const IPC_WINDOW_CONFIRM_CLOSE = "window:confirm-close";
+// Current maximize state of the main window. The renderer reads it once on
+// startup because the window can already be maximized before it subscribes
+// (--window=maximize).
+export const IPC_WINDOW_IS_MAXIMIZED = "window:is-maximized";
 export const IPC_SHARED_STATE_GET = "shared-state:get";
 export const IPC_BACKEND_START = "backend:start";
 // Subscribe to the startup log stream: the invoke reply replays the full
@@ -26,6 +30,9 @@ export const IPC_BACKEND_LOG_SUBSCRIBE = "backend:log-subscribe";
 export const IPC_SHARED_STATE_GET_SYNC = "shared-state:get-sync";
 
 // Main -> Renderer, events (webContents.send / ipcRenderer.on)
+// Maximize state change of the main window, pushed on every maximize /
+// unmaximize so the title bar buttons never drift from the real window.
+export const IPC_WINDOW_MAXIMIZED_CHANGE = "window:maximized-change";
 export const IPC_BACKEND_LOG = "backend:log";
 export const IPC_BACKEND_READY = "backend:ready";
 export const IPC_CONFIRM_CLOSE = "confirm-close";

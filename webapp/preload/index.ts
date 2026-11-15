@@ -14,7 +14,9 @@ import {
   IPC_SHUTDOWN_STAGE,
   IPC_WINDOW_CONFIRM_CLOSE,
   IPC_WINDOW_HIDE,
+  IPC_WINDOW_IS_MAXIMIZED,
   IPC_WINDOW_MAXIMIZE,
+  IPC_WINDOW_MAXIMIZED_CHANGE,
   IPC_WINDOW_MINIMIZE,
 } from "../shared/ipc";
 
@@ -24,6 +26,15 @@ const api = {
   maximizeWindow: () => ipcRenderer.send(IPC_WINDOW_MAXIMIZE),
   hideWindow: () => ipcRenderer.send(IPC_WINDOW_HIDE),
   confirmClose: () => ipcRenderer.invoke(IPC_WINDOW_CONFIRM_CLOSE),
+  // Current maximize state, read once by the title bar on mount (the window
+  // can already be maximized before the renderer subscribes to the push).
+  isWindowMaximized: () => ipcRenderer.invoke(IPC_WINDOW_IS_MAXIMIZED) as Promise<boolean>,
+  // Fires on every maximize/unmaximize, whatever triggered it.
+  onWindowMaximizedChange: (callback: (maximized: boolean) => void) => {
+    const handler = (_: any, maximized: boolean) => callback(maximized);
+    ipcRenderer.on(IPC_WINDOW_MAXIMIZED_CHANGE, handler);
+    return () => ipcRenderer.removeListener(IPC_WINDOW_MAXIMIZED_CHANGE, handler);
+  },
 
   // Backend events
   onBackendLog: (callback: (log: string) => void) => {
