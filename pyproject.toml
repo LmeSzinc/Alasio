@@ -47,7 +47,8 @@ dependencies = [
     # alasio/log
     # rich version is limited because we patched rich.trackback to enable exceptiongroup tracebacks on py<3.11
     # 14.1.0 is the minimum version to have exceptiongroup support
-    # see alasio/ext/backport/__init__.py patch_rich_traceback_extract()
+    # a new rich release needs a copy in alasio/backport/rich and its version in the list there,
+    # see patch_rich_traceback_extract()
     "rich>=14.1.0,<=15.0.0",
 ]
 

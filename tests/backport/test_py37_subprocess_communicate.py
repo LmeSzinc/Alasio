@@ -5,10 +5,17 @@ import pytest
 
 from alasio.backport.patch import fix_py37_subprocess_communicate
 
-pytestmark = pytest.mark.skipif(
-    sys.platform != 'win32' or sys.version_info[:2] != (3, 7),
-    reason="Patch only applies to Windows Python 3.7"
-)
+# The tests spawn subprocesses of their own, which is what a serial group would
+# wait for: they depend on nothing but the patched subprocess module, so the file
+# runs beside the group instead of holding it. The skip stays, the mark is the
+# decision of the author and a skipped file costs the pool nothing.
+pytestmark = [
+    pytest.mark.parallel,
+    pytest.mark.skipif(
+        sys.platform != 'win32' or sys.version_info[:2] != (3, 7),
+        reason="Patch only applies to Windows Python 3.7"
+    ),
+]
 
 
 @pytest.fixture(scope="module", autouse=True)

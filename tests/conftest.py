@@ -17,10 +17,20 @@ use:
 """
 import pytest
 
+from alasio.backport.rich import patch_rich_traceback_extract
 from alasio.ext import env
 
 # Shown in the skip line of the report, so it has to say why nothing ran
 NETWORK_SKIP_REASON = 'network test, runs on CI only'
+
+# The patch is decided once per process, and the decision reads the version of rich
+# from the filesystem that is in place at that moment. A test that replaces the
+# filesystem (the in-memory one of the filesystem fixture) cannot answer that read,
+# so a first exception formatted inside such a test would decide against the patch
+# for the whole worker. The suite applies it here instead, while the disk of the
+# process is the one rich was installed on; the logger itself keeps deferring the
+# patch, so a process that never formats an exception never pays for it.
+patch_rich_traceback_extract()
 
 
 def pytest_collection_modifyitems(items):
