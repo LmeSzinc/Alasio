@@ -1,6 +1,7 @@
 import * as path from "path";
-import { BrowserWindow, Menu, Tray, app, nativeImage } from "electron";
+import { BrowserWindow, Menu, Tray, nativeImage } from "electron";
 import { setLang, t } from "./i18ngen";
+import { quitApp } from "./window";
 
 let tray: Tray | null = null;
 let currentLang = "en-US";
@@ -93,7 +94,10 @@ export function updateTrayMenu(lang: string) {
     {
       label: t.Tray.Exit(),
       click: () => {
-        app.quit();
+        // Opening the tray menu and picking Exit is already a deliberate two
+        // step action, so it quits directly: the renderer close dialog would
+        // be invisible anyway while the window is hidden.
+        void quitApp();
       },
     },
   ]);

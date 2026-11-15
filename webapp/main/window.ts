@@ -16,6 +16,11 @@ import { type StartupWindowMode, getStartupWindowMode } from "./startup-args";
 
 let mainWindow: BrowserWindow | null = null;
 let isQuitting = false;
+// In-flight graceful shutdown, shared by every entry point that quits the
+// app so a second request (clicking tray Exit twice, or confirming the
+// close dialog while the tray is already quitting) joins the first one
+// instead of starting a second shutdown of the same backend process.
+let quitPromise: Promise<void> | null = null;
 
 // The relaunch path of the backend asks whether the user is already closing
 // the app before it takes the exit over (see backend.ts:requestRelaunch)
@@ -178,11 +183,76 @@ export function getMainWindow(): BrowserWindow | null {
  * Push the current maximize state of the main window to the renderer.
  */
 function notifyMaximizedState() {
+  sendToRenderer(IPC_WINDOW_MAXIMIZED_CHANGE, mainWindow?.isMaximized() ?? false);
+}
+
+/**
+ * Send a message to the renderer, ignoring windows that are already gone.
+ *
+ * The shutdown flow keeps talking to the renderer (progress stages) while
+ * the window may have been destroyed by another path.
+ *
+ * Args:
+ *     channel (str): IPC channel name
+ *     args (list[any]): Payload of the message
+ */
+function sendToRenderer(channel: string, ...args: unknown[]) {
   const target = mainWindow;
   if (!target || target.isDestroyed()) {
     return;
   }
-  target.webContents.send(IPC_WINDOW_MAXIMIZED_CHANGE, target.isMaximized());
+  target.webContents.send(channel, ...args);
+}
+
+/**
+ * Quit the app gracefully, without asking the renderer to confirm.
+ *
+ * The renderer confirmation dialog is for the close button, a single click
+ * that is easy to trigger by accident. A tray menu exit is already a
+ * deliberate two step action (open the menu, pick Exit), so it quits
+ * directly. Both paths share this function: it stops the backend with the
+ * same staged shutdown, then destroys the window and quits.
+ *
+ * Returns:
+ *     Promise[None]: Resolves once the backend is down, before the window is
+ *     destroyed, so an IPC reply based on it still reaches the renderer
+ */
+export function quitApp(): Promise<void> {
+  if (quitPromise) {
+    return quitPromise;
+  }
+  isQuitting = true;
+
+  quitPromise = new Promise<void>((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      // Resolve first so an IPC reply is sent to the renderer before the
+      // window is destroyed (otherwise "reply was never sent" error)
+      resolve();
+      setImmediate(() => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.destroy();
+        }
+        app.quit();
+      });
+    };
+
+    shutdownBackend((stage) => {
+      sendToRenderer(IPC_SHUTDOWN_STAGE, stage);
+      if (stage === ShutdownStage.Done) {
+        finish();
+      }
+    }).catch((err) => {
+      // The user already asked to exit: a backend that cannot be stopped
+      // cleanly is reported, not a reason to keep the app open.
+      console.error("[window] Failed to shut down the backend:", err);
+      finish();
+    });
+  });
+
+  return quitPromise;
 }
 
 export function setupWindowIPC() {
@@ -206,23 +276,5 @@ export function setupWindowIPC() {
     mainWindow?.hide();
   });
 
-  ipcMain.handle(IPC_WINDOW_CONFIRM_CLOSE, async () => {
-    isQuitting = true;
-
-    return new Promise<void>((resolve) => {
-      shutdownBackend((stage) => {
-        mainWindow?.webContents.send(IPC_SHUTDOWN_STAGE, stage);
-
-        if (stage === ShutdownStage.Done) {
-          // Resolve first so the IPC reply is sent to the renderer
-          // before destroying the window (otherwise "reply was never sent" error)
-          resolve();
-          setImmediate(() => {
-            mainWindow?.destroy();
-            app.quit();
-          });
-        }
-      });
-    });
-  });
+  ipcMain.handle(IPC_WINDOW_CONFIRM_CLOSE, () => quitApp());
 }
