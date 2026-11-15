@@ -15,8 +15,29 @@ files:
   # module collection, this exclusion keeps the asar identical to a
   # dependency-free build.
   - "!node_modules{,/**/*}"
+# Only the locale packs of the supported GUI languages ship. Chromium resolves
+# the application locale by matching the OS language against the packs present,
+# so a pack of a *supported* language must exist or app.getLocale() degrades to
+# en-US for that user (measured on electron 22.3.27: a zh-CN Windows with only
+# en-US.pak reports 'en-US' while getSystemLocale() still reports 'zh-CN').
+# Both the host display language (app.getLocale() in main/app-state.ts) and the
+# embedded frontend's first-paint guess (navigator.languages, which puts the
+# application locale first) read that value.
+#
+# electron-builder matches by file name: exact, or `<entry>-` / `<entry>_` as a
+# prefix of the entry, so ja-JP keeps ja.pak and es-ES keeps es.pak. The
+# underscore spellings cover the macOS `*.lproj` directory names (zh_CN.lproj,
+# zh_TW.lproj); the hyphen spellings cover the win/linux `*.pak` names. A
+# language whose pack is missing falls back to en-US, which is why the file
+# names are listed explicitly instead of relying on one spelling.
 electronLanguages:
   - en-US
+  - zh-CN
+  - zh_CN
+  - zh-TW
+  - zh_TW
+  - ja-JP
+  - es-ES
 win:
   target:
     - dir
