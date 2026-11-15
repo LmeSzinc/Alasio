@@ -7,7 +7,7 @@ import { vitePreprocess } from "@sveltejs/vite-plugin-svelte";
 import tailwindcss from "@tailwindcss/vite";
 import { type Plugin, defineConfig } from "vite";
 import electron from "vite-plugin-electron";
-import { cspInlineHashDev } from "./scripts/csp-inline-hash/vite.ts";
+import { rendererCsp } from "./scripts/csp/config.ts";
 import { mainI18nConfig, rendererI18nConfig } from "./scripts/i18n/config.ts";
 import { i18nPlugin } from "./scripts/i18n/vite.ts";
 
@@ -154,6 +154,11 @@ export default defineConfig({
         $src: "renderer",
         $routes: "renderer/routes",
       },
+
+      // The policy is written by SvelteKit (a meta tag in the built page, the
+      // response header in dev); scripts/csp/config.ts computes it from
+      // renderer/app.html, its inline script needs a hash per algorithm.
+      csp: rendererCsp(),
     }),
     tailwindcss(),
     electron([
@@ -197,9 +202,6 @@ export default defineConfig({
     },
     svelteKitGeneratedHmrGuard(),
     ignoreBuildOutput("**/dist/**"),
-    // dev: intercept html responses before sveltekit injects its
-    // bootstrap script (enforce pre inside the plugin)
-    cspInlineHashDev(),
   ],
   server: {
     fs: {

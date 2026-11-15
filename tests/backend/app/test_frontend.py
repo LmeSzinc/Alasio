@@ -38,7 +38,7 @@ ROOT = '/site'
 #  test data
 # ════════════════════════════════════════════════════════════════════════════
 
-# a page with the meta CSP the build-time csp-inline-hash plugin writes
+# a page with the shape of the CSP meta SvelteKit writes at build time
 HTML_META = (
     '<!doctype html>\n'
     '<html>\n'
@@ -704,3 +704,48 @@ class TestRequest:
         scope['type'] = 'lifespan'
         with pytest.raises(RuntimeError):
             await site(scope, None, None)
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  response header policy
+# ════════════════════════════════════════════════════════════════════════════
+
+
+class TestHtmlCsp:
+    """The response header derived from the CSP meta of a page.
+
+    The header is what the browser enforces together with the meta
+    (intersection), so a page whose meta is not recognized would fall back to
+    the constant policy, which has no script hashes: every inline script of
+    the page would be blocked.
+    """
+
+    # The meta SvelteKit writes (kit.csp, hash mode): lower case http-equiv, no
+    # self closing slash, several hashes with the base64 alphabet
+    KIT_META = (
+        '<!doctype html><html><head>'
+        '<meta http-equiv="content-security-policy" '
+        'content="default-src \'self\'; script-src \'self\' '
+        '\'sha256-mL/IynlYM0zue3qVlMFwZZ3c3sKlBu2qUk0jGKeiung=\' '
+        '\'sha256-WtebyY5jNeeAYTD/Zuq0p1XXmpJ2/yBTUFOir6DhRaw=\'" />'
+        '</head><body></body></html>'
+    )
+
+    def test_mirrors_the_meta_sveltekit_writes(self):
+        csp = frontend._html_csp(self.KIT_META.encode())
+        assert csp == (
+            "default-src 'self'; script-src 'self' "
+            "'sha256-mL/IynlYM0zue3qVlMFwZZ3c3sKlBu2qUk0jGKeiung=' "
+            "'sha256-WtebyY5jNeeAYTD/Zuq0p1XXmpJ2/yBTUFOir6DhRaw='; "
+            f'{FRAME_ANCESTORS}'
+        )
+
+    def test_keeps_a_meta_that_already_has_frame_ancestors(self):
+        page = (
+            '<meta http-equiv="content-security-policy" '
+            'content="script-src \'self\'; frame-ancestors \'none\'">'
+        )
+        assert frontend._html_csp(page.encode()) == "script-src 'self'; frame-ancestors 'none'"
+
+    def test_falls_back_without_a_meta(self):
+        assert frontend._html_csp(HTML_NO_META.encode()) == CSP

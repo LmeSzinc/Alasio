@@ -20,7 +20,9 @@ export default defineConfig({
   plugins: [svelte({ configFile: false })],
   test: {
     environment: "jsdom",
-    include: ["src/**/*.test.ts"],
+    // scripts/ holds build-time helpers (the CSP hash check) that have their
+    // own unit tests; they are plain TS/JS modules, not part of the app.
+    include: ["src/**/*.test.ts", "scripts/**/*.test.ts"],
   },
   // Expose the shared message fixtures path to the contract test. The
   // fixtures live outside the frontend tree (tests/ws_fixtures/), and

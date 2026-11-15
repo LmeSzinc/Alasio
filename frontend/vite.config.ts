@@ -3,7 +3,6 @@ import { join } from "path";
 import { sveltekit } from "@sveltejs/kit/vite";
 import tailwindcss from "@tailwindcss/vite";
 import { type Plugin, defineConfig } from "vite";
-import { cspInlineHashDev } from "./scripts/csp-inline-hash/vite.ts";
 import { i18nConfig } from "./scripts/i18n/config.ts";
 import { i18nPlugin } from "./scripts/i18n/vite.ts";
 import { svelteDropDevPage } from "./scripts/svelte-drop-dev-page/vite.ts";
@@ -108,9 +107,6 @@ export default defineConfig({
     sveltekit(),
     svelteKitGeneratedHmrGuard(),
     ignoreBuildOutput("**/build/**"),
-    // dev: intercept html responses before sveltekit injects its
-    // bootstrap script (enforce pre inside the plugin)
-    cspInlineHashDev(),
   ],
   server: {
     // Use 127.0.0.1

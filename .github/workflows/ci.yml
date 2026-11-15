@@ -4,6 +4,7 @@ name: CI
 #                                                                    +---> wheel
 # frontend (1) ------------------------------------------------------+
 # webapp   (1) ------------------------------------------------------+
+# smoke    (1) ------------------------------------------------------+
 #
 # The accelerator libraries are compiled once per platform by the speedup job
 # and handed to the python-tests matrix as speedup-<os>, so the 21 test jobs
@@ -372,9 +373,71 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  # The Content-Security-Policy is the one thing that breaks the app silently
+  # and totally: a hash that does not match its inline script leaves a blank
+  # window, and no unit test can see it (the browser is the judge). This job
+  # builds both pages and loads them in the real engine, the electron 22 /
+  # chromium 108 the client ships. It runs beside frontend and webapp instead
+  # of extending them: it needs the electron binary they deliberately skip.
+  #
+  # Windows is the platform of the product: the engine runs there unmodified,
+  # with no display server and no extra shared libraries to install, so the
+  # smoke measures what the user actually gets.
+  #
+  # Each smoke runs three phases: the real build must load and boot with no
+  # violation; removing one hash must be blocked by the engine; removing the
+  # bootstrap hash must leave the app unstarted. The negative phases are what
+  # prove the policy is enforced instead of merely absent.
+  smoke:
+    name: smoke
+    runs-on: windows-latest
+    timeout-minutes: 30
+    # the workflow default shell is bash (the other jobs run on ubuntu); on
+    # windows powershell is the shell pnpm and node are set up for
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v6.1.0
+        with:
+          version: "10.33.2"
+
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: |
+            frontend/pnpm-lock.yaml
+            webapp/pnpm-lock.yaml
+
+      # unlike the webapp job, the electron binary is the point of this job
+      - run: pnpm install --frozen-lockfile
+        working-directory: frontend
+
+      - run: pnpm install --frozen-lockfile
+        working-directory: webapp
+
+      - run: pnpm run build
+        working-directory: frontend
+
+      - run: pnpm run build
+        working-directory: webapp
+
+      # the frontend smoke borrows the electron of webapp, the only copy in
+      # the repo
+      - name: Smoke frontend
+        run: pnpm run smoke:csp
+        working-directory: frontend
+
+      - name: Smoke webapp
+        run: pnpm run smoke:csp
+        working-directory: webapp
+
   wheel:
     name: wheel
-    needs: [python-tests, minimum, frontend, webapp]
+    needs: [python-tests, minimum, frontend, webapp, smoke]
     runs-on: ubuntu-22.04
     timeout-minutes: 30
     # the last step tags the version it built, the tag is the only way a

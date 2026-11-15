@@ -4,17 +4,14 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Alasio</title>
-    <!-- Content-Security-Policy. The inline script below is allowed
-         through sha256 hashes (no 'unsafe-inline'); the build-time
-         csp-inline-hash plugin rewrites the script-src hashes on every
-         dev/build so they always cover the current inline scripts
-         (including the sveltekit bootstrap script, which changes per
-         build). frame-src allows the embedded frontend at the local
-         backend (any port: the port is configurable). -->
-    <meta
-      http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self' 'sha256-sxgASNsFgBHJcb1AyfshDaBMm9cm/P979ECS6ATmyfQ='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' ws: wss:; font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-src 'self' http://127.0.0.1:*"
-    />
+    <!-- The Content-Security-Policy is owned by SvelteKit (`kit.csp`, hash
+         mode): it writes the meta tag below with the hashes of the inline
+         scripts it renders itself, and scripts/csp/config.ts supplies the
+         hashes of the template script further down, including the frame-src
+         that allows the embedded frontend at the local backend. Do not add a
+         CSP meta here: a second policy would be enforced on top of the
+         generated one. The hashes are checked against this file by
+         `scripts/csp/verify.ts` after every build. -->
     %sveltekit.head%
     <script>
       // Apply the host display theme before the first paint. Without this

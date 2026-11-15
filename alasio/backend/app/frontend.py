@@ -84,9 +84,9 @@ MEDIA_TYPES = {
 FRAME_ANCESTORS = "frame-ancestors 'self' app://bundle http://127.0.0.1:* http://localhost:*"
 
 # Fallback Content-Security-Policy for a page without a CSP meta (the served
-# page normally carries its own meta, kept in sync with the inline scripts by
-# the build-time csp-inline-hash plugin; the response header then mirrors that
-# meta so the browser enforces their intersection).
+# page normally carries its own meta, written at build time with the hashes of
+# its inline scripts; the response header then mirrors that meta so the browser
+# enforces their intersection).
 CSP = (
     "default-src 'self'; "
     "script-src 'self' 'sha256-/c574zxOUzzzs52yM/ATmZ7eBGoJ3nHgHTc8O5t7jRw='; "
@@ -662,9 +662,9 @@ def _html_csp(content):
     """
     Content-Security-Policy of an html page.
 
-    The build-time csp-inline-hash plugin keeps the meta of the page in sync
-    with the inline scripts, so the meta is mirrored into the response header
-    and the browser enforces their intersection. The policy is extended with
+    The build writes the meta of the page with the hashes of its inline
+    scripts, so the meta is mirrored into the response header and the browser
+    enforces their intersection. The policy is extended with
     frame-ancestors, which the meta tag ignores. A page without a meta falls
     back to the constant policy.
 

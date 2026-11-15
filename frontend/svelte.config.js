@@ -1,5 +1,24 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import adapter from "@sveltejs/adapter-static";
 import { vitePreprocess } from "@sveltejs/vite-plugin-svelte";
+import { inlineScriptHashes } from "./scripts/csp/inline-scripts.js";
+
+// The page template carries one inline script: the pre-paint theme applied to
+// embedded sessions. SvelteKit hashes the inline scripts it renders itself,
+// but it never parses the template, so the hashes of the template scripts are
+// declared here. They are recomputed on every config load (dev restart,
+// build) from the template that is about to be compiled, so the two can not
+// drift apart. `scripts/csp/verify.js` re-checks the built page.
+// `import.meta.url` is a file url when the config is loaded by kit (it loads
+// the config through vite). Tools that transform the config instead of
+// importing it (vitest, in the tests of the directives below) get a virtual
+// url, and `process.cwd()` is the only thing that locates the source tree.
+const templateUrl = new URL("./src/app.html", import.meta.url);
+const appTemplate =
+  templateUrl.protocol === "file:" ? fileURLToPath(templateUrl) : resolve(process.cwd(), "src/app.html");
+const appTemplateHashes = inlineScriptHashes(readFileSync(appTemplate, "utf8"));
 
 /**
  * @type {import('@sveltejs/kit').Config}
@@ -25,6 +44,38 @@ const config = {
    * This is the core configuration section for all SvelteKit-specific features.
    */
   kit: {
+    /**
+     * Content Security Policy
+     * ---------------------------------------
+     * The policy is written by SvelteKit into the page (a meta tag, the page
+     * is prerendered by the static adapter) and in dev into the response
+     * header. The backend mirrors the meta into the production response
+     * header, so both are enforced.
+     *
+     * Hash mode is the only usable mode here. A nonce can not be delivered to
+     * the template script: `%sveltekit.nonce%` makes the adapter-static
+     * fallback prerender throw, and without it the inline theme script would
+     * be blocked in dev, where the inline scripts are served as they are.
+     *
+     * `frame-ancestors` is deliberately absent: a meta tag ignores it, and the
+     * backend adds it to the response header (it allows the electron host).
+     */
+    csp: {
+      mode: "hash",
+      directives: {
+        "default-src": ["self"],
+        "script-src": ["self", ...appTemplateHashes],
+        "style-src": ["self", "unsafe-inline"],
+        "img-src": ["self", "data:", "blob:"],
+        "connect-src": ["self", "ws:", "wss:"],
+        "font-src": ["self", "data:"],
+        "object-src": ["none"],
+        "base-uri": ["self"],
+        "form-action": ["self"],
+        "frame-src": ["self"],
+      },
+    },
+
     /**
      * Adapter
      * --------------------
