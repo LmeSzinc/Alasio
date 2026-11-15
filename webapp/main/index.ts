@@ -92,15 +92,16 @@ if (!gotTheLock) {
         isFirstTimeSetup: false,
       });
 
+      // IPC first, for the same reason as the normal startup below.
+      setupSharedStateIPC();
+      setupWindowIPC();
+
       const window = createWindow();
       setSharedStateWindow(window);
       setTrayWindow(window);
       setBackendWindow(window);
 
       setRoute("error", appState.configError.type, appState.configError.currentPath);
-
-      setupSharedStateIPC();
-      setupWindowIPC();
 
       createTray(appState.displayLang);
       return;
@@ -113,15 +114,20 @@ if (!gotTheLock) {
       isFirstTimeSetup: appState.isFirstTimeSetup,
     });
 
+    // Setup IPC before the window exists: the renderer's pre-paint script
+    // reads the shared state synchronously (getSharedStateSync), and the
+    // window starts loading as soon as createWindow() returns. Registering
+    // the handlers first means the read can never run before its handler is
+    // installed (a missing handler does not throw, it answers undefined, and
+    // the first paint would silently fall back to light).
+    setupSharedStateIPC();
+    setupWindowIPC();
+
     // Create window
     const window = createWindow();
     setSharedStateWindow(window);
     setTrayWindow(window);
     setBackendWindow(window);
-
-    // Setup IPC
-    setupSharedStateIPC();
-    setupWindowIPC();
 
     // Startup log subscription: the invoke reply replays the buffered
     // startup log (chronological snapshot); lines recorded after the
