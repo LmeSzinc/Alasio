@@ -46,9 +46,10 @@ class GenConfigGenerated(GenNavIndex):
         """
         Whether a model bound to an already declared group name still fits it.
 
-        A model of the same inheritance chain (a subclass or a base class of the
-        models already bound) is a variant of the group, which is what variant
-        groups are for: the declared one still gives the IDE a usable type.
+        Models of one variant family share an ancestor in their MRO chain: the
+        base group they are all variants of. A subclass, a base class and a
+        sibling variant of the declared model all validate the same group, so
+        the declared one still gives the IDE a usable type.
 
         Args:
             models (dict[str, str]): Models already bound to the group name,
@@ -56,21 +57,18 @@ class GenConfigGenerated(GenNavIndex):
             model (str): Class name of the model of the binding to check
 
         Returns:
-            bool: True if the model is related to every model already bound
+            bool: True if the model shares an ancestor with every model already bound
         """
 
         def mro_of(name):
             group = self.groups_data.get(name, None)
             if group is None or not group.mro:
                 # unknown group, or a chain that is not built: it stands alone
-                return (name,)
-            return group.mro
+                return {name}
+            return set(group.mro)
 
         mro = mro_of(model)
-        return all(
-            other in mro or model in mro_of(other)
-            for other in models
-        )
+        return all(mro & mro_of(other) for other in models)
 
     def generate_config_generated_file(self, gitadd=None):
         """
@@ -164,11 +162,12 @@ class GenConfigGenerated(GenNavIndex):
                         # generate group_name: anno
                         # A group name may be bound by several tasks: the first
                         # binding declares the attribute, the later ones only add
-                        # a comment. Binding it to a model of another inheritance
-                        # chain is reported: the same input would be validated by
-                        # two unrelated models, and the IDE reads a wrong type.
-                        # A variant of the declared model is what variant groups
-                        # are for, so it is not reported.
+                        # a comment. Binding it to a model of another variant
+                        # family is reported: the same input would be validated
+                        # by two unrelated models, and the IDE reads a wrong type.
+                        # A variant of the declared model, a base class or a
+                        # sibling variant is what variant groups are for, so it
+                        # is not reported.
                         models = collected_groups[group_name]
                         if not models:
                             gen.use_import(model_nav)

@@ -216,6 +216,46 @@ Second:
         assert '# Group: "main.Other"' in code
         assert 'Multiple validation model bound' not in capture.concat()
 
+    def test_group_bound_to_sibling_variants_is_silent(self, fs):
+        """Two variants of one base group are one family, not a conflict.
+
+        A group name is shared by the tasks of a mod, each task binding its own
+        variant of the base group, like `Campaign: GemsCampaign` and
+        `Campaign: CoalitionCampaign` of a mod. Neither model is an ancestor of
+        the other, the base group they both descend from is what relates them.
+        """
+        gen = build(fs, navs={'main': """\
+Campaign:
+  args:
+    Name:
+      value: main
+      option: [main, event]
+GemsCampaign:
+  parent: Campaign
+  args:
+    Name:
+      value: gems
+      option: [gems, event]
+CoalitionCampaign:
+  parent: Campaign
+  args:
+    Name:
+      value: coalition
+      option: [coalition, event]
+"""}, tasks={'main': """\
+GemsFarming:
+  groups:
+    Campaign: GemsCampaign
+Coalition:
+  groups:
+    Campaign: CoalitionCampaign
+"""})
+        with logger.mock_capture_writer() as capture:
+            code = generated(gen)
+        assert code.count('    Campaign: "main.GemsCampaign"') == 1
+        assert '# Campaign: "main.CoalitionCampaign"' in code
+        assert 'Multiple validation model bound' not in capture.concat()
+
     def test_group_bound_to_two_models_warns(self, fs):
         """A group name validated by two unrelated models is reported."""
         gen = build(fs, navs={'main': """\
