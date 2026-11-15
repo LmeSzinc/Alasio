@@ -171,8 +171,8 @@ function recordStartupLog(line: string) {
  * handler by main/index.ts.
  *
  * Returns:
- *     list[str]: Buffered lines in chronological order (oldest first);
- *         the renderer reverses the snapshot for its newest-first view
+ *     list[str]: Buffered lines in chronological order (oldest first),
+ *         which is also the order the loading page renders them in
  */
 export function subscribeBackendLogs(): string[] {
   return startupLog.subscribe();
