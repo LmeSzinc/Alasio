@@ -125,6 +125,52 @@ class TestNegotiateLocale:
         # Underscore in preferred, hyphen in available
         assert negotiate_locale(["zh_Hans"], available) == "zh-Hans"
 
+    def test_traditional_chinese_regions(self):
+        """The regions that write Traditional Chinese resolve to it.
+
+        'zh' is the base of both scripts, so a base match alone would answer
+        Simplified for a Traditional Chinese user; the region of the tag decides.
+        """
+        available = ["zh-CN", "zh-TW", "en-US"]
+
+        assert negotiate_locale(["zh-HK"], available) == "zh-TW"
+        assert negotiate_locale(["zh-MO"], available) == "zh-TW"
+        assert negotiate_locale(["zh-Hant-HK"], available) == "zh-TW"
+        assert negotiate_locale(["zh-Hant-MO"], available) == "zh-TW"
+        # Simplified is untouched
+        assert negotiate_locale(["zh-CN"], available) == "zh-CN"
+        assert negotiate_locale(["zh-Hans-CN"], available) == "zh-CN"
+        assert negotiate_locale(["zh-SG"], available) == "zh-CN"
+        assert negotiate_locale(["zh-Hans-SG"], available) == "zh-CN"
+        # a bare 'zh' still means Simplified
+        assert negotiate_locale(["zh"], available) == "zh-CN"
+
+    def test_a_region_pinned_chinese_tag_is_not_left_to_the_base_match(self):
+        """The region decides on its own, without a trailing base tag.
+
+        A header always degrades towards the base code, so the base alias
+        alone would hide a missing region alias; a single tag shows it.
+        """
+        available = ["zh-CN", "zh-TW", "en-US"]
+
+        for tag, expected in (
+            ("zh-SG", "zh-CN"),
+            ("zh-HK", "zh-TW"),
+            ("zh-MO", "zh-TW"),
+        ):
+            assert negotiate_locale([tag], available) == expected, tag
+
+    def test_traditional_chinese_without_a_traditional_available(self):
+        """A Traditional request answers nothing when only Simplified is offered.
+
+        The alias target must be in `available`: nothing is invented, the
+        caller falls back the way it does for any unsupported language.
+        """
+        available = ["zh-CN", "en-US"]
+
+        assert negotiate_locale(["zh-HK"], available) == ""
+        assert negotiate_locale(["zh-Hant"], available) == ""
+
     def test_alias_matching(self):
         """Test matching using language aliases."""
         available = ["en-US", "nb-NO", "zh-CN"]
@@ -183,6 +229,20 @@ class TestNegotiateLocale:
         # Should use alias when exact match not available
         preferred = ["zh"]  # Should alias to zh-CN
         assert negotiate_locale(preferred, available) == "zh-CN"
+
+    def test_traditional_chinese_header(self):
+        """A browser in Hong Kong gets Traditional Chinese, not Simplified.
+
+        The header a browser sends degrades towards the base code, so an
+        unaliased 'zh-HK' would be answered by its trailing 'zh' (Simplified).
+        """
+        available = ["zh-CN", "zh-TW", "en-US"]
+
+        assert negotiate_accept_language("zh-HK,zh;q=0.9,en;q=0.8", available) == "zh-TW"
+        assert negotiate_accept_language("zh-MO,zh;q=0.9", available) == "zh-TW"
+        assert negotiate_accept_language("zh-Hant-HK,zh-Hant;q=0.9,zh;q=0.8", available) == "zh-TW"
+        # a Simplified browser is unaffected
+        assert negotiate_accept_language("zh-CN,zh;q=0.9,en;q=0.8", available) == "zh-CN"
 
     def test_mixed_case_and_separator_combinations(self):
         """Test various combinations of case and separator styles."""

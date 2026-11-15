@@ -81,6 +81,13 @@ def negotiate_locale(preferred, available):
     # or incomplete language codes to their more specific counterparts.
     # Note that this is an in-function table to save memory, as we don't need to call this function frequently.
     # e.g., 'en' -> 'en-US', 'no' -> 'nb-NO' (Norwegian Bokmål)
+    #
+    # Most keys are bare language codes, but a region may be part of the key
+    # when it pins the script of a language that cannot be told apart by the
+    # base code alone: 'zh' is the base of both Simplified and Traditional, so
+    # the regions that pin a script are named here. Without them a browser
+    # sending 'zh-HK,zh;q=0.9' would answer 'zh' -> Simplified, and a bare
+    # 'zh-SG' would answer nothing at all.
     aliases = {
         'ar': 'ar-SY', 'bg': 'bg-BG', 'bs': 'bs-BA', 'ca': 'ca-ES', 'cs': 'cs-CZ',
         'da': 'da-DK', 'de': 'de-DE', 'el': 'el-GR', 'en': 'en-US', 'es': 'es-ES',
@@ -91,6 +98,11 @@ def negotiate_locale(preferred, available):
         'pt': 'pt-PT', 'ro': 'ro-RO', 'ru': 'ru-RU', 'sk': 'sk-SK', 'sl': 'sl-SI',
         'sv': 'sv-SE', 'th': 'th-TH', 'tr': 'tr-TR', 'uk': 'uk-UA', 'zh': 'zh-CN',
         'zh-hans': 'zh-CN', 'zh-hans-cn': 'zh-CN', 'zh-hant': 'zh-TW', 'zh-hant-tw': 'zh-TW',
+        # regions that pin the script (Singapore writes Simplified, the rest
+        # of the listed ones write Traditional)
+        'zh-sg': 'zh-CN', 'zh-hans-sg': 'zh-CN',
+        'zh-hk': 'zh-TW', 'zh-mo': 'zh-TW',
+        'zh-hant-hk': 'zh-TW', 'zh-hant-mo': 'zh-TW',
     }
 
     # Create a mapping from a normalized locale to its original cased/separated form.
@@ -106,9 +118,8 @@ def negotiate_locale(preferred, available):
         if norm_pref in dict_norm_available:
             return dict_norm_available[norm_pref]
 
-        # 2. Alias match (e.g., preferred 'no' matches available 'nb_NO')
-        # Note: Alias lookup keys are typically simple language codes, not region-specific.
-        # We look up the alias using the simple lowercased string, as per Babel's logic.
+        # 2. Alias match (e.g., preferred 'no' matches available 'nb_NO', or
+        # preferred 'zh-HK' matches available 'zh-TW')
         alias = aliases.get(norm_pref)
         if alias:
             # Normalize the *result* of the alias lookup for comparison.
