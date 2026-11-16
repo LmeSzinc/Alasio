@@ -1,0 +1,115 @@
+"""
+Warm the bytecode cache of the environment and the mods, the entry of the
+warmup subprocess.
+
+    python -m alasio.deploy.pyc_warm [--root DIR] [--mod DIR]... [--json] [--dry-run]
+
+The subprocess runs the interpreter of the release, so the cache tag, the
+magic number and the optimization level of the pyc files it writes are the
+ones of the worker that imports them afterwards. It must not be started
+with -O: the pyc files are then named ".opt-N.pyc", which a worker running
+without -O never reads, and the run is wasted. It may be started with -B,
+py_compile writes the files regardless, but the sources the run imports
+itself, e.g. the scope reader, are then compiled every time.
+
+The scope is read from the arguments, nothing is guessed from the layout of
+a release: --root is the project root, the tree that holds requirements.txt
+and the default mod, --mod names the other mod trees, the first one being
+the mod the worker will run. The site-packages folders are the ones of the
+running interpreter, see scope.site_packages_dirs().
+
+The output is meant for the parent process. The report is logged rather
+than printed, and a run started by the backend passes --json, where the
+logger is muted on all of its outputs: stdout then carries the JSON line
+alone, and the warmup never opens the log file of the release, which the
+backend is starting at that same moment. A run started by hand keeps its
+lines. The exit code only tells whether the run could start, a source
+that fails to compile is counted, never raised: the warmup is an
+optimization, and the parent must never fail because of it.
+"""
+import argparse
+import json
+import os
+import sys
+
+from alasio.deploy.pyc_warm.runner import warm
+from alasio.deploy.pyc_warm.scope import LOCK_FILE
+from alasio.ext.path.calc import joinpath
+from alasio.logger import logger
+
+# Prefix of the lines on stderr, the channel a machine does not read
+TAG = '[pyc_warm]'
+
+
+def main(argv=None):
+    """
+    Warm the bytecode caches of an environment, the entry of the module.
+
+    Args:
+        argv (list[str]): Arguments of the command line. Defaults to
+            None, sys.argv[1:]
+
+    Returns:
+        int: Exit code, 0 when the run started, 1 when the root does not
+            exist
+    """
+    parser = argparse.ArgumentParser(
+        prog='python -m alasio.deploy.pyc_warm',
+        description='Compile the bytecode cache of the environment and the mods in advance.',
+    )
+    parser.add_argument(
+        '--root', default=None, metavar='DIR',
+        help='project root: the tree that holds the requirements file and the '
+             'default mod, defaults to the working directory',
+    )
+    parser.add_argument(
+        '--mod', action='append', default=None, metavar='DIR',
+        help='root of a mod tree to warm, repeatable, the self mod first, '
+             'defaults to the project root',
+    )
+    parser.add_argument(
+        '--json', action='store_true',
+        help='print the summary as one line of JSON on stdout',
+    )
+    parser.add_argument(
+        '--dry-run', action='store_true',
+        help='list the sources to compile, compile nothing',
+    )
+    args = parser.parse_args(argv)
+
+    root = args.root if args.root is not None else os.getcwd()
+    if not os.path.isdir(root):
+        print(f'{TAG} root does not exist: {root}', file=sys.stderr)
+        return 1
+
+    if sys.flags.optimize:
+        print(
+            f'{TAG} warning: the interpreter runs with -O{sys.flags.optimize}, the pyc files '
+            f'are named ".opt-{sys.flags.optimize}.pyc" and a worker without -O never reads them',
+            file=sys.stderr,
+        )
+    if sys.dont_write_bytecode:
+        # py_compile writes the files whatever this flag says, it is the
+        # modules the run imports itself that would be compiled again
+        sys.dont_write_bytecode = False
+
+    if args.json:
+        # The parent reads one line of JSON on stdout: the lines of the
+        # report have no reader there, and the log file of the release
+        # must stay closed, the backend opens it at the same moment
+        logger.mute(all=True)
+
+    mods = args.mod if args.mod else [root]
+    report = warm(
+        mod_roots=[mod for mod in mods],
+        requirements_file=joinpath(root, LOCK_FILE),
+        dry_run=args.dry_run,
+    )
+    logger.info(f'total   : {report.seconds:.2f}s')
+    if args.json:
+        print(json.dumps(report.to_dict(), ensure_ascii=False))
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())
