@@ -779,25 +779,32 @@ class Supervisor:
             mprint("ERROR: backend entry is still placeholder, nothing to run")
             return
 
-        mprint(f"Running on PID: {os.getpid()}")
-
-        # Electron mode (tokens generated, rotated and announced) is decided by
-        # the host pid electron wrote into the spawn environment; without one
-        # the backend token table stays empty and sensitive APIs are locked.
-        if self.is_electron:
-            self.token_manager.init_token()
-            self.token_manager.start_rotation()
-
-        # Set up custom SIGINT handler to track CTRL+C count
+        # Install the signal handlers before the first line of the run is
+        # printed: whoever reacts to that line -- the host process, a user
+        # watching the console -- may send CTRL+C from that moment on, so the
+        # line must not mark a moment when a signal still gets the default
+        # handler. The line is printed inside the try below, so a signal
+        # arriving right after it takes the same graceful shutdown path as any
+        # later one.
         signal.signal(signal.SIGINT, self.handle_sigint)
         signal.signal(signal.SIGTERM, self.handle_sigint)
         if sys.platform == "win32":
             signal.signal(signal.SIGBREAK, self.handle_sigint)
 
-        # The stdin listener thread ("command:stop" from Electron) is started
-        # and stopped by start_backend around every spawn
-
         try:
+            mprint(f"Running on PID: {os.getpid()}")
+
+            # Electron mode (tokens generated, rotated and announced) is decided
+            # by the host pid electron wrote into the spawn environment; without
+            # one the backend token table stays empty and sensitive APIs are
+            # locked.
+            if self.is_electron:
+                self.token_manager.init_token()
+                self.token_manager.start_rotation()
+
+            # The stdin listener thread ("command:stop" from Electron) is
+            # started and stopped by start_backend around every spawn
+
             # Main supervision loop
             while True:
                 # Start the backend

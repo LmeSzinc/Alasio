@@ -13,8 +13,16 @@ ACK_TIMEOUT = 2.0
 # log lines are written by different threads (the rotation thread, the recv
 # loop, the stdin listener); print() writes the text and the newline in two
 # calls, so without a lock a rotation announcement and a relaunch announcement
-# could end up on one line, and the host would parse neither
-PRINT_LOCK = threading.Lock()
+# could end up on one line, and the host would parse neither.
+#
+# Re-entrant on purpose: the SIGINT/SIGTERM handler logs through mprint(), and a
+# signal handler runs in whatever thread took the signal. A signal delivered
+# while that thread is inside mprint() would block the handler on the lock the
+# same thread holds, so KeyboardInterrupt would never be raised and the
+# supervisor would hang instead of shutting down (a hang, not a crash: no log
+# line is written after the one being printed). Re-entering is safe here, the
+# lock only orders whole lines.
+PRINT_LOCK = threading.RLock()
 
 
 class SupervisorTokenManager:
