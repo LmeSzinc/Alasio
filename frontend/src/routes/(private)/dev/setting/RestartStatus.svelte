@@ -8,17 +8,27 @@
   import { useTopic } from "$lib/ws";
 
   /**
-   * Status of a graceful backend restart, shown below the restart tool.
+   * Status of a backend maintenance flow (restart / update), shown below the
+   * restart tool.
    *
    * The phase comes from the Restart topic and the configs still running (and
    * the ones queued for the auto-resume) come from the Worker topic, which is
-   * the single source of truth for every worker state: the restart does not
-   * keep a second copy of it. Without a restart in progress nothing is
-   * rendered at all.
+   * the single source of truth for every worker state: the flow does not keep
+   * a second copy of it. The update flow pushes the same 'stopping' phase and
+   * parks its workers in "updating" instead of "restarting", everything else
+   * is identical. Without a flow in progress nothing is rendered at all.
    */
 
   /** Phase of a graceful backend restart, `null` = no restart in progress */
   type RestartPhase = NonNullable<RestartTopicLike["phase"]>;
+
+  /**
+   * Worker states of a maintenance flow in progress: no process, waiting for
+   * the new backend. The backend parks the workers in the state of the flow
+   * that stopped them ("restarting" for a restart, "updating" for an update /
+   * daily / startup flow), see WORKER_PARKED_STATE in the worker manager.
+   */
+  const PARKED_STATES: WORKER_STATE[] = ["restarting", "updating"];
 
   type Props = {
     /**
@@ -35,10 +45,11 @@
   };
   let { phase: phaseOverride, workers: workersOverride, class: className }: Props = $props();
 
-  // Restart topic: only carries the phase of the restart in progress
+  // Restart topic: only carries the phase of the maintenance flow in progress
   const restartClient = useTopic<RestartTopicLike>("Restart");
-  // Worker topic: per-worker progress of the restart ('restarting' = stopped
-  // and waiting for the new backend, 'resuming' = queued for the auto-resume)
+  // Worker topic: per-worker progress of the flow ('restarting' / 'updating' =
+  // stopped and waiting for the new backend, 'resuming' = queued for the
+  // auto-resume)
   const workerClient = useTopic<Record<string, WORKER_STATE>>("Worker");
 
   // Values come either from the props (dev page) or from the topics
@@ -46,12 +57,15 @@
   const workers = $derived(workersOverride === undefined ? (workerClient.data ?? {}) : workersOverride);
 
   // Configs the graceful stop is still waiting for: a worker that finished its
-  // current task and stopped is marked "restarting" by the backend, and one
-  // waiting in the auto-resume queue is "resuming" (no process either), so
-  // every other alive state means "still running"
+  // current task and stopped is parked by the backend ("restarting" for a
+  // restart flow, "updating" for an update one), and one waiting in the
+  // auto-resume queue is "resuming" (no process either), so every other alive
+  // state means "still running"
   const stoppingWorkers = $derived.by(() =>
     Object.entries(workers)
-      .filter(([, state]) => state !== "restarting" && state !== "resuming" && state !== "idle" && state !== "error")
+      .filter(
+        ([, state]) => !PARKED_STATES.includes(state) && state !== "resuming" && state !== "idle" && state !== "error",
+      )
       .map(([name, state]) => ({ name, state })),
   );
   // Auto-resume queue of the new backend: waiting for its turn or starting
@@ -60,13 +74,18 @@
       .filter(([, state]) => state === "resuming" || state === "starting")
       .map(([name, state]) => ({ name, state })),
   );
-  // Already stopped, waiting for the new backend to start: "restarting" for
-  // this restart and "resuming" for the queue it took over (a leftover of the
-  // previous restart's auto-resume) -- neither has a process, both count as
-  // stopped, and neither is a config the graceful stop still waits for
+  // Already stopped, waiting for the new backend to start: the park states for
+  // this flow and "resuming" for the queue it took over (a leftover of the
+  // previous restart's auto-resume) -- none of them has a process, all count as
+  // stopped, and none is a config the graceful stop still waits for
   const stoppedCount = $derived(
-    Object.values(workers).filter((state) => state === "restarting" || state === "resuming").length,
+    Object.values(workers).filter((state) => PARKED_STATES.includes(state) || state === "resuming").length,
   );
+  // Configs parked by a restart only (no update flow): the missing-phase
+  // fallback below reads them. A config parked in "updating" is left out: its
+  // flow keeps the backend running while it applies the files (the backend is
+  // not shutting down yet), and the phase is what tells that stage
+  const restartParkedCount = $derived(Object.values(workers).filter((state) => state === "restarting").length);
 
   type View = {
     phase: RestartPhase;
@@ -79,7 +98,7 @@
   const view = $derived.by<View | null>(() => {
     if (phase === null) {
       if (resumingWorkers.length) return { phase: "resuming", workers: resumingWorkers };
-      if (stoppedCount) return { phase: "shutting-down", workers: [] };
+      if (restartParkedCount) return { phase: "shutting-down", workers: [] };
       return null;
     }
     if (phase === "stopping") return { phase, workers: stoppingWorkers };
@@ -114,6 +133,7 @@
     if (state === "killing") return t.Scheduler.Killing();
     if (state === "force-killing") return t.Scheduler.ForceKilling();
     if (state === "restarting") return t.Scheduler.Restarting();
+    if (state === "updating") return t.Scheduler.Updating();
     if (state === "resuming") return t.Scheduler.Resuming();
     return t.Scheduler.Error();
   }

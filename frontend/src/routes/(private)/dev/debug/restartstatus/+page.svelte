@@ -68,6 +68,12 @@
       workers: { cfg_a: "restarting", cfg_b: "resuming", cfg_c: "running" },
     },
     {
+      label: "Stopping · update flow",
+      note: "The update flow stops the workers the same way and parks them in 'updating' instead of 'restarting': a parked config counts as stopped and leaves the waiting list, the running ones stay.",
+      phase: "stopping",
+      workers: { cfg_a: "updating", cfg_b: "running", cfg_c: "scheduler-stopping" },
+    },
+    {
       label: "Stopping · long config name",
       note: "The name truncates, the state stays at the right edge of the row.",
       phase: "stopping",

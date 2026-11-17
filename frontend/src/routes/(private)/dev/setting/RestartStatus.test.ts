@@ -82,6 +82,33 @@ describe("TestRestartStatus", () => {
     expect(target.textContent).not.toContain("cfg_a");
   });
 
+  it("counts a config parked by the update flow as stopped", async () => {
+    // The update flow stops the workers the same way and parks them in
+    // "updating" (no process, auto-resume after the restart): it is not a
+    // config the stop still waits for, it counts as stopped like "restarting".
+    const target = await mountStatus("stopping", {
+      cfg_a: "updating",
+      cfg_b: "running",
+      cfg_c: "scheduler-waiting",
+    });
+    expect(target.textContent).toContain("1/3");
+    expect(target.textContent).toContain("cfg_b");
+    expect(target.textContent).toContain("cfg_c");
+    expect(target.textContent).not.toContain("cfg_a");
+  });
+
+  it("does not claim a shutdown from the configs parked by an update", async () => {
+    // Missing phase: the configs parked by a restart are the fallback signal
+    // that the backend is shutting down. An update parks its configs while the
+    // backend keeps running (it applies the files first), so the banner stays
+    // hidden for them instead of announcing a shutdown.
+    const restart = await mountStatus(null, { cfg_a: "restarting" });
+    expect(restart.textContent).not.toBe("");
+
+    const update = await mountStatus(null, { cfg_a: "updating" });
+    expect(update.textContent).toBe("");
+  });
+
   it("lists the auto-resume queue while the new backend starts it", async () => {
     const target = await mountStatus("resuming", {
       cfg_a: "resuming",
