@@ -104,10 +104,12 @@ export class WebsocketManager {
   connectionGeneration = $state(0);
 
   /**
-   * Tracks which topics have received their initial 'full' message,
-   * serving as a stable signal for subscription readiness.
-   * Key is topic name, value is boolean. This is decoupled from the topic data itself
-   * to avoid triggering effects on high-frequency data updates.
+   * Tracks which topics are usable on the live connection: their subscribe
+   * message has been sent on it, so the server accepts rpcs of the topic from
+   * that point on. Cleared when the connection drops, so a resilient operation
+   * sees the re-subscription of the next connection as a new one. Decoupled
+   * from the topic data itself to avoid triggering effects on high-frequency
+   * data updates.
    */
   topicReady = $state<Record<string, boolean>>({});
 
@@ -222,7 +224,10 @@ export class WebsocketManager {
       // re-subscriptions below refill every topic from the new session.
       this.#clearAll();
 
-      // Immediately mark all default topics as "ready".
+      // A connection subscribes from scratch: the default topics are already
+      // registered server-side, the active subscriptions are re-sent below.
+      // A topic counts as ready (rpcs for it are accepted) once its subscribe
+      // message is on the wire, since both travel in order over one socket.
       for (const topic of this.#options.defaultSubscriptions) {
         this.topicReady[topic] = true;
       }
@@ -231,6 +236,7 @@ export class WebsocketManager {
       for (const topic in this.subscriptions) {
         if (this.subscriptions[topic] > 0) {
           this.#send({ t: topic });
+          this.topicReady[topic] = true;
         }
       }
 
@@ -788,6 +794,22 @@ export class WebsocketManager {
     }
   }
 
+  /**
+   * Whether the subscription of a topic is established on the live connection:
+   * its subscribe message has been sent on it. Both messages travel in order
+   * over one socket, so the server accepts rpcs of the topic from that point
+   * on. Reactive: reading it inside an effect follows the connection changes.
+   *
+   * Args:
+   *     topic (str): Topic name
+   *
+   * Returns:
+   *     bool: True when the topic is usable on the current connection
+   */
+  isTopicReady(topic: string): boolean {
+    return this.topicReady[topic] === true;
+  }
+
   // --- Implementation of RpcContext ---
   registerRpcCall(id: string, callbacks: RpcCallbacks) {
     this.#rpcCallbacks.set(id, callbacks);
@@ -821,8 +843,11 @@ export class WebsocketManager {
     // the `onopen` handler is responsible for sending the initial subscription message.
     // For testing purposes, `forceSend` allows bypassing this check.
     if (forceSend || (currentCount === 0 && !this.#options.defaultSubscriptions.includes(topic))) {
+      // While the connection is down the subscribe waits for onopen, which
+      // sends it before anything else queued.
       if (this.isConnected()) {
         this.#send({ t: topic });
+        this.topicReady[topic] = true;
       }
     }
   }
@@ -871,7 +896,12 @@ export class WebsocketManager {
   };
 
   /**
-   * A raw send method for direct use, e.g., in a testing UI.
+   * A raw send method for direct use, e.g., in a testing UI. It is the one
+   * caller that queues while disconnected: an rpc is never queued (see
+   * createRpc), and a subscription is re-sent by the connection itself.
+   *
+   * Args:
+   *     payload (RequestEvent): Message to send
    */
   sendRaw(payload: RequestEvent) {
     this.#send(payload);

@@ -1,6 +1,5 @@
-import { untrack } from "svelte";
 import { toast } from "svelte-sonner";
-import { renewalCoordinator, websocketClient } from "./client.svelte";
+import { renewalCoordinator } from "./client.svelte";
 import type { RequestEvent } from "./event";
 
 /**
@@ -43,6 +42,10 @@ export interface RpcContext {
   unregisterRpcCall(id: string): void;
   /** Whether a connection is open. */
   isConnected(): boolean;
+  /** Whether the topic's subscription is established on the live connection. */
+  isTopicReady(topic: string): boolean;
+  /** Increments on every successful connection. */
+  readonly connectionGeneration: number;
 }
 
 /**
@@ -222,59 +225,46 @@ export function createRpc(topic: string, context: RpcContext, options: RpcOption
 }
 
 /**
- * Creates an RPC instance that automatically re-sends its last call upon WebSocket reconnection,
- * crucially waiting for its dependent topic subscription to be confirmed by the server before firing.
+ * Creates an RPC instance that asserts its last call on the connection that
+ * replaced the one carrying it: a reconnect may land on a new backend session,
+ * and the command that set the page up (the language, the config, the preview)
+ * has to run there too.
  *
- * It wraps the base `createRpc` by adding a reactive `$effect` that monitors both
- * the connection generation and the presence of the topic's data.
+ * The call is sent once the topic's subscription is established on the new
+ * connection (see RpcContext.isTopicReady), so the server never answers
+ * "Cannot do RPC before subscribing topic".
  *
- * @param topic - The WebSocket topic this RPC call depends on. Its presence in `websocketClient.topics`
- *                is used as a signal that the subscription is ready.
- * @param context - The RpcContext, typically the `websocketClient` instance.
+ * @param topic - The WebSocket topic this RPC call depends on.
+ * @param context - The RpcContext, typically a `WebsocketManager` instance.
  * @param options - Configuration options, same as `createRpc`.
  * @returns A stateful `Rpc` object with added resilience.
  */
 export function createResilientRpc(topic: string, context: RpcContext, options: RpcOptions = {}): Rpc {
+  let lastCall: { func: string; args: any; callbacks?: CallCallbacks } | null = null;
+  // Connection that carried the last call; -1 while it was never sent.
+  let sentGeneration = -1;
+
   const rpc = createRpc(topic, context, options);
 
-  let lastCall: { func: string; args: any; callbacks?: CallCallbacks } | null = $state(null);
-  let dataGeneration = $state(-1);
-
   $effect(() => {
-    // 1. Read dependencies.
-    const topicReady = websocketClient.topicReady[topic];
-    if (!topicReady) {
-      // if websocket closed, websocketClient will set all topicReady to false
-      // so we can update dataGeneration to the latest connectionGeneration
-      dataGeneration = untrack(() => websocketClient.connectionGeneration);
-      return;
-    }
-
-    const last = untrack(() => lastCall);
-    if (!last) {
-      // No stored call
-      return;
-    }
-    if (untrack(() => rpc.isPending)) {
-      // last call still running
-      return;
-    }
-    const rpcGeneration = untrack(() => dataGeneration);
-    const currentGeneration = untrack(() => websocketClient.connectionGeneration);
-
-    if (rpcGeneration > 0 && rpcGeneration < currentGeneration) {
-      dataGeneration = currentGeneration;
-      // console.log(
-      //   `[Resilient RPC] Topic '${topic}' is ready, re-calling '${last.func}' for connection generation ${currentGeneration}`,
-      // );
-      rpc.call(last.func, last.args, last.callbacks);
-    }
+    // Both signals are read on every run: an effect only re-runs on the
+    // dependencies it read last time, and the guards below change with them.
+    const ready = context.isTopicReady(topic);
+    const generation = context.connectionGeneration;
+    if (lastCall === null || !ready || generation === sentGeneration) return;
+    // The last call was never sent (it was issued while the connection was
+    // down), or was lost with the connection: this one knows nothing about it,
+    // so it is sent now — on a topic whose subscription is already in place.
+    sentGeneration = generation;
+    rpc.call(lastCall.func, lastCall.args, lastCall.callbacks);
   });
 
-  // MODIFIED: Wrap the `call` method to store the arguments and callbacks for later.
   const call = (func: string, args: any = {}, callbacks?: CallCallbacks) => {
     lastCall = { func, args, callbacks };
-    dataGeneration = untrack(() => websocketClient.connectionGeneration);
+    // createRpc sends only on an open connection: record which one carried the
+    // call, or -1 when it was not sent at all (the effect above sends it once
+    // the connection is back and the topic is ready).
+    sentGeneration = context.isConnected() ? context.connectionGeneration : -1;
     rpc.call(func, args, callbacks);
   };
 

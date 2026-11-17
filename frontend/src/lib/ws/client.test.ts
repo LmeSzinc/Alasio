@@ -293,18 +293,37 @@ describe("TestTopicReady", () => {
     expect(client.topicReady).toEqual({});
   });
 
-  it("tracks ready state per topic after subscription", () => {
+  it("marks a topic ready once its subscribe is on the wire", () => {
+    // A topic is usable for rpcs as soon as its subscribe message has been
+    // sent: both travel in order over one socket, so the server registers the
+    // subscription before it reads the rpc. Data is a separate matter (Preview
+    // pushes none at all).
     const client = new WebsocketManager();
     client.connect();
     FakeWebSocket.last!.serverOpen();
-    client.sub("ConfigScan");
-    FakeWebSocket.last!.serverMessage(JSON.stringify({ t: "ConfigScan", o: "full", v: [] }));
 
-    expect(client.topicReady).toEqual({ ConnState: true });
+    client.sub("ConfigScan");
+    expect(client.topicReady).toEqual({ ConnState: true, ConfigScan: true });
+    expect(client.isTopicReady("ConfigScan")).toBe(true);
+    expect(client.isTopicReady("Preview")).toBe(false);
 
     client.unsub("ConfigScan");
     expect(client.topicReady).toEqual({ ConnState: true });
     expect(client.topics).not.toHaveProperty("ConfigScan");
+  });
+
+  it("marks the re-subscribed topics ready on the new connection", () => {
+    const client = new WebsocketManager();
+    client.connect();
+    FakeWebSocket.last!.serverOpen();
+    client.sub("Preview");
+
+    const ws = dropAndReconnect(1000);
+    expect(client.isTopicReady("Preview")).toBe(false);
+
+    ws.serverOpen();
+    expect(lastSent(ws)).toEqual({ t: "Preview" });
+    expect(client.isTopicReady("Preview")).toBe(true);
   });
 });
 
@@ -1079,6 +1098,20 @@ describe("TestMessageQueue", () => {
 
     dropAndReconnect(1000).serverOpen();
     expect(lastSent(FakeWebSocket.last!)).toEqual({ t: "ConfigScan" });
+  });
+
+  it("sends the subscription before the messages that waited for the connection", () => {
+    // An rpc of a topic whose subscribe is still on its way would be rejected
+    // with "Cannot do RPC before subscribing topic".
+    const client = new WebsocketManager();
+    client.sub("Preview");
+    client.sendRaw({ t: "Preview", o: "rpc", f: "preview_start", v: {}, i: "rpc-1" });
+
+    FakeWebSocket.last!.serverOpen();
+    expect(FakeWebSocket.last!.sent.map(parseSent)).toEqual([
+      { t: "Preview" },
+      { t: "Preview", o: "rpc", f: "preview_start", v: {}, i: "rpc-1" },
+    ]);
   });
 
   it("serializes the payload with the exact protocol shape", () => {
