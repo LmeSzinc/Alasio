@@ -20,10 +20,17 @@ vi.stubGlobal("WebSocket", FakeWebSocket);
 /** A minimal in-memory RpcContext (no real websocket involved). */
 class FakeContext implements RpcContext {
   sent: RequestEvent[] = [];
+  /** Whether the fake connection is live (see RpcContext.isConnected). */
+  connected = true;
+  /** How many times the context was asked to connect. */
+  connectCalls = 0;
   #callbacks = new Map<string, RpcCallbacks>();
 
   sendRaw(payload: RequestEvent): void {
     this.sent.push(payload);
+  }
+  connect(): void {
+    this.connectCalls++;
   }
   registerRpcCall(id: string, callbacks: RpcCallbacks): void {
     this.#callbacks.set(id, callbacks);
@@ -33,6 +40,9 @@ class FakeContext implements RpcContext {
   }
   hasRpcCall(id: string): boolean {
     return this.#callbacks.has(id);
+  }
+  isConnected(): boolean {
+    return this.connected;
   }
   callbacks(id: string): RpcCallbacks | undefined {
     return this.#callbacks.get(id);
@@ -208,6 +218,90 @@ describe("TestCreateRpc", () => {
     expect(rpc.isPending).toBe(false);
     expect(rpc.errorMsg).toBeNull();
     expect(rpc.isOpen).toBe(true);
+  });
+});
+
+describe("TestCreateRpcWhenOffline", () => {
+  let context: FakeContext;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.clearAllMocks();
+    context = new FakeContext();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("sends nothing and reports nothing while there is no connection", () => {
+    // No connection can answer the request, and a request that never left the
+    // client has no deadline: it is not sent at all, and its state stays
+    // untouched. A resilient rpc asserts the call again once the connection is
+    // back, so the client is only asked for a connection.
+    context.connected = false;
+    const rpc = createRpc("ConnState", context, { pendingDelay: 0 });
+    const onError = vi.fn();
+    rpc.call("set_lang", {}, { onError });
+
+    vi.advanceTimersByTime(60_000);
+    expect(context.sent).toHaveLength(0);
+    expect(context.connectCalls).toBe(1);
+    expect(rpc.errorMsg).toBeNull();
+    expect(rpc.isPending).toBe(false);
+    expect(onError).not.toHaveBeenCalled();
+    expect(toast.error).not.toHaveBeenCalled();
+  });
+
+  it("reports nothing when the call times out on a connection that is gone", () => {
+    // The socket dropped before the answer: the call can never be answered,
+    // which is a connection failure, not an rpc failure. The page already
+    // reports the disconnection, and a resilient rpc replays the call.
+    const rpc = createRpc("ConnState", context, { pendingDelay: 0, timeout: 100 });
+    const onError = vi.fn();
+    rpc.call("set_lang", {}, { onError });
+    const id = context.sent[0].i!;
+
+    context.connected = false;
+    vi.advanceTimersByTime(100);
+
+    expect(rpc.errorMsg).toBeNull();
+    expect(rpc.isPending).toBe(false);
+    expect(onError).not.toHaveBeenCalled();
+    expect(toast.error).not.toHaveBeenCalled();
+    // The call is still cleaned up: a late answer cannot revive it.
+    expect(context.hasRpcCall(id)).toBe(false);
+  });
+
+  it("ignores the response of a call that was replaced", () => {
+    // call #1 is answered after call #2 replaced it: its result is not this
+    // operation's state any more.
+    const rpc = createRpc("ConnState", context, { pendingDelay: 0 });
+    rpc.call("set_lang", { lang: "en-US" });
+    const firstId = context.sent[0].i!;
+    const firstHandlers = context.callbacks(firstId)!;
+
+    rpc.call("set_lang", { lang: "zh-CN" });
+    firstHandlers.onSuccess(firstId);
+
+    expect(rpc.successMsg).toBeNull();
+    expect(rpc.errorMsg).toBeNull();
+  });
+
+  it("restarts the clock of a call that was replaced", () => {
+    const rpc = createRpc("ConnState", context, { pendingDelay: 0, timeout: 100 });
+    rpc.call("set_lang", { lang: "en-US" });
+    vi.advanceTimersByTime(60);
+
+    rpc.call("set_lang", { lang: "zh-CN" });
+    // 160ms after the first call, 100ms after the second: only the second one
+    // is late.
+    vi.advanceTimersByTime(60);
+    expect(toast.error).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(40);
+    expect(toast.error).toHaveBeenCalledTimes(1);
+    expect(rpc.errorMsg).toBe("RPC call timeout");
   });
 });
 
