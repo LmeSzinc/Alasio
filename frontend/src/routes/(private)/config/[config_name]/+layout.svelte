@@ -4,7 +4,7 @@
   import type { ConfigTopicLike, WORKER_STATE } from "$lib/components/aside/types";
   import { Scheduler, type TaskQueueData, type TaskQueueI18n, type TaskRunningData } from "$lib/components/scheduler";
   import { ScrollArea } from "$lib/components/ui/scroll-area";
-  import { NavContext } from "$lib/slotcontext.svelte";
+  import { NavContext, type NavLayout } from "$lib/slotcontext.svelte";
   import { useTopic } from "$lib/ws";
   import ConfigNav from "./ConfigNav.svelte";
   import { uiState as ui } from "./state.svelte";
@@ -114,9 +114,18 @@
   );
 </script>
 
-{#snippet nav()}
+{#snippet nav(layout: NavLayout)}
   <div class="flex h-full flex-col gap-2 overflow-hidden">
-    <Scheduler class="pb-0" {config_name} {workerState} {taskRunning} {taskPending} {taskWaiting} {onOverviewClick} />
+    <Scheduler
+      class="pb-0"
+      mode={layout}
+      {config_name}
+      {workerState}
+      {taskRunning}
+      {taskPending}
+      {taskWaiting}
+      {onOverviewClick}
+    />
     <div class="border-border mx-3 border-t"></div>
     <ScrollArea class="min-h-0 w-full flex-1" bind:viewportRef={navViewport}>
       <ConfigNav {onCardClick} {onOverviewClick} {onDeviceClick} viewport={navViewport} />

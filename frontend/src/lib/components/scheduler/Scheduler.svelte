@@ -16,6 +16,17 @@
   import NextRun from "./NextRun.svelte";
   import type { RestartPhase, TaskItem } from "./types";
 
+  /**
+   * Where the scheduler is rendered.
+   *
+   * `sidebar` is the fixed nav column of the desktop layout: the card keeps the
+   * width of that column and nothing floats over it. `sheet` is the drawer the
+   * mobile layout opens: the card takes the whole column, and the drawer's close
+   * button floats over the top right corner of the title row, so the row keeps
+   * that corner clear.
+   */
+  export type SchedulerMode = "sidebar" | "sheet";
+
   type $props = {
     config_name: string;
     workerState?: WORKER_STATE;
@@ -30,6 +41,8 @@
      */
     restartPhase?: RestartPhase | null;
     onOverviewClick?: () => void;
+    /** Layout of the column that holds the card, `sidebar` when omitted */
+    mode?: SchedulerMode;
     class?: string;
   };
   let {
@@ -40,8 +53,11 @@
     taskWaiting = [],
     restartPhase: restartPhaseOverride,
     onOverviewClick,
+    mode = "sidebar",
     class: className,
   }: $props = $props();
+
+  const isSheet = $derived(mode === "sheet");
 
   const displayState = useWorkerState(() => workerState);
   const isRunning = $derived(taskRunning && displayState.value !== "idle");
@@ -144,7 +160,13 @@
 </script>
 
 <div
-  class={cn("border-muted-foreground/35 relative flex max-w-60 flex-col px-3 pb-3", className)}
+  class={cn(
+    "border-muted-foreground/35 relative flex flex-col px-3 pb-3",
+    // The sidebar column has a width of its own; a drawer hands the card the
+    // whole column and expects it to fill it
+    isSheet ? "max-w-none" : "max-w-60",
+    className,
+  )}
   onclick={onOverviewClick}
   onkeydown={(e) => (e.key === "Enter" || e.key === " ") && onOverviewClick?.()}
   role="button"
@@ -153,13 +175,23 @@
   <!-- Title -->
   <!-- Keep h-12 aligned with AppHeader bottom (h-12 = 48px) -->
   <!-- minor padding-left for visual compensation of title -->
-  <div class="flex h-12 items-center gap-1 pl-0.25">
-    <!-- Config Name -->
-    <ConfigName text={config_name} class="w-30 shrink-0" />
-    <!-- Worker Status -->
+  <!-- In a drawer the close button floats over the right end of this row: it
+       is 32px wide and sits 10px from the edge of the column, while the row
+       already ends 12px inside it (the card's px-3). Reserving 34px keeps the
+       right-aligned state 4px clear of the button (12 + 34 - 32 - 10). -->
+  <div class={cn("flex h-12 items-center gap-1 pl-0.25", isSheet && "pr-[34px]")}>
+    <!-- Config Name: takes whatever the state leaves, so a wider column shows
+         more of the name (it is truncated, never wrapped past two lines) -->
+    <ConfigName text={config_name} class="min-w-0 flex-1" />
+    <!-- Worker Status: a fixed reserve, not the leftover, so the states of
+         different lengths line up on the right instead of moving the name. The
+         reserve is the width this text had while the name was fixed at 120px:
+         a 240px card, minus its two 12px paddings (216), minus the 1px pl-0.25
+         and the 4px gap of this row, minus those 120px, i.e. 91px. Longer
+         labels are cut with an ellipsis, as they were before. -->
     <span
       class={cn(
-        "ml-auto truncate text-right text-sm font-semibold",
+        "w-[91px] shrink-0 truncate text-right text-sm font-semibold",
         workerState === "error" ? "text-destructive" : "text-primary",
       )}
     >
@@ -184,14 +216,21 @@
   <!-- Task list: always 4 rows tall (up to 3 tasks + the summary row in the
        last one), so the card height never follows the queue content. A row is
        one text-xs line (1rem) and the empty rows of a short queue keep their
-       track. No bottom padding: the last row ends the block. -->
-  <div class="mb-1 grid grid-rows-[repeat(4,1rem)] gap-0.5 pt-0.5 text-sm">
+       track. No bottom padding: the last row ends the block.
+       grid-cols-1 makes the single column minmax(0, 1fr): without the zero
+       minimum the column is sized by the min-content width of its rows, and a
+       task name is one unbreakable line (truncate sets white-space: nowrap), so
+       a long name would widen the whole row past the card. -->
+  <div class="mb-1 grid grid-cols-1 grid-rows-[repeat(4,1rem)] gap-0.5 pt-0.5 text-sm">
     {#if taskRunning || nextTasksToShow.length > 0}
       <!-- Task running -->
       {#if isRunning}
         <div class="flex items-center gap-1">
           <ConfigState {workerState} displayIdle={true} iconClass="h-3 w-3" class="shrink-0" />
-          <span class="flex-1 truncate text-xs">{taskRunning}</span>
+          <!-- min-w-0 on a truncating flex item: without it the item keeps its
+               min-content width (the whole name, as it is one line) and is
+               clipped at that width instead of at the row, so no ellipsis -->
+          <span class="min-w-0 flex-1 truncate text-xs">{taskRunning}</span>
           <span class="min-w-8 shrink-0 text-right text-xs">now</span>
         </div>
       {/if}
@@ -209,7 +248,7 @@
               strokeWidth="2"
             />
           {/if}
-          <span class="flex-1 truncate text-xs">{row.task.TaskName}</span>
+          <span class="min-w-0 flex-1 truncate text-xs">{row.task.TaskName}</span>
           <!-- now, hh:mm, >24h -->
           <NextRun timestamp={row.task.NextRun} class="min-w-8 shrink-0 text-right text-xs" />
         </div>

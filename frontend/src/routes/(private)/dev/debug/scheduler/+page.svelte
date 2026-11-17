@@ -1,5 +1,6 @@
 <script lang="ts">
   // !!![svelte-drop-dev-page]!!!
+  import XIcon from "@lucide/svelte/icons/x";
   import Arg from "$lib/components/arg/Arg.svelte";
   import type { ArgData } from "$lib/components/arg/utils.svelte";
   import type { WORKER_STATE } from "$lib/components/aside/types";
@@ -23,6 +24,19 @@
 
   // Worker states whose buttons depend on the restart phase
   const RESTART_STATES: WORKER_STATE[] = ["scheduler-stopping", "restarting", "updating", "resuming"];
+
+  // Names of the sheet previews: the drawer is narrower than the sidebar, so the
+  // previews use a typical config and task name rather than the long-name cases
+  // of the cards above
+  const SHEET_CONFIG_NAME = "example_mod2";
+  const SHEET_TASKS = {
+    taskRunning: "重启游戏",
+    taskPending: [
+      { TaskName: "大世界每日", NextRun: 0 },
+      { TaskName: "每日任务", NextRun: 0 },
+    ],
+    taskWaiting: [{ TaskName: "每日副本", NextRun: 3600 }],
+  };
 
   /**
    * Preview queue of the scheduler: `pending` due tasks (the first one takes
@@ -141,6 +155,30 @@
     }
   });
 </script>
+
+{#snippet MockCloseButton()}
+  <!-- Stands in for the close button of the mobile nav sheet: the real one is an
+       icon-sm ghost button placed at top-2.5 right-2.5 of the sheet, over the
+       nav column. The mock drawer is already the column, so the same insets
+       reproduce the same clearance. -->
+  <div
+    class="text-foreground pointer-events-none absolute top-2.5 right-2.5 z-10 flex size-8 items-center justify-center rounded-md"
+  >
+    <XIcon class="size-4" />
+  </div>
+{/snippet}
+
+<!-- One drawer of the sheet previews: a column of the given width with the close
+     button over its top right corner, holding a scheduler in sheet mode. -->
+{#snippet sheetDrawer(width: number, workerState: WORKER_STATE)}
+  <div class="flex flex-col gap-1">
+    <div class="text-muted-foreground font-mono text-xs">{workerState}</div>
+    <div class="ring-border relative overflow-hidden rounded-md ring-1" style={`width: ${width}px`}>
+      {@render MockCloseButton()}
+      <Scheduler mode="sheet" config_name={SHEET_CONFIG_NAME} {workerState} restartPhase={null} {...SHEET_TASKS} />
+    </div>
+  </div>
+{/snippet}
 
 <div class="container mx-auto flex h-full w-full flex-col gap-4 overflow-auto p-4">
   <h1 class="text-3xl font-bold">Scheduler Component Debug Page</h1>
@@ -328,6 +366,42 @@
                 {/each}
               </div>
             </div>
+          {/each}
+        </div>
+      </Card.Content>
+    </Card.Root>
+
+    <!-- Sheet mode: the drawer the mobile layout opens. Its nav column is as
+         wide as the phone leaves it (the sheet is 3/4 of the viewport, capped at
+         384px, minus the 80px config column), and the drawer's close button
+         floats over the top right corner of the scheduler title row. One card
+         per device size shows both ends of the range the sheet is used at: 360px
+         leaves 190px, 500px leaves 295px. The mock reproduces that column and
+         that button, so the reserved corner and the name/state split can be
+         checked without resizing the window. The ring draws the column edge
+         without a border: a border would take 2px off the width being
+         previewed. -->
+    <Card.Root class="neushadow border-none">
+      <Card.Header>
+        <Card.Title>Sheet Mode — Narrow Drawer (360px phone, 190px column)</Card.Title>
+      </Card.Header>
+      <Card.Content>
+        <div class="flex flex-wrap items-start gap-4">
+          {#each WORKER_STATES as workerState (workerState)}
+            {@render sheetDrawer(190, workerState)}
+          {/each}
+        </div>
+      </Card.Content>
+    </Card.Root>
+
+    <Card.Root class="neushadow border-none">
+      <Card.Header>
+        <Card.Title>Sheet Mode — Wide Drawer (500px phone, 295px column)</Card.Title>
+      </Card.Header>
+      <Card.Content>
+        <div class="flex flex-wrap items-start gap-4">
+          {#each WORKER_STATES as workerState (workerState)}
+            {@render sheetDrawer(295, workerState)}
           {/each}
         </div>
       </Card.Content>

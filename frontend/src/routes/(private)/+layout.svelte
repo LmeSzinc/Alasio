@@ -93,7 +93,7 @@
              borders, so the two dividers of the column look the same. The xl
              block drops it together with the other card borders -->
         <div class={cn("aside-item bg-card border-border w-50 border-r xl:pt-0", screen.isXL && "neushadow w-60")}>
-          {@render NavContext.snippet()}
+          {@render NavContext.snippet("sidebar")}
         </div>
       {/if}
     </div>
@@ -123,8 +123,11 @@
       <Sheet.Content side="left" closeClass="top-2.5 right-2.5" class="aside-shadow bg-card max-w-sm border-none p-0">
         <div class="flex h-full">
           <ConfigAside class="border-border border-r" />
-          <div class="flex-1">
-            {@render NavContext.snippet?.()}
+          <!-- min-w-0 keeps the column at the width the sheet gives it: a flex
+               item in a row is at least as wide as its content, so one long
+               line in the nav would push the sheet past the screen -->
+          <div class="min-w-0 flex-1">
+            {@render NavContext.snippet?.("sheet")}
           </div>
         </div>
       </Sheet.Content>
