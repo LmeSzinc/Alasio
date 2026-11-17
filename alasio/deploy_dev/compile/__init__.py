@@ -9,8 +9,9 @@ over, and the file a client installs the dependency step from, so one run of
 this package replaces a run of ``uv pip compile`` and needs no external binary.
 
 The metadata of a version is read by alasio.deploy_dev.metadata, shared with
-the pack_deps tool: a compile followed by a ``PackDepsManager`` run in the same
-process reads every index page and every METADATA once.
+the pack_deps manager of the same instance: ``RequirementsCompile.pack_deps``
+is the manager, and a compile followed by it in the same process reads every
+index page and every METADATA once.
 
 The rules are the ones of this project rather than the ones of uv: a wheel of
 the target platform (never an sdist, never a build), no URL or git dependency,
@@ -18,15 +19,16 @@ one platform per lock, and the versions a previous lock pinned are preferred
 while they still satisfy the declarations.
 
 Usage:
-    from alasio.deploy_dev.compile import RequirementCompiler
+    from alasio.deploy_dev.compile import RequirementsCompile
 
-    compiler = RequirementCompiler(header='# generated, do not edit')
-    result = compiler.compile()
-    result.pins      # {'httpx2': '2.16.0', ...}
+    with RequirementsCompile(header='# generated, do not edit') as job:
+        result = job.compile()
+        result.pins      # {'httpx2': '2.16.0', ...}
+        job.pack_deps    # the PackDepsManager of the same mod, same reader
 """
 
 from alasio.deploy_dev.compile.candidates import Candidate, Index, versions_of
-from alasio.deploy_dev.compile.compiler import DEFAULT_INDEX, REQUIREMENTS_FILE, CompileResult, RequirementCompiler
+from alasio.deploy_dev.compile.compiler import DEFAULT_INDEX, REQUIREMENTS_FILE, CompileResult, RequirementsCompile
 from alasio.deploy_dev.compile.errors import CompileError
 from alasio.deploy_dev.compile.requirement import (
     RequirementSpec, compile_environment, dependencies_of, requirements_of_pyproject
@@ -42,8 +44,8 @@ __all__ = [
     'CompileError',
     'CompileResult',
     'Index',
-    'RequirementCompiler',
     'RequirementSpec',
+    'RequirementsCompile',
     'Resolution',
     'Resolver',
     'compile_environment',

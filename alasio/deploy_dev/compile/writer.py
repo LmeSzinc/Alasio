@@ -88,21 +88,24 @@ def _parents_of(project, parents):
     """
     The parents of a pin, as the ``# via`` annotation spells them.
 
-    The project itself is written as ``<name> (pyproject.toml)``: a pin the
-    project declares is not required by a distribution, and the tuple of the
-    two is what the annotation of uv looks like.
+    The project itself comes first, as ``<name> (pyproject.toml)``: a pin the
+    project declares is the requirement the lock exists for, while the others
+    are the distributions that pulled it in. uv writes the order this way, and
+    the lock of a project is compared line by line with the one uv produces,
+    so the annotation keeps it. The distributions are sorted after it.
 
     Args:
         project (str): PEP 503 normalized name of the project
         parents (Iterable[str]): The origins of the requirements of the pin
 
     Returns:
-        list[str]: The parents, sorted
+        list[str]: The parents, the project first
     """
-    out = []
+    own = []
+    others = []
     for parent in parents:
         if parent == 'pyproject.toml':
-            out.append(f'{project} (pyproject.toml)')
+            own.append(f'{project} (pyproject.toml)')
         else:
-            out.append(parent)
-    return sorted(out)
+            others.append(parent)
+    return own + sorted(others)

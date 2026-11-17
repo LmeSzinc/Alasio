@@ -33,7 +33,7 @@ So anything the caller cannot decide becomes ``pip``, with the reason kept in
 the decision.
 
 Usage:
-    from alasio.deploy_dev.pack_deps.resolve import decide, wheels_of
+    from alasio.deploy_dev.compile.pack_deps.resolve import decide, wheels_of
 
     candidates = wheels_of(page.links, 'httpx2', '2.12.0')
     decision = decide('httpx2', '2.12.0', page.url, candidates, target)

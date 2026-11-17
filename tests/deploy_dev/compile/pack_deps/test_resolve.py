@@ -1,5 +1,5 @@
 """
-Tests for the pack channel decision (alasio/deploy_dev/pack_deps/resolve.py).
+Tests for the pack channel decision (alasio/deploy_dev/compile/pack_deps/resolve.py).
 
 The decision is a property of the wheels one pinned version publishes: the
 tests cover the tag rules against a fixed python 3.8 target (the decision must
@@ -14,7 +14,7 @@ from alasio.deploy.pip_download._tags import Tag
 from alasio.deploy.pip_download._target_python import TargetPython
 from alasio.deploy.pip_download._wheel import Wheel
 from alasio.deploy.pip_download.pypi_file import WheelCandidate, WheelNotFoundError
-from alasio.deploy_dev.pack_deps.resolve import (
+from alasio.deploy_dev.compile.pack_deps.resolve import (
     DECISION_PACK, DECISION_PIP, REASON_COMPILED, REASON_NO_PURE, REASON_NOT_INSTALLABLE, REASON_PURE_ONLY, decide,
     decision_text, tag_covers_target, wheel_compiled_for_target, wheel_pure_for_target, wheels_of
 )

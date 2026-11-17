@@ -1,5 +1,5 @@
 """
-Tests for the maintenance of Update.pack_deps (alasio/deploy_dev/pack_deps/manager.py).
+Tests for the maintenance of Update.pack_deps (alasio/deploy_dev/compile/pack_deps/manager.py).
 
 The manager is the tool a mod author runs: it registers the roots of the
 closure, resolves every pinned version of the closure against its index, and
@@ -14,12 +14,13 @@ import sys
 import pytest
 
 from alasio.config.entry.mod_entry import ModEntry
-from alasio.deploy_dev.pack_deps import (
-    DECISION_PACK, DECISION_PIP, REASON_COMPILED, REASON_FORCED, REASON_INDEX, PackDepsError, PackDepsManager
+from alasio.deploy_dev.compile.pack_deps.manager import PackDepsError, PackDepsManager
+from alasio.deploy_dev.compile.pack_deps.resolve import (
+    DECISION_PACK, DECISION_PIP, REASON_COMPILED, REASON_FORCED, REASON_INDEX
 )
 from alasio.logger import logger
 from alasio.testing.filesystem import fs  # noqa: F401
-from tests.deploy_dev.pack_deps.conftest import INDEX_URL, UNREACHABLE_INDEX, write_requirements
+from tests.deploy_dev.compile.pack_deps.conftest import INDEX_URL, UNREACHABLE_INDEX, write_requirements
 
 pytestmark = [
     pytest.mark.parallel,

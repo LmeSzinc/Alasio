@@ -19,7 +19,7 @@ computes its requirements at build time, core metadata 1.1) is refused, so a
 lock never silently misses the dependencies of a distribution. Building such a
 project is what pip does at install time, and the pack channel never serves it
 (the pack of a version is built from its pure wheel, see
-alasio.deploy_dev.pack_deps.resolve).
+alasio.deploy_dev.compile.pack_deps.resolve).
 
 Usage:
     from alasio.deploy_dev.metadata.sdist import is_sdist, read_sdist_metadata

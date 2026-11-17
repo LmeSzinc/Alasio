@@ -39,12 +39,19 @@ What it does not do (see doc/2026-11-16_own-uv-compile.md):
   union of the platforms is what ``pack_deps`` decides over.
 
 Usage:
-    from alasio.deploy_dev.compile import RequirementCompiler
+    from alasio.deploy_dev.compile import RequirementsCompile
 
-    compiler = RequirementCompiler()                 # env.PROJECT_ROOT
-    result = compiler.compile()
-    result.pins                                      # {'httpx2': '2.16.0', ...}
-    result.written                                   # False when unchanged
+    with RequirementsCompile(root=env.PROJECT_ROOT, header='# generated') as job:
+        result = job.compile()
+        result.pins                                  # {'httpx2': '2.16.0', ...}
+        result.written                               # False when unchanged
+
+        # the pack channel of the same mod, over the metadata the compile read
+        job.pack_deps.register('alasio[backend,image]', recursive=True)
+        job.pack_deps.write()
+
+The block closes the reader and the client of the run, so a caller writes the
+``with`` and never calls aclose(); an async caller uses ``async with``.
 """
 
 import functools
@@ -70,7 +77,7 @@ from alasio.ext.path import PathStr
 from alasio.ext.path.atomic import atomic_read_text, atomic_write
 from alasio.logger import logger
 
-__all__ = ['CompileError', 'CompileResult', 'RequirementCompiler']
+__all__ = ['CompileError', 'CompileResult', 'RequirementsCompile']
 
 # The index a project's dependencies are read from when it declares none: the
 # official PyPI simple index, the value of RepoBase.DEFAULT_INDEX
@@ -104,14 +111,19 @@ class CompileResult(Struct):
     changed: List[str]
 
 
-class RequirementCompiler:
+class RequirementsCompile:
     """
     Compile the requirements of one project into its lock file.
 
-    One instance is one compile: the declaration, the indexes and the previous
-    lock are read once, the resolution and the write happen in compile(). The
-    provider of the run is created by the compile and closed with it, so the
-    metadata cache is the run.
+    One instance is one run of the developer tools of a mod: compile() resolves
+    the declaration and writes the lock, and the ``pack_deps`` property answers
+    the manager of the pack channel of the same mod. The two share one metadata
+    reader, so a compile followed by ``pack_deps`` in the same instance reads
+    every index page and every METADATA once (see ``provider``).
+
+    The instance is a context manager: the reader and the client of the run are
+    closed when the block ends, so a caller never closes it by hand (``with``
+    on an event loop is ``async with``).
 
     Attributes:
         root (PathStr): Root folder of the project
@@ -124,7 +136,7 @@ class RequirementCompiler:
     """
 
     def __init__(self, root='', client=None, proxy='', target=None, resolution='highest',
-                 output='', header='', dest='', provider=None):
+                 output='', header='', dest='', provider=None, entry=None):
         """
         Args:
             root (str): Root folder of the project. Defaults to '',
@@ -144,10 +156,12 @@ class RequirementCompiler:
                 reads every file in memory, so nothing is written. Defaults to
                 '', `<root>/temp/compile`
             provider (MetadataProvider, optional): The metadata reader of a
-                run that compiles and then maintains the pack channel of the
-                mod (see PackDepsManager): the pages and the METADATA of the
-                compile stay in its caches for the second tool. Defaults to
-                None, a provider of this run, closed with it
+                run that reads several files: the pages and the METADATA of
+                the compile stay in its caches for the caller that reads them
+                next. Defaults to None, a provider of this instance, closed by
+                aclose()
+            entry (ModEntry, optional): The declaration ``pack_deps``
+                maintains. Defaults to None, the entry of the project root
 
         Raises:
             CompileError: If no project root is given or set
@@ -166,9 +180,135 @@ class RequirementCompiler:
         self._output = output
         self.dest = dest or str(self.root.joinpath('temp/compile'))
         self._given_provider = provider
+        self._given_entry = entry
+        # the client created by this instance, closed by aclose(); an injected
+        # one belongs to the caller
+        self._owned_client = None
 
     def __repr__(self):
         return f'{self.__class__.__name__}(root="{self.root}")'
+
+    @cached_property
+    def provider(self):
+        """
+        The metadata reader of the run, shared by the compile and the pack_deps.
+
+        The provider lives as long as this instance: compile() reads the pages
+        and the METADATA of the resolution into it, and ``pack_deps`` asks the
+        same questions of the same versions, so it costs no request for them.
+
+        Returns:
+            MetadataProvider: The reader, the one given to the constructor when
+                it was
+        """
+        if self._given_provider is not None:
+            return self._given_provider
+        client = self.client
+        if client is None:
+            client = self._owned_client = create_client(self.proxy)
+        return MetadataProvider(client=client, dest=self.dest)
+
+    @cached_property
+    def pack_deps(self):
+        """
+        The manager of the pack channel of the same mod, over the same reader.
+
+        The manager reads the requirements file this compile writes, so the
+        pins it decides are the ones of the lock, and its index pages and
+        METADATA are the ones the compile already read.
+
+        Returns:
+            PackDepsManager: The manager of the run
+        """
+        # imported here: a compile that maintains no pack channel does not pay
+        # for the declaration model of a mod entry
+        from alasio.config.entry.mod_entry import ModEntry
+        from alasio.deploy_dev.compile.pack_deps.manager import PackDepsManager
+
+        entry = self._given_entry
+        if entry is None:
+            entry = ModEntry(self.root)
+        return PackDepsManager(
+            entry=entry, client=self.client, proxy=self.proxy, provider=self.provider)
+
+    def aclose(self):
+        """
+        Close the metadata reader and the client this instance owns.
+
+        A provider or a client given to the constructor belongs to the caller
+        and is left open, like every other client of the domain. Closing is
+        idempotent, and a closed instance must not run another compile. The
+        ``with`` block calls this, so a caller that uses ``with`` never has to;
+        a caller that is already on an event loop awaits aclose_async(), or uses
+        ``async with``.
+
+        Raises:
+            RuntimeError: If called on an event loop, where closing an async
+                client needs an await the caller has to make
+        """
+        try:
+            trio.lowlevel.current_task()
+        except RuntimeError:
+            # not on a loop: the close is a short run of its own
+            trio.run(self.aclose_async)
+            return
+        raise RuntimeError(
+            'RequirementsCompile.aclose() was called on an event loop: closing the async '
+            'client needs an await, so use `async with` (or await aclose_async()) instead '
+            'of `with`')
+
+    async def aclose_async(self):
+        """
+        Close the metadata reader and the client this instance owns, see aclose().
+        """
+        if self._given_provider is None:
+            # the reader of this instance, if the run ever asked for one
+            provider = cached_property.pop(self, 'provider')
+            if provider is not None:
+                await provider.aclose()
+        if self._owned_client is not None:
+            await self._owned_client.aclose()
+            self._owned_client = None
+
+    def __enter__(self):
+        """
+        Run the tools of the mod as one block, see aclose().
+
+        Returns:
+            RequirementsCompile: This instance
+        """
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        """
+        Close the reader and the client of the run when the block ends.
+
+        Args:
+            exc_type (type | None): The exception of the block, None when none
+            exc_value (BaseException | None): The exception of the block
+            traceback (traceback | None): The traceback of the exception
+        """
+        self.aclose()
+
+    async def __aenter__(self):
+        """
+        Run the tools of the mod as one block on an event loop, see aclose_async().
+
+        Returns:
+            RequirementsCompile: This instance
+        """
+        return self
+
+    async def __aexit__(self, exc_type, exc_value, traceback):
+        """
+        Close the reader and the client of the run when the block ends, see __exit__().
+
+        Args:
+            exc_type (type | None): The exception of the block, None when none
+            exc_value (BaseException | None): The exception of the block
+            traceback (traceback | None): The traceback of the exception
+        """
+        await self.aclose_async()
 
     """
     The declaration of the project
@@ -391,20 +531,12 @@ class RequirementCompiler:
             f'({len(roots)} requirement(s), resolution={self.resolution})')
 
         existing = {} if upgrade else self._existing_pins()
-        own = self.client is None and self._given_provider is None
-        client = None if self._given_provider is not None else (
-            create_client(self.proxy) if own else self.client)
-        provider = self._given_provider
-        if provider is None:
-            provider = MetadataProvider(client=client, dest=self.dest)
-        try:
-            resolver = Resolver(
-                provider, self.indexes, self.target, existing=existing,
-                resolution=self.resolution, sources=self.sources)
-            resolution = await resolver.resolve(roots)
-        finally:
-            if own:
-                await client.aclose()
+        # the reader of the instance, not of the call: the pages and the METADATA
+        # it holds answer the pack_deps of the same run
+        resolver = Resolver(
+            self.provider, self.indexes, self.target, existing=existing,
+            resolution=self.resolution, sources=self.sources)
+        resolution = await resolver.resolve(roots)
         text = requirements_text(
             self.name, resolution, self.indexes, header=self.header)
         self._verify(text, resolution)

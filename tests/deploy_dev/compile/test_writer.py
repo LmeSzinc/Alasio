@@ -65,15 +65,16 @@ shared==1.0
     #   other
 """
 
-    def test_the_parents_are_sorted(self):
-        text = requirements_text('demo', resolution_of(
+    def test_the_project_comes_first(self):
+        """The project annotation is written before the distributions, then uv's order."""
+        text = requirements_text('zmod', resolution_of(
             {'shared': '1.0'},
             parents={'shared': ('other', 'pyproject.toml')}))
 
         assert text == """\
 shared==1.0
     # via
-    #   demo (pyproject.toml)
+    #   zmod (pyproject.toml)
     #   other
 """
 

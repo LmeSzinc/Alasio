@@ -8,7 +8,7 @@ declaration, resolves the versions, writes the lock and reads it back.
 import pytest
 
 from alasio.deploy.pip_download._target_python import TargetPython
-from alasio.deploy_dev.compile import CompileError, RequirementCompiler
+from alasio.deploy_dev.compile import CompileError, RequirementsCompile
 from alasio.ext.path.atomic import atomic_read_text
 from alasio.logger import logger
 from alasio.testing.filesystem import fs  # noqa: F401
@@ -50,11 +50,11 @@ def compiler_of(project, network, **kwargs):
         **kwargs: Options of the compiler
 
     Returns:
-        RequirementCompiler: The compiler
+        RequirementsCompile: The compiler
     """
     kwargs.setdefault('target', TARGET)
     kwargs.setdefault('header', HEADER)
-    return RequirementCompiler(root=project, client=network.client, **kwargs)
+    return RequirementsCompile(root=project, client=network.client, **kwargs)
 
 
 class TestCompile:
@@ -167,6 +167,157 @@ leaf==2.0
 
         assert result.path.replace('\\', '/').endswith('deploy/requirements.txt')
         assert 'demo==1.0' in atomic_read_text(project.joinpath('deploy/requirements.txt'))
+
+
+class TestTheRun:
+    """One instance, both tools: the compile and the pack channel of the mod."""
+
+    @staticmethod
+    def write_entry(root, index=INDEX_URL):
+        """
+        Declare the mod entry ``pack_deps`` maintains.
+
+        Args:
+            root (PathStr): Root of the project
+            index (str): Value of ``Update.pypi_mirrors``. Defaults to INDEX_URL
+
+        Returns:
+            PathStr: Path of the declaration
+        """
+        file = root.joinpath('module/config/_index/mod_entry.yaml')
+        file.atomic_write(
+            f'Mod:\n  name: demo_mod\n'
+            f'Update:\n  pypi_mirrors: {index}\n  pack_deps: []\n'.encode('utf-8'))
+        return file
+
+    @pytest.mark.trio
+    async def test_the_second_compile_costs_no_request(self, project, network):
+        """The reader of the instance outlives the call, so a rerun is cached."""
+        write_pyproject(project, pyproject('demo'))
+        network.index().add('demo', '1.0')
+        job = compiler_of(project, network)
+        await job.compile_async()
+        before = list(network.requests)
+
+        result = await job.compile_async(upgrade=True)
+
+        assert result.pins == {'demo': '1.0'}
+        assert network.requests == before
+        await job.aclose_async()
+
+    @pytest.mark.trio
+    async def test_the_pack_deps_is_one_manager_of_the_run(self, project, network):
+        write_pyproject(project, pyproject('demo'))
+        network.index().add('demo', '1.0')
+        self.write_entry(project)
+        job = compiler_of(project, network)
+
+        assert job.pack_deps is job.pack_deps
+        await job.aclose_async()
+
+    @pytest.mark.trio
+    async def test_the_pack_deps_shares_the_metadata_of_the_compile(self, project, network):
+        """The decisions of the same run read no page and no METADATA again."""
+        write_pyproject(project, pyproject('demo'))
+        network.index().add('demo', '1.0', requires=['leaf'])
+        network.index().add('leaf', '2.0')
+        self.write_entry(project)
+        job = compiler_of(project, network)
+        await job.compile_async()
+        before = list(network.requests)
+
+        manager = job.pack_deps
+        manager.register('demo', recursive=True)
+        decisions = await manager.resolve_async()
+
+        assert set(decisions) == {'demo', 'leaf'}
+        assert network.requests == before
+        await job.aclose_async()
+
+    @pytest.mark.trio
+    async def test_the_pack_deps_reads_the_lock_the_compile_wrote(self, project, network):
+        """The manager of the run decides the pins of the file just written."""
+        write_pyproject(project, pyproject('demo'))
+        network.index().add('demo', '1.4')
+        self.write_entry(project)
+        job = compiler_of(project, network)
+        result = await job.compile_async()
+
+        manager = job.pack_deps
+        manager.register('demo')
+        decisions = await manager.resolve_async()
+
+        assert decisions['demo'].version == result.pins['demo']
+        await job.aclose_async()
+
+    def test_aclose_drops_the_reader_of_the_run(self, project, network):
+        """The reader lives with the instance, and aclosed() ends it."""
+        write_pyproject(project, pyproject('demo'))
+        network.index().add('demo', '1.0')
+        job = compiler_of(project, network)
+        job.compile()
+        assert 'provider' in job.__dict__
+
+        job.aclose()
+
+        assert 'provider' not in job.__dict__
+        # closing twice is not an error, like the client of the domain
+        job.aclose()
+
+    def test_the_block_closes_the_run(self, project, network):
+        """A caller writes the with block and calls no close."""
+        write_pyproject(project, pyproject('demo'))
+        network.index().add('demo', '1.0')
+        job = compiler_of(project, network)
+
+        with job as entered:
+            assert entered is job
+            result = job.compile()
+            assert 'provider' in job.__dict__
+
+        assert result.pins == {'demo': '1.0'}
+        assert 'provider' not in job.__dict__
+
+    def test_the_block_closes_the_run_of_a_failure(self, project, network):
+        """An exception of the block still closes the reader."""
+        write_pyproject(project, pyproject('demo>=2'))
+        network.index().add('demo', '1.0')
+        job = compiler_of(project, network)
+
+        with pytest.raises(CompileError):
+            with job:
+                job.compile()
+
+        assert 'provider' not in job.__dict__
+
+    @pytest.mark.trio
+    async def test_the_async_block_closes_the_run(self, project, network):
+        """An async caller uses async with, and it closes the same things."""
+        write_pyproject(project, pyproject('demo'))
+        network.index().add('demo', '1.0')
+        job = compiler_of(project, network)
+
+        async with job as entered:
+            assert entered is job
+            result = await job.compile_async()
+            assert 'provider' in job.__dict__
+
+        assert result.pins == {'demo': '1.0'}
+        assert 'provider' not in job.__dict__
+
+    def test_aclose_keeps_a_given_reader(self, project, network):
+        """A reader given to the constructor belongs to the caller."""
+        from alasio.deploy_dev.metadata import MetadataProvider
+
+        write_pyproject(project, pyproject('demo'))
+        network.index().add('demo', '1.0')
+        provider = MetadataProvider(client=network.client)
+        job = compiler_of(project, network, provider=provider)
+        job.compile()
+
+        job.aclose()
+
+        assert 'provider' in job.__dict__
 
 
 class TestDeclaration:

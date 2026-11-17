@@ -10,9 +10,13 @@ snapshot does not carry are refused.
 
 Which distribution belongs to which channel is a property of the wheels a
 pinned version publishes, and that is what this tool reads, see
-alasio.deploy_dev.pack_deps.resolve. The answer is decided once, by the mod
-author, and written into the declaration: the runtime never reads an index for
-it, the declaration is the record.
+alasio.deploy_dev.compile.pack_deps.resolve. A version is a pack target when it
+publishes a pure python wheel and no compiled wheel the target interpreter can
+install: the pack channel builds its packs from that one wheel, so declaring a
+version that also ships a compiled build would replace the build a client
+installs today with the pure fallback on every platform. The answer is decided
+once, by the mod author, and written into the declaration: the runtime never
+reads an index for it, the declaration is the record.
 
 The tool walks the closure of the distributions the caller registers, over the
 requirements file of the mod (which is the lock: every pin is an exact
@@ -20,7 +24,7 @@ version), and replaces the whole ``pack_deps`` of the entry with the names it
 decided to be pack targets. Nothing else in the declaration is touched.
 
 Usage:
-    from alasio.deploy_dev.pack_deps import PackDepsManager
+    from alasio.deploy_dev.compile.pack_deps.manager import PackDepsManager
 
     manager = PackDepsManager()                      # env.PROJECT_ROOT
     manager.register('alasio[backend,image]', recursive=True)
@@ -32,6 +36,9 @@ are matched against ``sys.version_info``. A mod author that develops on 3.11
 and ships a 3.8 runtime should run the tool inside the runtime environment,
 otherwise a dependency that is compiled for 3.9+ only is left on the pack
 channel (a conservative miss, not a break).
+
+The design of the tool, and why the runtime does not derive the list itself, is
+in doc/2026-11-15_pack-deps-manager.md.
 """
 
 import sys
@@ -46,11 +53,11 @@ from alasio.deploy.httpclient.probe_mirrors import AllMirrorsFailedError
 from alasio.deploy.pip_download._target_python import TargetPython
 from alasio.deploy.pip_download.pypi_file import WheelNotFoundError
 from alasio.deploy.simple_pip.parse_req import Requirements
-from alasio.deploy_dev.metadata import ClosureRoot, MetadataProvider
-from alasio.deploy_dev.pack_deps.resolve import (
+from alasio.deploy_dev.compile.pack_deps.resolve import (
     DECISION_PACK, DECISION_PIP, REASON_FORCED, REASON_INDEX, REASON_NO_WHEEL, PackDepDecision, decide, decision_text,
     wheels_of
 )
+from alasio.deploy_dev.metadata import ClosureRoot, MetadataProvider
 from alasio.deploy_dev.pack_server.fetch_wheel import create_client
 from alasio.ext import env
 from alasio.ext.cache import InstanceCacheOperation, cached_property

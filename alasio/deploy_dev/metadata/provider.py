@@ -3,7 +3,7 @@ The metadata of a distribution version, read once per run and shared.
 
 Two tools of the developer side ask the same question of an index: which
 dependencies does a pinned version declare, and which wheels does it publish.
-:class:`~alasio.deploy_dev.pack_deps.PackDepsManager` asks it to decide the pack
+:class:`~alasio.deploy_dev.compile.pack_deps.PackDepsManager` asks it to decide the pack
 channel of a mod, the compiler will ask it to resolve a lock. Both read the same
 pages and the same METADATA files, so the answers are read here, once, and kept
 in memory for the rest of the process.
