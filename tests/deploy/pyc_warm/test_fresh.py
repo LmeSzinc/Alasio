@@ -350,6 +350,22 @@ class TestScanOpens:
     Tests of what the scan reads: a stale pyc file is never opened.
     """
 
+    @pytest.fixture(autouse=True)
+    def _free_stat(self, monkeypatch):
+        """
+        Run the listing that answers the stat of an entry, the one of Windows.
+
+        The branch is the platform's, see DIRENT_STAT_IS_FREE, and the test
+        pins it: what it asserts -- a pyc file older than its source is
+        settled without opening it -- is a property of that listing. The
+        listing that answers no stat is TestDeferredStat, which pins the
+        other branch and asserts the same answers one layer later.
+
+        Args:
+            monkeypatch: The pytest monkeypatch fixture
+        """
+        monkeypatch.setattr(fresh_module, 'DIRENT_STAT_IS_FREE', True)
+
     def test_missing_pyc_never_opened(self, fs, monkeypatch):
         """A source without any pyc file is stale without an open."""
         spy = OpenSpy()
@@ -445,7 +461,18 @@ class TestPlan:
     """
     Tests for plan() and plan_folder(): the traversal that lists every
     folder once and yields one work item per source, opening no file.
+
+    The listing that answers the stat of an entry is pinned, see
+    TestScanOpens: the shapes of the items follow from which listing runs.
     """
+
+    @pytest.fixture(autouse=True)
+    def _free_stat(self, monkeypatch):
+        """
+        Args:
+            monkeypatch: The pytest monkeypatch fixture
+        """
+        monkeypatch.setattr(fresh_module, 'DIRENT_STAT_IS_FREE', True)
 
     def test_stale_without_open(self, fs, monkeypatch):
         """A pyc file missing or older than its source is settled by the listing."""
