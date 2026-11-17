@@ -10,6 +10,7 @@
   import SquarePause from "@lucide/svelte/icons/square-pause";
   import X from "@lucide/svelte/icons/x";
   import { cn } from "$lib/utils";
+  import AnimationShake from "./AnimationShake.svelte";
   import AnimationUp from "./AnimationUp.svelte";
   import type { WORKER_STATE } from "./types";
 
@@ -57,14 +58,19 @@
     <!-- Error: red X -->
     <X class={cn("text-destructive h-3 w-3", iconClass)} {strokeWidth} aria-label="Error" />
   {:else if workerState === "scheduler-stopping"}
-    <!-- Scheduler stopping: pause in a square -->
+    <!-- Scheduler stopping: pause in a square. No sway: the worker simply
+         finishes its task, which is the ordinary end of a run and not a fault,
+         and the swing would not read at the 10px size of this icon -->
     <SquarePause class={cn("h-2.5 w-2.5", !active && "text-primary", iconClass)} {strokeWidth} aria-label="Stopping" />
   {:else if workerState === "starting"}
     <!-- Starting: hollow circle with muted color -->
     <CirclePlay class={cn("h-3 w-3", !active && "text-primary", iconClass)} {strokeWidth} aria-label="Starting" />
   {:else if workerState === "killing" || workerState === "force-killing"}
-    <!-- Killing: X with muted color -->
-    <Ghost class={cn("h-3 w-3", !active && "text-primary", iconClass)} {strokeWidth} aria-label="Killing" />
+    <!-- Killing: the process is being torn down, a transient state that needs
+         attention, so its ghost rings like a bell -->
+    <AnimationShake>
+      <Ghost class={cn("h-3 w-3", !active && "text-primary", iconClass)} {strokeWidth} aria-label="Killing" />
+    </AnimationShake>
   {:else if workerState === "restarting"}
     <!-- Restarting: stopped for a graceful backend restart, auto-resume later -->
     <RefreshCw class={cn("h-3 w-3", !active && "text-primary", iconClass)} {strokeWidth} aria-label="Restarting" />
@@ -77,8 +83,11 @@
     <!-- Resuming: queued for auto-resume after the backend restart -->
     <Loader class={cn("h-3 w-3", !active && "text-primary", iconClass)} {strokeWidth} aria-label="Resuming" />
   {:else if workerState === "disconnected"}
-    <!-- Disconnected: circle with muted color -->
-    <Ghost class={cn("h-3 w-3", !active && "text-primary", iconClass)} {strokeWidth} aria-label="Disconnected" />
+    <!-- Disconnected: the backend lost the worker, the same transient attention
+         state as killing -->
+    <AnimationShake>
+      <Ghost class={cn("h-3 w-3", !active && "text-primary", iconClass)} {strokeWidth} aria-label="Disconnected" />
+    </AnimationShake>
   {:else if displayIdle && workerState === "idle"}
     <!-- idle: no display -->
     <CirclePlay class={cn("h-3 w-3", !active && "text-primary", iconClass)} {strokeWidth} aria-label="Idle" />
