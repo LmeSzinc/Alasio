@@ -14,6 +14,7 @@ The verifier reads an artifact from disk and checks what the build promises:
 A failure raises ``WheelVerifyError`` with every problem found, so a caller
 reports all of them in one run instead of one per build.
 """
+import csv
 import io
 import json
 import struct
@@ -262,6 +263,9 @@ class WheelVerifier:
             record.load_bytes(content)
         except UnicodeDecodeError as e:
             self.problems.append(f'RECORD is not UTF-8: {e}')
+            return
+        except csv.Error as e:
+            self.problems.append(f'RECORD is not a csv file: {e}')
             return
 
         for name in sorted(self.members):

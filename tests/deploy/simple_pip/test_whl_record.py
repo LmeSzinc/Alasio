@@ -1,3 +1,5 @@
+import csv
+
 import pytest
 
 from alasio.deploy.simple_pip.whl_record import RecordEntry, RecordManager, sha256_checksum
@@ -76,6 +78,14 @@ class TestLoadBytes:
         record = RecordManager()
         with pytest.raises(UnicodeDecodeError):
             record.load_bytes(b'demo/\xff.py,sha256=abc,1\n')
+
+    def test_load_nul_byte(self):
+        """A path never holds a NUL byte, a RECORD holding one is refused whole."""
+        record = RecordManager()
+        with pytest.raises(csv.Error):
+            record.load_bytes(b'demo/a\x00b.py,sha256=abc,1\n')
+        # Refused before any entry is kept, not just the row that holds it
+        assert record.entries == {}
 
     def test_load_replaces_entries(self):
         """Loading a RECORD replaces the entries of the manager."""

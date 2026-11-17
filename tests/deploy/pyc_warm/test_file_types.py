@@ -196,7 +196,7 @@ class TestMalformedRecord:
     """
 
     def test_a_nul_byte(self, fs):
-        """csv refuses a NUL byte, and a RECORD that refuses is not a list."""
+        """A NUL byte is no character of a path, a RECORD holding one is no list."""
         write(fs, f'{SITE}/demo-1.0.dist-info/RECORD', b'demo/a\x00b.py,sha256=x,1\n')
         assert record_sources(SITE, f'{SITE}/demo-1.0.dist-info') == []
 

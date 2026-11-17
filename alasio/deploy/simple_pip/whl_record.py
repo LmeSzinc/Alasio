@@ -83,9 +83,16 @@ class RecordManager:
 
         Raises:
             UnicodeDecodeError: If the content is not UTF-8
+            csv.Error: If the content is not a csv file, e.g. it holds a NUL
+                byte, which no path of an installation can hold
         """
         entries = {}
         text_content = content.decode('utf-8')
+        if '\0' in text_content:
+            # A RECORD holding a NUL byte is corrupt and is refused whole. csv
+            # answered the same error up to python 3.10 and passes the row
+            # through from 3.11 on, the check keeps one answer on every version
+            raise csv.Error('line contains NUL')
         f = io.StringIO(text_content)
 
         # RECORD is a csv file, but the fields are not quoted most of the time

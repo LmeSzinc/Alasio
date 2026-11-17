@@ -36,6 +36,8 @@ is advisory (see UpdateJob._read_file()), and the record that reads it checks
 the content and downloads the record when it differs.
 """
 
+import csv
+
 from alasio.deploy.pack.pack_model import IdxInfo
 from alasio.deploy.simple_pip.pip_list import DIST_INFO_SUFFIX, PipList, normalize_name
 from alasio.deploy.simple_pip.whl_record import RecordManager
@@ -179,8 +181,9 @@ class LocalSidePip(LocalSide):
         record = RecordManager()
         try:
             record.load_bytes(content)
-        except UnicodeDecodeError:
-            # the RECORD is a UTF-8 csv, PEP 376
+        except (UnicodeDecodeError, csv.Error):
+            # the RECORD is a UTF-8 csv, PEP 376, and one that can not be read
+            # is no file list: the installation can not name its files
             return None
         return record
 

@@ -534,8 +534,8 @@ def record_sources(site_packages, dist_info):
         record.load_bytes(content)
     except (OSError, UnicodeDecodeError, csv.Error):
         # A RECORD that is not there, not UTF-8, or not a csv at all, e.g.
-        # one holding a NUL byte, which csv refuses: the distribution has no
-        # file list to read, and a broken list is never an error of the run
+        # one holding a NUL byte: the distribution has no file list to read,
+        # and a broken list is never an error of the run
         return []
 
     sources = []
