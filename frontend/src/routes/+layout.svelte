@@ -35,5 +35,18 @@
 </script>
 
 <ModeWatcher />
-<Toaster richColors closeButton duration={5000} position="top-right" expand={true} />
+<!-- The app header (AppHeader, h-12 = 3rem) is fixed at the top of every
+     private page and the toasts are top aligned, so the top offset clears it
+     instead of letting them overlap: header height + a gap (1rem on desktop,
+     0.5rem on mobile, like the 24px / 16px of sonner's own defaults). Every
+     toast of the app inherits it, a custom toast included. -->
+<Toaster
+  richColors
+  closeButton
+  duration={5000}
+  position="top-right"
+  expand={true}
+  offset={{ top: "4rem" }}
+  mobileOffset={{ top: "3.5rem" }}
+/>
 {@render children()}

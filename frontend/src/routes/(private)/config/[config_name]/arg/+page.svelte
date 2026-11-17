@@ -38,12 +38,9 @@
 
   // --- Toast on RPC success ---
   // RPC framework will have its toast on failure, so we only need to handle success case
+  // (the Toaster already keeps every toast below the app header)
   const toastOptions = {
     duration: 2000,
-    classes: {
-      // Skip header height
-      toast: "mt-10",
-    },
   };
   $effect(() => {
     if (setRpc.successMsg) {

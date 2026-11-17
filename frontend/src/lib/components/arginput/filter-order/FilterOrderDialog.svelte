@@ -68,12 +68,10 @@
 
   const dndRules = { selected: ["item"], unused: ["item"] };
 
+  // The Toaster keeps every toast below the app header, so only the lifetime
+  // is set here
   const toastOptions = {
     duration: 2000,
-    classes: {
-      // Skip header height
-      toast: "mt-10",
-    },
   };
 
   function labelOf(item: FilterOrderItemValue): string {
