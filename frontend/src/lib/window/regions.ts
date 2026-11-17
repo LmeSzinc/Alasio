@@ -10,7 +10,7 @@
 // a layer that wants a viewport-relative edge subtracts it back out -- the sheet
 // is the only such case, because its close button is positioned from the panel's
 // edge.
-import { HEADER_RIGHT_INSET } from "$lib/components/header/geometry";
+import { HEADER_ACTIONS_WIDTH, bandRightInset } from "$lib/components/header/geometry";
 import type { DragRegionLayer } from "./dragRegion.svelte";
 
 /** Breakpoints of the application layout: <768, 768-1279, >=1280 */
@@ -36,8 +36,8 @@ export function breakpointOf(width: number): Breakpoint {
 }
 
 /** Default header band of the private layout */
-export function defaultRegion(breakpoint: Breakpoint): DragRegionLayer {
-  return () => ({ left: DEFAULT_BAND_LEFT[breakpoint], right: HEADER_RIGHT_INSET });
+export function defaultRegion(breakpoint: Breakpoint, controlsWidth = 0): DragRegionLayer {
+  return () => ({ left: DEFAULT_BAND_LEFT[breakpoint], right: bandRightInset(controlsWidth) });
 }
 
 /**
@@ -59,7 +59,9 @@ export function sheetRegion(controlsWidth: number): DragRegionLayer {
 }
 
 /** Header band of the public layouts: no aside, no menu button */
-export const authRegion: DragRegionLayer = () => ({ left: 0, right: HEADER_RIGHT_INSET });
+export function authRegion(controlsWidth = 0): DragRegionLayer {
+  return () => ({ left: 0, right: bandRightInset(controlsWidth) });
+}
 
 /** Width of the interactive cluster in the `/dev/assets` header: gap-1 (4) + ModSelector w-64 (256) */
 export const DEV_ASSETS_CLUSTER_WIDTH = 4 + 256;
@@ -70,6 +72,6 @@ export const DEV_ASSETS_CLUSTER_WIDTH = 4 + 256;
  * Only the right side is narrowed: the left stays what the layout declared, so
  * the aside config column is still clickable.
  */
-export const devAssetsRegion: DragRegionLayer = () => ({
-  right: HEADER_RIGHT_INSET + DEV_ASSETS_CLUSTER_WIDTH,
-});
+export function devAssetsRegion(controlsWidth = 0): DragRegionLayer {
+  return () => ({ right: bandRightInset(controlsWidth) + DEV_ASSETS_CLUSTER_WIDTH });
+}

@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
   import type { HTMLAttributes } from "svelte/elements";
-  import { HEADER_PADDING_X } from "$lib/components/header/geometry";
+  import { headerPaddingRight } from "$lib/components/header/geometry";
   import ThemeToggle from "$lib/components/ui/theme/theme-toggle.svelte";
   import LangSelector from "$lib/i18n/LangSelector.svelte";
   import { cn } from "$lib/utils.js";
@@ -15,11 +15,10 @@
   };
   let { children, class: className }: HTMLAttributes<HTMLHeadElement> & $props = $props();
 
-  // Reserve the host window controls on top of the normal padding. `px-4` sets
-  // both sides, so writing the bare controls width here would replace the 16px
-  // instead of adding to it, and the trailing actions would sit 16px further
-  // from the drag band than in a session without controls.
-  const reserveRight = $derived(frame.controls.width + HEADER_PADDING_X);
+  // The reserve width already includes the gap between the content and the
+  // buttons, so it replaces the `px-4` padding rather than adding to it; a
+  // browser without a host keeps the plain padding.
+  const reserveRight = $derived(headerPaddingRight(frame.controls.width));
 
   // A browser has no host to draw the window controls, so the reserved space is
   // filled with inert stand-ins; a real client draws its own on top of this

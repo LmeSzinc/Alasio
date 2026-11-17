@@ -44,7 +44,9 @@
   // when the stack is folded (inside the reporter's effect), so they follow the
   // breakpoint and the controls width.
   DragRegionContext.use((inherited) =>
-    isSheetOpen ? sheetRegion(frame.controls.width)(inherited) : defaultRegion(breakpointOf(screen.width))(inherited),
+    isSheetOpen
+      ? sheetRegion(frame.controls.width)(inherited)
+      : defaultRegion(breakpointOf(screen.width), frame.controls.width)(inherited),
   );
 
   // Auto close sheet if window get resized

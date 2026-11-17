@@ -8,10 +8,12 @@
  * rather than replacing it.
  */
 import { describe, expect, it } from "vitest";
-import { HEADER_PADDING_X, HEADER_RIGHT_INSET } from "$lib/components/header/geometry";
-
-/** Width of the actions group: language (36) + gap (4) + theme (36) */
-const ACTIONS_WIDTH = 36 + 4 + 36;
+import {
+  HEADER_ACTIONS_WIDTH,
+  HEADER_PADDING_X,
+  bandRightInset,
+  headerPaddingRight,
+} from "$lib/components/header/geometry";
 
 /** Window width the model below is evaluated at */
 const WINDOW = 960;
@@ -24,34 +26,33 @@ const WINDOW = 960;
  *   controls: Reserve width of the window controls
  */
 function layout(controls: number) {
-  const paddingRight = HEADER_PADDING_X + controls;
-  const contentRight = WINDOW - paddingRight;
-  const langLeft = contentRight - ACTIONS_WIDTH;
-  const bandRight = WINDOW - (HEADER_RIGHT_INSET + controls);
+  const contentRight = WINDOW - headerPaddingRight(controls);
+  const langLeft = contentRight - HEADER_ACTIONS_WIDTH;
+  const bandRight = WINDOW - (bandRightInset(controls) + controls);
+  // The controls group is 4 * 36 + 3 * 4 + 6 wide, flush to the window edge.
+  const controlsLeft = WINDOW - (4 * 36 + 3 * 4 + 6);
   return {
     gapBandToLang: langLeft - bandRight,
-    themeToEdge: WINDOW - contentRight,
+    gapActionsToControls: controls > 0 ? controlsLeft - contentRight : null,
   };
 }
 
 describe("TestHeaderGeometry", () => {
-  it("covers the right padding plus the trailing actions", () => {
-    expect(HEADER_RIGHT_INSET).toBe(HEADER_PADDING_X + ACTIONS_WIDTH);
+  it("keeps the px-4 padding only when there are no window controls", () => {
+    expect(headerPaddingRight(0)).toBe(HEADER_PADDING_X);
+    expect(headerPaddingRight(168)).toBe(168);
   });
 
   it("puts the band right edge where the language selector starts", () => {
-    // The invariant both constants have to keep, with and without the window
-    // controls: no gap, but also no overlap.
+    // The invariant both helpers have to keep, with and without the controls:
+    // no gap, but also no overlap.
     expect(layout(0).gapBandToLang).toBe(0);
     expect(layout(168).gapBandToLang).toBe(0);
   });
 
-  it("keeps the header padding next to the window controls", () => {
-    // The padding is added on top of `px-4`, not substituted for it: with no
-    // controls the actions sit 16px from the window edge, and with controls the
-    // same 16px survives between them and the reserved area. Writing the bare
-    // controls width would drop that 16 and shift the actions right by it.
-    expect(layout(0).themeToEdge).toBe(HEADER_PADDING_X);
-    expect(layout(168).themeToEdge).toBe(HEADER_PADDING_X + 168);
+  it("leaves the same 6px between the actions and the controls as inside the group", () => {
+    // The reserve width already contains that gap; adding the padding on top of
+    // it (instead of replacing it) put 22px there instead of 6.
+    expect(layout(168).gapActionsToControls).toBe(6);
   });
 });

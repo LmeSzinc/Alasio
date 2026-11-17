@@ -3,6 +3,7 @@
   import { PAGE_LAYER } from "$lib/context/stack.svelte";
   import { HeaderContext } from "$lib/slotcontext.svelte";
   import { DragRegionContext } from "$lib/window/dragRegion.svelte";
+  import { frame } from "$lib/window/frame.svelte";
   import { devAssetsRegion } from "$lib/window/regions";
   import { useTopic } from "$lib/ws";
   import AssetManager from "./AssetManager.svelte";
@@ -18,7 +19,7 @@
   // The header of this page carries an interactive selector, so the drag band
   // stops left of it. Only the right side is narrowed: the left stays what the
   // layout declared, so the aside config column remains clickable.
-  DragRegionContext.use(devAssetsRegion, { priority: PAGE_LAYER });
+  DragRegionContext.use((inherited) => devAssetsRegion(frame.controls.width)(inherited), { priority: PAGE_LAYER });
 
   const topicClient = useTopic<FolderResponse>("DevAssetsManager");
   const modRpc = topicClient.rpc();

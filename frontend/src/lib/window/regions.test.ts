@@ -16,7 +16,7 @@
  * uses, so a broken layer or a broken `toPayload` fails here.
  */
 import { describe, expect, it } from "vitest";
-import { HEADER_PADDING_X, HEADER_RIGHT_INSET } from "$lib/components/header/geometry";
+import { HEADER_ACTIONS_WIDTH, bandRightInset, headerPaddingRight } from "$lib/components/header/geometry";
 import { type DragRegion, type DragRegionLayer, mergeRegionLayers, toPayload } from "$lib/window/dragRegion.svelte";
 import {
   DEFAULT_BAND_LEFT,
@@ -72,13 +72,13 @@ function evalInset(expression: number | string, windowWidth: number): number {
 
 /** Left edge of the language selector, given the header padding */
 function langLeft(windowWidth: number, controls: number): number {
-  return windowWidth - (HEADER_PADDING_X + controls) - ACTIONS;
+  return windowWidth - headerPaddingRight(controls) - HEADER_ACTIONS_WIDTH;
 }
 
 describe("TestDefaultRegion", () => {
   it.each(CONTROLS)("starts at the menu button on small screens (controls %i)", (controls) => {
     const width = WIDTHS.sm;
-    const payload = payloadOf([defaultRegion(breakpointOf(width))], controls);
+    const payload = payloadOf([defaultRegion(breakpointOf(width), controls)], controls);
 
     // px-4 (16) + size-9 (36) + gap-1 (4): the button spans 16..52, so 56 clears it
     expect(payload.left).toBe(56);
@@ -87,7 +87,7 @@ describe("TestDefaultRegion", () => {
 
   it.each(CONTROLS)("starts at the aside config column on medium screens (controls %i)", (controls) => {
     const width = WIDTHS.md;
-    const payload = payloadOf([defaultRegion(breakpointOf(width))], controls);
+    const payload = payloadOf([defaultRegion(breakpointOf(width), controls)], controls);
 
     // The config column is w-20 (80) + 1px border; the nav column and the
     // header sit right of it and are draggable.
@@ -96,7 +96,7 @@ describe("TestDefaultRegion", () => {
 
   it.each(CONTROLS)("starts at the window edge on large screens (controls %i)", (controls) => {
     const width = WIDTHS.xl;
-    const payload = payloadOf([defaultRegion(breakpointOf(width))], controls);
+    const payload = payloadOf([defaultRegion(breakpointOf(width), controls)], controls);
 
     // The aside floats 16px below the top there, so nothing is under the band.
     expect(payload.left).toBe(0);
@@ -104,7 +104,7 @@ describe("TestDefaultRegion", () => {
 
   it.each(CONTROLS)("ends on the language selector at every breakpoint (controls %i)", (controls) => {
     for (const width of Object.values(WIDTHS)) {
-      const payload = payloadOf([defaultRegion(breakpointOf(width))], controls);
+      const payload = payloadOf([defaultRegion(breakpointOf(width), controls)], controls);
 
       expect(bandRight(payload, width)).toBe(langLeft(width, controls));
     }
@@ -156,7 +156,7 @@ describe("TestSheetRegion", () => {
 describe("TestAuthRegion", () => {
   it.each(CONTROLS)("covers the whole header up to the language selector (controls %i)", (controls) => {
     const width = 900;
-    const payload = payloadOf([authRegion], controls);
+    const payload = payloadOf([authRegion(controls)], controls);
 
     expect(payload.left).toBe(0);
     expect(bandRight(payload, width)).toBe(langLeft(width, controls));
@@ -167,20 +167,20 @@ describe("TestDevAssetsRegion", () => {
   it.each(CONTROLS)("stops left of the header selector (controls %i)", (controls) => {
     const width = WIDTHS.xl;
     // Page layer over the private layout layer, both pushed.
-    const payload = payloadOf([defaultRegion(breakpointOf(width)), devAssetsRegion], controls);
+    const payload = payloadOf([defaultRegion(breakpointOf(width), controls), devAssetsRegion(controls)], controls);
 
     // Actions (92) + gap-1 (4) + ModSelector w-64 (256) = 352 from the content
     // edge; the selector itself then spans up to the actions group.
-    expect(payload.right).toBe(352 + controls);
-    const selectorRight = width - (HEADER_RIGHT_INSET + controls);
+    expect(payload.right).toBe(bandRightInset(controls) + 4 + 256 + controls);
+    const selectorRight = width - headerPaddingRight(controls) - HEADER_ACTIONS_WIDTH - 4;
     const selectorLeft = selectorRight - 256;
-    expect(bandRight(payload, width)).toBe(selectorLeft - 4);
+    expect(bandRight(payload, width)).toBe(selectorLeft);
   });
 
   it.each(CONTROLS)("keeps the layout's left inset (controls %i)", (controls) => {
     for (const width of Object.values(WIDTHS)) {
       const breakpoint = breakpointOf(width);
-      const payload = payloadOf([defaultRegion(breakpoint), devAssetsRegion], controls);
+      const payload = payloadOf([defaultRegion(breakpoint, controls), devAssetsRegion(controls)], controls);
 
       // The page narrows the right side only; the aside must stay clickable.
       expect(payload.left).toBe(DEFAULT_BAND_LEFT[breakpoint]);
@@ -192,7 +192,7 @@ describe("TestRegionInvariants", () => {
   it("keeps the band positive at every breakpoint and both sessions", () => {
     for (const controls of CONTROLS) {
       for (const width of Object.values(WIDTHS)) {
-        const payload = payloadOf([defaultRegion(breakpointOf(width))], controls);
+        const payload = payloadOf([defaultRegion(breakpointOf(width), controls)], controls);
         const rendered = bandRight(payload, width) - Number(payload.left);
 
         expect(rendered).toBeGreaterThan(0);
@@ -202,13 +202,15 @@ describe("TestRegionInvariants", () => {
 
   it("reserves only the controls width difference between the two sessions", () => {
     const width = WIDTHS.md;
-    const withHost = payloadOf([defaultRegion(breakpointOf(width))], 168);
-    const withoutHost = payloadOf([defaultRegion(breakpointOf(width))], 0);
+    const withHost = payloadOf([defaultRegion(breakpointOf(width), 168)], 168);
+    const withoutHost = payloadOf([defaultRegion(breakpointOf(width), 0)], 0);
 
-    // The page layout is identical in both sessions; only the room the overlay
-    // takes on the right differs, by exactly the reserved width.
-    expect(Number(withHost.right) - Number(withoutHost.right)).toBe(168);
-    expect(bandRight(withoutHost, width) - bandRight(withHost, width)).toBe(168);
+    // The header content is laid out the same way in both sessions, but the
+    // band edge follows the content: with the controls the reserve width
+    // replaces the px-4 padding, so the edge moves by the controls minus that
+    // padding. Without controls the actions sit at the plain px-4 padding.
+    expect(Number(withHost.right) - Number(withoutHost.right)).toBe(168 - 16);
+    expect(bandRight(withoutHost, width) - bandRight(withHost, width)).toBe(168 - 16);
     expect(withoutHost.left).toBe(withHost.left);
   });
 });
