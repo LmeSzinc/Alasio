@@ -234,10 +234,14 @@ export class WebsocketManager {
         }
       }
 
-      // Send any messages that were queued while disconnected.
-      while (this.#messageQueue.length > 0) {
-        const message = this.#messageQueue.shift();
-        if (message) this.#send(message);
+      // Send the messages that were queued while disconnected. The queue is
+      // taken as a whole: a send may queue again (the socket closed in the
+      // meantime), and the message must land in the queue of the next
+      // connection instead of looping through this one.
+      const queued = this.#messageQueue;
+      this.#messageQueue = [];
+      for (const message of queued) {
+        this.#send(message);
       }
     };
 
