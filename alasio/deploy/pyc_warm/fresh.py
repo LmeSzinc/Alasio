@@ -47,16 +47,31 @@ and the ensures are one per source, so they split freely.
 Where the stat of a directory entry is taken depends on the platform,
 see DIRENT_STAT_IS_FREE. Windows reads it from the enumeration, so the
 listing takes it and a pyc file older than its source is answered stale
-without a single open. POSIX answers the names only, so a stat there is
-a syscall on the one thread of the run that is not parallel: it travels
-to the worker, which opens the pyc file anyway and reads the stat of its
-descriptor instead of calling fstatat() by path first.
+without a single open. POSIX answers the type of an entry but not its
+stat, so a stat there is a syscall on the one thread of the run that is
+not parallel: it travels to the worker, which opens the pyc file anyway
+and reads the stat of its descriptor instead of calling fstatat() by path
+first.
+
+The type is free on both platforms, so the listing asks it and answers a
+folder named "x.py" without a syscall, and a source without a pyc file is
+settled without one too: no stat of a source is taken anywhere on the
+thread that lists.
 
 The listings come in one order. The pyc file of a source is named after
 the source alone, so __pycache__ is listed first: a source without a pyc
 file is stale there and then, and no stat of it is taken anywhere. The
 size of a source is never carried through the scan, only the path, which
 is all a run needs.
+
+A path of the scope can be the wrong kind of file: a folder named "x.py"
+in a RECORD, a file named __pycache__ where the bytecode of a folder goes.
+The warmup is best effort and never fails the release, and the two shapes
+are not warmable at all, so they are answered before anything is compiled:
+a folder is never a source, and a folder whose cache folder is a file has
+nothing to warm. What is left is a layout that is broken in a way only the
+write can report, e.g. a folder where a pyc file belongs, which is a
+failure of that one file and never of the run.
 
 This module is imported by the warmup subprocess before anything else:
 it only imports the standard library and pyc_path(), it must never
@@ -65,6 +80,7 @@ import the logger nor the mod.
 import os
 import time
 from importlib.util import MAGIC_NUMBER
+from stat import S_ISREG
 
 from alasio.deploy.simple_pip.pyc import PYCACHE, pyc_path
 from alasio.ext.path.atomic import atomic_open
@@ -86,11 +102,18 @@ STAT_MASK = 0xFFFFFFFF
 # POSIX answers the name and the type only, so DirEntry.stat() is an
 # fstatat() syscall.
 #
+# The type is free on both, and that is a different thing from the stat:
+# readdir() answers a d_type (DT_DIR, DT_REG, DT_UNKNOWN) and
+# DirEntry.is_dir() reads it without a syscall, on Linux and on macOS. Only
+# a filesystem that answers DT_UNKNOWN, e.g. some network shares, makes
+# is_dir() fall back to a stat.
+#
 # The listing runs on the calling thread, the one thread of a run that is
-# not parallel, so a stat is only taken there where it costs nothing. It is
-# not about the total work: fstatat() by path is cheaper than the open that
-# the mtime gate saves. It is about the thread, which has one thread of
-# budget while the workers have several.
+# not parallel, so it takes a stat only where it costs nothing, and a
+# question that the type answers is never a stat at all. It is not about
+# the total work: fstatat() by path is cheaper than the open that the mtime
+# gate saves. It is about the thread, which has one thread of budget while
+# the workers have several.
 DIRENT_STAT_IS_FREE = os.name == 'nt'
 
 
@@ -212,7 +235,10 @@ def plan_folder(folder, names, now):
 
     One listing of the __pycache__ folder and one of the folder itself,
     and no other call where a directory entry answers the stat, see
-    DIRENT_STAT_IS_FREE.
+    DIRENT_STAT_IS_FREE. The type of an entry is asked here, and it is the
+    one question the enumeration of both platforms answers without a
+    syscall: a folder named "x.py" is dropped on the thread that lists,
+    rather than opened and refused by a worker.
 
     The pyc file of a source is named after the source alone, so the
     listing of __pycache__ comes first and tells which sources have no
@@ -254,11 +280,15 @@ def plan_folder(folder, names, now):
         # entry of the source answers its stat, so neither half opens a
         # file and the cold tree costs nothing
         pyc_mtimes = _list_pyc_mtimes(pyc_folder, wanted)
+        if pyc_mtimes is None:
+            return []
     else:
         # The names alone tell which pyc files exist, and every stat is
         # left to the worker: it opens the pyc file anyway and reads the
         # stat of its descriptor, see ensure()
         pyc_there = _list_pyc_names(pyc_folder, wanted)
+        if pyc_there is None:
+            return []
 
     items = []
     try:
@@ -269,6 +299,18 @@ def plan_folder(folder, names, now):
                 if pyc_name is None:
                     # Not a source of the scope, e.g. an entry of a
                     # __pycache__ folder that holds thousands of files
+                    continue
+                try:
+                    is_dir = entry.is_dir()
+                except OSError:
+                    # Removed between the listing and the type, or a
+                    # filesystem that can not answer it
+                    continue
+                if is_dir:
+                    # A folder named "x.py" is not a source, and compiling
+                    # it would only raise. The type comes from the
+                    # enumeration on every platform, see DIRENT_STAT_IS_FREE:
+                    # this costs no syscall, whatever the filesystem
                     continue
                 file = joinpath(folder, name)
                 if DIRENT_STAT_IS_FREE:
@@ -351,7 +393,9 @@ def ensure(item):
     """
     file, pyc, source, now = item
     if pyc is None:
-        # The listing settled it: there is no pyc file to look at
+        # The listing settled it: there is no pyc file to look at, and the
+        # entry was a source rather than a folder, whatever the platform
+        # answers about the type of an entry, see plan_folder()
         return file
     if source is None:
         # The listing took no stat, so both answers come from here: the
@@ -361,6 +405,11 @@ def ensure(item):
             st = os.stat(file)
         except OSError:
             # Removed since the listing, there is nothing to compile
+            return None
+        if not S_ISREG(st.st_mode):
+            # Not a regular file: a folder was filtered by the listing, so
+            # this is a device, a fifo or a socket named "x.py", which a
+            # compilation of could only raise on
             return None
         mtime, size = st.st_mtime, st.st_size
         try:
@@ -410,9 +459,11 @@ def _list_pyc_names(pyc_folder, names):
         names (set[str]): File names of the pyc files to look for
 
     Returns:
-        set[str]: The names of the asked pyc files that exist. A missing
-            folder answers an empty set, e.g. the first run of a tree
-            that was never imported
+        set[str] | None: The names of the asked pyc files that exist. A
+            missing folder answers an empty set, e.g. the first run of a
+            tree that was never imported, and None answers a folder that
+            is not a folder, e.g. a file named __pycache__: the layout of
+            the folder is broken and nothing in it can be cached
     """
     found = set()
     try:
@@ -420,6 +471,8 @@ def _list_pyc_names(pyc_folder, names):
             for entry in entries:
                 if entry.name in names:
                     found.add(entry.name)
+    except NotADirectoryError:
+        return None
     except OSError:
         return set()
     return found
@@ -440,9 +493,11 @@ def _list_pyc_mtimes(pyc_folder, names):
         names (set[str]): File names of the pyc files to stat
 
     Returns:
-        dict[str, float]: File name of the pyc file to its mtime. A
-            missing folder answers an empty dict, e.g. the first run of
-            a tree that was never imported
+        dict[str, float] | None: File name of the pyc file to its mtime.
+            A missing folder answers an empty dict, e.g. the first run of
+            a tree that was never imported, and None answers a folder that
+            is not a folder, e.g. a file named __pycache__: the layout of
+            the folder is broken and nothing in it can be cached
     """
     mtimes = {}
     try:
@@ -456,6 +511,8 @@ def _list_pyc_mtimes(pyc_folder, names):
                 except OSError:
                     # Removed between the listing and the stat
                     continue
+    except NotADirectoryError:
+        return None
     except OSError:
         return {}
     return mtimes

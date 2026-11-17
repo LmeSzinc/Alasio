@@ -36,6 +36,7 @@ a layout.
 Every path here is a posix path: the layers build absolute paths and pass
 them to the scan, which normalizes them again for the disk.
 """
+import csv
 import os
 import sys
 
@@ -55,9 +56,6 @@ PACK_AREA = '.pack'
 INDEX_PACK = 'index.pack'
 # Suffix of a python source
 SOURCE_SUFFIX = '.py'
-# Suffix of a file installed outside of site-packages, e.g. a script of
-# the environment root, PEP 376 records it with a relative path
-OUTSIDE = '..'
 # Names of the site-packages folders, the environment of the interpreter
 SITE_DIRS = ('site-packages', 'dist-packages')
 
@@ -197,13 +195,23 @@ class Scope:
         import is what makes that order explicit.
 
         Returns:
-            dict[str, Mod]: The mods of the project root
+            dict[str, Mod]: The mods of the project root, empty when the
+                declaration of the root itself can not be read
         """
         if self._mods is not None:
             return self._mods
         from alasio.config.entry.loader import ModLoader
+        from alasio.config.entry.mod_entry import ModEntryError
         from alasio.ext import env
-        return ModLoader(env.PROJECT_ROOT).dict_mod
+
+        try:
+            return ModLoader(env.PROJECT_ROOT).dict_mod
+        except ModEntryError:
+            # The declaration of the project root is unreadable. The backend
+            # builds the same list at its startup and reports the reason
+            # there, so a warmup is not a second place to fail: no mod of
+            # the release can be warmed, the environment tiers still are
+            return {}
 
     def tiers(self):
         """
@@ -329,9 +337,12 @@ class Scope:
         file = joinpath(to_posix(mod.root), mod.entry.requirements_file)
         try:
             content = atomic_read_text(file)
-        except OSError:
+        except (OSError, UnicodeDecodeError):
             # The declaration names a file the tree does not hold, e.g. a
-            # mod that never pinned its dependencies
+            # mod that never pinned its dependencies, or a file that is not
+            # the UTF-8 the pins are written in, e.g. one an editor saved in
+            # the local code page. Either way there are no pins to read, and
+            # the environment tiers are still warmed
             yield ScopeResult(TIER_LOCK, file)
             return
         for key in Requirements(content).dict_pins:
@@ -504,6 +515,9 @@ def record_sources(site_packages, dist_info):
     The RECORD is the file list of the installation, PEP 376, it is
     written by the installer: the files that are not in it, e.g. the
     bytecode caches and the files placed by hand, are never warmed up.
+    A row is a path relative to site-packages by definition, so a row that
+    leaves it, e.g. a script of the environment root, is not a file of the
+    installation and is skipped.
 
     Args:
         site_packages (str): Posix path of the folder the RECORD paths
@@ -518,14 +532,19 @@ def record_sources(site_packages, dist_info):
         content = atomic_read_bytes(joinpath(dist_info, 'RECORD'))
         record = RecordManager()
         record.load_bytes(content)
-    except (OSError, UnicodeDecodeError):
+    except (OSError, UnicodeDecodeError, csv.Error):
+        # A RECORD that is not there, not UTF-8, or not a csv at all, e.g.
+        # one holding a NUL byte, which csv refuses: the distribution has no
+        # file list to read, and a broken list is never an error of the run
         return []
 
     sources = []
     for path in record.entries:
-        if path.startswith(OUTSIDE):
+        if path.startswith('/') or '..' in path.split('/'):
             # Installed outside of site-packages, e.g. a script of the
-            # environment root, the path does not resolve here
+            # environment root, the path does not resolve here. The same
+            # holds for a row that climbs out in its middle, which no
+            # installer writes and no installation holds
             continue
         if not path.endswith(SOURCE_SUFFIX):
             continue
