@@ -142,6 +142,20 @@ describe("TestUpdateAvailableToast", () => {
     expect(announcedSets()).toHaveLength(1);
   });
 
+  it("stays quiet for the same pair after the user closed the toast", async () => {
+    await mountTrigger();
+    await pushSnapshot({ alasio: entry("available", SHA_A) });
+    // the user closes the toast: it leaves sonner, the announcement stays
+    vi.mocked(toast.getActiveToasts).mockReturnValue([]);
+
+    // the periodic check of the backend reports the same pair again (a new
+    // UpdateInfo of the same values, every 5 minutes in production): closing
+    // the toast only closes that message, the pair is not announced twice
+    await pushMod("alasio", entry("available", SHA_A));
+
+    expect(announcedSets()).toHaveLength(1);
+  });
+
   it("aggregates a second available mod into one toast, replacing the one on screen", async () => {
     await mountTrigger();
     await pushSnapshot({ alasio: entry("available", SHA_A) });
@@ -163,9 +177,10 @@ describe("TestUpdateAvailableToast", () => {
     expect(toast.dismiss).toHaveBeenCalledWith(toastId(0));
   });
 
-  it("pops the toast again for a newer version of the same mod", async () => {
+  it("pops the toast again for a newer version, after the user closed it", async () => {
     await mountTrigger();
     await pushSnapshot({ alasio: entry("available", SHA_A) });
+    vi.mocked(toast.getActiveToasts).mockReturnValue([]);
 
     await pushMod("alasio", entry("available", SHA_B));
 

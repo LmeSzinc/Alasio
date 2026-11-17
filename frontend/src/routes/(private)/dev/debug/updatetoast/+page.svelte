@@ -25,12 +25,25 @@
 
   // Versions of the mock data: 40 hex characters are the sha1 of a packed
   // commit (shown shortened to 8), anything else is a tag / wheel version
-  // (shown as it is)
-  const SHA = {
-    a: "0beb992a4b31f0e2f8b2f3b7a1c2d3e4f5a6b7c8",
-    b: "ab41c81d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b",
-    c: "d3599d6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e",
-  } as const;
+  // (shown as it is).
+  //
+  // Every scenario reports a version the trigger has not announced yet: a
+  // session announces a (mod, version) pair once, so a fixed version would
+  // make the second press of a button show nothing. The counter sits in the
+  // head of the sha -- the 8 characters the toast shows -- so two presses are
+  // told apart on screen too.
+  const SHA_TAIL = "4b31f0e2f8b2f3b7a1c2d3e4f5a6b7c8";
+  let presses = 0;
+
+  /** A 40-hex sha1 of a packed commit, a different one per call */
+  function sha(): string {
+    const head = ((0x0beb992a + presses++) & 0xffffffff).toString(16);
+    return head + SHA_TAIL;
+  }
+
+  // Tag versions of the wheel mod count on their own: a tag is displayed as
+  // it is, so a second press needs a different one
+  let tagPresses = 1;
 
   const LONG_NAME = "ExampleMod_with_a_very_long_repository_name";
   const LONG_VERSION = "v1.2.3-rc.4+build.20261016.abcdef1234567890";
@@ -54,14 +67,6 @@
     // A new object: the trigger reads the data of the topic, a mutation would
     // not be a new value to announce
     mockTopic = { ...mockTopic, [mod]: entry(latest) };
-  }
-
-  // Versions that are fresh by construction: a scenario that has to pop the
-  // toast on every press reports a version the trigger has not announced yet
-  let fresh = 0;
-
-  function upsertFresh(mod: string) {
-    upsert(mod, `v1.0.${++fresh}`);
   }
 
   // Bumped by Reset: a remount clears the announcement set of the trigger, so
@@ -88,9 +93,9 @@
         burstTimer = undefined;
         return;
       }
-      // Every replacement is a version the trigger has not announced: without
-      // that, the repeats after the first burst would be deduplicated
-      upsertFresh("alasio");
+      // A new version per tick: the trigger announces a pair once, so a
+      // repeated version would be deduplicated after the first replacement
+      upsert("alasio", sha());
     }, 400);
   }
 
@@ -105,23 +110,33 @@
   const actions: Action[] = [
     {
       label: "Update · first mod",
-      note: "alasio becomes available: the toast announces it and never auto-closes -- leave it on screen and watch that nothing dismisses it. Pressing it again announces nothing: the same (mod, version) pair pops once, like a session.",
-      run: () => upsert("alasio", SHA.a),
+      note: "alasio becomes available: the toast announces it and never auto-closes -- leave it on screen and watch that nothing dismisses it. Every press reports a newer version, so the scenario can be replayed; press 'Same pair · no toast' for the pair a session announces only once.",
+      run: () => upsert("alasio", sha()),
     },
     {
       label: "Update · second mod",
       note: "ExampleMod becomes available while the toast is still up: the previous toast is dismissed (its exit animation plays) and the new one enters announcing both mods. The information accumulates, the toasts never stack.",
-      run: () => upsert("ExampleMod", SHA.c),
+      run: () => upsert("ExampleMod", sha()),
     },
     {
       label: "Update · third mod (tag)",
       note: "A wheel mod joins with a tag version: the row list carries every mod with its own version, tags as they are and packed sha1 shortened to 8.",
-      run: () => upsert("wheel_mod", "0.9.2"),
+      run: () => upsert("wheel_mod", `0.9.${++tagPresses}`),
     },
     {
       label: "Newer version of a mod",
-      note: "alasio reports the other version: the replacement animation again, with the version of the row updated in place.",
-      run: () => upsert("alasio", mockTopic.alasio?.latest_version === SHA.b ? SHA.a : SHA.b),
+      note: "alasio reports a newer latest while the toast is still up: the replacement animation again, with the version of the row updated in place.",
+      run: () => upsert("alasio", sha()),
+    },
+    {
+      label: "Same pair · no toast",
+      note: "The backend re-reports a pair this session already announced: its periodic check (every 5 minutes) finds the same version and pushes 'available' again. Nothing pops -- a pair is announced once per session, so a re-check never nags. Closing the toast is not what silences the pair: a newer version pops again, the same one does not.",
+      run: () => {
+        // The pair the topic already reports, pushed again unchanged
+        const mod = Object.keys(mockTopic).find((name) => mockTopic[name].latest_version);
+        if (mod === undefined) return;
+        mockTopic = { ...mockTopic, [mod]: entry(mockTopic[mod].latest_version ?? "") };
+      },
     },
     {
       label: "Available · unknown version",
@@ -132,19 +147,19 @@
       label: "Long mod name",
       note: "A single update with a long mod name: the name column stops at half of the row, so the name truncates (the full name stays in its tooltip) and the version column keeps its place.",
       run: () => {
-        mockTopic = { [LONG_NAME]: entry(SHA.a) };
+        mockTopic = { [LONG_NAME]: entry(sha()) };
       },
     },
     {
       label: "Long name · long version",
       note: "Both sides are long: every column of a row stops at half of the width, so the name and the version truncate instead of squeezing each other (both tooltips carry the full values).",
       run: () => {
-        mockTopic = { [LONG_NAME]: entry(LONG_VERSION) };
+        mockTopic = { [LONG_NAME]: entry(`${LONG_VERSION}.${++presses}`) };
       },
     },
     {
       label: "Close the toast",
-      note: "The programmatic twin of the close button inside the toast content: the exit animation plays and the toast leaves. Closing is not cancelling -- the mock available updates stay, and they are not announced again.",
+      note: "The programmatic twin of the close button inside the toast content: the exit animation plays and the toast leaves. Closing is not cancelling -- the mock available updates stay, a newer version pops again, and the same pair stays quiet.",
       run: () => dismissUpdateToast(),
     },
     {
@@ -157,7 +172,7 @@
       note: "An ordinary toast of the Toaster (it auto-closes, the update one never does) beside the update toast: they stack like any two toasts.",
       run: () => {
         toast.info("A normal toast, it closes by itself");
-        upsertFresh("alasio");
+        upsert("alasio", sha());
       },
     },
     {
@@ -216,7 +231,8 @@
       set of available updates). The toast always reads as a title row plus one row per mod (the name left, its version
       right), so one update and five look alike. The buttons below only change the mock topic: the page mounts the
       production trigger (UpdateAvailableToast), so the filter, the per-session announcement and the toast itself are
-      the production ones, not a copy.
+      the production ones, not a copy. Closing the toast closes that one message: a newer version pops again, while the
+      pair already announced stays quiet (the backend re-reports the same version every check, it must not nag).
     </p>
   </div>
 
