@@ -199,7 +199,7 @@ class TestRange:
         index.add('demo', '1.0')
         provider = MetadataProvider(client=index.client)
 
-        with pytest.raises(WheelNotFoundError):
+        with pytest.raises(MetadataError, match='no wheel of the version'):
             await provider.metadata('demo', '2.0', INDEX_URL)
         await provider.aclose()
 

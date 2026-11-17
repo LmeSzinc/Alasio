@@ -20,6 +20,7 @@ Usage:
 """
 
 import io
+import tarfile
 import zipfile
 from hashlib import sha256
 
@@ -33,6 +34,7 @@ __all__ = [
     'METADATA_SUFFIX',
     'IndexEntry',
     'MockIndex',
+    'make_sdist',
     'make_wheel',
     'metadata_text',
 ]
@@ -93,6 +95,44 @@ def make_wheel(name, version, requires=(), trail=b''):
         zf.writestr(f'{dist_info}/METADATA', metadata_text(name, version, requires))
         if trail:
             zf.writestr(f'{dist_info}/RECORD', trail)
+    return buffer.getvalue()
+
+
+def make_sdist(name, version, requires=(), metadata_version='2.1', requires_txt=None):
+    """
+    A minimal source distribution: a tar.gz holding the metadata of a project.
+
+    Args:
+        name (str): Distribution name as the publisher writes it
+        version (str): Version of the distribution
+        requires (Iterable[str]): The ``Requires-Dist`` values of the PKG-INFO
+        metadata_version (str): Core metadata version of the PKG-INFO. Defaults
+            to '2.1', the first version whose Requires-Dist a reader trusts;
+            '1.1' is the legacy metadata that declares no dependency
+        requires_txt (str | None): Content of the
+            ``<name>.egg-info/requires.txt`` of a setuptools sdist. Defaults to
+            None, no egg-info record
+
+    Returns:
+        bytes: Content of the .tar.gz file
+    """
+    headers = [
+        f'Metadata-Version: {metadata_version}',
+        f'Name: {name}',
+        f'Version: {version}',
+    ]
+    headers.extend(f'Requires-Dist: {text}' for text in requires)
+    folder = f'{name}-{version}'
+    members = {f'{folder}/PKG-INFO': '\n'.join(headers) + '\n'}
+    if requires_txt is not None:
+        members[f'{folder}/{name}.egg-info/requires.txt'] = requires_txt
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode='w:gz') as tf:
+        for path, content in members.items():
+            data = content.encode('utf-8')
+            info = tarfile.TarInfo(path)
+            info.size = len(data)
+            tf.addfile(info, io.BytesIO(data))
     return buffer.getvalue()
 
 
@@ -195,8 +235,9 @@ class MockIndex:
         if not filename:
             filename = f'{name.replace("-", "_")}-{version}-{tag}.whl'
         if content is None:
-            content = make_wheel(name, version, requires, trail) if trail else (
-                f'{filename} content'.encode('utf-8'))
+            # a real wheel, so a reader of the METADATA reads a zip archive:
+            # the attributes of the page are not the only thing a tool reads
+            content = make_wheel(name, version, requires, trail)
         body = metadata_text(name, version, requires).encode('utf-8')
         if metadata == 'sha256':
             metadata = f'sha256={sha256(body).hexdigest()}'

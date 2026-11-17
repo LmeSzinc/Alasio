@@ -21,12 +21,14 @@ Usage:
 """
 
 from alasio.deploy_dev.metadata.provider import (
-    DEFAULT_CONCURRENCY, DEFAULT_INDEX, MODE_FULL, MODE_PEP658, MODE_RANGE, MODE_RANGE_NO_SUFFIX, ClosureResult,
-    ClosureRoot, DistributionMetadata, MetadataError, MetadataProvider, SourceCapabilities, readable_wheels
+    DEFAULT_CONCURRENCY, DEFAULT_INDEX, MODE_FULL, MODE_PEP658, MODE_RANGE, MODE_RANGE_NO_SUFFIX, MODE_SDIST,
+    ClosureResult, ClosureRoot, DistributionMetadata, MetadataError, MetadataProvider, SourceCapabilities,
+    readable_wheels, sdist_of
 )
 from alasio.deploy_dev.metadata.requirements import (
     PLATFORMS, marker_environments, requirement_names, requires_dist, wheel_metadata
 )
+from alasio.deploy_dev.metadata.sdist import is_sdist, read_sdist_metadata, sdist_name_of
 
 __all__ = [
     'DEFAULT_CONCURRENCY',
@@ -35,6 +37,7 @@ __all__ = [
     'MODE_PEP658',
     'MODE_RANGE',
     'MODE_RANGE_NO_SUFFIX',
+    'MODE_SDIST',
     'PLATFORMS',
     'ClosureResult',
     'ClosureRoot',
@@ -42,9 +45,13 @@ __all__ = [
     'MetadataError',
     'MetadataProvider',
     'SourceCapabilities',
+    'is_sdist',
     'marker_environments',
+    'read_sdist_metadata',
     'readable_wheels',
     'requirement_names',
     'requires_dist',
+    'sdist_name_of',
+    'sdist_of',
     'wheel_metadata',
 ]

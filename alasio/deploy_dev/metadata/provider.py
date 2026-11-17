@@ -52,8 +52,9 @@ from packaging.utils import canonicalize_name
 
 from alasio.deploy.httpclient.client_async import AsyncHttpClient
 from alasio.deploy.pip_download._wheel import is_pure_wheel
-from alasio.deploy.pip_download.pypi_file import DOWNLOAD_MODE_ALL, PypiFile, select_wheels
+from alasio.deploy.pip_download.pypi_file import DOWNLOAD_MODE_ALL, PypiFile, WheelNotFoundError, select_wheels
 from alasio.deploy_dev.metadata.requirements import requirement_names, requires_dist, wheel_metadata
+from alasio.deploy_dev.metadata.sdist import is_sdist, read_sdist_metadata, sdist_name_of
 from alasio.deploy_dev.metadata.zip_reader import (
     LOCAL_HEADER_SIZE, TAIL_SIZE, WINDOW_PADDING, ZipLayoutError, central_directory, content_range, decompress_member,
     end_of_central_directory, find_metadata, local_data_offset
@@ -67,6 +68,7 @@ __all__ = [
     'MODE_PEP658',
     'MODE_RANGE',
     'MODE_RANGE_NO_SUFFIX',
+    'MODE_SDIST',
     'ClosureResult',
     'ClosureRoot',
     'DistributionMetadata',
@@ -74,6 +76,7 @@ __all__ = [
     'MetadataProvider',
     'SourceCapabilities',
     'readable_wheels',
+    'sdist_of',
 ]
 
 # The index a distribution is read from when the caller names none: the
@@ -91,6 +94,8 @@ MODE_PEP658 = 'pep658'
 MODE_RANGE = 'range'
 MODE_RANGE_NO_SUFFIX = 'range-explicit'
 MODE_FULL = 'full'
+# the metadata of a version that publishes no wheel, read from its sdist
+MODE_SDIST = 'sdist'
 
 # PEP 658 is declared by the link of a wheel, not by the index, so the answer of
 # a file that is not there means "this wheel serves no metadata", not "this
@@ -134,8 +139,10 @@ class DistributionMetadata(Struct):
         source (str): Base url of the index the version was read from
         requires_dist (List[str]): The ``Requires-Dist`` values of the METADATA
         origin (str): Url the METADATA was read from, the metadata file of the
-            wheel or the wheel itself
-        mode (str): How it was read, one of the MODE_* constants
+            wheel, the wheel itself, or the sdist of a version without a wheel
+        mode (str): How it was read, one of the MODE_* constants. MODE_SDIST
+            means the version publishes no wheel the target can install: its
+            dependencies were read from the static metadata of its sdist
     """
     name: str
     version: str
@@ -266,6 +273,32 @@ def readable_wheels(links, name, version):
         not is_pure_wheel(candidate.wheel.file_tags),
         candidate.filename,
     ))
+
+
+def sdist_of(links, name, version):
+    """
+    The source distribution of one version of a distribution.
+
+    Args:
+        links (Iterable[Link]): Links of the index page of the distribution
+        name (str): Distribution name, any case and separator style
+        version (str): Exact version of the distribution
+
+    Returns:
+        Link | None: The link of the sdist, None when the version publishes
+            none
+    """
+    dist = canonicalize_name(name)
+    for link in links:
+        if not is_sdist(link.filename):
+            continue
+        parsed = sdist_name_of(link.filename)
+        if parsed is None:
+            continue
+        if canonicalize_name(parsed[0]) != dist or parsed[1] != version:
+            continue
+        return link
+    return None
 
 
 class MetadataProvider:
@@ -487,8 +520,14 @@ class MetadataProvider:
             WheelNotFoundError: If the page lists no wheel of the version
         """
         page = await self.page(name, source)
-        candidates = readable_wheels(page.links, name, version)
         normalized = canonicalize_name(name)
+        try:
+            candidates = readable_wheels(page.links, name, version)
+        except WheelNotFoundError as e:
+            # a version that only publishes an sdist: its metadata is read from
+            # the archive itself, see the fallback below
+            candidates = []
+            logger.debug(f'"{name}=={version}" publishes no wheel: {e}')
 
         # 1. the PEP 658 file of a wheel: a few KB, one request
         for candidate in candidates:
@@ -527,8 +566,49 @@ class MetadataProvider:
                 requires_dist=requires_dist(text), origin=candidate.link.url_without_fragment,
                 mode=mode)
 
-        detail = '; '.join(dict.fromkeys(reasons)) or 'no wheel of the version'
-        raise MetadataError(f'Cannot read the metadata of "{normalized}=={version}": {detail}')
+        return await self._read_sdist(
+            normalized, version, source, page, '; '.join(dict.fromkeys(reasons)))
+
+    async def _read_sdist(self, name, version, source, page, detail):
+        """
+        Read the metadata of a version from its source distribution.
+
+        A version that publishes no wheel the target can install is still
+        installable: pip builds its sdist. The dependencies are read from the
+        archive without building it, see
+        alasio.deploy_dev.metadata.sdist, and a version whose sdist declares
+        them nowhere is refused: a lock that silently misses the dependencies
+        of a distribution is worse than a compile that fails.
+
+        Args:
+            name (str): PEP 503 normalized name
+            version (str): Exact version
+            source (str): Base url of the index
+            page (PackageIndex): The page of the distribution
+            detail (str): Why the wheels of the version could not be read,
+                the tail of the error message
+
+        Returns:
+            DistributionMetadata: The metadata, its mode MODE_SDIST
+
+        Raises:
+            MetadataError: If the version has no sdist, or its sdist declares
+                no static dependency metadata
+        """
+        link = sdist_of(page.links, name, version)
+        if link is None:
+            raise MetadataError(
+                f'Cannot read the metadata of "{name}=={version}": '
+                f'{detail or "no wheel of the version"}')
+        content = await self._fetcher_of(source).get_bytes(link.url)
+        self._open_budget()
+        try:
+            requires = read_sdist_metadata(content, link.filename)
+        except ValueError as e:
+            raise MetadataError(f'Cannot read "{name}=={version}": {e}') from None
+        return DistributionMetadata(
+            name=name, version=version, source=page.url, requires_dist=requires,
+            origin=link.url_without_fragment, mode=MODE_SDIST)
 
     async def _read_metadata_file(self, source, url, hashes):
         """

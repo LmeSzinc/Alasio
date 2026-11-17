@@ -223,6 +223,30 @@ class TestResolve:
         assert all(url.startswith(INDEX_URL) for url in index.requests)
 
     @pytest.mark.trio
+    async def test_a_given_provider_is_reused(self, mod_root, index):
+        """A run that already read the pages (a compile) costs the tool no request."""
+        from alasio.deploy_dev.metadata import MetadataProvider
+
+        write_requirements(mod_root, {'demo': '1.0', 'pure': '2.0'})
+        index.add('demo', '1.0', requires=['pure>=2'], metadata='sha256')
+        index.add('pure', '2.0', metadata='sha256')
+        provider = MetadataProvider(client=index.client)
+        await provider.page('demo', INDEX_URL)
+        await provider.page('pure', INDEX_URL)
+        before = list(index.requests)
+
+        manager = manager_of(index, provider=provider)
+        manager.register('demo', recursive=True)
+        decisions = await manager.resolve_async()
+
+        assert decisions['demo'].decision == DECISION_PACK
+        new = index.requests[len(before):]
+        # the pages are cached, only the METADATA of the two versions is read
+        assert len(new) == 2
+        assert all(url.endswith('.metadata') for url in new)
+        await provider.aclose()
+
+    @pytest.mark.trio
     async def test_the_default_index(self, mod_root, index, monkeypatch):
         """A pin without an annotation is read from PyPI, not from pypi_mirrors.
 

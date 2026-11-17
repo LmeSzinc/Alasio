@@ -114,7 +114,7 @@ class PackDepsManager:
     # metadata, and both are small requests
     CONCURRENT = 8
 
-    def __init__(self, entry=None, client=None, proxy=''):
+    def __init__(self, entry=None, client=None, proxy='', provider=None):
         """
         Args:
             entry (ModEntry, optional): The declaration to maintain. Defaults to
@@ -123,6 +123,11 @@ class PackDepsManager:
                 send the requests with. Defaults to None, a client of the run
             proxy (str): Proxy url the requests are routed through, e.g.
                 'http://127.0.0.1:7890'. Defaults to '', a direct connection
+            provider (MetadataProvider, optional): The metadata reader of a
+                run that reads several files, e.g. a compile followed by this
+                tool: the pages and the METADATA the compile read are already
+                in its caches, so the run costs no request for them. Defaults
+                to None, a provider of this run, closed with it
 
         Raises:
             PackDepsError: If the interpreter is not CPython (the wheel tags are
@@ -140,6 +145,7 @@ class PackDepsManager:
         self.entry = entry
         self.client = client
         self.proxy = proxy
+        self._given_provider = provider
         # The folder a fetcher would write a wheel into. The tool reads every
         # file in memory (see alasio.deploy_dev.metadata), so nothing is written
         # today; the fetcher still takes the folder
@@ -324,12 +330,17 @@ class PackDepsManager:
             self._merge(states, root)
         self._states = states
 
-        own = self.client is None
-        # the client of the pack server of the domain: a direct connection, or
-        # the proxy the operator gives (the backport indexes serve their wheels
-        # from GitHub releases, which some networks cannot reach)
-        client = create_client(self.proxy) if own else self.client
-        provider = MetadataProvider(client=client, concurrency=self.CONCURRENT, dest=self.dest)
+        own = self.client is None and self._given_provider is None
+        if self._given_provider is not None:
+            provider = self._given_provider
+            client = None
+        else:
+            # the client of the pack server of the domain: a direct connection,
+            # or the proxy the operator gives (the backport indexes serve their
+            # wheels from GitHub releases, which some networks cannot reach)
+            client = create_client(self.proxy) if own else self.client
+            provider = MetadataProvider(
+                client=client, concurrency=self.CONCURRENT, dest=self.dest)
         self._provider = provider
         try:
             roots = [
