@@ -11,19 +11,23 @@
   };
   let { mod, afspin = false, class: className }: Props = $props();
 
-  let iconError = $state(false);
-
-  $effect(() => {
-    mod;
-    iconError = false;
-  });
+  // The mod whose icon failed to load. The failure is remembered per mod
+  // instead of a boolean that an effect clears whenever it reads the prop: a
+  // re-render that keeps the mod (the topic hands over a new config object
+  // carrying the same mod name) cleared such a flag, which put the <img> back
+  // on screen, had the browser request the same file again and dropped back to
+  // the fallback once it failed -- the sidebar icon flickered although the
+  // data had not changed. A different mod is a different file, and it is
+  // tried.
+  let failedMod = $state<string | null>(null);
+  const failed = $derived(failedMod === mod);
 
   function handleIconError() {
-    iconError = true;
+    failedMod = mod;
   }
 </script>
 
-{#if mod && !iconError}
+{#if mod && !failed}
   <img
     src="/static/icon/{mod}.svg"
     alt=""
