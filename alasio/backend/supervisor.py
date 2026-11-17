@@ -32,6 +32,8 @@ def mprint(*args, start=''):
     abort the supervision or shutdown flow, otherwise a dead host can
     leave the supervisor and its backend running as orphans.
 
+    Never call this from a signal handler, see Supervisor.handle_sigint.
+
     Args:
         *args: Values printed after the [Supervisor] prefix
         start (str): Prefix inserted before the [Supervisor] marker
@@ -118,6 +120,10 @@ class Supervisor:
 
         # Track SIGINT count to handle multiple CTRL+C presses
         self.sigint_count = 0
+        # Signal behind the last interruption, reported by the shutdown line
+        # run() prints. The handler only records it: handling a signal may not
+        # log (see handle_sigint).
+        self.sigint_signum = signal.SIGINT
 
         # Set when a stop is requested through stdin, so the supervisor exits
         # after the backend is gone instead of restarting it
@@ -634,27 +640,44 @@ class Supervisor:
         - Second CTRL+C: Trigger force kill
         - Third+ CTRL+C: Ignored (already shutting down)
 
+        The handler only counts and raises, it never logs. It runs in the
+        thread that took the signal, and on POSIX that thread is inside a
+        write() whenever a signal interrupts one: CPython calls the handler
+        from PyErr_CheckSignals() while the buffered stdout lock of that same
+        thread is still held, so an mprint() here re-enters the buffer and
+        raises "reentrant call inside <_io.BufferedWriter>" in place of the
+        KeyboardInterrupt. Graceful shutdown is then skipped and the exit is
+        reported as an unexpected error. run() prints the shutdown lines once
+        the interrupt has left the signal context.
+
         Args:
             signum: Signal number
             frame: Current stack frame
         """
         self.sigint_count += 1
-        try:
-            sig = signal.Signals(signum).name
-        except ValueError:
-            sig = f'Unknown-signal-{signum}'
+        self.sigint_signum = signum
 
-        if self.sigint_count == 1:
-            # First CTRL+C - trigger graceful shutdown
-            mprint(f"Received {sig}, initiating graceful shutdown...", start='\n')
+        if self.sigint_count <= 2:
+            # First CTRL+C: graceful shutdown, second: force kill. Both
+            # interrupt whatever the main thread is waiting on.
             raise KeyboardInterrupt
-        elif self.sigint_count == 2:
-            # Second CTRL+C - trigger force kill
-            mprint(f"Received {sig}, force killing backend...", start='\n')
-            raise KeyboardInterrupt
-        else:
-            # Third+ CTRL+C - ignore, already shutting down
-            mprint(f"Already shutting down, please wait... (CTRL+C #{self.sigint_count})", start='\n')
+        # Third+ CTRL+C: ignore, the shutdown is already running
+
+    def _signal_name(self):
+        """
+        Name of the signal behind the last interruption.
+
+        Formatted here rather than in handle_sigint: the handler may only
+        count and raise, the shutdown path owns the log line.
+
+        Returns:
+            str: Signal name such as 'SIGINT', or 'Unknown-signal-N' when the
+                platform has no name for that number
+        """
+        try:
+            return signal.Signals(self.sigint_signum).name
+        except ValueError:
+            return f'Unknown-signal-{self.sigint_signum}'
 
     def wait_for_backend(self) -> int:
         """
@@ -695,9 +718,17 @@ class Supervisor:
                 mprint(f"ERROR: Failed to sending stop to backend: {e}")
 
         # Wait for backend to exit gracefully
+        reported = self.sigint_count
         for _ in loop_until_timeout(timeout=self.graceful_shutdown_timeout):
             # interruptable join(), so KeyboardInterrupt can be injected here
             self.process.join(timeout=0.2)
+            if self.sigint_count > reported:
+                # A CTRL+C the handler swallowed (the shutdown already runs)
+                # is reported from here: the handler may not log, and the
+                # second press never reaches this loop (it raises and force
+                # kills).
+                reported = self.sigint_count
+                mprint(f"Already shutting down, please wait... (CTRL+C #{reported})", start='\n')
             if not self.process.is_alive():
                 break
         else:
@@ -708,6 +739,7 @@ class Supervisor:
         # cleanup on success
         self.process = None
         self._cleanup_conn()
+        return True
 
     def force_shutdown(self):
         """
@@ -859,14 +891,20 @@ class Supervisor:
                     break
                 continue
 
-        except (KeyboardInterrupt, ParentProcessExited):
+        except (KeyboardInterrupt, ParentProcessExited) as e:
             # First CTRL+C, or the parent process exited: initiate graceful
-            # shutdown
+            # shutdown. The line is printed here, never in the handler: a
+            # handler that logs runs inside the stdout write() it interrupted
+            # and loses its KeyboardInterrupt to a reentrant-write error (see
+            # handle_sigint). A parent exit carries no signal to report.
             try:
+                if isinstance(e, KeyboardInterrupt):
+                    mprint(f"Received {self._signal_name()}, initiating graceful shutdown...", start='\n')
                 if not self.graceful_shutdown():
                     self.force_shutdown()
             except KeyboardInterrupt:
                 # Second CTRL+C - force kill immediately
+                mprint(f"Received {self._signal_name()}, force killing backend...", start='\n')
                 self.force_shutdown()
 
         except Exception as e:

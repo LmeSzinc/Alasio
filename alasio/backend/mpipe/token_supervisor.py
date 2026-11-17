@@ -15,14 +15,13 @@ ACK_TIMEOUT = 2.0
 # calls, so without a lock a rotation announcement and a relaunch announcement
 # could end up on one line, and the host would parse neither.
 #
-# Re-entrant on purpose: the SIGINT/SIGTERM handler logs through mprint(), and a
-# signal handler runs in whatever thread took the signal. A signal delivered
-# while that thread is inside mprint() would block the handler on the lock the
-# same thread holds, so KeyboardInterrupt would never be raised and the
-# supervisor would hang instead of shutting down (a hang, not a crash: no log
-# line is written after the one being printed). Re-entering is safe here, the
-# lock only orders whole lines.
-PRINT_LOCK = threading.RLock()
+# Never re-entered on purpose: every mprint() call is shallow, and no signal
+# handler writes (Supervisor.handle_sigint only counts and raises). Re-entrancy
+# is what broke the shutdown once: a handler that logs runs inside the buffered
+# stdout write it interrupted, holding the buffer lock of the same thread, so a
+# re-entrant lock would let it through and the second write would raise
+# "reentrant call inside <_io.BufferedWriter>", replacing the KeyboardInterrupt.
+PRINT_LOCK = threading.Lock()
 
 
 class SupervisorTokenManager:

@@ -16,9 +16,11 @@ pytestmark = [
     pytest.mark.parallel,
 ]
 
-# A supervisor thread that takes a signal while it is inside mprint(): the shape
-# of a CTRL+C that arrives while the line the caller reacted to is printed. It
-# prints HANDLED when the handler got through, and hangs silently otherwise.
+# A supervisor thread that takes a signal while the print lock is held by the
+# same thread: the shape of a CTRL+C that arrives while the line the caller
+# reacted to is being printed. It prints HANDLED when the handler got through,
+# and hangs silently if the handler needed the lock (a plain Lock cannot be
+# re-entered, so a handler that prints would block on it forever).
 HOLDING_THE_PRINT_LOCK = """
 import signal
 from alasio.backend.mpipe.token_supervisor import PRINT_LOCK
@@ -32,6 +34,59 @@ with PRINT_LOCK:
     except KeyboardInterrupt:
         # inside the lock on purpose: the handler must not need it released
         print('HANDLED', flush=True)
+"""
+
+# The shape of the CI failure reproduced on purpose: a supervisor blocked in a
+# buffered stdout write when the signal arrives. CPython runs the handler from
+# PyErr_CheckSignals() inside that write, with the stdout buffer lock held by
+# the same thread. The child probes for exactly that state (an empty write to
+# the same buffer raises "reentrant call inside" only for the owning thread)
+# and reports it before it calls the real handler, so the test cannot pass
+# without having reproduced the hazard.
+SIGNAL_DURING_A_BLOCKED_WRITE = r"""
+import io
+import os
+import signal
+import sys
+
+from alasio.backend.supervisor import Supervisor
+
+# Replace the inherited stdout with a block-buffered writer: an unbuffered
+# stdout (python -u, an inherited PYTHONUNBUFFERED) would hold no buffer lock
+# while writing, and the hazard would not exist
+sys.stdout = io.TextIOWrapper(io.BufferedWriter(io.FileIO(1, 'w')), encoding='utf-8')
+out = sys.stdout
+control = os.fdopen(os.dup(2), 'wb', 0)
+supervisor = Supervisor()
+
+
+def handler(signum, frame):
+    try:
+        # Re-enters the buffer only for the thread that owns it: this is how
+        # the child knows the signal was delivered inside a buffered write
+        out.buffer.write(b'')
+        where = b'OUTSIDE'
+    except RuntimeError:
+        where = b'INSIDE'
+    control.write(where + b'\n')
+    if where == b'INSIDE':
+        supervisor.handle_sigint(signum, frame)
+
+
+signal.signal(signal.SIGINT, handler)
+control.write(b'READY\n')
+
+try:
+    # Far more than a pipe holds: the write blocks until the parent reads,
+    # and the parent never reads
+    out.write('x' * 4_000_000)
+    out.flush()
+except KeyboardInterrupt:
+    control.write(b'HANDLED\n')
+
+control.write(b'EXIT\n')
+# Skip the interpreter's stdout flush: it would block on the same full pipe
+os._exit(0)
 """
 
 
@@ -1085,36 +1140,60 @@ class TestHandleSigint:
 
     The handler is installed by run() before the first backend is spawned, so a
     CTRL+C that arrives once the supervisor prints anything about that backend
-    reaches it. What it must never do is block: it runs in the thread that took
-    the signal, and it logs through the same print lock that thread may already
-    hold.
+    reaches it. What it must never do is write: it runs in the thread that took
+    the signal, usually inside the stdout write() that signal interrupted, so a
+    log line here re-enters the same thread's buffer and replaces the
+    KeyboardInterrupt with a RuntimeError. run() prints the shutdown lines
+    instead.
     """
 
-    def test_first_signal_asks_for_a_graceful_shutdown(self, monkeypatch):
-        """The first CTRL+C logs the shutdown and raises into the main loop."""
-        from alasio.logger.writer import CaptureStream
-
-        capture = CaptureStream()
-        monkeypatch.setattr(sys, 'stdout', capture)
+    def test_first_signal_asks_for_a_graceful_shutdown(self):
+        """The first CTRL+C raises into the main loop."""
         supervisor = Supervisor()
 
         with pytest.raises(KeyboardInterrupt):
             supervisor.handle_sigint(signal.SIGINT, None)
 
         assert supervisor.sigint_count == 1
-        assert capture.any_contains('Received SIGINT, initiating graceful shutdown')
+        assert supervisor._signal_name() == 'SIGINT'
+
+    def test_the_handler_writes_nothing(self, monkeypatch):
+        """
+        No CTRL+C press may be logged from the handler.
+
+        On POSIX the handler is called from PyErr_CheckSignals() while the
+        interrupted thread still holds the buffered stdout lock, so a print
+        here raises "reentrant call inside <_io.BufferedWriter>" and replaces
+        the KeyboardInterrupt: the supervisor then reports an unexpected error
+        and skips graceful_shutdown. That is the failure that made
+        py3.8 / ubuntu-22.04 time out in test_supervisor.
+        """
+        from alasio.logger.writer import CaptureStream
+
+        capture = CaptureStream()
+        monkeypatch.setattr(sys, 'stdout', capture)
+        supervisor = Supervisor()
+
+        for _ in range(3):
+            try:
+                supervisor.handle_sigint(signal.SIGTERM, None)
+            except KeyboardInterrupt:
+                pass
+
+        assert supervisor.sigint_count == 3
+        assert capture.logs == []
+        assert supervisor._signal_name() == 'SIGTERM'
 
     def test_the_signal_is_handled_while_the_thread_holds_the_print_lock(self):
         """
-        A signal that lands inside mprint() must still be handled.
+        A signal that lands while the thread is inside mprint() is handled.
 
-        The handler logs through mprint(), which takes PRINT_LOCK, and it runs
-        in the thread that took the signal. If that thread is already inside
-        mprint() -- printing the very line the test reacted to -- a non
-        re-entrant lock blocks the handler on itself: KeyboardInterrupt is
+        The handler runs in the thread that took the signal. If that thread is
+        already inside mprint() -- printing the very line the test reacted to
+        -- a handler that logs would need the print lock that same thread
+        holds: with a plain Lock it blocks on itself, KeyboardInterrupt is
         never raised and the supervisor hangs with no further output instead of
-        shutting down. This is the shape of the race that made
-        TestSupervisor::test_graceful_exit_timings time out once.
+        shutting down. The handler therefore takes no lock at all.
 
         A fresh interpreter runs the case: the hazard is a deadlock that holds
         the shared print lock forever, and a hung thread in the test process
@@ -1133,12 +1212,8 @@ class TestHandleSigint:
         assert proc.returncode == 0, proc.stderr
         assert proc.stdout.strip().splitlines()[-1] == 'HANDLED'
 
-    def test_the_second_signal_asks_for_a_force_kill(self, monkeypatch):
+    def test_the_second_signal_asks_for_a_force_kill(self):
         """The second CTRL+C raises again, so the shutdown path force kills."""
-        from alasio.logger.writer import CaptureStream
-
-        capture = CaptureStream()
-        monkeypatch.setattr(sys, 'stdout', capture)
         supervisor = Supervisor()
 
         with pytest.raises(KeyboardInterrupt):
@@ -1147,21 +1222,15 @@ class TestHandleSigint:
             supervisor.handle_sigint(signal.SIGINT, None)
 
         assert supervisor.sigint_count == 2
-        assert capture.any_contains('Received SIGINT, force killing backend')
 
-    def test_a_further_signal_is_only_logged(self, monkeypatch):
+    def test_a_further_signal_is_ignored(self):
         """A third CTRL+C must not raise: the shutdown is already running."""
-        from alasio.logger.writer import CaptureStream
-
-        capture = CaptureStream()
-        monkeypatch.setattr(sys, 'stdout', capture)
         supervisor = Supervisor()
         supervisor.sigint_count = 2
 
         supervisor.handle_sigint(signal.SIGINT, None)
 
         assert supervisor.sigint_count == 3
-        assert capture.any_contains('Already shutting down, please wait')
 
 
 class TestRunSignalHandlers:
@@ -1218,7 +1287,62 @@ class TestRunSignalHandlers:
         supervisor.run([])
 
         assert supervisor.sigint_count == 1
-        assert any('Supervisor loop ended' in line for line in lines)
+        # The shutdown is reported by run(), not by the handler: the interrupt
+        # arrives inside a stdout write() on POSIX, where a print would replace
+        # it with a reentrant-write error
+        assert any('Received SIGINT, initiating graceful shutdown' in line for line in lines)
+        assert lines[-1].endswith('Supervisor loop ended')
+
+
+class TestSignalDuringStdoutWrite:
+    """
+    The signal context that broke the shutdown on py3.8 / ubuntu-22.04.
+
+    A supervisor blocked in a buffered stdout write takes the signal inside
+    that write: CPython calls the handler from PyErr_CheckSignals() with the
+    buffer lock held by the same thread, so a handler that prints raises
+    "reentrant call inside <_io.BufferedWriter>" in place of the
+    KeyboardInterrupt it meant to raise. The child of this test reports where
+    the signal landed, so a passing run proves the handler survived exactly
+    that state.
+    """
+
+    @pytest.mark.skipif(
+        sys.platform == 'win32',
+        reason='needs a POSIX signal delivered inside a blocked write',
+    )
+    def test_a_signal_inside_a_blocked_stdout_write_is_still_handled(self):
+        proc = subprocess.Popen(
+            [sys.executable, '-c', SIGNAL_DURING_A_BLOCKED_WRITE],
+            cwd=str(env.ALASIO_ROOT),
+            env=child_env(),
+            # stdout is never read: the child stays blocked in write()
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        # A child that never gets a signal in the right place must not hang
+        # the suite
+        watchdog = threading.Timer(30, proc.kill)
+        watchdog.start()
+        try:
+            assert proc.stderr.readline() == b'READY\n'
+            # The first signal can land between READY and the blocked write;
+            # the child reports that, the write blocks right after, so the
+            # next signal lands inside it
+            where = b''
+            for _ in range(20):
+                proc.send_signal(signal.SIGINT)
+                where = proc.stderr.readline()
+                if where != b'OUTSIDE\n':
+                    break
+            assert where == b'INSIDE\n', where
+            assert proc.stderr.readline() == b'HANDLED\n'
+            assert proc.wait(timeout=10) == 0
+        finally:
+            watchdog.cancel()
+            if proc.poll() is None:
+                proc.kill()
+            proc.wait()
 
 
 class TestHandleBackendMessage:
@@ -1490,6 +1614,33 @@ class TestGracefulShutdown:
 
         assert supervisor.process is None
         assert supervisor.parent_conn is None
+
+    def test_an_ignored_signal_is_reported_while_waiting(self, monkeypatch):
+        """A CTRL+C the handler swallowed is logged by the wait loop.
+
+        The handler may not log (a signal lands inside the stdout write it
+        interrupted, see TestHandleSigint), so the shutdown path reports the
+        press it ignored. Only a third press can reach this loop: the second
+        one raises KeyboardInterrupt and force kills.
+        """
+        from alasio.logger.writer import CaptureStream
+
+        capture = CaptureStream()
+        monkeypatch.setattr(sys, 'stdout', capture)
+        supervisor = Supervisor(graceful_shutdown_timeout=5)
+        supervisor.sigint_count = 1
+
+        class PressingProcess(FakeProcess):
+            """A backend that takes one join cycle to exit while the user presses"""
+
+            def join(self, timeout=None):
+                supervisor.sigint_count = 3
+                super().join(timeout)
+
+        supervisor.process = PressingProcess()
+
+        assert supervisor.graceful_shutdown() is True
+        assert capture.any_contains('Already shutting down, please wait... (CTRL+C #3)')
 
 
 class TestHandleRelaunch:
