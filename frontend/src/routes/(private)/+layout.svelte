@@ -114,9 +114,13 @@
          beside it, because text ink is placed from the baseline and leans below
          its line box (measured on a 14px line: text ink 19..32.5, its box
          14..34). The band center would be top-2 (button center 24); top-2.5
-         puts the button center at 26, on the ink center of the title row. -->
+         puts the button center at 26, on the ink center of the title row.
+         The insets follow the same rule on both sides: the painted cross is
+         inset about 3.5px inside its 16px glyph box, so the default right-4
+         (16px) leaves 27.3px of ink to the right edge against 26.3px above.
+         right-2.5 (10px) evens them out, 26.3px above against 25.7px right. -->
     <Sheet.Root bind:open={isSheetOpen}>
-      <Sheet.Content side="left" closeClass="top-2.5" class="aside-shadow bg-card max-w-sm border-none p-0">
+      <Sheet.Content side="left" closeClass="top-2.5 right-2.5" class="aside-shadow bg-card max-w-sm border-none p-0">
         <div class="flex h-full">
           <ConfigAside class="border-border border-r" />
           <div class="flex-1">
