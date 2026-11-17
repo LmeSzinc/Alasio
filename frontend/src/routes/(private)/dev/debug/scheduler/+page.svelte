@@ -3,25 +3,12 @@
   import Arg from "$lib/components/arg/Arg.svelte";
   import type { ArgData } from "$lib/components/arg/utils.svelte";
   import type { WORKER_STATE } from "$lib/components/aside/types";
+  // Every worker state, in display order (the array the WORKER_STATE type is
+  // derived from): this page can never miss a state
+  import { WORKER_STATES } from "$lib/components/aside/types";
   import Scheduler from "$lib/components/scheduler/Scheduler.svelte";
   import type { RestartPhase, TaskItem } from "$lib/components/scheduler/types";
   import * as Card from "$lib/components/ui/card";
-
-  // All available state options
-  const ALL_STATES: WORKER_STATE[] = [
-    "idle",
-    "starting",
-    "running",
-    "scheduler-stopping",
-    "scheduler-waiting",
-    "killing",
-    "force-killing",
-    "disconnected",
-    "error",
-    "restarting",
-    "updating",
-    "resuming",
-  ];
 
   // Restart topic phases: the phase decides which buttons a stopping or
   // parked worker gets. "none" is the empty topic (no restart in progress),
@@ -79,6 +66,8 @@
       "Finishing its current task. Without a restart: stop + continue. During a restart: stop now (resumes after the restart), or stop now without resuming (the round X).",
     restarting:
       "Stopped for the restart, no process, waiting for the new backend: start is disabled, the round button cancels the auto-resume. Disabled once the resume list is frozen ('shutting-down'): the backend refuses the cancel from there on.",
+    updating:
+      "Stopped for an update / daily / startup flow instead of a user restart, otherwise identical to 'restarting': the label reads updating, the auto-resume and the cancel behave the same.",
     resuming:
       "Queued for the auto-resume of the new backend, no process yet: start is disabled, the round button cancels the queue entry (never disabled, a stop here always cancels).",
   };
@@ -100,7 +89,7 @@
     dt: "select",
     value: "idle",
     name: "State",
-    option: ALL_STATES,
+    option: [...WORKER_STATES],
   });
 
   let queueInput = $state<ArgData>({
@@ -204,7 +193,7 @@
       </Card.Header>
       <Card.Content>
         <div class="grid md:grid-cols-2 lg:grid-cols-3">
-          {#each ALL_STATES as workerState}
+          {#each WORKER_STATES as workerState}
             <Scheduler
               config_name="TestConfig"
               {workerState}
@@ -245,7 +234,7 @@
       </Card.Header>
       <Card.Content>
         <div class="grid md:grid-cols-2 lg:grid-cols-3">
-          {#each ALL_STATES as workerState}
+          {#each WORKER_STATES as workerState}
             <Scheduler config_name="EmptyScheduler" {workerState} restartPhase={null} />
           {/each}
         </div>
@@ -259,7 +248,7 @@
       </Card.Header>
       <Card.Content>
         <div class="grid md:grid-cols-2 lg:grid-cols-3">
-          {#each ALL_STATES as workerState}
+          {#each WORKER_STATES as workerState}
             <Scheduler
               config_name="VeryLongConfigurationNameThatShouldBeTruncatedInTheUserInterface"
               {workerState}
@@ -287,7 +276,7 @@
       </Card.Header>
       <Card.Content>
         <div class="grid md:grid-cols-2 lg:grid-cols-3">
-          {#each ALL_STATES as workerState}
+          {#each WORKER_STATES as workerState}
             <Scheduler
               config_name="NextOnly"
               {workerState}

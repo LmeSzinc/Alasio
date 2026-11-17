@@ -5,26 +5,14 @@
   import ConfigItem from "$lib/components/aside/ConfigItem.svelte";
   import type { ConfigLike, WORKER_STATE } from "$lib/components/aside/types";
   import type { ConfigTopicLike } from "$lib/components/aside/types";
+  // Every worker state, in display order (the array the WORKER_STATE type is
+  // derived from): this page can never miss a state
+  import { WORKER_STATES } from "$lib/components/aside/types";
   import * as Card from "$lib/components/ui/card";
   import { useTopic } from "$lib/ws";
 
   // Subscribe to ConfigScan topic
   const topicClient = useTopic<ConfigTopicLike>("ConfigScan");
-
-  // All available state options
-  const ALL_STATES: WORKER_STATE[] = [
-    "idle",
-    "starting",
-    "running",
-    "scheduler-stopping",
-    "scheduler-waiting",
-    "killing",
-    "force-killing",
-    "disconnected",
-    "error",
-    "restarting",
-    "resuming",
-  ];
 
   // Input state
   let configNameInput = $state<ArgData>({
@@ -52,7 +40,7 @@
     dt: "select",
     value: "idle",
     name: "State",
-    option: ALL_STATES,
+    option: [...WORKER_STATES],
   });
 
   let spinInput = $state<ArgData>({
@@ -157,7 +145,7 @@
         <div>
           <h3 class="mb-2 text-lg font-medium">Inactive</h3>
           <div class="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-9">
-            {#each ALL_STATES as state}
+            {#each WORKER_STATES as state}
               <div class="flex flex-col items-center gap-2 rounded border p-3">
                 <div class="w-full truncate text-center font-mono text-xs" title={state}>
                   {state}
@@ -172,7 +160,7 @@
         <div>
           <h3 class="mb-2 text-lg font-medium">Active</h3>
           <div class="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-9">
-            {#each ALL_STATES as state}
+            {#each WORKER_STATES as state}
               <div class="flex flex-col items-center gap-2 rounded border p-3">
                 <div class="w-full truncate text-center font-mono text-xs" title={state}>
                   {state}
@@ -187,7 +175,7 @@
         <div>
           <h3 class="mb-2 text-lg font-medium">Inactive + Spin</h3>
           <div class="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-9">
-            {#each ALL_STATES as state}
+            {#each WORKER_STATES as state}
               <div class="flex flex-col items-center gap-2 rounded border p-3">
                 <div class="w-full truncate text-center font-mono text-xs" title={state}>
                   {state}
@@ -202,7 +190,7 @@
         <div>
           <h3 class="mb-2 text-lg font-medium">Active + Spin</h3>
           <div class="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-9">
-            {#each ALL_STATES as state}
+            {#each WORKER_STATES as state}
               <div class="flex flex-col items-center gap-2 rounded border p-3">
                 <div class="w-full truncate text-center font-mono text-xs" title={state}>
                   {state}

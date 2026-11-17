@@ -82,12 +82,20 @@ export type UpdateInfoLike = {
 // Topic data from "Update": the update state of every mod, keyed by mod name.
 export type UpdateTopicLike = Record<string, UpdateInfoLike>;
 
+// Every worker state, in display order.
+//
+// The array is the single source of truth of the type below: a state exists
+// because it is listed here, so a list of the states (the debug pages iterate
+// this one) can never be out of sync with the union. A state is documented by
+// the comment on its own entry.
+//
 // idle: not running
 // starting: requesting to start a worker, starting worker process
 // running: worker process running
 // scheduler-stopping: requesting to stop scheduler loop, worker will stop after current task
 // scheduler-waiting: worker waiting for next task, no task running currently
 // killing: requesting to kill a worker, worker will stop and do GC asap
+//   worker_kill() escalates to force-killing after a short wait
 // force-killing: requesting to kill worker process immediately
 // disconnected: backend just lost connection worker,
 //   worker process will be clean up and worker status will turn into idle or error very soon
@@ -101,16 +109,18 @@ export type UpdateTopicLike = Record<string, UpdateInfoLike>;
 //   began): shown as 更新中 / updating instead of restarting
 // resuming: queued for auto-resume after the backend restart (no process yet)
 //   a stop on it cancels the auto-resume
-export type WORKER_STATE =
-  | "idle"
-  | "starting"
-  | "running"
-  | "disconnected"
-  | "error"
-  | "scheduler-stopping"
-  | "scheduler-waiting"
-  | "killing"
-  | "force-killing"
-  | "restarting"
-  | "updating"
-  | "resuming";
+export const WORKER_STATES = [
+  "idle",
+  "starting",
+  "running",
+  "scheduler-stopping",
+  "scheduler-waiting",
+  "killing",
+  "force-killing",
+  "disconnected",
+  "error",
+  "restarting",
+  "updating",
+  "resuming",
+] as const;
+export type WORKER_STATE = (typeof WORKER_STATES)[number];
