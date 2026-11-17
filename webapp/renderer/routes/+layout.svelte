@@ -5,6 +5,7 @@
   import TitleBar from "$lib/components/TitleBar.svelte";
   import { i18nState } from "$lib/i18n/state.svelte";
   import { useSharedState } from "$lib/useSharedState.svelte";
+  import { resetDragRegion } from "$lib/windowFrame.svelte";
   import "../app.css";
 
   let { children } = $props();
@@ -45,6 +46,14 @@
     const dark = sharedState.displayTheme === "dark";
     document.documentElement.classList.toggle("dark", dark);
     document.documentElement.style.colorScheme = dark ? "dark" : "light";
+  });
+
+  // The drag region belongs to the embedded page: leaving it (setup, loading,
+  // error) drops the reported band and the title bar goes back to its own.
+  $effect(() => {
+    if (page.route.id !== "/app") {
+      resetDragRegion();
+    }
   });
 </script>
 

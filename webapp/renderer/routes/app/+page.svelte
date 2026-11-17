@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { useSharedState } from "$lib/useSharedState.svelte";
+  import { applyDragRegion, resetDragRegion, windowFrame } from "$lib/windowFrame.svelte";
 
   const sharedState = useSharedState();
   let iframe: HTMLIFrameElement | undefined = $state();
@@ -25,7 +26,11 @@
   let iframeSrc = $state(
     `http://127.0.0.1:${sharedState.backendPort}/?embedded=electron&theme=${sharedState.displayTheme}` +
       `&themeConfig=${sharedState.configTheme}` +
-      `&lang=${sharedState.displayLang}&langConfig=${sharedState.configLang}`,
+      `&lang=${sharedState.displayLang}&langConfig=${sharedState.configLang}` +
+      // The window controls are overlaid on the frontend header; their reserve
+      // width is passed in the URL so the very first paint already keeps them
+      // clear (`alasio:frame` corrects it once they are measured).
+      `&controlsWidth=${windowFrame.controlsWidth}`,
   );
 
   // The embedded frontend origin. Downlink messages are only sent to this
@@ -64,6 +69,7 @@
       origin,
     );
     frame.contentWindow.postMessage({ type: "alasio:dpi-scaling", dpiScaling: sharedState.dpiScaling }, origin);
+    frame.contentWindow.postMessage({ type: "alasio:frame", controls: { width: windowFrame.controlsWidth } }, origin);
   }
 
   // Send whenever the display values change after the iframe finished
@@ -76,6 +82,18 @@
   $effect(() => {
     if (!iframeLoaded) return;
     sendDownlink();
+  });
+
+  // The window controls are measured once they mounted (and remeasured if
+  // their size ever changes), which can happen after the ready handshake.
+  // Pushing the value here keeps the frontend's reserve width exact instead of
+  // relying on the URL value baked at first paint.
+  $effect(() => {
+    const width = windowFrame.controlsWidth;
+    if (!iframeLoaded) return;
+    const frame = iframe;
+    if (!frame?.contentWindow) return;
+    frame.contentWindow.postMessage({ type: "alasio:frame", controls: { width } }, frontendOrigin);
   });
 
   // The frontend registers its message listeners when its scripts run, so
@@ -104,6 +122,15 @@
         window.electronAPI.setTheme(data.theme);
       } else if (data.type === "alasio:dpi-scaling" && typeof data.dpiScaling === "boolean") {
         window.electronAPI.setDpiScaling(data.dpiScaling);
+      } else if (data.type === "alasio:drag-region") {
+        // Where the frontend header may be dragged. `null` means it declares
+        // nothing (no header, or the layout unmounted), so the default band
+        // applies again. Malformed payloads keep the previous band.
+        if (data.region === null) {
+          resetDragRegion();
+        } else {
+          applyDragRegion(data.region);
+        }
       } else if (data.type === "alasio:ready") {
         // Handshake from the embedded frontend: it finished starting and
         // registered its listeners. The load-event downlink may have been

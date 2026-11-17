@@ -10,6 +10,9 @@
   import { HeaderContext, NavContext } from "$lib/slotcontext.svelte.js";
   import { screen } from "$lib/use/screen.svelte";
   import { cn } from "$lib/utils.js";
+  import { DragRegionContext } from "$lib/window/dragRegion.svelte";
+  import { frame } from "$lib/window/frame.svelte";
+  import { breakpointOf, defaultRegion, sheetRegion } from "$lib/window/regions";
 
   // props
   let { data, children } = $props();
@@ -34,6 +37,15 @@
   let isSheetOpen = $state(false);
   const openSheet = () => (isSheetOpen = true);
   const closeSheet = () => (isSheetOpen = false);
+
+  // Declared by the layout, overridden by pages that put controls in the
+  // header; svelte drops the page layer when the page is destroyed, so a page
+  // change restores this one without watching the route. The insets are read
+  // when the stack is folded (inside the reporter's effect), so they follow the
+  // breakpoint and the controls width.
+  DragRegionContext.use((inherited) =>
+    isSheetOpen ? sheetRegion(frame.controls.width)(inherited) : defaultRegion(breakpointOf(screen.width))(inherited),
+  );
 
   // Auto close sheet if window get resized
   $effect(() => {

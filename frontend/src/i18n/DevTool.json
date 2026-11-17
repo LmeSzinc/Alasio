@@ -209,40 +209,61 @@
     "zh-TW": "返回登入頁面",
     "es-ES": "Volver a la página de inicio de sesión"
   },
-  "AvoidAuto": {
-    "en-US": "Auto avoid",
-    "zh-CN": "自动回避",
-    "ja-JP": "自動回避",
-    "zh-TW": "自動回避",
-    "es-ES": "Evitar automáticamente"
+  "SimulateAuto": {
+    "en-US": "Follow host",
+    "zh-CN": "跟随宿主",
+    "ja-JP": "ホストに従う",
+    "zh-TW": "跟隨宿主",
+    "es-ES": "Seguir al host"
   },
-  "AvoidAlways": {
-    "en-US": "Always avoid",
-    "zh-CN": "总是回避",
-    "ja-JP": "常に回避",
-    "zh-TW": "總是回避",
-    "es-ES": "Evitar siempre"
+  "SimulateAlways": {
+    "en-US": "Simulate webapp",
+    "zh-CN": "模拟 webapp",
+    "ja-JP": "webapp を模擬",
+    "zh-TW": "模擬 webapp",
+    "es-ES": "Simular la webapp"
   },
-  "AvoidNever": {
-    "en-US": "Never avoid",
-    "zh-CN": "不回避",
-    "ja-JP": "回避しない",
-    "zh-TW": "不回避",
-    "es-ES": "No evitar"
+  "SimulateNever": {
+    "en-US": "Reserve nothing",
+    "zh-CN": "不预留",
+    "ja-JP": "予約しない",
+    "zh-TW": "不預留",
+    "es-ES": "Sin reserva"
   },
-  "WindowControlsAvoid": {
-    "en-US": "Window Controls Avoid",
-    "zh-CN": "窗口按钮回避",
-    "ja-JP": "ウィンドウボタン回避",
-    "zh-TW": "視窗按鈕回避",
-    "es-ES": "Evitar Controles de Ventana"
+  "WindowControlsSimulate": {
+    "en-US": "Window controls simulation",
+    "zh-CN": "窗口按钮模拟",
+    "ja-JP": "ウィンドウボタンの模擬",
+    "zh-TW": "視窗按鈕模擬",
+    "es-ES": "Simulación de controles de ventana"
   },
-  "WindowControlsAvoidHelp": {
-    "en-US": "Debugging only, affects the UI layout",
-    "zh-CN": "仅供调试，仅影响界面布局",
-    "ja-JP": "デバッグ専用、UIレイアウトのみに影響",
-    "zh-TW": "僅供除錯，僅影響介面版面",
-    "es-ES": "Solo depuración, afecta solo al diseño de la interfaz"
+  "WindowControlsSimulateHelp": {
+    "en-US": "Simulates the webapp window controls width outside Electron. Affects the layout only",
+    "zh-CN": "在没有 Electron 时模拟 webapp 的窗口按钮宽度，仅影响界面布局",
+    "ja-JP": "Electron がない場合に webapp のウィンドウボタン幅を模擬する。レイアウトのみに影響",
+    "zh-TW": "在沒有 Electron 時模擬 webapp 的視窗按鈕寬度，僅影響介面版面",
+    "es-ES": "Simula el ancho de los controles de ventana de la webapp fuera de Electron. Solo afecta al diseño"
+  },
+  "SimulateOutline": {
+    "en-US": "Drag region outline",
+    "zh-CN": "拖拽区域边框",
+    "ja-JP": "ドラッグ領域の枠線",
+    "zh-TW": "拖曳區域邊框",
+    "es-ES": "Contorno de la zona de arrastre"
+  },
+  "SimulateOutlineHelp": {
+    "en-US": "Dev only. Draws the drag region reported to the client",
+    "zh-CN": "仅开发模式可用，画出发给客户端的拖拽区域",
+    "ja-JP": "開発モードのみ。クライアントに送るドラッグ領域を描画する",
+    "zh-TW": "僅開發模式可用，畫出發給用戶端的拖曳區域",
+    "es-ES": "Solo en desarrollo. Dibuja la zona de arrastre enviada al cliente"
+  },
+  "SimulateSource": {
+    "en-US": "Effective width: {width}px ({source})",
+    "zh-CN": "生效宽度：{width}px（{source}）",
+    "ja-JP": "有効幅：{width}px（{source}）",
+    "zh-TW": "生效寬度：{width}px（{source}）",
+    "es-ES": "Ancho efectivo: {width}px ({source})"
   },
   "SessionElectron": {
     "en-US": "Electron session",

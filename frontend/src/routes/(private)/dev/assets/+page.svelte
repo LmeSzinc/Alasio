@@ -1,6 +1,9 @@
 <script lang="ts">
   import ModSelector from "$lib/components/arginput/ModSelector.svelte";
+  import { PAGE_LAYER } from "$lib/context/stack.svelte";
   import { HeaderContext } from "$lib/slotcontext.svelte";
+  import { DragRegionContext } from "$lib/window/dragRegion.svelte";
+  import { devAssetsRegion } from "$lib/window/regions";
   import { useTopic } from "$lib/ws";
   import AssetManager from "./AssetManager.svelte";
   import ImageViewer from "./ImageViewer.svelte";
@@ -9,8 +12,13 @@
   import StatusBar from "./StatusBar.svelte";
   import type { FolderResponse } from "./types";
 
-  // header context
-  HeaderContext.use(header);
+  // header context: this page owns the whole header bar (title + selector), so
+  // its snippet outranks the one the dev layout declares.
+  HeaderContext.use(header, { priority: PAGE_LAYER });
+  // The header of this page carries an interactive selector, so the drag band
+  // stops left of it. Only the right side is narrowed: the left stays what the
+  // layout declared, so the aside config column remains clickable.
+  DragRegionContext.use(devAssetsRegion, { priority: PAGE_LAYER });
 
   const topicClient = useTopic<FolderResponse>("DevAssetsManager");
   const modRpc = topicClient.rpc();
@@ -31,7 +39,7 @@
 </script>
 
 {#snippet header()}
-  <div class="flex w-full flex-1 items-center justify-center gap-4">
+  <div class="flex w-full flex-1 items-center justify-end gap-4">
     <h1 class="text-lg">Asset Browser</h1>
     <ModSelector class="w-64" {mod_name} handleEdit={handleModChange} />
   </div>

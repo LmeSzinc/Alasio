@@ -1,6 +1,6 @@
 <script lang="ts">
   import { ModeWatcher } from "mode-watcher";
-  import { onMount } from "svelte";
+  import { type Component, onMount } from "svelte";
   import { Toaster } from "$lib/components/ui/sonner";
   import "$lib/dpi/state.svelte";
   // Side-effect imports: register the alasio:* downlink listeners at app
@@ -13,9 +13,34 @@
   import "$lib/i18n/state.svelte";
   import "$lib/theme/state.svelte";
   import { isElectronSession } from "$lib/use/useElectronEnv.svelte";
+  import { DragRegionContext, startDragRegionReporter } from "$lib/window/dragRegion.svelte";
   import "../app.css";
 
   let { children } = $props();
+
+  // The drag region context lives at the root: both the public and the private
+  // layouts declare into it, and the reporter started below is the only writer
+  // of the host message.
+  const dragRegion = DragRegionContext.init();
+
+  // Dev-only outline of the reported drag region (see DragRegionOutline).
+  // Loaded through a dynamic import guarded by import.meta.env.DEV, so the
+  // component is never bundled into a production build.
+  let DragRegionOutline: Component | undefined = $state();
+
+  onMount(() => {
+    if (import.meta.env.DEV) {
+      import("$lib/window/DragRegionOutline.svelte")
+        .then((mod) => {
+          DragRegionOutline = mod.default;
+        })
+        .catch((err) => {
+          console.error("Failed to load DragRegionOutline:", err);
+        });
+    }
+
+    return startDragRegionReporter(dragRegion);
+  });
 
   // Electron handshake: the host (webapp renderer) sends its first
   // alasio:* downlink on iframe load, but the frontend's message listeners
@@ -50,3 +75,9 @@
   mobileOffset={{ top: "3.5rem" }}
 />
 {@render children()}
+
+<!-- Dev-only: the drag region the host would make draggable. The module is
+     only loaded (and only bundled) in dev builds; see the dynamic import above. -->
+{#if DragRegionOutline}
+  <DragRegionOutline />
+{/if}

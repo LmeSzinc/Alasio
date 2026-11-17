@@ -12,13 +12,20 @@ import { defineConfig } from "vitest/config";
  * Tests run in the node environment: they cover the pure logic of the
  * main process (log buffering, line splitting, startup arguments, token
  * chaining), the build scripts (the CSP hash of the renderer template) and
- * must not start electron. Renderer tests would need the svelte plugin and a
- * jsdom environment, which are not part of this project yet; add them here
- * together with the first renderer test.
+ * must not start electron. The `renderer` entries are pure modules on purpose:
+ * anything using runes or the DOM needs the svelte plugin and a jsdom
+ * environment, which are not part of this project yet; add them here together
+ * with the first such test.
  */
 export default defineConfig({
   test: {
     environment: "node",
-    include: ["main/**/*.test.ts", "preload/**/*.test.ts", "shared/**/*.test.ts", "scripts/**/*.test.ts"],
+    include: [
+      "main/**/*.test.ts",
+      "preload/**/*.test.ts",
+      "shared/**/*.test.ts",
+      "renderer/**/*.test.ts",
+      "scripts/**/*.test.ts",
+    ],
   },
 });

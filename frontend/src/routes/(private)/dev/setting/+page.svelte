@@ -7,7 +7,7 @@
   import RestartBackendTool from "./RestartBackendTool.svelte";
   import RestartStatus from "./RestartStatus.svelte";
   import ReturnToLoginTool from "./ReturnToLoginTool.svelte";
-  import WindowControlsAvoidTool from "./WindowControlsAvoidTool.svelte";
+  import WindowControlsSimulateTool from "./WindowControlsSimulateTool.svelte";
 
   // the width of the cards follows the config pages, see cardWidth()
   let containerSize = $state({ width: 0, height: 0 });
@@ -23,6 +23,6 @@
     <!-- Status of the restart in progress (phase + configs still running) -->
     <RestartStatus />
     <ReturnToLoginTool />
-    <WindowControlsAvoidTool />
+    <WindowControlsSimulateTool />
   </ArgGroupCard>
 </div>

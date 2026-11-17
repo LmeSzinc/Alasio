@@ -7,10 +7,12 @@
   import X from "@lucide/svelte/icons/x";
   import Button from "$lib/components/ui/button/button.svelte";
   import { t } from "$lib/i18n";
+  import { CONTROLS_GAP, setControlsWidth } from "$lib/windowFrame.svelte";
   import CloseDialog from "./CloseDialog.svelte";
 
   let isMaximized = $state(false);
   let showCloseDialog = $state(false);
+  let root: HTMLDivElement | null = $state(null);
 
   // The host window owns the maximize state. Read it once on mount (the
   // window may already be maximized before this component exists, for
@@ -43,9 +45,31 @@
   function handleClose() {
     showCloseDialog = true;
   }
+
+  // The frontend keeps its header clear of the window controls, so it needs
+  // their reserve width: the group itself plus the same 6px gap on its left
+  // that `pr-1.5` gives it on the right. Measured instead of hardcoded, so a
+  // button size or gap change reaches the frontend without a matching constant
+  // on the other side. The observer only fires on size changes of the group,
+  // never while the window is being dragged or resized by itself.
+  onMount(() => {
+    const element = root;
+    if (!element) return;
+
+    const measure = () => {
+      const rect = element.getBoundingClientRect();
+      if (rect.width <= 0) return;
+      setControlsWidth(window.innerWidth - rect.left + CONTROLS_GAP);
+    };
+
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  });
 </script>
 
-<div class="flex items-center gap-1 pr-1.5" style="-webkit-app-region: no-drag">
+<div bind:this={root} class="flex items-center gap-1 pr-1.5" style="-webkit-app-region: no-drag">
   <Button
     variant="ghost"
     size="icon"
