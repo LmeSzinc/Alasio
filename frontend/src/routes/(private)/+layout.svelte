@@ -75,7 +75,10 @@
   <!-- 1. Main layout -->
   <div class="app-grid dotbg h-screen w-full overflow-hidden">
     <!-- 1.1 Header -->
-    <div class={cn("area-header", screen.isMDtoXL ? "border-border border-l" : "header-shadow")}>
+    <!-- md..xl: the header starts at the right border of the nav column, so that
+         border (1.2) is the seam; a border of this box would draw the same line
+         twice, and over the page background instead of the card -->
+    <div class={cn("area-header", !screen.isMDtoXL && "header-shadow")}>
       <Header onMenuClick={openSheet} />
     </div>
 
@@ -85,7 +88,11 @@
         <ConfigAside class="pt-1 xl:pt-0" />
       </div>
       {#if NavContext.snippet}
-        <div class={cn("aside-item bg-card w-50 xl:pt-0", screen.isXL && "neushadow w-60")}>
+        <!-- The right border is the divider of the nav column in md..xl, the
+             counterpart of the config column's one above: both are card
+             borders, so the two dividers of the column look the same. The xl
+             block drops it together with the other card borders -->
+        <div class={cn("aside-item bg-card border-border w-50 border-r xl:pt-0", screen.isXL && "neushadow w-60")}>
           {@render NavContext.snippet()}
         </div>
       {/if}
