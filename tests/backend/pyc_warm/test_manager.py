@@ -259,7 +259,10 @@ class TestClose:
 
         assert not [p for p in multiprocessing.active_children() if p.name == WARMUP_NAME]
         assert manager.state == {}
-        assert not [t for t in threading.enumerate() if t.name == WARMUP_NAME]
+        # close() joins the recv thread with a timeout: a thread that is in
+        # the disconnect handler when the timeout expires finishes on its
+        # own, the way the worker tests wait for theirs
+        assert wait_for(lambda: not [t for t in threading.enumerate() if t.name == WARMUP_NAME])
 
     def test_close_without_a_start(self, manager):
         """A backend that never warmed anything closes cleanly."""
