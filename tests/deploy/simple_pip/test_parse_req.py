@@ -235,6 +235,159 @@ class TestSharedRules:
         assert parse_req.parse_requirement('PyYAML>=6.0.1') is None
 
 
+class TestFromLine:
+    """The whole requirement text: ranges, extras and markers included."""
+
+    def test_a_plain_name(self):
+        assert parse_req.RequirementSpec.from_line('numpy') == parse_req.RequirementSpec(name='numpy')
+
+    def test_a_range(self):
+        spec = parse_req.RequirementSpec.from_line('numpy>=1.24,<2')
+
+        assert spec.name == 'numpy'
+        # the text is kept as it is written, the parsed form is `specifiers`
+        assert spec.specifier == '>=1.24,<2'
+        assert str(spec.specifiers) == '<2,>=1.24'
+
+    def test_an_exact_pin_with_extras(self):
+        spec = parse_req.RequirementSpec.from_line('alasio[backend,image]==2.0.3')
+
+        assert spec == parse_req.RequirementSpec(
+            name='alasio', extras=('backend', 'image'), specifier='==2.0.3')
+
+    def test_the_name_is_kept_as_written(self):
+        assert parse_req.RequirementSpec.from_line('PyYAML==6.0').name == 'PyYAML'
+
+    def test_a_marker_is_kept_as_written(self):
+        spec = parse_req.RequirementSpec.from_line('colorama; sys_platform == "win32"')
+
+        assert spec.marker == 'sys_platform == "win32"'
+        assert spec.specifier == ''
+
+    def test_every_operator_of_pep440(self):
+        for operator in ('==', '!=', '<=', '>=', '<', '>', '~=', '==='):
+            specifier = f'{operator}1.2.3'
+            assert parse_req.RequirementSpec.from_line(f'demo{specifier}').specifier == specifier
+
+    def test_a_wildcard(self):
+        assert parse_req.RequirementSpec.from_line('demo==1.2.*').specifier == '==1.2.*'
+
+    def test_the_parenthesized_form(self):
+        """The legacy metadata of a distribution writes the specifier in parentheses."""
+        spec = parse_req.RequirementSpec.from_line('deprecation (<3.0,>=2.0.6)')
+
+        assert spec == parse_req.RequirementSpec(
+            name='deprecation', specifier='<3.0,>=2.0.6')
+
+    def test_the_parenthesized_form_of_a_bare_name(self):
+        assert parse_req.RequirementSpec.from_line('demo ()') == parse_req.RequirementSpec(name='demo')
+
+    def test_a_direct_reference(self):
+        spec = parse_req.RequirementSpec.from_line(
+            'demo @ https://example.com/demo-1.0-py3-none-any.whl')
+
+        assert spec.url == 'https://example.com/demo-1.0-py3-none-any.whl'
+        assert spec.specifier == ''
+
+    def test_a_direct_reference_with_extras_and_a_marker(self):
+        spec = parse_req.RequirementSpec.from_line(
+            'demo[cli] @ git+https://example.com/demo.git ; python_version < "3.9"')
+
+        assert spec.extras == ('cli',)
+        assert spec.url == 'git+https://example.com/demo.git'
+        assert spec.marker == 'python_version < "3.9"'
+
+    @pytest.mark.parametrize('text', [
+        '',
+        '--hash=sha256:abcdef',
+        '-r base.txt',
+        'not a requirement !',
+        'demo>>>1.2',
+        'demo[bad extra]==1.0',
+        'demo-==1.0',
+        # an empty specifier in the set, which packaging rejects too
+        'demo>=1.0,,<2.0',
+        'demo>=1.0,',
+        # a union of ranges, which a PEP 440 specifier cannot express
+        'demo>=1.0,<2.0||>=3.0',
+    ])
+    def test_not_a_requirement(self, text):
+        assert parse_req.RequirementSpec.from_line(text) is None
+
+    def test_the_conjunction_of_the_question(self):
+        """A range with an exclusion is one specifier set, in every order."""
+        spec = parse_req.RequirementSpec.from_line('demo>=1.0,<2.0,!=1.4.1')
+
+        assert spec.specifier == '>=1.0,<2.0,!=1.4.1'
+        assert spec.pin_version is None
+        assert str(spec.specifiers) == '!=1.4.1,<2.0,>=1.0'
+
+
+class TestPinVersion:
+    """The version a requirement pins exactly, the cached property of it."""
+
+    @pytest.mark.parametrize('specifier, expected', [
+        ('==0.28.1', '0.28.1'),
+        ('==1!2.0+local.1', '1!2.0+local.1'),
+        ('', None),
+        ('>=0.28.1', None),
+        ('<=0.28.1', None),
+        ('~=0.28.0', None),
+        ('!=0.28.1', None),
+        ('===0.28.1', None),
+        ('==1.2.*', None),
+        ('==1.0,==2.0', None),
+        ('>=1.0,<2.0', None),
+        ('!=1.4.1,<2.0,>=1.0', None),
+    ])
+    def test_pin_version(self, specifier, expected):
+        spec = parse_req.RequirementSpec.from_line(f'demo{specifier}')
+
+        assert spec is not None, specifier
+        assert spec.pin_version == expected
+
+    def test_it_is_cached(self):
+        """The version is read once and kept on the requirement."""
+        spec = parse_req.RequirementSpec.from_line('demo==1.0')
+
+        assert spec.pin_version == '1.0'
+        assert 'pin_version' in spec.__dict__
+
+
+class TestSpecs:
+    """The requirements of a file, the ranges included."""
+
+    def test_a_range_is_kept(self):
+        parser = parse_req.Requirements('numpy>=1.24\nhttpx==0.28.1\n')
+
+        assert parser.specs == [
+            parse_req.RequirementSpec(name='numpy', specifier='>=1.24'),
+            parse_req.RequirementSpec(name='httpx', specifier='==0.28.1'),
+        ]
+
+    def test_the_annotations_and_options_are_not_requirements(self):
+        content = """\
+--extra-index-url https://example.com/simple
+httpx==0.28.1
+    # via demo (pyproject.toml)
+    # from https://pypi.org/simple
+"""
+        parser = parse_req.Requirements(content)
+
+        assert [spec.name for spec in parser.specs] == ['httpx']
+
+    def test_the_pins_are_the_exact_ones(self):
+        parser = parse_req.Requirements('numpy>=1.24\nruff==0.16.0\n')
+
+        assert parser.dict_deps == {'ruff': '0.16.0'}
+        assert [spec.name for spec in parser.specs] == ['numpy', 'ruff']
+
+    def test_a_line_that_is_not_a_requirement_is_skipped(self):
+        parser = parse_req.Requirements('not a requirement !\nhttpx==0.28.1\n')
+
+        assert [spec.name for spec in parser.specs] == ['httpx']
+
+
 class TestWithPipList:
     def test_the_keys_find_the_installed_distributions(self, fs):
         """The keys of the pins are the dist-key of the installed distributions."""

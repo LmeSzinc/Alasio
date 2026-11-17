@@ -108,7 +108,48 @@ class TestSpecifierSet:
         with pytest.raises(InvalidSpecifier):
             SpecifierSet('>=3.6,lolwat')
 
+    @pytest.mark.parametrize('text', ['>=3.6,', '>=3.6,,<3.9', ',>=3.6', ','])
+    def test_an_empty_specifier_in_the_set(self, text):
+        """The text declares a part that is not a specifier: the set is invalid."""
+        with pytest.raises(InvalidSpecifier):
+            SpecifierSet(text)
+
+    def test_an_empty_set(self):
+        """An empty text is the empty set, not a malformed one."""
+        assert len(SpecifierSet('')) == 0
+        assert len(SpecifierSet('  ')) == 0
+
     def test_pre_release_of_set(self):
         # one specifier that names a pre-release accepts them for the set
         assert '3.9.0rc1' in SpecifierSet('>=3.9.0rc1')
         assert '3.9.0rc1' not in SpecifierSet('>=3.8')
+
+
+class TestSpecifierSetAnd:
+    """The intersection of two sets, without a text in between."""
+
+    def test_the_non_zero_requires_both(self):
+        combined = SpecifierSet('>=1.0') & SpecifierSet('<2.0')
+
+        assert combined == SpecifierSet('>=1.0,<2.0')
+        assert '1.5' in combined
+        assert '2.0' not in combined
+        assert '0.9' not in combined
+
+    def test_an_exclusion_is_kept(self):
+        combined = SpecifierSet('>=1.0,<2.0') & SpecifierSet('!=1.4.1')
+
+        assert '1.4.1' not in combined
+        assert '1.5' in combined
+
+    def test_a_repeated_specifier_is_one(self):
+        combined = SpecifierSet('>=1.0') & SpecifierSet('>=1.0')
+
+        assert len(combined) == 1
+
+    def test_the_empty_set_is_the_identity(self):
+        assert SpecifierSet('>=1.0') & SpecifierSet('') == SpecifierSet('>=1.0')
+
+    def test_other_is_not_a_set(self):
+        with pytest.raises(TypeError):
+            SpecifierSet('>=1.0') & '>=1.0'

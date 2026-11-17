@@ -2,21 +2,21 @@
 Tests for the dependency file parsers: RequirementsParser and PyprojectParser.
 
 The parsers take the content of one dependency file each (a requirements
-file, a pyproject.toml) and provide the requirements pinned to an exact
-version as dict_deps: a dict of the PEP 503 normalized name to the version,
-see parse_dep. A declaration that does not pin a version (a range, a
-wildcard, a bare name, a URL, a local path, a pip option) is skipped, and two
-different versions of one name in one file raise a ValueError.
+file, a pyproject.toml) and provide two views: dict_deps is the requirements
+pinned to an exact version, a dict of the PEP 503 normalized name to the
+version, and specs is every requirement of the file, ranges included, see
+parse_dep. A declaration that does not pin a version (a range, a wildcard, a
+bare name, a URL, a local path, a pip option) has no entry in dict_deps, and
+two different versions of one name in one file keep the first one.
 """
 import pytest
 from packaging.utils import canonicalize_name
 
 from alasio.deploy.simple_pip import parse_req
-from alasio.deploy.simple_pip.parse_req import Requirements
+from alasio.deploy.simple_pip.parse_req import Requirements, RequirementSpec
 from alasio.deploy_dev.pack_server import parse_dep
-from alasio.deploy_dev.pack_server.parse_dep import DepInfo, PyprojectParser, RequirementsParser
+from alasio.deploy_dev.pack_server.parse_dep import DepInfo, PyprojectParser, RequirementsParser, poetry_specifier
 from alasio.logger import logger
-
 
 pytestmark = [
     pytest.mark.parallel,
@@ -372,6 +372,106 @@ WARNING | Conflicting versions of "httpx" in the requirements: "0.28.1" and "0.2
         """A document without a dependency has no pin."""
         assert parse_pyproject('') == {}
         assert parse_pyproject('[project]\nname = "alasio"\n') == {}
+
+
+class TestPyprojectSpecs:
+    """The requirements of a document, the ranges included."""
+
+    def test_a_range_is_kept(self):
+        content = '[project]\ndependencies = ["numpy>=1.24", "httpx==0.28.1"]\n'
+
+        specs = PyprojectParser(content).specs
+
+        assert specs == [
+            RequirementSpec(name='numpy', specifier='>=1.24'),
+            RequirementSpec(name='httpx', specifier='==0.28.1'),
+        ]
+
+    def test_the_marker_and_the_extras_are_kept(self):
+        content = """\
+[project]
+dependencies = ['alasio[backend]>=2.0; python_version < "3.9"']
+"""
+
+        spec = PyprojectParser(content).specs[0]
+
+        assert spec.extras == ('backend',)
+        assert spec.marker == 'python_version < "3.9"'
+
+    def test_a_direct_reference_is_an_error(self):
+        """A document the compiler uses cannot declare a dependency it cannot resolve."""
+        content = '[project]\ndependencies = ["demo @ https://example.com/demo.whl"]\n'
+
+        with pytest.raises(ValueError, match='names a url'):
+            _ = PyprojectParser(content).specs
+
+    def test_an_invalid_requirement_is_an_error(self):
+        content = '[project]\ndependencies = ["not a requirement !"]\n'
+
+        with pytest.raises(ValueError, match='Invalid requirement'):
+            _ = PyprojectParser(content).specs
+
+    def test_a_poetry_constraint(self):
+        content = '[tool.poetry.dependencies]\nnumpy = "^1.24"\nhttpx = "0.28.1"\n'
+
+        specs = PyprojectParser(content).specs
+
+        assert specs == [
+            RequirementSpec(name='numpy', specifier='<2.0,>=1.24'),
+            RequirementSpec(name='httpx', specifier='==0.28.1'),
+        ]
+
+    def test_a_poetry_source_is_an_error(self):
+        content = '[tool.poetry.dependencies]\ndemo = { git = "https://example.com/x.git" }\n'
+
+        with pytest.raises(ValueError, match='names a git'):
+            _ = PyprojectParser(content).specs
+
+    def test_a_union_of_ranges_is_an_error(self):
+        """PEP 440 has no union: the message names the form, not a parse failure."""
+        content = '[project]\ndependencies = ["demo>=1.0,<2.0||>=3.0"]\n'
+
+        with pytest.raises(ValueError, match='union of ranges'):
+            _ = PyprojectParser(content).specs
+
+    def test_a_conjunction_with_an_exclusion(self):
+        content = '[project]\ndependencies = ["demo>=1.0,<2.0,!=1.4.1"]\n'
+
+        spec = PyprojectParser(content).specs[0]
+
+        assert spec.specifier == '!=1.4.1,<2.0,>=1.0'
+
+
+class TestPoetrySpecifier:
+    """The translation of a poetry constraint into PEP 440."""
+
+    @pytest.mark.parametrize('constraint, expected', [
+        ('', ''),
+        ('*', ''),
+        ('1.2.3', '==1.2.3'),
+        ('=1.2.3', '==1.2.3'),
+        ('==1.2.3', '==1.2.3'),
+        ('^1.2.3', '<2.0.0,>=1.2.3'),
+        ('^0.2.3', '<0.3.0,>=0.2.3'),
+        ('^0.0.3', '<0.0.4,>=0.0.3'),
+        ('^0', '<1,>=0'),
+        ('~1.2.3', '<1.3.0,>=1.2.3'),
+        ('~1.2', '<1.3,>=1.2'),
+        ('~1', '<2,>=1'),
+        ('>=1.0,<2.0', '<2.0,>=1.0'),
+        ('>=1.0 <2.0', '<2.0,>=1.0'),
+        ('~=1.2.3', '~=1.2.3'),
+        ('===1.2.3', '===1.2.3'),
+        ('!=1.5', '!=1.5'),
+        ('1.2.*', '==1.2.*'),
+    ])
+    def test_translate(self, constraint, expected):
+        assert poetry_specifier('demo', constraint) == expected
+
+    @pytest.mark.parametrize('constraint', ['^1.0 || ^2.0', '~=', '>=', '^1.0rc1'])
+    def test_a_form_the_reader_does_not_translate(self, constraint):
+        with pytest.raises(ValueError):
+            poetry_specifier('demo', constraint)
 
 
 class TestClientRules:

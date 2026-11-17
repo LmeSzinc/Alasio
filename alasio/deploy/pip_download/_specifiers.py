@@ -561,9 +561,15 @@ class SpecifierSet:
         self._prereleases = prereleases
         self._specs = {}
         # the empty specifier set accepts every version
+        if not specifiers.strip():
+            return
         for spec in specifiers.split(','):
             if not spec.strip():
-                continue
+                # an empty specifier in the set, e.g. '>=1.0,,<2.0' or a
+                # trailing comma: the text is malformed, and the source
+                # (packaging/specifiers.py) rejects it rather than reading the
+                # set without a part the text declares
+                raise InvalidSpecifier(f"Invalid specifier: '{specifiers}'")
             parsed = Specifier(spec)
             self._specs[parsed] = None
 
@@ -628,6 +634,31 @@ class SpecifierSet:
         elif not isinstance(other, self.__class__):
             return NotImplemented
         return self._specs == other._specs
+
+    def __and__(self, other):
+        """
+        The intersection of two specifier sets, a version has to satisfy both.
+
+        Ported from packaging/specifiers.py: the specifiers of the two sets are
+        merged, so a caller that holds parsed constraints never joins them back
+        into a text and parses it again.
+
+        Args:
+            other (SpecifierSet): The other set
+
+        Returns:
+            SpecifierSet: The intersection, the pre-releases of this set
+
+        Raises:
+            TypeError: If other is not a SpecifierSet
+        """
+        if not isinstance(other, SpecifierSet):
+            return NotImplemented
+
+        specifiers = SpecifierSet()
+        specifiers._specs = {**self._specs, **other._specs}
+        specifiers._prereleases = self._prereleases
+        return specifiers
 
     def __contains__(self, item):
         """

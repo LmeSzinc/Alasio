@@ -10,7 +10,7 @@ index (PEP 503) of the pin into the cache folder of its version:
     {workspace}/.wheel_cache/{distribution}/{version}/{filename}.whl   the wheels
 
 The fetch is the shared wheel fetcher of the deploy domain,
-`alasio.deploy.pip_download.PypiFile` (the ported pip helpers parse the page,
+`alasio.deploy.pip_download.pypi_file.PypiFile` (the ported pip helpers parse the page,
 select the wheel of a version for a mode, check the bytes against the hash of
 their index link and write the file atomically), and this class is the release
 side of it. A run of the pack server is repeated on the same workspace, so the

@@ -18,11 +18,18 @@ the same pins, {'httpx': '0.28.1'}, and dict_sources the source view. The pins
 are parsed from the content on the first read of dict_pins and cached on the
 parser.
 
-A declaration that does not pin a version is skipped: a range (>=, <=, ~=,
-!=), a wildcard (==1.2.*), a bare name, a URL, a local path and a pip option
-have no version to install. The extras and the environment markers of a pin
-are read as they are, no marker is evaluated: the parser does not resolve
-dependencies, it reads the versions a file declares.
+A declaration that does not pin a version is skipped by dict_pins: a range
+(>=, <=, ~=, !=), a wildcard (==1.2.*), a bare name, a URL, a local path and a
+pip option have no version to install. The ranges are not lost, though: specs
+is the same file as the requirement texts they declare, read by
+RequirementSpec.from_line, which keeps the specifier, the extras and the
+marker,
+and refuses nothing but a text that is not a requirement. A range has no
+version to install, so a consumer that pins versions reads dict_pins; a
+consumer that resolves versions (the compiler of the developer side) reads
+specs. The extras and the environment markers of a pin are read as they are,
+no marker is evaluated: the parser does not resolve dependencies, it reads
+the versions a file declares.
 
 An exact pin is one version: when two different versions of one name appear
 in one file, the first one is kept and the later ones are warnings, so the
@@ -54,9 +61,11 @@ Usage:
     Requirements(content).dict_pins
     Requirements(content).dict_deps
     Requirements(content).dict_sources
+    Requirements(content).specs
 """
 
 import re
+from typing import Tuple
 
 from msgspec import Struct
 
@@ -87,10 +96,11 @@ def parse_requirement(text):
     Parse one requirement text into a pin.
 
     The text is a subset of PEP 508: the extras are ignored, an environment
-    marker after a ';' is ignored, the version is a text of version
-    characters with a digit, a wildcard is not a version. The release side
-    parses the PEP 508 texts of a pyproject.toml with it, see
-    alasio.deploy_dev.pack_server.parse_dep.
+    marker after a ';' is ignored, the version is the version of a specifier
+    that pins exactly one ('=='), a wildcard is not a version. The release
+    side parses the PEP 508 texts of a pyproject.toml with it, see
+    alasio.deploy_dev.pack_server.parse_dep; the whole requirement, ranges
+    included, is read by RequirementSpec.from_line.
 
     Args:
         text (str): Requirement text, e.g. 'httpx[cli]==0.28.1; python_version < "3.9"'
@@ -100,30 +110,200 @@ def parse_requirement(text):
             in the file, None if the text is not a requirement pinned to an
             exact version
     """
-    # the environment marker is not evaluated, the pin is read as it is
-    text = text.partition(';')[0].strip()
-    match = re.fullmatch(
-        # the distribution name, PEP 508, e.g. 'httpx', 'ruamel.yaml'
-        r'(?P<name>[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?)'
-        # the extras, e.g. '[cli]', they are ignored
-        r'(?:\s*\[[^\]]*\])?'
-        # the exact version operator, e.g. '=='. A range operator of PEP 440
-        # ('>=', '~=') and the arbitrary equality ('===') do not match
-        r'\s*==\s*'
-        # the version: the characters a version is written with, PEP 440 and
-        # the legacy forms, e.g. 0.28.1, 1.0rc1, 1!2.0, 1.0+local.1, 1.0-1
-        r'(?P<version>[A-Za-z0-9._+!-]+)',
-        text,
-    )
-    if not match:
+    spec = RequirementSpec.from_line(text)
+    if spec is None or spec.url:
+        # a url, a git repository or a local path is not a version of an index
         return None
-    version = match.group('version')
-    if not re.search(r'[0-9]', version):
-        # a version carries a digit, e.g. 1.0.dev0 does and a text like 'dev'
-        # does not: a text without a digit is not a version, no wheel can
-        # carry it
+    version = spec.pin_version
+    if version is None:
         return None
-    return match.group('name'), version
+    return spec.name, version
+
+
+class RequirementSpec(Struct, frozen=True, dict=True):
+    """
+    One requirement text of a dependency file, the one model of a constraint.
+
+    The requirement is kept whole rather than as a version: a consumer that
+    installs a pinned environment reads the version (parse_requirement), a
+    consumer that resolves versions reads the specifier. It is the same value
+    for both sides of the project, the client that installs and the compiler
+    that resolves, so the two never carry a shape of a requirement of their
+    own.
+
+    ``specifier`` is the text as it is written, and ``specifiers`` is its
+    parsed form: the text is what a report prints and what a lock writes, and
+    the parse is done once and cached on the instance, so a resolver does not
+    walk back from a model to a text and parse the text again.
+
+    Attributes:
+        name (str): Distribution name, as written in the file, e.g. 'PyYAML'
+        extras (Tuple[str, ...]): Extras the requirement asks for, in the
+            written order, e.g. ('backend', 'image')
+        specifier (str): PEP 440 specifier text, as written, '' when the
+            requirement pins nothing, e.g. '>=1.0,<2.0,!=1.4.1'
+        marker (str): Environment marker after the ';', as written, '' when
+            the requirement has none. It is never evaluated here
+        url (str): Url of a direct reference ('name @ https://...'), '' for a
+            requirement a version of an index satisfies
+        origin (str): Who declares the requirement, an annotation of the
+            consumer rather than of the file: the project ('pyproject.toml')
+            or the distribution that requires the name, '' when the consumer
+            does not track it
+        source (str): Base url of the index the requirement names, '' for any
+            index, see [tool.uv.sources] of the compiler
+    """
+    name: str
+    extras: Tuple[str, ...] = ()
+    specifier: str = ''
+    marker: str = ''
+    url: str = ''
+    origin: str = ''
+    source: str = ''
+
+    @cached_property
+    def specifiers(self):
+        """
+        The constraint as a specifier set, parsed on the first read.
+
+        The parse belongs to the requirement: a resolver asks the same
+        requirement once per candidate version of its name, and the cached
+        set dies with the requirement. A cache of the process would keep the
+        constraints of a finished run alive, and the constraints of two runs
+        are the versions of two different locks.
+
+        The import is local on purpose: the wheel selector of the deploy side
+        brings the http client, trio and sqlite with it, which the client that
+        only parses a requirements file must not pay for.
+
+        Returns:
+            SpecifierSet: The parsed constraint, empty when the requirement
+                pins nothing
+
+        Raises:
+            ValueError: If the text is not a PEP 440 specifier. Nothing is
+                cached then, so every read raises
+        """
+        from alasio.deploy.pip_download._specifiers import InvalidSpecifier, SpecifierSet
+
+        if not self.specifier:
+            return SpecifierSet()
+        try:
+            return SpecifierSet(self.specifier)
+        except InvalidSpecifier as e:
+            raise ValueError(
+                f'Invalid specifier "{self.specifier}" of "{self.name}": {e}') from None
+
+    @cached_property
+    def pin_version(self):
+        """
+        The version the requirement pins exactly, read on the first access.
+
+        An exact pin is one '==' specifier whose version is a version: a range,
+        a set of specifiers, a wildcard (``==1.2.*``) and the arbitrary
+        equality (``===x``) pin nothing a wheel is installed by, so they have
+        no version. A consumer that installs a pinned environment reads this
+        (the client); a consumer that resolves versions reads ``specifiers``.
+
+        Returns:
+            str | None: The version, e.g. '0.28.1' of '==0.28.1', None when the
+                requirement is not an exact pin
+
+        Raises:
+            ValueError: If the text is not a PEP 440 specifier, see specifiers
+        """
+        specifiers = self.specifiers
+        if len(specifiers) != 1:
+            return None
+        spec = next(iter(specifiers))
+        if spec.operator != '==':
+            return None
+        version = spec.version
+        if version.endswith('.*'):
+            return None
+        if not re.search(r'[0-9]', version):
+            # a version carries a digit, e.g. 1.0.dev0 does and a text like
+            # 'dev' does not: a text without a digit is not a version, no
+            # wheel can carry it
+            return None
+        return version
+
+    @classmethod
+    def from_line(cls, text):
+        """
+        Parse one requirement line of a dependency file.
+
+        The requirement is read, not resolved: the specifier is validated by
+        the specifier parser itself (:attr:`specifiers`, read once and kept on
+        the requirement) and left as written, the extras are validated by the
+        rule of PEP 508, and the marker is kept as written. A direct reference
+        (``name @ url``) is read too, its url in the field: whether a url is
+        usable is the decision of the caller, the client that installs skips it
+        and the compiler refuses it.
+
+        The patterns are written in the method rather than at module level: the
+        `re` module keeps its own cache of the last patterns it compiled, so a
+        module level constant only saves a dict lookup, and a constant of a
+        module the client imports at start up stays in memory for the life of
+        the process.
+
+        Args:
+            text (str): Requirement text, e.g.
+                'httpx[cli]>=0.28,<0.29; python_version < "3.9"'
+
+        Returns:
+            RequirementSpec | None: The requirement, None when the text is not
+                a PEP 508 requirement (a pip option, a comment that reached
+                here, a malformed specifier)
+        """
+        # the name of a distribution, PEP 508: an alphanumeric at each end, and
+        # the separators of PEP 503 in between
+        name = r'[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?'
+        # the requirement text: the name, the extras, then either a direct
+        # reference ('@ url') or a PEP 440 specifier, then the environment
+        # marker. The specifier is written as it is or in the parentheses of
+        # the legacy form, 'name (<3.0,>=2.0.6)'. The marker cannot carry a
+        # ';' (PEP 508), so the last part of the text is the marker
+        match = re.match(
+            r'^\s*(?P<name>' + name + r')'
+            r'\s*(?:\[(?P<extras>[^\]]*)\])?'
+            r'\s*(?:@\s*(?P<url>[^;]+)'
+            r'|\((?P<paren>[^;)]*)\)'
+            r'|(?P<specifier>[^;@()]*))'
+            r'\s*(?:;\s*(?P<marker>.*?))?\s*$',
+            text,
+        )
+        if not match:
+            return None
+
+        extras = []
+        for extra in (match.group('extras') or '').split(','):
+            extra = extra.strip()
+            if not extra:
+                continue
+            if not re.match(name + r'$', extra):
+                return None
+            extras.append(extra)
+
+        url = (match.group('url') or '').strip()
+        marker = (match.group('marker') or '').strip()
+        if url:
+            return cls(
+                name=match.group('name'), extras=tuple(extras), marker=marker, url=url)
+
+        text = match.group('paren') if match.group('paren') is not None else match.group('specifier')
+        spec = cls(
+            name=match.group('name'), extras=tuple(extras),
+            specifier=(text or '').strip(), marker=marker)
+        try:
+            # the specifier parser is the one authority on the PEP 440 rules,
+            # and its answer is kept on the requirement: the consumer that
+            # evaluates the constraint reads it from there, it does not parse
+            # the text again
+            _ = spec.specifiers
+        except ValueError:
+            return None
+        return spec
 
 
 def normalize_index_url(url):
@@ -366,6 +546,33 @@ class Requirements:
                 f'The "# from" annotation of "{name}" is not an index url: {text!r}, the source is undefined')
         return source
 
+    @cached_property
+    def _records(self):
+        """
+        Every logical line of the file, its requirement parsed once.
+
+        The file is read twice by its consumers (the pins of dict_pins and the
+        requirements of specs), and both need the same parse of the same line:
+        this is the parse, read once and kept on the parser, so a requirement
+        line of a file is read into a :class:`RequirementSpec` once however
+        many views of the file are asked for.
+
+        Returns:
+            list[tuple[RequirementSpec | None, str, bool]]: For every logical
+                line, (the requirement, the comment, whether the line declares
+                a requirement). A comment line declares nothing, its
+                requirement is None and its comment is the text after the '#';
+                an option line declares nothing either, and carries no text
+        """
+        return [
+            (
+                RequirementSpec.from_line(text) if text and not text.startswith('-') else None,
+                comment,
+                bool(text) and not text.startswith('-'),
+            )
+            for text, comment in self._iter_logical_line(self.content)
+        ]
+
     def _iter_dep_info(self):
         """
         Iter the pins of the file and their sources.
@@ -380,19 +587,14 @@ class Requirements:
         name = version = ''
         sources = []
 
-        for text, comment in self._iter_logical_line(self.content):
-            if not text:
+        for spec, comment, is_line in self._records:
+            if not is_line:
                 # a comment line: '# from' belongs to the pin before it, '# via'
                 # and the other comments are ignored
                 if name and comment:
                     source = self._read_source(comment, name)
                     if source and source not in sources:
                         sources.append(source)
-                continue
-
-            if text.startswith('-'):
-                # an option line, e.g. --index-url, --hash or -r, belongs to
-                # the file, not to the pin before it
                 continue
 
             # a new requirement line commits the pin before it; a line that
@@ -402,10 +604,12 @@ class Requirements:
             name = version = ''
             sources = []
 
-            dep = parse_requirement(text)
-            if dep is None:
+            if spec is None:
                 continue
-            name, version = dep
+            version = spec.pin_version
+            if version is None:
+                continue
+            name = spec.name
             if comment:
                 source = self._read_source(comment, name)
                 if source:
@@ -413,6 +617,22 @@ class Requirements:
 
         if name:
             yield self._build_dep_info(name, version, sources)
+
+    @cached_property
+    def specs(self):
+        """
+        The requirements the file declares, ranges and markers included.
+
+        The lines are the ones dict_pins reads (an option line and an inline
+        '# from' annotation included in the file format), but a line that
+        declares a range is kept rather than skipped: a caller that resolves
+        the versions of a file reads them here.
+
+        Returns:
+            list[RequirementSpec]: The requirements, in the file order, e.g.
+                [RequirementSpec('numpy', specifier='<2')]
+        """
+        return [spec for spec, _comment, _line in self._records if spec is not None]
 
     @cached_property
     def extra_index(self):
