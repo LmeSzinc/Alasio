@@ -13,6 +13,7 @@ from alasio.backend.auth import auth
 from alasio.backend.dev import golden_test
 from alasio.backend.dev.assets import ImageStaticFiles
 from alasio.backend.middleware.gate import DeploymentGateMiddleware
+from alasio.backend.pyc_warm.manager import PYC_WARM_MANAGER
 from alasio.backend.reactive.source import BaseSource
 from alasio.backend.topic._worker import BACKEND_WORKER_MANAGER
 from alasio.backend.topic.golden_test import watch_loop as golden_test_watch_loop
@@ -230,6 +231,13 @@ async def lifespan(app):
         # so a request never scans the project in the loop thread either.
         _ = await trio.to_thread.run_sync(lambda: MOD_LOADER.dict_mod)
         nursery.start_soon(MOD_PRELOAD.run)
+        # the bytecode cache of the release: without it the first start after
+        # an update compiles thousands of pyc files while the worker waits for
+        # its first device. A child of this backend, so the compilation never
+        # runs on this loop and never outlives the process that does (see
+        # alasio.backend.pyc_warm). Best effort: the spawn costs tens of
+        # milliseconds and a failure is a warning, the backend starts either way
+        PYC_WARM_MANAGER.start()
         # daily maintenance (Deploy.Update.AutoRestartTime): the bookkeeping owns
         # the schedule task, a no-op when the config disables it or the backend
         # runs without a supervisor. The task only decides WHEN the daily action
@@ -262,6 +270,9 @@ async def lifespan(app):
         nursery.cancel_scope.cancel()
 
     # cleanup before exit
+    # Stop the warmup first: it is an optimization, the workers get the rest
+    # of the shutdown budget
+    PYC_WARM_MANAGER.close()
     # Terminate all workers
     BACKEND_WORKER_MANAGER.close()
     # release db connections

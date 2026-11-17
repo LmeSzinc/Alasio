@@ -554,6 +554,50 @@ class WorkerManager(metaclass=Singleton):
         self._set_state(state, 'starting')
         return child_conn
 
+    def _spawn_process(self, mod: str, config: str, child_conn,
+                       project_root='', mod_root='', path_main=''):
+        """
+        Create the process of one child, without starting it.
+
+        The seam of a manager of another kind of child process: a subclass
+        answers its own entry here and leaves the pipe, the spawn window, the
+        recv thread and the shutdown to this class, see
+        alasio.backend.pyc_warm.manager.PycWarmManager. A child is always
+        started with the same six arguments, so the entry of a subclass
+        declares the same ones.
+
+        Args:
+            mod (str): Name of the mod, or of the entry of a subclass
+            config (str): Name of the config, or of the entry of a subclass
+            child_conn (Connection): The child end of the pipe
+            project_root (str): Project root, '' for a test worker
+            mod_root (str): Mod folder, '' for a test worker
+            path_main (str): Import path of the mod entry file
+
+        Returns:
+            multiprocessing.Process: The process, not started yet
+        """
+        args = (mod, config, child_conn, project_root, mod_root, path_main)
+        return self._ctx.Process(
+            target=mod_entry,
+            args=args,
+            name=f'Worker-{mod}-{config}',
+            daemon=True,
+        )
+
+    @staticmethod
+    def _recv_thread_name(config: str):
+        """
+        The name of the thread that reads the pipe of one child.
+
+        Args:
+            config (str): Name of the config
+
+        Returns:
+            str: Name of the thread, as it shows in a thread listing
+        """
+        return f'WorkerRecv-{config}'
+
     def _worker_start_process(self, state: WorkerState, mod: str, config: str, child_conn,
                               project_root='', mod_root='', path_main='') -> "tuple[bool, str]":
         """
@@ -566,19 +610,8 @@ class WorkerManager(metaclass=Singleton):
         Returns:
             whether success, reason
         """
-        if project_root and mod_root and path_main:
-            # if project_root, mod_root, path_main all provided, consider as real mod
-            args = (mod, config, child_conn, project_root, mod_root, path_main)
-        else:
-            # otherwise just testing
-            args = (mod, config, child_conn)
-        process = self._ctx.Process(
-            target=mod_entry,
-            args=args,
-            name=f"Worker-{mod}-{config}",
-            daemon=True
-        )
         try:
+            process = self._spawn_process(mod, config, child_conn, project_root, mod_root, path_main)
             process.start()
         except Exception as e:
             # Spawning failed in the parent (the interpreter / OS could not create
@@ -608,7 +641,7 @@ class WorkerManager(metaclass=Singleton):
             thread = threading.Thread(
                 target=self._worker_recv_loop,
                 args=(state,),
-                name=f"WorkerRecv-{config}",
+                name=self._recv_thread_name(config),
                 daemon=True
             )
             thread.start()

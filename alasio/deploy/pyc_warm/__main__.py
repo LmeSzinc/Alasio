@@ -6,11 +6,14 @@ warmup subprocess.
 
 The subprocess runs the interpreter of the release, so the cache tag, the
 magic number and the optimization level of the pyc files it writes are the
-ones of the worker that imports them afterwards. It must not be started
-with -O: the pyc files are then named ".opt-N.pyc", which a worker running
-without -O never reads, and the run is wasted. It may be started with -B,
-py_compile writes the files regardless, but the sources the run imports
-itself, e.g. the scope reader, are then compiled every time.
+ones of the worker that imports them afterwards. The chain shares one set
+of flags: the backend and the worker are spawn children of the supervisor,
+and a spawn child keeps the optimization level of its parent, so a warmup
+started by the backend writes the pyc the worker reads whatever -O says.
+A run started by hand needs the interpreter of the release for the same
+reason. It may be started with -B, py_compile writes the files regardless,
+but the sources the run imports itself, e.g. the scope reader, are then
+compiled every time.
 
 The scope is the environment of the running interpreter and the mods of
 the project root: --root sets the project root, which is where the mods of
@@ -83,12 +86,6 @@ def main(argv=None):
     from alasio.deploy.pyc_warm.scope import Scope
     from alasio.logger import logger
 
-    if sys.flags.optimize:
-        print(
-            f'{TAG} warning: the interpreter runs with -O{sys.flags.optimize}, the pyc files '
-            f'are named ".opt-{sys.flags.optimize}.pyc" and a worker without -O never reads them',
-            file=sys.stderr,
-        )
     if sys.dont_write_bytecode:
         # py_compile writes the files whatever this flag says, it is the
         # modules the run imports itself that would be compiled again
