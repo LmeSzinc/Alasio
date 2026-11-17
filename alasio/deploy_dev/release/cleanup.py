@@ -1,3 +1,6 @@
+import os
+
+from alasio.config.entry.mod_entry import ModEntry
 from alasio.ext.path import PathStr
 from alasio.ext.path.atomic import atomic_read_bytes, file_remove, folder_rmtree, folder_rmtree_empty
 from alasio.ext.path.iter import iter_files, iter_folders
@@ -374,18 +377,67 @@ def find_test_file(root: PathStr):
             continue
 
 
-def cleanup_electron(root: PathStr):
+def cleanup_electron_locales(root: PathStr, gui_language=None):
     """
-    Cleanup electron build
+    Keep the locale packs of the GUI languages, remove the others
+
+    Chromium resolves the application locale against the packs that ship, and
+    the display language of the webapp follows that value, so removing the
+    pack of a supported language silently degrades it to en-US.
+
+    Args:
+        root: path to the electron folder
+        gui_language (dict[str, None]): Languages of the GUI to keep, the tags
+            of the frontend, e.g. 'zh-CN' and 'ja-JP'. Defaults to None, the
+            languages of the library
+    """
+    if gui_language is None:
+        gui_language = ModEntry.alasio.gui_language
+    locales = root.joinpath('locales')
+    try:
+        names = os.listdir(locales)
+    except (FileNotFoundError, NotADirectoryError):
+        # No electron build at this path: a release that ships the shell only
+        # at its root has no toolkit/WebApp, nothing is kept and nothing is
+        # missing
+        return
+    # Chromium names a pack after the locale it holds, and a language that is
+    # translated as a whole carries no region: 'ja-JP' ships as 'ja.pak' and
+    # 'es-ES' as 'es.pak', while 'zh-CN' and 'en-US' keep the region because
+    # they have siblings. A tag keeps the exact pack when the build has one
+    # and the pack of its language otherwise.
+    paks = {name.lower(): locales / name for name in names if name.endswith('.pak')}
+    keep = set()
+    missing = []
+    for lang in gui_language:
+        for name in (f'{lang}.pak', f'{lang.partition("-")[0]}.pak'):
+            file = paks.get(name.lower())
+            if file:
+                keep.add(file.name)
+                break
+        else:
+            missing.append(lang)
+    if missing:
+        # A language the build cannot serve degrades to en-US at runtime, the
+        # release folder is broken and the reason is reported
+        print(f'MISSING locale pack of {", ".join(missing)} in {locales}')
+    for file in paks.values():
+        if file.name not in keep:
+            rm(file)
+
+
+def cleanup_electron(root: PathStr, gui_language=None):
+    """
+    Cleanup electron build, keeping the locale packs of the GUI languages
+
+    Args:
+        root: path to the electron folder
+        gui_language (dict[str, None]): Languages of the GUI to keep. Defaults
+            to None, the languages of the library
     """
     rm(root / 'LICENSE.electron.txt')
     rm(root / 'LICENSES.chromium.html')
-    # keep en-US only
-    for file in root.joinpath('locales').iter_files(ext='.pak'):
-        if file.endswith('en-US.pak'):
-            continue
-        else:
-            rm(file)
+    cleanup_electron_locales(root, gui_language)
 
 
 def cleanup(root: str):
