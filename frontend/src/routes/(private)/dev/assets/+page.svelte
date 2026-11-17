@@ -40,9 +40,14 @@
 </script>
 
 {#snippet header()}
-  <div class="flex w-full flex-1 items-center justify-end gap-4">
-    <h1 class="text-lg">Asset Browser</h1>
-    <ModSelector class="w-64" {mod_name} handleEdit={handleModChange} />
+  <!-- The selector is a fixed-width control, so the title sits on the centre
+       line of the header and the selector is pinned to the right end of it,
+       instead of the two sharing the right edge as a justify-end row does -->
+  <div class="grid w-full flex-1 grid-cols-[1fr_auto_1fr] items-center gap-4">
+    <h1 class="col-start-2 text-lg">Asset Browser</h1>
+    <div class="col-start-3 flex justify-end">
+      <ModSelector class="w-64" {mod_name} handleEdit={handleModChange} />
+    </div>
   </div>
 {/snippet}
 
