@@ -1,7 +1,7 @@
 <script lang="ts">
   import { mode } from "mode-watcher";
   import { onMount } from "svelte";
-  import CircleArrowUp from "@lucide/svelte/icons/circle-arrow-up";
+  import ArrowUp from "@lucide/svelte/icons/arrow-up";
   import CircleDotDashed from "@lucide/svelte/icons/circle-dot-dashed";
   import CirclePlay from "@lucide/svelte/icons/circle-play";
   import Ghost from "@lucide/svelte/icons/ghost";
@@ -10,6 +10,7 @@
   import SquarePause from "@lucide/svelte/icons/square-pause";
   import X from "@lucide/svelte/icons/x";
   import { cn } from "$lib/utils";
+  import AnimationUp from "./AnimationUp.svelte";
   import type { WORKER_STATE } from "./types";
 
   // props
@@ -23,11 +24,15 @@
   let { workerState, active = false, class: className, iconClass, displayIdle = false }: Props = $props();
 
   const strokeWidth = $derived(mode.current === "dark" ? "3" : "2");
+  // Only the round / circular icons spin: the spin reads as the icon turning
+  // on itself, and "updating" is a plain arrow whose direction carries the
+  // meaning -- rotating it would point the arrow away from "up". The loader
+  // of "resuming" is an open ring, which is what a spinner is made of.
   const spin = $derived(
     workerState === "running" ||
       workerState === "scheduler-waiting" ||
       workerState === "restarting" ||
-      workerState === "updating"
+      workerState === "resuming"
       ? "animate-spin"
       : "",
   );
@@ -65,7 +70,9 @@
     <RefreshCw class={cn("h-3 w-3", !active && "text-primary", iconClass)} {strokeWidth} aria-label="Restarting" />
   {:else if workerState === "updating"}
     <!-- Updating: stopped for an update transaction, auto-resume after it -->
-    <CircleArrowUp class={cn("h-3 w-3", !active && "text-primary", iconClass)} {strokeWidth} aria-label="Updating" />
+    <AnimationUp class={cn("h-3 w-3", iconClass)}>
+      <ArrowUp class={cn("h-3 w-3", !active && "text-primary", iconClass)} {strokeWidth} aria-label="Updating" />
+    </AnimationUp>
   {:else if workerState === "resuming"}
     <!-- Resuming: queued for auto-resume after the backend restart -->
     <Loader class={cn("h-3 w-3", !active && "text-primary", iconClass)} {strokeWidth} aria-label="Resuming" />
