@@ -2,13 +2,10 @@
   // !!![svelte-drop-dev-page]!!!
   import { onDestroy } from "svelte";
   import { toast } from "svelte-sonner";
+  import type { UPDATE_STATE, UpdateInfoLike, UpdateTopicLike } from "$lib/components/aside/types";
   import { Button } from "$lib/components/ui/button";
-  import {
-    UPDATE_TOAST_ID_PREFIX,
-    type UpdateToastData,
-    dismissUpdateToast,
-    showUpdateToast,
-  } from "$lib/components/update/updateToast";
+  import UpdateAvailableToast from "$lib/components/update/UpdateAvailableToast.svelte";
+  import { UPDATE_TOAST_ID_PREFIX, dismissUpdateToast } from "$lib/components/update/updateToast";
   import { prettyVersion } from "$lib/components/update/utils";
 
   /**
@@ -17,10 +14,13 @@
    * set of updates replaces it (the previous toast is dismissed and plays its
    * exit animation while the new one enters).
    *
-   * The mock state below plays the role of the Update topic: every button
-   * changes the set of available updates the way the backend would (a mod
-   * becomes available, a newer version is reported), then hands the whole set
-   * to the production module (`updateToast.ts`).
+   * The page fakes the Update topic and mounts the production trigger with it
+   * (`UpdateAvailableToast` takes the data of the topic as a prop), so the
+   * buttons below drive the real path end to end: the filter of the trigger
+   * ('available' with a known version), its session-wide announcement set, the
+   * aggregation of every available mod into one toast, and the replacement of
+   * the toast on screen. The toast rendered here is the production one, not a
+   * copy.
    */
 
   // Versions of the mock data: 40 hex characters are the sha1 of a packed
@@ -35,26 +35,43 @@
   const LONG_NAME = "ExampleMod_with_a_very_long_repository_name";
   const LONG_VERSION = "v1.2.3-rc.4+build.20261016.abcdef1234567890";
 
-  // --- The mock Update topic: the available updates accumulate here ---
-  let mockUpdates = $state<UpdateToastData[]>([]);
+  // --- The mock Update topic: what the backend would report ---
+  let mockTopic = $state<UpdateTopicLike>({});
+
+  /** One entry of the mock topic, as the backend reports it */
+  function entry(latest: string, state: UPDATE_STATE = "available"): UpdateInfoLike {
+    return {
+      state,
+      current_version: "ab41c81d",
+      latest_version: latest,
+      checked_at: 1760000000,
+      error: "",
+    };
+  }
 
   /** One mod of the mock topic enters / stays in 'available' */
   function upsert(mod: string, latest: string) {
-    const update = mockUpdates.find((entry) => entry.mod === mod);
-    if (update) {
-      update.latest = latest;
-    } else {
-      mockUpdates.push({ mod, latest });
-    }
+    // A new object: the trigger reads the data of the topic, a mutation would
+    // not be a new value to announce
+    mockTopic = { ...mockTopic, [mod]: entry(latest) };
   }
 
-  /** Show everything the mock topic reports available right now */
-  function show() {
-    showUpdateToast([...mockUpdates]);
+  // Versions that are fresh by construction: a scenario that has to pop the
+  // toast on every press reports a version the trigger has not announced yet
+  let fresh = 0;
+
+  function upsertFresh(mod: string) {
+    upsert(mod, `v1.0.${++fresh}`);
   }
+
+  // Bumped by Reset: a remount clears the announcement set of the trigger, so
+  // every scenario can be replayed from the start (the set lives as long as
+  // the mount, i.e. as long as a session in production)
+  let epoch = $state(0);
 
   function reset() {
-    mockUpdates = [];
+    mockTopic = {};
+    epoch += 1;
     dismissUpdateToast();
   }
 
@@ -71,8 +88,9 @@
         burstTimer = undefined;
         return;
       }
-      upsert("alasio", `v1.0.${index}`);
-      show();
+      // Every replacement is a version the trigger has not announced: without
+      // that, the repeats after the first burst would be deduplicated
+      upsertFresh("alasio");
     }, 400);
   }
 
@@ -87,55 +105,46 @@
   const actions: Action[] = [
     {
       label: "Update · first mod",
-      note: "alasio becomes available: the toast announces it and never auto-closes -- leave it on screen and watch that nothing dismisses it.",
-      run: () => {
-        upsert("alasio", SHA.a);
-        show();
-      },
+      note: "alasio becomes available: the toast announces it and never auto-closes -- leave it on screen and watch that nothing dismisses it. Pressing it again announces nothing: the same (mod, version) pair pops once, like a session.",
+      run: () => upsert("alasio", SHA.a),
     },
     {
       label: "Update · second mod",
       note: "ExampleMod becomes available while the toast is still up: the previous toast is dismissed (its exit animation plays) and the new one enters announcing both mods. The information accumulates, the toasts never stack.",
-      run: () => {
-        upsert("ExampleMod", SHA.c);
-        show();
-      },
+      run: () => upsert("ExampleMod", SHA.c),
     },
     {
       label: "Update · third mod (tag)",
       note: "A wheel mod joins with a tag version: the row list carries every mod with its own version, tags as they are and packed sha1 shortened to 8.",
-      run: () => {
-        upsert("wheel_mod", "0.9.2");
-        show();
-      },
+      run: () => upsert("wheel_mod", "0.9.2"),
     },
     {
       label: "Newer version of a mod",
-      note: "alasio reports a newer latest: the replacement animation again, with the version of the row updated in place.",
-      run: () => {
-        upsert("alasio", SHA.b);
-        show();
-      },
+      note: "alasio reports the other version: the replacement animation again, with the version of the row updated in place.",
+      run: () => upsert("alasio", mockTopic.alasio?.latest_version === SHA.b ? SHA.a : SHA.b),
+    },
+    {
+      label: "Available · unknown version",
+      note: "The backend reports 'available' without a latest version (the last check saw none): the trigger ignores it, so nothing pops. The toast is only shown for a pair that can be named.",
+      run: () => upsert("alasio", ""),
     },
     {
       label: "Long mod name",
       note: "A single update with a long mod name: the name column stops at half of the row, so the name truncates (the full name stays in its tooltip) and the version column keeps its place.",
       run: () => {
-        mockUpdates = [{ mod: LONG_NAME, latest: SHA.a }];
-        show();
+        mockTopic = { [LONG_NAME]: entry(SHA.a) };
       },
     },
     {
       label: "Long name · long version",
       note: "Both sides are long: every column of a row stops at half of the width, so the name and the version truncate instead of squeezing each other (both tooltips carry the full values).",
       run: () => {
-        mockUpdates = [{ mod: LONG_NAME, latest: LONG_VERSION }];
-        show();
+        mockTopic = { [LONG_NAME]: entry(LONG_VERSION) };
       },
     },
     {
       label: "Close the toast",
-      note: "The programmatic twin of the close button inside the toast content: the exit animation plays and the toast leaves. Closing is not cancelling -- the mock available updates stay.",
+      note: "The programmatic twin of the close button inside the toast content: the exit animation plays and the toast leaves. Closing is not cancelling -- the mock available updates stay, and they are not announced again.",
       run: () => dismissUpdateToast(),
     },
     {
@@ -148,12 +157,12 @@
       note: "An ordinary toast of the Toaster (it auto-closes, the update one never does) beside the update toast: they stack like any two toasts.",
       run: () => {
         toast.info("A normal toast, it closes by itself");
-        show();
+        upsertFresh("alasio");
       },
     },
     {
       label: "Reset",
-      note: "Clears the mock available updates (as if every mod had been updated) and takes the toast down.",
+      note: "Clears the mock topic (as if every mod had been updated) and takes the toast down. The trigger is remounted, so the announcement set starts over and every scenario can be replayed.",
       run: reset,
     },
   ];
@@ -187,7 +196,15 @@
   });
 
   const updateToastOnScreen = $derived(liveToasts.some((entry) => String(entry.id).startsWith(UPDATE_TOAST_ID_PREFIX)));
+  const mockMods = $derived(Object.entries(mockTopic));
 </script>
+
+<!-- The production trigger, fed with the mock topic: every toast of this page
+     goes through the same component, filter and announcement set as the one
+     the (private) layout mounts -->
+{#key epoch}
+  <UpdateAvailableToast update={mockTopic} />
+{/key}
 
 <div class="container mx-auto flex flex-col gap-8 p-4 pb-20">
   <div class="space-y-2">
@@ -197,8 +214,9 @@
       screen until the user closes it, and a newer set of updates replaces it (the previous toast is dismissed with its
       exit animation while the new one enters -- the toasts never stack, and the newest toast always carries the whole
       set of available updates). The toast always reads as a title row plus one row per mod (the name left, its version
-      right), so one update and five look alike. The buttons below drive the production module (updateToast.ts), so the
-      toast previewed here is the production one, not a copy.
+      right), so one update and five look alike. The buttons below only change the mock topic: the page mounts the
+      production trigger (UpdateAvailableToast), so the filter, the per-session announcement and the toast itself are
+      the production ones, not a copy.
     </p>
   </div>
 
@@ -215,15 +233,17 @@
   </section>
 
   <section class="space-y-2">
-    <h2 class="text-lg font-semibold">Mock state</h2>
+    <h2 class="text-lg font-semibold">Mock topic</h2>
     <p class="text-muted-foreground text-xs">
-      The available updates the buttons above have reported so far, the payload the next toast would carry. The Update
-      topic owns this state in production; the page only fakes it.
+      The Update topic the page hands to the trigger, the way the backend would report it. The Update topic owns this
+      state in production; the page only fakes it.
     </p>
     <p class="font-mono text-xs">
-      {mockUpdates.length === 0
-        ? "(no available update)"
-        : mockUpdates.map((update) => `${update.mod} @ ${prettyVersion(update.latest)}`).join(", ")}
+      {mockMods.length === 0
+        ? "(no mod reported)"
+        : mockMods
+            .map(([mod, info]) => `${mod} ${info.state} @ ${prettyVersion(info.latest_version ?? "") || "(none)"}`)
+            .join(", ")}
     </p>
   </section>
 

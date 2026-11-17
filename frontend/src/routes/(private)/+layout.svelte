@@ -6,7 +6,7 @@
   import { Button } from "$lib/components/ui/button";
   import * as Card from "$lib/components/ui/card";
   import * as Sheet from "$lib/components/ui/sheet";
-  import UpdateAvailableDialog from "$lib/components/update/UpdateAvailableDialog.svelte";
+  import UpdateAvailableToast from "$lib/components/update/UpdateAvailableToast.svelte";
   import { HeaderContext, NavContext } from "$lib/slotcontext.svelte.js";
   import { screen } from "$lib/use/screen.svelte";
   import { cn } from "$lib/utils.js";
@@ -98,9 +98,9 @@
       </Sheet.Content>
     </Sheet.Root>
 
-    <!-- 1.5 Update available popup: its Update topic subscription must be
+    <!-- 1.5 Update available toast: its Update topic subscription must be
          alive on every page (a check completes while the user is anywhere) -->
-    <UpdateAvailableDialog />
+    <UpdateAvailableToast />
   </div>
 {:else}
   <!-- 2. Error page -->
