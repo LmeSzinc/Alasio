@@ -181,6 +181,8 @@ class MockIndex:
         base (str): Base url of the index
         files (dict[str, dict[str, IndexEntry]]): {dist key: {filename: entry}}
         requests (list[str]): Urls of the requests, in order
+        ranges (list[str]): The Range header of every request, in the order of
+            requests, '' for a request without one
         range_supported (bool): True to answer a Range request with the bytes it
             asks for, False to answer 200 with the whole file (a host that
             ignores the header)
@@ -200,6 +202,8 @@ class MockIndex:
         self.base = base
         self.files = {}
         self.requests = []
+        # the Range header of every request, in the order of requests
+        self.ranges = []
         self.range_supported = True
         self.suffix_range_supported = True
         self.serve_metadata = True
@@ -307,6 +311,7 @@ class MockIndex:
         """
         url = str(request.url)
         self.requests.append(url)
+        self.ranges.append(request.headers.get('range', ''))
         path = url.split('://', 1)[1].partition('/')[2]
         prefix = self.base.split('://', 1)[1].partition('/')[2].rstrip('/')
         if prefix and path.startswith(f'{prefix}/'):

@@ -16,11 +16,11 @@ from alasio.deploy.pip_download._target_python import TargetPython
 from alasio.deploy.pip_download.pypi_file import WheelNotFoundError
 from alasio.deploy_dev.metadata import (
     MODE_FULL, MODE_PEP658, MODE_RANGE, MODE_RANGE_NO_SUFFIX, ClosureRoot, MetadataError, MetadataProvider,
-    SourceCapabilities, readable_wheels
+    SourceCapabilities, known_source, readable_wheels
 )
 from alasio.testing.filesystem import fs  # noqa: F401
 from tests.deploy_dev.metadata.conftest import INDEX_URL
-from tests.deploy_dev.pypi_mock import make_wheel
+from tests.deploy_dev.pypi_mock import MockIndex, make_wheel
 
 pytestmark = [
     pytest.mark.parallel,
@@ -315,6 +315,234 @@ class TestCapabilities:
         assert MODE_RANGE in notes
         assert MODE_FULL in notes
         await provider.aclose()
+
+
+class TestHints:
+    """The capabilities a run adopts without asking, see KNOWN_SOURCES."""
+
+    # the base of a mock index that sits on the host of the official index
+    PYPI_URL = 'https://pypi.org/simple'
+
+    def test_a_declaration_is_a_record(self):
+        """The table holds values, not tuples: what a host is declared to serve."""
+        declared = known_source(self.PYPI_URL)
+
+        assert isinstance(declared, SourceCapabilities)
+        assert (declared.range, declared.suffix_range) == (True, True)
+        assert declared.ready is True
+        assert declared.assumed is True
+
+    def test_the_host_is_read_from_the_url(self):
+        """A url is parsed by yarl: the host decides, whatever the case."""
+        assert known_source('https://PyPI.org/simple') is not None
+        assert known_source('https://private.example/simple') is None
+        assert known_source('') is None
+
+    @pytest.mark.trio
+    async def test_a_known_host_is_never_probed(self):
+        """The table answers the question, the run reads the wheel once."""
+        index = MockIndex(self.PYPI_URL)
+        index.add('demo', '1.0', content=make_wheel('demo', '1.0'))
+        provider = MetadataProvider(client=index.client)
+
+        assert provider.bootstrap([self.PYPI_URL]) is True
+        meta = await provider.metadata('demo', '1.0', self.PYPI_URL)
+
+        assert meta.mode == MODE_RANGE
+        # one read of the wheel and no probe before it
+        assert len(wheel_requests(index)) == 1
+        caps = provider.capabilities_of(self.PYPI_URL)
+        assert (caps.range, caps.suffix_range, caps.ready, caps.assumed) == (
+            True, True, True, True)
+        await provider.aclose()
+
+    @pytest.mark.trio
+    async def test_a_declared_mirror_is_never_probed(self):
+        """A mirror of the cn group reads its METADATA by range, with no probe."""
+        base = 'https://mirrors.aliyun.com/pypi/simple'
+        index = MockIndex(base)
+        # the mirrors publish no PEP 658 file, so the range path is the one a
+        # compile reads by: exactly the case the declaration is for
+        index.add('demo', '1.0', content=make_wheel('demo', '1.0'))
+        provider = MetadataProvider(client=index.client)
+
+        assert provider.bootstrap([base]) is True
+        meta = await provider.metadata('demo', '1.0', base)
+
+        assert meta.mode == MODE_RANGE
+        assert len(wheel_requests(index)) == 1
+        await provider.aclose()
+
+    @pytest.mark.trio
+    async def test_an_unknown_host_is_probed_as_before(self, index):
+        """A host the table does not know falls back to the probe."""
+        index.add('demo', '1.0', content=make_wheel('demo', '1.0'))
+        provider = MetadataProvider(client=index.client)
+
+        assert provider.bootstrap([INDEX_URL]) is False
+        await provider.metadata('demo', '1.0', INDEX_URL)
+
+        # the probe, then the read
+        assert len(wheel_requests(index)) == 2
+        await provider.aclose()
+
+    @pytest.mark.trio
+    async def test_a_wrong_hint_is_corrected_by_the_first_refusal(self):
+        """A host that refuses the suffix range costs one request, not one per version."""
+        index = MockIndex(self.PYPI_URL)
+        index.suffix_range_supported = False
+        index.add('demo', '1.0', content=make_wheel('demo', '1.0'))
+        index.add('demo', '2.0', content=make_wheel('demo', '2.0'))
+        provider = MetadataProvider(client=index.client)
+        provider.bootstrap([self.PYPI_URL])
+
+        first = await provider.metadata('demo', '1.0', self.PYPI_URL)
+        caps = provider.capabilities_of(self.PYPI_URL)
+
+        assert first.mode == MODE_RANGE_NO_SUFFIX
+        assert caps.suffix_range is False
+
+        before = len(index.requests)
+        second = await provider.metadata('demo', '2.0', self.PYPI_URL)
+
+        assert second.mode == MODE_RANGE_NO_SUFFIX
+        # the corrected hint is not tried again: the read of the second version
+        # never asks for a suffix range
+        assert [value for value in index.ranges[before:] if value.startswith('bytes=-')] == []
+        await provider.aclose()
+
+    @pytest.mark.trio
+    async def test_a_correction_does_not_leak_into_the_table(self):
+        """The declarations are shared by every run and are never written."""
+        declared = known_source(self.PYPI_URL)
+        before = repr(declared)
+        index = MockIndex(self.PYPI_URL)
+        index.suffix_range_supported = False
+        index.add('demo', '1.0', content=make_wheel('demo', '1.0'))
+        provider = MetadataProvider(client=index.client)
+        provider.bootstrap([self.PYPI_URL])
+
+        await provider.metadata('demo', '1.0', self.PYPI_URL)
+
+        assert provider.capabilities_of(self.PYPI_URL).suffix_range is False
+        assert repr(known_source(self.PYPI_URL)) == before
+        await provider.aclose()
+
+    @pytest.mark.trio
+    async def test_the_budget_opens_when_every_source_is_known(self):
+        """A run over known sources starts at full concurrency, no gate."""
+        index = MockIndex(self.PYPI_URL)
+        index.add('demo', '1.0', content=make_wheel('demo', '1.0'))
+        provider = MetadataProvider(client=index.client, concurrency=7)
+
+        assert provider.bootstrap([self.PYPI_URL]) is True
+        await provider.page('demo', self.PYPI_URL)
+
+        assert provider._budget_open is True
+        assert provider._limiter.total_tokens == 7
+        await provider.aclose()
+
+    @pytest.mark.trio
+    async def test_one_unknown_source_keeps_the_gate(self, index):
+        """The known sources are adopted, an unknown one still starts serial."""
+        provider = MetadataProvider(client=index.client, concurrency=7)
+        private = 'https://private.example/simple'
+
+        assert provider.bootstrap([self.PYPI_URL, private]) is False
+
+        assert provider._budget_open is False
+        # the hint of the known source is adopted anyway
+        assert provider.capabilities_of(self.PYPI_URL).ready is True
+        assert provider.capabilities_of(private) is None
+        await provider.aclose()
+
+    @pytest.mark.trio
+    async def test_no_source_no_gate(self):
+        """Bootstrap without a source knows nothing and opens nothing."""
+        provider = MetadataProvider(concurrency=7)
+
+        assert provider.bootstrap([]) is False
+
+        assert provider._budget_open is False
+        await provider.aclose()
+
+
+class TestSourceCapabilities:
+    """What a source is declared to serve, and how a declaration is merged."""
+
+    def test_a_declaration_is_ready_and_assumed(self):
+        declared = SourceCapabilities.known(range_served=True, suffix_served=False)
+
+        assert (declared.range, declared.suffix_range) == (True, False)
+        assert declared.ready is True
+        assert declared.assumed is True
+
+    def test_assume_takes_every_known_value(self):
+        state = SourceCapabilities()
+
+        state.assume(SourceCapabilities.known(range_served=True, suffix_served=False))
+
+        assert (state.range, state.suffix_range) == (True, False)
+        assert state.ready is True
+        assert state.assumed is True
+
+    def test_assume_keeps_what_the_other_does_not_know(self):
+        """A record with no value of its own does not erase the one in use."""
+        state = SourceCapabilities()
+        state.range = True
+        state.suffix_range = True
+
+        state.assume(SourceCapabilities())
+
+        assert (state.range, state.suffix_range) == (True, True)
+        assert state.ready is False
+        assert state.assumed is False
+
+    def test_assume_twice_changes_nothing(self):
+        """The records are values: merging the same declaration is idempotent."""
+        declared = SourceCapabilities.known(range_served=True, suffix_served=True)
+        state = SourceCapabilities()
+
+        state.assume(declared)
+        first = repr(state)
+        state.assume(declared)
+
+        assert repr(state) == first
+
+    @pytest.mark.parametrize('source, expected', [
+        ('https://pypi.org/simple', (True, True)),
+        ('https://files.pythonhosted.org/packages', (True, True)),
+        ('https://py38deps.github.io/py38deps/simple', (True, False)),
+        ('https://github.com/owner/repo/releases', (True, False)),
+        ('https://mirrors.aliyun.com/pypi/simple', (True, True)),
+        ('https://mirrors.cloud.tencent.com/pypi/simple', (True, True)),
+        ('https://mirrors.ustc.edu.cn/pypi/simple', (True, True)),
+        ('https://repo.huaweicloud.com/repository/pypi/simple', (True, True)),
+        ('https://mirror.nju.edu.cn/pypi/web/simple', (True, True)),
+    ])
+    def test_the_declared_hosts(self, source, expected):
+        declared = known_source(source)
+
+        assert (declared.range, declared.suffix_range) == expected
+
+    @pytest.mark.parametrize('source', [
+        'https://private.example/simple',
+        'http://127.0.0.1:8080/simple',
+        '',
+    ])
+    def test_a_host_nobody_declared(self, source):
+        assert known_source(source) is None
+
+    @pytest.mark.parametrize('source', [
+        # a mirror that refused every file of the survey: a 403 is the network
+        # path talking, so these are probed rather than declared
+        'https://pypi.tuna.tsinghua.edu.cn/simple',
+        'https://mirrors.bfsu.edu.cn/pypi/web/simple',
+        # a mirror that serves some packages itself and redirects the others
+        'https://mirror.sjtu.edu.cn/pypi/web/simple',
+    ])
+    def test_a_mirror_a_survey_could_not_measure(self, source):
+        assert known_source(source) is None
 
 
 class TestReadableWheels:

@@ -22,7 +22,7 @@ Usage:
 
 from alasio.deploy_dev.metadata.provider import (
     DEFAULT_CONCURRENCY, DEFAULT_INDEX, MODE_FULL, MODE_PEP658, MODE_RANGE, MODE_RANGE_NO_SUFFIX, MODE_SDIST,
-    ClosureResult, ClosureRoot, DistributionMetadata, MetadataError, MetadataProvider, SourceCapabilities,
+    ClosureResult, ClosureRoot, DistributionMetadata, MetadataError, MetadataProvider, SourceCapabilities, known_source,
     readable_wheels, sdist_of
 )
 from alasio.deploy_dev.metadata.requirements import (
@@ -46,6 +46,7 @@ __all__ = [
     'MetadataProvider',
     'SourceCapabilities',
     'is_sdist',
+    'known_source',
     'marker_environments',
     'read_sdist_metadata',
     'readable_wheels',

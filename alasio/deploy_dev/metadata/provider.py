@@ -49,6 +49,7 @@ import httpx2
 import trio
 from msgspec import Struct, field
 from packaging.utils import canonicalize_name
+from yarl import URL
 
 from alasio.deploy.httpclient.client_async import AsyncHttpClient
 from alasio.deploy.pip_download._wheel import is_pure_wheel
@@ -111,6 +112,11 @@ _PEP658_MISSING = (403, 404, 405)
 # another way of reading it (see MetadataProvider._read_by_range)
 _RANGE_REFUSED = (416, 501)
 
+# The statuses that say something about the host rather than about this file: a
+# 501 refuses the shape of the request, while a 416 may be one odd archive. Only
+# the first corrects a declared capability (see MetadataProvider._demote)
+_RANGE_HOST_REFUSED = (501,)
+
 
 class MetadataError(ValueError):
     """
@@ -129,7 +135,23 @@ class _ModeUnavailable(Exception):
     The modes are tried from the cheapest to the dearest (see
     MetadataProvider.metadata): this error is the signal to try the next one,
     it never leaves the provider.
+
+    Attributes:
+        refused (bool): True when the host refused the shape of the request
+            rather than the bytes of this file being unusable. A refusal is a
+            fact about the host, so it corrects a declared capability; a layout
+            that does not hold says nothing about the next file of the source
     """
+
+    def __init__(self, reason='', refused=False):
+        """
+        Args:
+            reason (str): Why the mode does not apply. Defaults to ''
+            refused (bool): True when the host refused the request itself.
+                Defaults to False
+        """
+        super().__init__(reason)
+        self.refused = refused
 
 
 class DistributionMetadata(Struct):
@@ -214,11 +236,14 @@ class SourceCapabilities:
     Attributes:
         range (bool | None): True when an explicit byte range is served
         suffix_range (bool | None): True when ``bytes=-N`` is served
-        ready (bool): True when the probe of the source ran
+        ready (bool): True when the capabilities are known, by a probe or by a
+            declaration of KNOWN_SOURCES
+        assumed (bool): True when the record is a declaration rather than an
+            observation: a range the host refuses replaces it
         lock (trio.Lock): The single flight of the probe of the source
     """
 
-    __slots__ = ('lock', 'range', 'ready', 'suffix_range')
+    __slots__ = ('assumed', 'lock', 'range', 'ready', 'suffix_range')
 
     def __init__(self):
         # created on the first use of the source, inside the run of the caller
@@ -226,11 +251,58 @@ class SourceCapabilities:
         self.range = None
         self.suffix_range = None
         self.ready = False
+        self.assumed = False
+
+    @classmethod
+    def known(cls, range_served, suffix_served):
+        """
+        A record that declares what a host serves, for KNOWN_SOURCES.
+
+        The record is ready and marked as assumed: it is what this project
+        believes of the host, not what the run observed
+        (see MetadataProvider._demote).
+
+        Args:
+            range_served (bool): True when the host serves an explicit range
+            suffix_served (bool): True when the host serves ``bytes=-N``
+
+        Returns:
+            SourceCapabilities: The record
+        """
+        state = cls()
+        state.range = range_served
+        state.suffix_range = suffix_served
+        state.ready = True
+        state.assumed = True
+        return state
+
+    def assume(self, other):
+        """
+        Merge what another record knows into this one.
+
+        A value the other record knows replaces the one here, a value it does
+        not know leaves this one as it is, and the flags are the union of both:
+        merging a declaration makes this record assumed, and merging the same
+        declaration twice changes nothing (the records are values, not state).
+
+        The lock is never merged: it belongs to the reader of the source, and
+        a declaration has no reader.
+
+        Args:
+            other (SourceCapabilities): The record to merge
+        """
+        if other.range is not None:
+            self.range = other.range
+        if other.suffix_range is not None:
+            self.suffix_range = other.suffix_range
+        self.ready = self.ready or other.ready
+        self.assumed = self.assumed or other.assumed
 
     def __repr__(self):
         return (
             f'{self.__class__.__name__}(range={self.range}, '
-            f'suffix_range={self.suffix_range}, ready={self.ready})')
+            f'suffix_range={self.suffix_range}, ready={self.ready}, '
+            f'assumed={self.assumed})')
 
 
 class _Flight:
@@ -276,6 +348,69 @@ def readable_wheels(links, name, version):
         not is_pure_wheel(candidate.wheel.file_tags),
         candidate.filename,
     ))
+
+
+# What the hosts a compile of this project reads are declared to serve, so a
+# run does not spend a request finding out. {host: SourceCapabilities}
+#
+# A declaration is not an observation: a range the host refuses replaces it (see
+# MetadataProvider._demote), so a stale entry costs one request of the run and
+# never a wrong answer. A host that is not here is probed as before.
+#
+# The records are shared by every run and are never mutated: bootstrap() merges
+# a copy into the record of the run (see SourceCapabilities.assume).
+#
+# Every entry below was measured: the page of a distribution, then a suffix
+# range and a one byte range against a pure wheel of it, on five packages of
+# 30 KiB to 19 MiB, checking that the suffix answer is the tail of the file and
+# that no redirect hid another host behind the index. A mirror measured as
+# refusing a range is not listed as "no range": a 403 says the network path
+# refused the request, not the mirror, and an entry that declared it would
+# turn a route problem into a wrong capability. A host that is not listed is
+# probed once per run, which is what a run without this table does.
+KNOWN_SOURCES = {
+    # the official index serves its files from files.pythonhosted.org, which
+    # answers both shapes of a range
+    'pypi.org': SourceCapabilities.known(range_served=True, suffix_served=True),
+    'files.pythonhosted.org': SourceCapabilities.known(range_served=True, suffix_served=True),
+    # the backport index publishes GitHub release assets: their host answers
+    # 501 to a suffix range and 206 to an explicit one
+    'py38deps.github.io': SourceCapabilities.known(range_served=True, suffix_served=False),
+    'github.com': SourceCapabilities.known(range_served=True, suffix_served=False),
+    # the mirrors of the cn group of ModEntry (DEFAULT_PYPI_MIRRORS) and the
+    # public ones a mod may declare: each serves the file of the page itself,
+    # both shapes of a range, and no PEP 658 metadata next to it, so the range
+    # path is the one a compile of these indexes reads by
+    'mirrors.aliyun.com': SourceCapabilities.known(range_served=True, suffix_served=True),
+    'mirrors.cloud.tencent.com': SourceCapabilities.known(range_served=True, suffix_served=True),
+    'mirrors.ustc.edu.cn': SourceCapabilities.known(range_served=True, suffix_served=True),
+    'repo.huaweicloud.com': SourceCapabilities.known(range_served=True, suffix_served=True),
+    'mirror.nju.edu.cn': SourceCapabilities.known(range_served=True, suffix_served=True),
+}
+
+# The mirrors a run may read that are deliberately not above: pypi.tuna.tsinghua
+# and mirrors.bfsu refused every file request of the survey (a 403 on five
+# packages, whatever the User-Agent and Referer), and mirror.sjtu serves some
+# packages from its own host and redirects the others to tsinghua, so no single
+# pair of flags describes it. A run on those sources probes once, which is
+# correct whatever their answer actually is.
+
+
+def known_source(source):
+    """
+    What a host of an index is declared to serve, see KNOWN_SOURCES.
+
+    Args:
+        source (str): Base url of an index, e.g. 'https://pypi.org/simple'
+
+    Returns:
+        SourceCapabilities | None: The declared record of the host, None when
+            the host is not one this project declares
+    """
+    host = URL(source).host
+    if not host:
+        return None
+    return KNOWN_SOURCES.get(host.lower())
 
 
 def sdist_of(links, name, version):
@@ -356,6 +491,49 @@ class MetadataProvider:
 
     def __repr__(self):
         return f'{self.__class__.__name__}(concurrency={self.concurrency})'
+
+    def bootstrap(self, sources):
+        """
+        Adopt what is declared of the sources of a run, before the first request.
+
+        A source whose host is in KNOWN_SOURCES is marked ready with what the
+        host serves, so no request is spent probing it. A source that is not
+        there stays unknown and is probed by the first caller that needs it,
+        which is the behaviour of a run without the table.
+
+        When every source is known the request budget opens at once: the gate
+        exists for a run that has to find out whether the route works at all
+        (see _open_budget), and a caller that declared its sources is a caller
+        that already knows what it is talking to. A run that includes an
+        unknown source keeps the gate, because that source is what the first
+        request is for.
+
+        Args:
+            sources (Iterable[str]): Base urls of the indexes of the run
+
+        Returns:
+            bool: True when there is at least one source and every one of them
+                was known, False when at least one will be probed
+        """
+        sources = list(sources)
+        known = True
+        for source in sources:
+            source = source or DEFAULT_INDEX
+            state = self._capabilities.get(source)
+            if state is not None and state.ready:
+                continue
+            declared = known_source(source)
+            if declared is None:
+                known = False
+                # a source nobody declared keeps no record: it stays unasked,
+                # and capabilities_of() answers None for it
+                continue
+            if state is None:
+                state = self._capabilities[source] = SourceCapabilities()
+            state.assume(declared)
+        if sources and known:
+            self._open_budget()
+        return bool(sources) and known
 
     async def aclose(self):
         """
@@ -686,11 +864,13 @@ class MetadataProvider:
                 return await self._read_by_range(url, suffix=True), MODE_RANGE
             except _ModeUnavailable as e:
                 self._note(key, MODE_RANGE, e)
+                self._demote(source, suffix=True, refused=e.refused)
         if capabilities.range is not False and not self._noted(key, MODE_RANGE_NO_SUFFIX):
             try:
                 return await self._read_by_range(url, suffix=False), MODE_RANGE_NO_SUFFIX
             except _ModeUnavailable as e:
                 self._note(key, MODE_RANGE_NO_SUFFIX, e)
+                self._demote(source, suffix=False, refused=e.refused)
         self._note(key, MODE_FULL, 'the whole wheel is read')
         # the fetcher checks the bytes against the hash of the link, the only
         # check a whole file can afford
@@ -760,8 +940,10 @@ class MetadataProvider:
             # it: another file of the same index may be served by another host
             # (PEP 503 allows it), which is what a per-version downgrade keeps
             # correct, see the module note of _read_wheel
-            if e.response.status_code in _RANGE_REFUSED: raise _ModeUnavailable(
-                    f'the source refused the range with HTTP {e.response.status_code}') from None
+            if e.response.status_code in _RANGE_REFUSED:
+                raise _ModeUnavailable(
+                    f'the source refused the range with HTTP {e.response.status_code}',
+                    refused=e.response.status_code in _RANGE_HOST_REFUSED) from None
             raise
 
     async def _tail(self, url, suffix):
@@ -783,8 +965,11 @@ class MetadataProvider:
         if suffix:
             response = await self._get(url, {'Range': f'bytes=-{TAIL_SIZE}'})
             if response.status_code != 206:
+                # the host ignored the header and sent the whole file, or
+                # answered something that is not a range at all: no range
                 raise _ModeUnavailable(
-                    f'the source answered {response.status_code} to a suffix range')
+                    f'the source answered {response.status_code} to a suffix range',
+                    refused=True)
             span = content_range(response.headers.get('content-range', ''))
             if span is None or span.total < 0:
                 raise _ModeUnavailable('the answer of the suffix range names no size')
@@ -817,7 +1002,8 @@ class MetadataProvider:
         response = await self._get(url, {'Range': 'bytes=0-0'})
         if response.status_code != 206:
             raise _ModeUnavailable(
-                f'the source answered {response.status_code} to a range request')
+                f'the source answered {response.status_code} to a range request',
+                refused=True)
         span = content_range(response.headers.get('content-range', ''))
         if span is None or span.total <= 0:
             raise _ModeUnavailable('the answer of the range request names no size')
@@ -841,7 +1027,8 @@ class MetadataProvider:
         response = await self._get(url, {'Range': f'bytes={start}-{end}'})
         if response.status_code != 206:
             raise _ModeUnavailable(
-                f'the source answered {response.status_code} to the range "{start}-{end}"')
+                f'the source answered {response.status_code} to the range "{start}-{end}"',
+                refused=True)
         return response.content
 
     """
@@ -889,6 +1076,40 @@ class MetadataProvider:
                 # range first) for the rest of the run
                 state.ready = state.suffix_range is not None
         return state
+
+    def _demote(self, source, suffix, refused):
+        """
+        Correct a declared capability with what a host just answered.
+
+        A declaration that is wrong would otherwise cost one wasted request per
+        version: every version of the source would try the shape the host
+        refuses before falling back. The observation replaces the guess, so the
+        run pays one request and then behaves as if it had probed.
+
+        Only a refusal of the request itself is an observation (see
+        _RANGE_HOST_REFUSED); an archive whose layout is unexpected says
+        nothing about the next file, and is left to the per-version notes.
+
+        Args:
+            source (str): Base url of the index
+            suffix (bool): True for the suffix range, False for an explicit one
+            refused (bool): True when the host refused the shape of the request
+        """
+        if not refused:
+            return
+        state = self._capabilities.get(source or DEFAULT_INDEX)
+        if state is None or not state.assumed:
+            return
+        if suffix:
+            state.suffix_range = False
+        else:
+            state.range = False
+            if state.suffix_range is False:
+                # both shapes refused: nothing of the declaration is left to correct
+                state.assumed = False
+        logger.debug(
+            f'The declared capability of "{source}" was corrected: '
+            f'{"suffix" if suffix else "explicit"} range refused')
 
     async def _probe(self, state, url):
         """

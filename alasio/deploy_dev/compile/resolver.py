@@ -356,6 +356,10 @@ class Resolver:
                 a metadata cannot be read
         """
         state = self._state = _State(roots)
+        # the indexes of the compile are known before the first request: a
+        # source whose host is in the table costs no probe, and a run over
+        # known sources starts at full concurrency (see KNOWN_SOURCES)
+        self.provider.bootstrap(index.url for index in self.indexes)
         for spec in roots:
             # the roots are what the compile is about: their pages and the
             # metadata of the version they will pick are read at once

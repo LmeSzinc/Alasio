@@ -9,7 +9,7 @@ import trio
 
 from alasio.deploy.pip_download._target_python import TargetPython
 from alasio.deploy_dev.compile import CompileError, Index, RequirementSpec, Resolver
-from alasio.deploy_dev.compile.resolver import PROJECT_ORIGIN
+from alasio.deploy_dev.compile.resolver import PROJECT_ORIGIN, _State
 from alasio.deploy_dev.metadata import MetadataProvider
 from alasio.testing.filesystem import fs  # noqa: F401
 from tests.deploy_dev.compile.conftest import INDEX_URL, MOCK_INDEX_URL
@@ -343,8 +343,26 @@ class TestSpeculation:
         assert resolution.pins['shared'] == '1.0'
 
     @pytest.mark.trio
-    async def test_the_walk_reads_ahead_of_the_decisions(self, network):
-        """The walk goes deeper than the level the decisions are on."""
+    async def test_the_walk_follows_the_chain(self, network):
+        """The walk of a name reads that version and walks its dependencies."""
+        index = network.index()
+        index.add('demo', '1.0', requires=['middle'])
+        index.add('middle', '1.0', requires=['leaf'])
+        index.add('leaf', '1.0')
+        resolver = resolver_of(network)
+        resolver._state = _State([root('demo')])
+
+        # the walk of resolve(), run to its end: a nursery waits for every task
+        # it started, so the chain is walked before the assertion
+        async with trio.open_nursery() as walk:
+            resolver._spec_nursery = walk
+            resolver._speculate('demo', (root('demo'),))
+
+        assert {name for name, _ in resolver._speculated} == {'demo', 'middle', 'leaf'}
+
+    @pytest.mark.trio
+    async def test_the_walk_is_started_for_every_discovered_name(self, network):
+        """A name the search discovers is walked, not only the roots."""
         index = network.index()
         index.add('demo', '1.0', requires=['middle'])
         index.add('middle', '1.0', requires=['leaf'])
@@ -353,9 +371,9 @@ class TestSpeculation:
 
         await resolver.resolve([root('demo')])
 
-        # a root is decided before its walk gets to the metadata, the chain
-        # below it is where the walk is worth the requests
-        assert 'leaf' in {name for name, _ in resolver._speculated}
+        # whether a walk finishes before the search does depends on the
+        # scheduler, whether it is started does not
+        assert {'demo', 'middle', 'leaf'} <= resolver._speculating
 
     @pytest.mark.trio
     async def test_the_walk_stops_when_the_search_is_over(self, network, monkeypatch):
