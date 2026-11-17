@@ -1091,6 +1091,50 @@ describe("TestMessageQueue", () => {
   });
 });
 
+describe("TestDisconnectedPageRecovery", () => {
+  /** Drives the client through a full outage: the retries run out. */
+  function exhaustRetries() {
+    for (const delay of [1000, 2000, 4000, 8000, 16000]) {
+      FakeWebSocket.last!.serverClose(1006);
+      vi.advanceTimersByTime(delay);
+    }
+    // The sixth failure hits the attempt cap: the page is invalidated and the
+    // client stops trying on its own.
+    FakeWebSocket.last!.serverClose(1006);
+    expect(invalidateAll).toHaveBeenCalled();
+    expect(FakeWebSocket.last!.readyState).toBe(FakeWebSocket.CLOSED);
+  }
+
+  it("does not let the last page's unsub kill the subscription of the page the retry re-mounts", () => {
+    // The disconnected page unmounts its topic subscribers while the client
+    // is still offline. The unsub has nothing to cancel on a connection that
+    // is not open, and queuing it made it arrive after the subscribe of the
+    // page the retry button re-mounts: the fresh subscription was dropped
+    // server-side, and the next rpc failed with "Cannot do RPC before
+    // subscribing topic".
+    const client = new WebsocketManager();
+    client.connect();
+    FakeWebSocket.last!.serverOpen();
+    client.sub("Preview");
+    expect(lastSent(FakeWebSocket.last!)).toEqual({ t: "Preview" });
+
+    exhaustRetries();
+    const created = FakeWebSocket.instances.length;
+
+    client.unsub("Preview");
+    // Leaving the page does not start a connection attempt on its own.
+    expect(FakeWebSocket.instances).toHaveLength(created);
+    expect(client.subscriptions).toEqual({});
+
+    // The user clicks retry before the connection is back: the page mounts
+    // and subscribes again, then the connection opens.
+    client.sub("Preview");
+    FakeWebSocket.last!.serverOpen();
+
+    expect(FakeWebSocket.last!.sent.map(parseSent)).toEqual([{ t: "Preview" }]);
+  });
+});
+
 // Answer of the default session probe (it asks 'GET /api/auth/renew') for
 // the tests below: refused unless a test says otherwise, so no test ever
 // reaches the network.

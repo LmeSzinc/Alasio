@@ -747,21 +747,40 @@ export class WebsocketManager {
     this.#reconnectTimeout = setTimeout(() => this.connect(), delay);
   }
 
+  /** The socket of the live connection, or null when there is none. */
+  get #openSocket(): WebSocket | null {
+    const ws = this.#ws;
+    return ws !== null && ws.readyState === WebSocket.OPEN ? ws : null;
+  }
+
   /**
-   * Sends a payload to the WebSocket server or queues it if disconnected.
+   * Whether a connection is open. An rpc can only be answered while one is, and
+   * an rpc that runs out of time afterwards was lost with its connection rather
+   * than left unanswered by the server.
+   */
+  isConnected(): boolean {
+    return this.#openSocket !== null;
+  }
+
+  /**
+   * Sends a payload to the WebSocket server, or queues it until a connection
+   * is open.
+   *
+   * Args:
+   *     payload (RequestEvent): Message to send
    */
   #send(payload: RequestEvent) {
-    if (this.#ws?.readyState === WebSocket.OPEN) {
-      try {
-        const message = JSON.stringify(payload);
-        this.#ws.send(this.#encoder.encode(message));
-      } catch (e) {
-        console.error("Failed to serialize or send message:", payload, e);
-      }
-    } else {
+    const ws = this.#openSocket;
+    if (ws === null) {
       // Queue the message if the connection is not open.
       this.#messageQueue.push(payload);
       this.connect();
+      return;
+    }
+    try {
+      ws.send(this.#encoder.encode(JSON.stringify(payload)));
+    } catch (e) {
+      console.error("Failed to serialize or send message:", payload, e);
     }
   }
 
@@ -798,7 +817,7 @@ export class WebsocketManager {
     // the `onopen` handler is responsible for sending the initial subscription message.
     // For testing purposes, `forceSend` allows bypassing this check.
     if (forceSend || (currentCount === 0 && !this.#options.defaultSubscriptions.includes(topic))) {
-      if (this.#ws?.readyState === WebSocket.OPEN) {
+      if (this.isConnected()) {
         this.#send({ t: topic });
       }
     }
@@ -822,7 +841,16 @@ export class WebsocketManager {
     const shouldSendUnsubMessage = forceSend || (currentCount === 1 && !forceSend);
 
     if (shouldSendUnsubMessage) {
-      this.#send({ t: topic, o: "unsub" });
+      // Only the live connection needs to hear about the unsub: a topic is
+      // subscribed per connection, so one that is not open has nothing to
+      // cancel, and its subscriptions are rebuilt from `subscriptions` when it
+      // opens. Queuing the unsub would let it arrive *after* the subscribe of a
+      // page that was re-mounted before the socket opened, silently dropping
+      // the fresh subscription (the next rpc then fails with "Cannot do RPC
+      // before subscribing topic").
+      if (this.isConnected()) {
+        this.#send({ t: topic, o: "unsub" });
+      }
 
       // If the subscription count is now 0, clean up the topic data
       if ((this.subscriptions[topic] || 0) <= 0) {
