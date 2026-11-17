@@ -5,6 +5,7 @@
   import ThemeToggle from "$lib/components/ui/theme/theme-toggle.svelte";
   import LangSelector from "$lib/i18n/LangSelector.svelte";
   import { cn } from "$lib/utils.js";
+  import SimulatedWindowControls from "$lib/window/SimulatedWindowControls.svelte";
   import { frame } from "$lib/window/frame.svelte";
 
   // props
@@ -19,6 +20,11 @@
   // instead of adding to it, and the trailing actions would sit 16px further
   // from the drag band than in a session without controls.
   const reserveRight = $derived(frame.controls.width + HEADER_PADDING_X);
+
+  // A browser has no host to draw the window controls, so the reserved space is
+  // filled with inert stand-ins; a real client draws its own on top of this
+  // header and must not get a duplicate set.
+  const showSimulatedControls = $derived(frame.controls.source === "simulated");
 </script>
 
 <header
@@ -35,4 +41,8 @@
 
   <LangSelector></LangSelector>
   <ThemeToggle variant="ghost"></ThemeToggle>
+
+  {#if showSimulatedControls}
+    <SimulatedWindowControls />
+  {/if}
 </header>

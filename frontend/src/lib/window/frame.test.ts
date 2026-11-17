@@ -51,4 +51,13 @@ describe("TestResolveControlsWidth", () => {
       source: "none",
     });
   });
+
+  it("matches the geometry of the control group it stands for", () => {
+    // 4 * size-9 (36) + 3 * gap-1 (4) + pr-1.5 (6) on the right + the same 6px
+    // gap on the left. The simulated stand-ins draw that group, so a change to
+    // either number has to reach both.
+    const buttons = 4 * 36 + 3 * 4 + 6;
+
+    expect(FALLBACK_CONTROLS_WIDTH).toBe(buttons + 6);
+  });
 });
