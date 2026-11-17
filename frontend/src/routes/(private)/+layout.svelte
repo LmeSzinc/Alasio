@@ -108,8 +108,15 @@
     </div>
 
     <!-- 1.4 Sheet for < md -->
+    <!-- The sheet covers the app header, so its top band is the same h-12 band
+         the header draws. The close button is not centered in that band: a
+         glyph centered in its own box sits above the optical center of the text
+         beside it, because text ink is placed from the baseline and leans below
+         its line box (measured on a 14px line: text ink 19..32.5, its box
+         14..34). The band center would be top-2 (button center 24); top-2.5
+         puts the button center at 26, on the ink center of the title row. -->
     <Sheet.Root bind:open={isSheetOpen}>
-      <Sheet.Content side="left" class="aside-shadow bg-card max-w-sm border-none p-0">
+      <Sheet.Content side="left" closeClass="top-2.5" class="aside-shadow bg-card max-w-sm border-none p-0">
         <div class="flex h-full">
           <ConfigAside class="border-border border-r" />
           <div class="flex-1">

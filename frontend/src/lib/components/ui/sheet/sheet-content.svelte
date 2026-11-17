@@ -17,6 +17,7 @@
 		class: className,
 		side = "right",
 		showCloseButton = true,
+		closeClass,
 		portalProps,
 		children,
 		...restProps
@@ -24,6 +25,8 @@
 		portalProps?: WithoutChildrenOrChild<ComponentProps<typeof SheetPortal>>;
 		side?: Side;
 		showCloseButton?: boolean;
+		/** Placement of the built-in close button, for a sheet whose top band is not the default one */
+		closeClass?: string;
 		children: Snippet;
 	} = $props();
 </script>
@@ -44,7 +47,7 @@
 		{#if showCloseButton}
 			<SheetPrimitive.Close data-slot="sheet-close">
 				{#snippet child({ props })}
-					<Button variant="ghost" class="absolute top-4 right-4" size="icon-sm" {...props}>
+					<Button variant="ghost" class={cn("absolute top-4 right-4", closeClass)} size="icon-sm" {...props}>
 						<XIcon  />
 						<span class="sr-only">Close</span>
 					</Button>
