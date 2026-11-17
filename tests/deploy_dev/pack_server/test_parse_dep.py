@@ -439,7 +439,8 @@ dependencies = ['alasio[backend]>=2.0; python_version < "3.9"']
 
         spec = PyprojectParser(content).specs[0]
 
-        assert spec.specifier == '!=1.4.1,<2.0,>=1.0'
+        assert spec.specifier == '>=1.0,<2.0,!=1.4.1'
+        assert str(spec.specifiers) == '!=1.4.1,<2.0,>=1.0'
 
 
 class TestPoetrySpecifier:
