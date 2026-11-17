@@ -595,6 +595,13 @@ class TaskQueue(BaseTopic):
         config_name = await state.config_name
         if not config_name:
             return None
+        # The table is built from the schedule of the mod the config is bound
+        # to (TaskQueueSource.on_init reads the model classes), so the warmup
+        # of that mod is awaited here. The mod is looked up in the scan cache
+        # instead of reading ConnState.mod_name: the data of this topic
+        # depends on the config, and the lookup adds no dependency of its own.
+        info = ConfigScanSource().data.get(config_name)
+        await self.wait_mod_ready(info.mod if info is not None else '')
         source = TaskQueueSource(config_name)
         await source.reinit()
         return source
@@ -692,6 +699,7 @@ class TaskQueueI18n(BaseTopic):
         lang = await state.content_lang
         if not mod_name or not lang:
             return None
+        await self.wait_mod_ready(mod_name)
         source = TaskQueueI18nSource.get(mod_name, lang)
         await source.reinit()
         return source

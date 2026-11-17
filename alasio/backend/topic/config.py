@@ -55,6 +55,7 @@ class ConfigNav(BaseTopic):
         lang = await state.content_lang
         if not mod_name or not lang:
             return None
+        await self.wait_mod_ready(mod_name)
         source = ConfigNavSource.get(mod_name, lang)
         await source.reinit()
         return source
@@ -90,6 +91,7 @@ class ConfigArg(BaseTopic):
         lang = await state.content_lang
         if not mod_name or not config_name or not nav_name or not lang:
             return None
+        await self.wait_mod_ready(mod_name)
         source = ConfigArgSource.get(mod_name, config_name, nav_name, lang)
         if source is None:
             # config / mod / nav deleted: silent, next dependency change

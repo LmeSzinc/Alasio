@@ -31,6 +31,7 @@ class Dashboard(BaseTopic):
         lang = await state.content_lang
         if not mod_name or not config_name or not lang:
             return None
+        await self.wait_mod_ready(mod_name)
         source = DashboardSource.get(mod_name, config_name, lang)
         if source is None:
             # config / mod deleted: silent

@@ -219,7 +219,7 @@ async def lifespan(app):
         nursery.start_soon(SITE.warm_up)
         # the models and the json of every mod: two threads per mod in the
         # background, and a request that arrives before its mod is warm waits
-        # for it (see BaseTopic._wait_mod_ready) instead of paying the same
+        # for it (see BaseTopic.wait_mod_ready) instead of paying the same
         # work a second time in its own thread. The loader is imported here
         # for the reason given above build_app: it is bound to the project
         # root resolved by create_config.
