@@ -84,10 +84,13 @@ __all__ = [
 DEFAULT_INDEX = 'https://pypi.org/simple'
 
 # Requests in flight once the capabilities of the sources are known: a version
-# costs 1 (PEP 658) to 3 (range) small requests, so 8 already keeps the index
-# pages and the metadata of a mod's closure busy. uv downloads at 50, which is
-# for whole wheels, not for the few KB of a metadata
-DEFAULT_CONCURRENCY = 8
+# costs 1 (PEP 658) to 3 (range) small requests, and the graph is walked ahead
+# of the decisions (see Resolver._speculate), so the budget is what bounds a
+# compile. Measured on the reference repo (86 pins, 297 requests through a
+# proxy): 22s at 16, 17-20s at 32, 15-22s at 48, 26s at 64 - the proxy answers
+# slower once a burst outruns it, and 32 keeps the tail of the run short
+# without one. uv downloads at 50, which is for whole wheels
+DEFAULT_CONCURRENCY = 32
 
 # How a METADATA was read, kept on the answer: the evidence of the cost of a run
 MODE_PEP658 = 'pep658'
@@ -425,6 +428,25 @@ class MetadataProvider:
             return meta
         return await self._single_flight(
             self._metadata, key, lambda: self._read(key, name, version, source))
+
+    def capabilities_of(self, source):
+        """
+        What a source is known to serve, without probing it.
+
+        A caller that is about to guess reads this first: a source already known
+        to serve no range would answer the guess with a whole file, which is not
+        worth reading ahead of a decision. Nothing is requested here, so an
+        unprobed source answers None and reads as "try it" (see
+        SourceCapabilities).
+
+        Args:
+            source (str): Base url of the index. Defaults to '', DEFAULT_INDEX
+
+        Returns:
+            SourceCapabilities | None: The record of the source, None when the
+                run never asked anything of it
+        """
+        return self._capabilities.get(source or DEFAULT_INDEX)
 
     async def closure(self, roots, resolve, target):
         """
@@ -937,8 +959,10 @@ class MetadataProvider:
         The first round runs one request at a time: it is the round that
         discovers whether the run works at all (a mirror that does not answer, a
         proxy that is not there), and a burst of eight failures is neither
-        faster nor clearer than one. The budget opens on the first metadata the
-        run reads, the first answer that proves the route works.
+        faster nor clearer than one. The budget opens on the first answer the
+        run reads, a page or a metadata: the first page is the first request of
+        a compile, so the gate would otherwise hold the whole first level of
+        pages, one round trip per page.
 
         A source whose capabilities are unknown later costs one probe whatever
         the budget is: the callers of a source wait on its lock while the first
@@ -1046,7 +1070,11 @@ class MetadataProvider:
             PackageIndex: The page
         """
         async with self._limit:
-            return await self._fetcher_of(source).get_package_index(name)
+            page = await self._fetcher_of(source).get_package_index(name)
+        # the first page that answers is the proof the route works, see
+        # _open_budget()
+        self._open_budget()
+        return page
 
     def _fetcher_of(self, source):
         """

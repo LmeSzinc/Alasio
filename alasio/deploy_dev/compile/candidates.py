@@ -177,27 +177,43 @@ def versions_of(name, pages, target):
     files = {}
     # {(version, source): filename} of the source distributions
     sdists = {}
+    # the Requires-Python of a page is one value repeated by every file of it:
+    # the check is parsed once per value, not once per file
+    compatible = {}
+
+    def allows(link):
+        value = link.requires_python
+        if not value:
+            return True
+        known = compatible.get(value)
+        if known is None:
+            known = compatible[value] = _requires_python_ok(link, target)
+        return known
+
     for index, page in pages:
         for link in page.links:
-            if is_sdist(link.filename):
-                parsed = sdist_name_of(link.filename)
+            # the filename is a property of the url, parsed once per link here
+            # while the loop reads it three times
+            filename = link.filename
+            if is_sdist(filename):
+                parsed = sdist_name_of(filename)
                 if not parsed or canonicalize_name(parsed[0]) != dist:
                     continue
                 # an sdist installs on the interpreters its Requires-Python
                 # allows, exactly like a wheel: pip builds it only there
-                if not _requires_python_ok(link, target):
+                if not allows(link):
                     continue
-                sdists[(parsed[1], index.url)] = link.filename
+                sdists[(parsed[1], index.url)] = filename
                 continue
             if not link.is_wheel:
                 continue
             try:
-                wheel = Wheel(link.filename)
+                wheel = Wheel(filename)
             except InvalidWheelFilename:
                 continue
             if wheel.name != dist:
                 continue
-            if not _requires_python_ok(link, target):
+            if not allows(link):
                 continue
             if not wheel.supported(tags):
                 continue

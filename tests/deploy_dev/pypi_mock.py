@@ -203,6 +203,10 @@ class MockIndex:
         self.range_supported = True
         self.suffix_range_supported = True
         self.serve_metadata = True
+        # True to answer every file request with a 500: the failure of a file
+        # is not a property of its version, a reader must stop instead of
+        # picking another one
+        self.fail_files = False
         self.client = httpx2.AsyncClient(transport=httpx2.MockTransport(self.handler))
 
     def add(self, name, version, tag='py3-none-any', filename='', requires=(),
@@ -315,6 +319,9 @@ class MockIndex:
                 return httpx2.Response(404)
             body, content_type = _page_body(dist)
             return httpx2.Response(200, content=body, headers={'content-type': content_type})
+
+        if self.fail_files:
+            return httpx2.Response(500)
 
         if filename.endswith(METADATA_SUFFIX):
             entry = self.files.get(dist_key, {}).get(filename[:-len(METADATA_SUFFIX)])

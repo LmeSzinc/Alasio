@@ -5,6 +5,7 @@ The index is the mock of tests/deploy_dev/pypi_mock.py: every test states the
 versions of the dependencies and their Requires-Dist, and the resolver decides.
 """
 import pytest
+import trio
 
 from alasio.deploy.pip_download._target_python import TargetPython
 from alasio.deploy_dev.compile import CompileError, Index, RequirementSpec, Resolver
@@ -307,6 +308,126 @@ class TestBacktracking:
 
         with pytest.raises(CompileError, match='backtracking steps were spent'):
             await resolver.resolve([root('demo'), root('other')])
+
+
+class TestFailures:
+    """A failure that is not a property of a version fails the run."""
+
+    @pytest.mark.trio
+    async def test_a_file_that_fails_is_a_compile_error(self, network):
+        """The 500 of a file is the run failing, not a version to skip."""
+        index = network.index()
+        index.add('demo', '1.0')
+        index.fail_files = True
+
+        with pytest.raises(CompileError, match='Cannot read "demo==1.0"'):
+            await resolver_of(network).resolve([root('demo')])
+
+
+class TestSpeculation:
+    """The walk that reads ahead of the decisions."""
+
+    @pytest.mark.trio
+    async def test_a_failed_speculation_does_not_fail_the_run(self, network):
+        """A version the resolution never takes has no right to break the compile."""
+        index = network.index()
+        # two parents, one asks for any version of shared, the other for <2:
+        # the walk may guess 3.0 from the first one, whose metadata is broken
+        index.add('demo', '1.0', requires=['shared'])
+        index.add('other', '1.0', requires=['shared<2'])
+        index.add('shared', '3.0', content=b'not a wheel')
+        index.add('shared', '1.0')
+
+        resolution = await resolver_of(network).resolve([root('demo'), root('other')])
+
+        assert resolution.pins['shared'] == '1.0'
+
+    @pytest.mark.trio
+    async def test_the_walk_reads_ahead_of_the_decisions(self, network):
+        """The walk goes deeper than the level the decisions are on."""
+        index = network.index()
+        index.add('demo', '1.0', requires=['middle'])
+        index.add('middle', '1.0', requires=['leaf'])
+        index.add('leaf', '1.0')
+        resolver = resolver_of(network)
+
+        await resolver.resolve([root('demo')])
+
+        # a root is decided before its walk gets to the metadata, the chain
+        # below it is where the walk is worth the requests
+        assert 'leaf' in {name for name, _ in resolver._speculated}
+
+    @pytest.mark.trio
+    async def test_the_walk_stops_when_the_search_is_over(self, network, monkeypatch):
+        """The answer is returned without waiting for a walk that never ends."""
+        index = network.index()
+        index.add('demo', '1.0')
+
+        async def hang(self, name, specs):
+            # a walk that never answers: the search must not be held back by it
+            await trio.sleep_forever()
+
+        monkeypatch.setattr(Resolver, '_speculate_one', hang)
+
+        with trio.fail_after(5):
+            resolution = await resolver_of(network).resolve([root('demo')])
+
+        assert resolution.pins == {'demo': '1.0'}
+
+
+class TestTheCostOfAGuess:
+    """What the walk refuses to read ahead, see Resolver._reads_a_small_file."""
+
+    @pytest.mark.trio
+    async def test_a_metadata_file_is_a_small_read(self, network):
+        """A wheel with a PEP 658 file is one small request."""
+        index = network.index()
+        index.add('demo', '1.0', metadata='true')
+        resolver = resolver_of(network)
+        await resolver._read_pages('demo')
+        candidate = resolver._versions_of('demo')[0]
+
+        assert resolver._reads_a_small_file('demo', candidate) is True
+
+    @pytest.mark.trio
+    async def test_a_source_without_range_reads_the_whole_file(self, network):
+        """A source known to serve no range answers the read with the whole wheel."""
+        index = network.index()
+        index.add('demo', '1.0')
+        index.range_supported = False
+        index.serve_metadata = False
+        resolver = resolver_of(network)
+        await resolver._read_pages('demo')
+        candidate = resolver._versions_of('demo')[0]
+        # the read that teaches the run what the source serves
+        await resolver.provider.metadata('demo', '1.0', candidate.source)
+
+        assert resolver._reads_a_small_file('demo', candidate) is False
+
+    @pytest.mark.trio
+    async def test_a_source_nobody_asked_is_read_as_cheap(self, network):
+        """An unprobed source is tried, the rule of uv: only a proven refusal skips."""
+        index = network.index()
+        index.add('demo', '1.0')
+        index.range_supported = False
+        index.serve_metadata = False
+        resolver = resolver_of(network)
+        await resolver._read_pages('demo')
+        candidate = resolver._versions_of('demo')[0]
+
+        assert resolver._reads_a_small_file('demo', candidate) is True
+
+    @pytest.mark.trio
+    async def test_a_version_without_a_wheel_reads_its_archive(self, network):
+        """A source only version is a whole archive, whatever the source serves."""
+        index = network.index()
+        index.add('demo', '1.0', filename='demo-1.0.tar.gz',
+                  content=make_sdist('demo', '1.0'))
+        resolver = resolver_of(network)
+        await resolver._read_pages('demo')
+        candidate = resolver._versions_of('demo')[0]
+
+        assert resolver._reads_a_small_file('demo', candidate) is False
 
 
 class TestIndexes:
