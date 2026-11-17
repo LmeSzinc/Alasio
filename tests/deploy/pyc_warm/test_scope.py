@@ -2,15 +2,15 @@
 Tests of the scope of a warmup, see alasio/deploy/pyc_warm/scope.py.
 """
 import os
+from types import SimpleNamespace
 
 import pytest
 
 from alasio.deploy.pack.decode_base import PackDecodeBase
 from alasio.deploy.pack.job_base import DeployTarget
-from alasio.deploy.pyc_warm import scope as scope_module
 from alasio.deploy.pyc_warm.scope import (
-    ScopeResult, common_tier, dist_infos, index_sources, localize_path, lock_tier, mod_sources, pack_tier,
-    record_sources, site_packages_dirs, site_packages_tiers, walk_sources
+    TIER_COMMON, TIER_LOCK, TIER_MOD, TIER_PACK, Scope, ScopeResult, dist_infos, index_sources, localize_path,
+    record_sources, site_packages_dirs
 )
 from alasio.deploy_dev.pack.pack_full import PackFull
 from alasio.testing.filesystem import fs  # noqa: F401
@@ -91,6 +91,56 @@ def make_dist(fs, name, record_paths, version='1.0', site=SITE):
     rows = ''.join(f'{path},sha256=abc,1\n' for path in record_paths)
     write(fs, f'{dist_info}/RECORD', rows.encode())
     return dist_info
+
+
+class FakeMod:
+    """
+    A mod as the scope reads one: a name, a root and a declaration.
+
+    Attributes:
+        name (str): Name of the mod
+        root (str): Posix path of the mod tree
+        entry (SimpleNamespace): The declaration, only the fields the
+            scope reads are set
+    """
+
+    def __init__(self, name, root, requirements_file='requirements.txt'):
+        """
+        Args:
+            name (str): Name of the mod
+            root (str): Posix path of the mod tree
+            requirements_file (str): Declared location of the pins of the
+                mod, relative to root
+        """
+        self.name = name
+        self.root = root
+        self.entry = SimpleNamespace(requirements_file=requirements_file)
+
+
+def collect(results):
+    """
+    Read a generator of the scope into a list.
+
+    Args:
+        results (Iterable[ScopeResult]): The results of a tier
+
+    Returns:
+        list[ScopeResult]: The results, in the order they were yielded
+    """
+    return list(results)
+
+
+def by_target(results):
+    """
+    Index the results of a tier by the unit they answer.
+
+    Args:
+        results (list[ScopeResult]): The results of a tier
+
+    Returns:
+        dict[str, list[str]]: Target to its sources
+    """
+    return {result.target: result.sources for result in results}
 
 
 class TestLocalizePath:
@@ -221,7 +271,7 @@ class TestRecordSources:
 
 class TestPackTier:
     """
-    Tests for pack_tier().
+    Tests for Scope.pack_tier(): one result per ledger of the pack area.
     """
 
     def test_index_pack(self, fs):
@@ -230,66 +280,106 @@ class TestPackTier:
         # The RECORD of the same distribution lists other files: the
         # index pack of the ledger is the authority
         make_dist(fs, 'trio', ['trio/_old.py'])
-        result = pack_tier(SITE, dist_infos(SITE))
-        assert result.sources == [f'{SITE}/trio/_abc.py']
-        assert result.resolved == ['trio']
-        assert result.unresolved == []
+        results = collect(Scope().pack_tier(SITE, dist_infos(SITE), set()))
+        assert len(results) == 1
+        assert results[0].tier == TIER_PACK
+        assert results[0].target == 'trio'
+        assert results[0].sources == [f'{SITE}/trio/_abc.py']
+        assert results[0].folder == SITE
 
     def test_record_fallback(self, fs):
         """A ledger without an index pack falls back to the RECORD."""
         fs.create_dir(f'{SITE}/.pack/trio')
         make_dist(fs, 'trio', ['trio/_abc.py'])
-        result = pack_tier(SITE, dist_infos(SITE))
-        assert result.sources == [f'{SITE}/trio/_abc.py']
-        assert result.resolved == ['trio']
+        assert by_target(collect(Scope().pack_tier(SITE, dist_infos(SITE), set()))) == {
+            'trio': [f'{SITE}/trio/_abc.py'],
+        }
 
     def test_unresolved(self, fs):
-        """A ledger without any file list is reported, not fatal."""
+        """A ledger without any file list answers a result without sources."""
         fs.create_dir(f'{SITE}/.pack/gone')
-        result = pack_tier(SITE, dist_infos(SITE))
-        assert result.sources == []
-        assert result.unresolved == ['gone']
+        results = collect(Scope().pack_tier(SITE, dist_infos(SITE), set()))
+        assert [(result.target, result.sources) for result in results] == [('gone', [])]
 
     def test_no_pack_area(self, fs):
         """An environment that no pack flow touched has no pack tier."""
         fs.create_dir(SITE)
-        result = pack_tier(SITE, dist_infos(SITE))
-        assert (result.sources, result.resolved, result.unresolved) == ([], [], [])
+        assert collect(Scope().pack_tier(SITE, dist_infos(SITE), set())) == []
+
+    def test_covered_skipped(self, fs):
+        """A name an earlier tier covered is not listed, nor marked again."""
+        write(fs, f'{SITE}/.pack/trio/index.pack', TRIO_PACK)
+        write(fs, f'{SITE}/.pack/attrs/index.pack', TRIO_PACK)
+        covered = {'trio'}
+        results = collect(Scope().pack_tier(SITE, dist_infos(SITE), covered))
+        assert [result.target for result in results] == ['attrs']
+        # The names the tier answered are added, so the tiers after it
+        # skip them too
+        assert covered == {'trio', 'attrs'}
+
+    def test_a_covered_name_without_sources_stays_uncovered(self, fs):
+        """A name that could not be listed does not cover the tiers after it."""
+        fs.create_dir(f'{SITE}/.pack/gone')
+        covered = set()
+        collect(Scope().pack_tier(SITE, dist_infos(SITE), covered))
+        assert covered == set()
+
+    def test_order(self, fs):
+        """The ledgers are answered in the order of their folder name."""
+        for name in ('trio', 'attrs', 'zope'):
+            fs.create_dir(f'{SITE}/.pack/{name}')
+        results = collect(Scope().pack_tier(SITE, dist_infos(SITE), set()))
+        assert [result.target for result in results] == ['attrs', 'trio', 'zope']
 
 
 class TestCommonTier:
     """
-    Tests for common_tier().
+    Tests for Scope.common_tier(): one result per name of COMMON_DISTS.
     """
 
-    def test_resolved(self, fs):
-        """The common names that are installed give their sources."""
+    def test_installed(self, fs):
+        """A common name that is installed answers its sources."""
         make_dist(fs, 'trio', ['trio/_abc.py'])
         make_dist(fs, 'msgspec', ['msgspec/__init__.py'])
-        result = common_tier(SITE, dist_infos(SITE))
+        results = collect(Scope().common_tier(SITE, dist_infos(SITE), set()))
+        resolved = [result.target for result in results if result.sources]
         # The order of COMMON_DISTS holds, msgspec is listed before trio
-        assert result.sources == [f'{SITE}/msgspec/__init__.py', f'{SITE}/trio/_abc.py']
-        assert result.resolved == ['msgspec', 'trio']
-        # Every other name of COMMON_DISTS is not installed, numpy first
-        assert result.unresolved[:2] == ['numpy', 'scipy']
-        assert 'trio' not in result.unresolved
+        assert resolved == ['msgspec', 'trio']
+        assert by_target(results)['trio'] == [f'{SITE}/trio/_abc.py']
+
+    def test_missing(self, fs):
+        """A common name that is not installed answers a result without sources."""
+        make_dist(fs, 'trio', ['trio/_abc.py'])
+        results = collect(Scope().common_tier(SITE, dist_infos(SITE), set()))
+        missing = [result.target for result in results if not result.sources]
+        # Every other name of COMMON_DISTS, numpy first
+        assert missing[:2] == ['numpy', 'scipy']
+        assert 'trio' not in missing
 
     def test_covered_skipped(self, fs):
         """A distribution an earlier tier resolved is not listed again."""
         make_dist(fs, 'trio', ['trio/_abc.py'])
-        result = common_tier(SITE, dist_infos(SITE), {'trio'})
-        assert result.sources == []
-        assert 'trio' not in result.resolved
-        assert 'trio' not in result.unresolved
+        covered = {'trio'}
+        results = collect(Scope().common_tier(SITE, dist_infos(SITE), covered))
+        assert 'trio' not in [result.target for result in results]
+        assert covered == {'trio'}
+
+    def test_one_result_per_name(self, fs):
+        """Every name of the list answers exactly one result."""
+        make_dist(fs, 'trio', ['trio/_abc.py'])
+        results = collect(Scope().common_tier(SITE, dist_infos(SITE), set()))
+        targets = [result.target for result in results]
+        assert len(targets) == len(set(targets))
+        assert [result.tier for result in results] == [TIER_COMMON] * len(results)
 
 
 class TestLockTier:
     """
-    Tests for lock_tier().
+    Tests for Scope.lock_tier(): one result per pin of a requirements file.
     """
 
     def test_pins(self, fs):
-        """The pins of the requirements file give their sources."""
+        """The pins the declaration names give their sources."""
         make_dist(fs, 'trio', ['trio/_abc.py'])
         make_dist(fs, 'attrs', ['attr/__init__.py'])
         write(
@@ -300,32 +390,114 @@ class TestLockTier:
             'trio==0.22.0\n'
             'notinstalled==1.0.0\n',
         )
-        result = lock_tier(SITE, dist_infos(SITE), '/mod/requirements.txt')
-        assert result.sources == [f'{SITE}/attr/__init__.py', f'{SITE}/trio/_abc.py']
-        assert result.resolved == ['attrs', 'trio']
-        assert result.unresolved == ['notinstalled']
+        results = collect(Scope().lock_tier(SITE, dist_infos(SITE), FakeMod('mod', '/mod'), set()))
+        assert by_target(results) == {
+            'attrs': [f'{SITE}/attr/__init__.py'],
+            'trio': [f'{SITE}/trio/_abc.py'],
+            'notinstalled': [],
+        }
+        assert {result.tier for result in results} == {TIER_LOCK}
 
     def test_covered_skipped(self, fs):
         """A pin an earlier tier resolved is not listed again."""
         make_dist(fs, 'trio', ['trio/_abc.py'])
         write(fs, '/mod/requirements.txt', 'trio==0.22.0\n')
-        result = lock_tier(SITE, dist_infos(SITE), '/mod/requirements.txt', {'trio'})
-        assert (result.sources, result.resolved, result.unresolved) == ([], [], [])
+        covered = {'trio'}
+        assert collect(Scope().lock_tier(SITE, dist_infos(SITE), FakeMod('mod', '/mod'), covered)) == []
+        assert covered == {'trio'}
+
+    def test_the_declared_location(self, fs):
+        """The requirements file is the one the declaration names."""
+        make_dist(fs, 'trio', ['trio/_abc.py'])
+        write(fs, '/mod/deps/pins.txt', 'trio==0.22.0\n')
+        # The default location holds nothing, the declared one does
+        mod = FakeMod('mod', '/mod', requirements_file='deps/pins.txt')
+        results = collect(Scope().lock_tier(SITE, dist_infos(SITE), mod, set()))
+        assert by_target(results) == {'trio': [f'{SITE}/trio/_abc.py']}
 
     def test_missing_file(self, fs):
-        """A tree without a requirements file has no lock tier."""
+        """A mod whose file does not exist answers the file, without sources."""
         fs.create_dir('/mod')
-        result = lock_tier(SITE, dist_infos(SITE), '/mod/requirements.txt')
-        assert (result.sources, result.resolved, result.unresolved) == ([], [], [])
+        results = collect(Scope().lock_tier(SITE, dist_infos(SITE), FakeMod('mod', '/mod'), set()))
+        assert [(result.target, result.sources) for result in results] == [
+            ('/mod/requirements.txt', []),
+        ]
 
 
-class TestSitePackagesTiers:
+class TestModTier:
     """
-    Tests for site_packages_tiers().
+    Tests for Scope.mod_tier(): one result per mod, read from its ledger.
     """
 
-    def test_order_and_dedup(self, fs):
-        """The tiers run pack, common, lock, and no distribution twice."""
+    def test_index_pack(self, fs):
+        """The ledger of the project tree lists the sources of the mod."""
+        write(fs, '/mod/.pack/index.pack', MODULE_PACK)
+        scope = Scope(site_packages=[], mods={'mod': FakeMod('mod', '/mod')})
+        results = collect(scope.mod_tier())
+        assert len(results) == 1
+        assert results[0].tier == TIER_MOD
+        assert results[0].target == 'mod'
+        assert sorted(results[0].sources) == ['/mod/module/deep/nested.py', '/mod/module/main.py']
+        assert results[0].folder == '/mod'
+
+    def test_without_a_ledger_the_mod_is_skipped(self, fs):
+        """A tree without a ledger is never walked."""
+        write(fs, '/mod/module/main.py', b'VALUE = 1\n')
+        write(fs, '/mod/module/deep/nested.py', b'VALUE = 2\n')
+        scope = Scope(site_packages=[], mods={'mod': FakeMod('mod', '/mod')})
+        results = collect(scope.mod_tier())
+        # The files are on the disk, and the run does not warm them: a
+        # walk of a development tree would warm thousands of them
+        assert [(result.target, result.sources) for result in results] == [('mod', [])]
+
+    def test_one_result_per_mod(self, fs):
+        """Every mod of the loader answers its own result, in its order."""
+        for name in ('alas', 'other'):
+            write(fs, f'/{name}/.pack/index.pack', MODULE_PACK)
+        scope = Scope(site_packages=[], mods={
+            'alas': FakeMod('alas', '/alas'),
+            'other': FakeMod('other', '/other'),
+        })
+        results = collect(scope.mod_tier())
+        assert [(result.target, result.folder) for result in results] == [
+            ('alas', '/alas'),
+            ('other', '/other'),
+        ]
+
+
+class TestScopeResult:
+    """
+    Tests for ScopeResult.
+    """
+
+    def test_defaults(self):
+        """A result without sources holds its own empty list."""
+        first = ScopeResult(TIER_MOD, 'mod')
+        second = ScopeResult(TIER_MOD, 'other')
+        first.sources.append('/mod/main.py')
+        assert second.sources == []
+        assert (second.tier, second.target, second.folder) == (TIER_MOD, 'other', '')
+
+    def test_none_sources(self):
+        """A unit without a file list answers no source, not None."""
+        assert ScopeResult(TIER_MOD, 'mod', None).sources == []
+
+
+class TestTiers:
+    """
+    Tests for Scope.tiers(): the whole scope, tier by tier.
+    """
+
+    def make(self, fs):
+        """
+        A site-packages with one distribution per tier and one mod.
+
+        Args:
+            fs (FakeFilesystem): The fake filesystem
+
+        Returns:
+            Scope: The scope of the tests
+        """
         write(fs, f'{SITE}/.pack/trio/index.pack', TRIO_PACK)
         make_dist(fs, 'msgspec', ['msgspec/__init__.py'])
         # attrs is a common name, sympy is only a pin of the file
@@ -335,77 +507,82 @@ class TestSitePackagesTiers:
             fs, '/mod/requirements.txt',
             'trio==0.22.0\nmsgspec==0.18.0\nattrs==23.1.0\nsympy==1.12\n',
         )
-
-        tiers = site_packages_tiers(SITE, '/mod/requirements.txt')
-        assert [name for name, _ in tiers] == ['pack', 'common', 'lock']
-        pack, common, lock = (scope for _, scope in tiers)
-        assert pack.sources == [f'{SITE}/trio/_abc.py']
-        assert common.sources == [f'{SITE}/msgspec/__init__.py', f'{SITE}/attr/__init__.py']
-        # trio, msgspec and attrs are covered by the earlier tiers
-        assert lock.sources == [f'{SITE}/sympy/__init__.py']
-
-    def test_no_requirements_file(self, fs):
-        """Without a requirements file the lock tier is empty."""
-        fs.create_dir(SITE)
-        tiers = site_packages_tiers(SITE)
-        assert [name for name, _ in tiers] == ['pack', 'common', 'lock']
-        assert tiers[2][1].sources == []
-
-
-class TestModSources:
-    """
-    Tests for mod_sources().
-    """
-
-    def test_index_pack(self, fs):
-        """The ledger of the project tree lists the sources of the mod."""
         write(fs, '/mod/.pack/index.pack', MODULE_PACK)
-        assert sorted(mod_sources('/mod')) == ['/mod/module/deep/nested.py', '/mod/module/main.py']
+        return Scope(site_packages=[SITE], mods={'mod': FakeMod('mod', '/mod')})
 
-    def test_walk_fallback(self, fs):
-        """A tree without a ledger is read from the disk."""
-        write(fs, '/mod/module/main.py', b'VALUE = 1\n')
-        write(fs, '/mod/module/deep/nested.py', b'VALUE = 2\n')
-        write(fs, '/mod/module/data.json', b'{}\n')
-        assert sorted(mod_sources('/mod')) == ['/mod/module/deep/nested.py', '/mod/module/main.py']
+    def test_order_and_dedup(self, fs):
+        """The tiers run pack, common, lock, mod, and no name twice."""
+        results = collect(self.make(fs).tiers())
+        tiers = [result.tier for result in results]
+        # A tier is answered in one run of the generator, the caller
+        # groups them with itertools.groupby
+        assert tiers == sorted(tiers, key=[TIER_PACK, TIER_COMMON, TIER_LOCK, TIER_MOD].index)
+
+        resolved = {
+            tier: [result.target for result in results if result.tier == tier and result.sources]
+            for tier in (TIER_PACK, TIER_COMMON, TIER_LOCK, TIER_MOD)
+        }
+        assert resolved[TIER_PACK] == ['trio']
+        # attrs is a common name, and msgspec is a pin that is installed
+        assert resolved[TIER_COMMON] == ['msgspec', 'attrs']
+        # trio, msgspec and attrs are covered by the earlier tiers
+        assert resolved[TIER_LOCK] == ['sympy']
+        assert resolved[TIER_MOD] == ['mod']
+
+    def test_the_covered_set_is_shared(self, fs):
+        """A name is answered by the first tier that resolves it only."""
+        results = collect(self.make(fs).tiers())
+        resolved = [result.target for result in results if result.sources]
+        assert len(resolved) == len(set(resolved))
+        assert sorted(resolved) == ['attrs', 'mod', 'msgspec', 'sympy', 'trio']
+
+    def test_every_unit_is_answered(self, fs):
+        """A unit the scope could not list answers an empty result."""
+        results = collect(self.make(fs).tiers())
+        # numpy is in COMMON_DISTS and is not installed
+        assert [result.target for result in results if result.tier == TIER_COMMON].count('numpy') == 1
+        assert by_target([result for result in results if result.tier == TIER_COMMON])['numpy'] == []
 
 
-class TestWalkSources:
+class TestScope:
     """
-    Tests for walk_sources().
+    Tests for Scope: the folders and the mods of a run.
     """
 
-    def test_skip(self, fs):
-        """The frozen folders of the tree are never entered."""
-        write(fs, '/mod/module/main.py', b'')
-        for folder in ('__pycache__', '.git', '.pack', 'node_modules', 'site-packages', 'dist-packages'):
-            write(fs, f'/mod/{folder}/ignored.py', b'')
-        assert walk_sources('/mod') == ['/mod/module/main.py']
+    def test_injected(self):
+        """The folders and the mods of a caller are the ones of the run."""
+        mods = {'mod': FakeMod('mod', '/mod')}
+        scope = Scope(site_packages=['/site'], mods=mods)
+        assert scope.site_packages == ['/site']
+        assert scope.mods is mods
 
-    def test_missing_folder(self, fs):
-        """A folder that does not exist holds no source."""
-        assert walk_sources('/missing') == []
+    def test_cached(self):
+        """The folders are answered once, however often they are read."""
+        scope = Scope(site_packages=['/site'])
+        assert scope.site_packages is scope.site_packages
 
-    def test_environment_skipped(self, fs, monkeypatch):
-        """The environment of the interpreter is never walked."""
-        write(fs, '/mod/module/main.py', b'')
-        write(fs, '/mod/toolkit/Lib/os.py', b'')
-        write(fs, '/mod/toolkit/Lib/site-packages/trio/_abc.py', b'')
-        monkeypatch.setattr(scope_module, 'environment_dirs', lambda: frozenset({'/mod/toolkit'}))
-        assert walk_sources('/mod') == ['/mod/module/main.py']
+    def test_the_environment_of_the_interpreter(self):
+        """Without folders of its own, the scope reads the interpreter."""
+        assert Scope().site_packages == site_packages_dirs()
 
+    def test_the_mods_of_the_project_root(self, fs, monkeypatch):
+        """Without mods of its own, the scope reads the loader of the backend."""
+        from alasio.ext import env
 
-class TestScopeResult:
-    """
-    Tests for ScopeResult.
-    """
+        monkeypatch.setattr(env, 'PROJECT_ROOT', '/mod')
+        # The loader is built on the project root of the run, so the scope
+        # answers what a backend bound to that root answers
+        built = []
 
-    def test_defaults(self):
-        """An empty scope has three empty lists, not shared ones."""
-        first = ScopeResult()
-        second = ScopeResult()
-        first.sources.append('/mod/main.py')
-        assert (second.sources, second.resolved, second.unresolved) == ([], [], [])
+        class FakeLoader:
+            def __init__(self, root):
+                built.append(root)
+                self.dict_mod = {'mod': FakeMod('mod', '/mod')}
+
+        monkeypatch.setattr('alasio.config.entry.loader.ModLoader', FakeLoader, raising=True)
+        scope = Scope(site_packages=[])
+        assert list(scope.mods) == ['mod']
+        assert built == ['/mod']
 
 
 class TestSitePackagesDirs:

@@ -144,9 +144,11 @@ def stale_sources(py_files):
     """
     Find the source files whose bytecode cache has to be compiled.
 
-    This is the serial reference of the module, and the scope of a dry
-    run: it walks the generator of plan() on the calling thread, so it
-    reads every answer itself rather than handing the work to a pool.
+    This is the serial reference of the module: it walks the generator of
+    plan() on the calling thread, so it reads every answer itself rather
+    than handing the work to a pool. A run does not use it, the runner
+    maps ensure() over the batches of the plan; the tests compare what the
+    pool finds with what this answers.
 
     Only the pyc file of the running interpreter is looked at, the pyc
     files of the other interpreters and of the manual optimizations are

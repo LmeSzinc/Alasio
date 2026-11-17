@@ -2,7 +2,7 @@
 Warm the bytecode cache of the environment and the mods, the entry of the
 warmup subprocess.
 
-    python -m alasio.deploy.pyc_warm [--root DIR] [--mod DIR]... [--json] [--dry-run]
+    python -m alasio.deploy.pyc_warm [--root DIR] [--json] [--dry-run]
 
 The subprocess runs the interpreter of the release, so the cache tag, the
 magic number and the optimization level of the pyc files it writes are the
@@ -12,11 +12,10 @@ without -O never reads, and the run is wasted. It may be started with -B,
 py_compile writes the files regardless, but the sources the run imports
 itself, e.g. the scope reader, are then compiled every time.
 
-The scope is read from the arguments, nothing is guessed from the layout of
-a release: --root is the project root, the tree that holds requirements.txt
-and the default mod, --mod names the other mod trees, the first one being
-the mod the worker will run. The site-packages folders are the ones of the
-running interpreter, see scope.site_packages_dirs().
+The scope is the environment of the running interpreter and the mods of
+the project root: --root sets the project root, which is where the mods of
+the release declare themselves, see Scope.mods. Nothing is guessed from
+the layout of a release.
 
 The output is meant for the parent process. The report is logged rather
 than printed, and a run started by the backend passes --json, where the
@@ -32,10 +31,7 @@ import json
 import os
 import sys
 
-from alasio.deploy.pyc_warm.runner import warm
-from alasio.deploy.pyc_warm.scope import LOCK_FILE
-from alasio.ext.path.calc import joinpath
-from alasio.logger import logger
+from alasio.ext import env
 
 # Prefix of the lines on stderr, the channel a machine does not read
 TAG = '[pyc_warm]'
@@ -59,13 +55,8 @@ def main(argv=None):
     )
     parser.add_argument(
         '--root', default=None, metavar='DIR',
-        help='project root: the tree that holds the requirements file and the '
-             'default mod, defaults to the working directory',
-    )
-    parser.add_argument(
-        '--mod', action='append', default=None, metavar='DIR',
-        help='root of a mod tree to warm, repeatable, the self mod first, '
-             'defaults to the project root',
+        help='project root, the tree the mods declare themselves in, '
+             'defaults to the working directory',
     )
     parser.add_argument(
         '--json', action='store_true',
@@ -81,6 +72,16 @@ def main(argv=None):
     if not os.path.isdir(root):
         print(f'{TAG} root does not exist: {root}', file=sys.stderr)
         return 1
+    # The mods of the run are read through the loader of the backend, which
+    # is bound to the project root when it is imported: the root is set
+    # before anything of the scope is imported
+    env.set_project_root(root)
+
+    # The imports are local: the scope reads the loader of the backend, and
+    # the loader must see the project root set above
+    from alasio.deploy.pyc_warm.runner import warm
+    from alasio.deploy.pyc_warm.scope import Scope
+    from alasio.logger import logger
 
     if sys.flags.optimize:
         print(
@@ -99,12 +100,7 @@ def main(argv=None):
         # must stay closed, the backend opens it at the same moment
         logger.mute(all=True)
 
-    mods = args.mod if args.mod else [root]
-    report = warm(
-        mod_roots=[mod for mod in mods],
-        requirements_file=joinpath(root, LOCK_FILE),
-        dry_run=args.dry_run,
-    )
+    report = warm(Scope(), dry_run=args.dry_run)
     logger.info(f'total   : {report.seconds:.2f}s')
     if args.json:
         print(json.dumps(report.to_dict(), ensure_ascii=False))
