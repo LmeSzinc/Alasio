@@ -20,7 +20,7 @@ from alasio.deploy_dev.metadata import (
 )
 from alasio.testing.filesystem import fs  # noqa: F401
 from tests.deploy_dev.metadata.conftest import INDEX_URL
-from tests.deploy_dev.pypi_mock import MockIndex, make_wheel
+from tests.deploy_dev.pypi_mock import METADATA_SUFFIX, MockIndex, make_wheel
 
 pytestmark = [
     pytest.mark.parallel,
@@ -90,6 +90,22 @@ class TestPep658:
 
         assert meta.mode == MODE_RANGE
         assert meta.requires_dist == ['sniffio']
+        await provider.aclose()
+
+    @pytest.mark.trio
+    async def test_a_missing_metadata_file_is_asked_once_per_version(self, index):
+        """The wheels of a version declare the same dependencies: ask one."""
+        index.serve_metadata = False
+        for tag in ('cp38-cp38-win_amd64', 'cp38-cp38-manylinux2014_x86_64',
+                    'cp39-cp39-win_amd64', 'py3-none-any'):
+            index.add('demo', '1.0', tag=tag, metadata='true')
+        provider = MetadataProvider(client=index.client)
+
+        meta = await provider.metadata('demo', '1.0', INDEX_URL)
+
+        assert meta.mode == MODE_RANGE
+        missing = [url for url in index.requests if url.endswith(METADATA_SUFFIX)]
+        assert len(missing) == 1
         await provider.aclose()
 
 

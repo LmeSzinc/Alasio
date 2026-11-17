@@ -737,9 +737,13 @@ class MetadataProvider:
             try:
                 text = await self._read_metadata_file(source, url, candidate.link.metadata_hashes)
             except _ModeUnavailable as e:
+                # the wheels of one version declare the same dependencies, so a
+                # host that serves no metadata file for one of them serves none
+                # for the others: the next wheel is not asked, which is what
+                # keeps a broken index from costing one request per platform
                 logger.debug(
                     f'The wheel "{candidate.filename}" serves no metadata file: {e}')
-                continue
+                break
             self._open_budget()
             return DistributionMetadata(
                 name=normalized, version=version, source=page.url,
