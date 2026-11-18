@@ -31,6 +31,11 @@ function text(element: HTMLElement): string {
   return (element.textContent ?? "").replace(/\s+/g, " ").trim();
 }
 
+/** classes of the badge the pill renders. */
+function badgeClasses(element: HTMLElement): string[] {
+  return (element.querySelector("[data-slot='badge']")?.className ?? "").split(/\s+/);
+}
+
 describe("ModVersion", () => {
   afterEach(() => {
     for (const component of mounted) void unmount(component);
@@ -63,10 +68,22 @@ describe("ModVersion", () => {
     expect(target.querySelector("[title]")?.getAttribute("title")).toBe(SHA);
   });
 
+  it("reserves the mono font for the versions", async () => {
+    const unavailable = await mountPill({ version: "" });
+    const tagged = await mountPill({ version: SHA });
+
+    // the fallback is a sentence, in every language: a mono family resolves
+    // its CJK glyphs through another primary font, whose baseline sits higher
+    // inside the fixed height of the badge, so the sentence would not line up
+    // with the pills beside it
+    expect(badgeClasses(unavailable)).not.toContain("font-mono");
+    expect(badgeClasses(tagged)).toContain("font-mono");
+  });
+
   it("lets the class of the caller win over the sizing of the badge", async () => {
     const target = await mountPill({ version: SHA, class: "max-w-[50%] shrink" });
 
-    const classes = (target.querySelector("[data-slot='badge']")?.className ?? "").split(/\s+/);
+    const classes = badgeClasses(target);
     expect(classes).toContain("max-w-[50%]");
     // the caller may let the pill shrink (the toast gives it half of a row):
     // its class must win over the shrink-0 of the badge itself

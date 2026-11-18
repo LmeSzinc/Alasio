@@ -22,7 +22,13 @@
   let { version, class: className }: $props = $props();
 </script>
 
-<Badge variant="default" class={cn("bg-blue-600 font-mono", className)} title={version}>
+<!-- The mono font is for the versions only: "Local version unavailable" is
+     prose, and prose may be Chinese, which a mono family resolves through a
+     different primary font. The badge has a fixed height, so the baseline of
+     the text comes from that primary font, and the CJK glyphs of a sentence
+     set in mono sit a little higher than the same glyphs of the pills beside
+     it. -->
+<Badge variant="default" class={cn("bg-blue-600", version && "font-mono", className)} title={version}>
   <!-- the text sits in an element of its own: a caller may constrain the
        badge to a part of its row, and the truncation needs a box inside the
        inline-flex to act on -->
