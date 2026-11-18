@@ -1,56 +1,27 @@
 <script lang="ts">
   import { cn } from "$lib/utils";
+  import FitText from "./FitText.svelte";
 
-  interface Props {
+  /**
+   * The config name of the scheduler, in the largest of three sizes that fits.
+   *
+   * The name is a user string of any length, so the row cannot give it a fixed
+   * size: it takes the width the row leaves, and the text steps down from
+   * `text-lg` to `text-base` to `text-sm`. Only when even `text-sm` does not fit
+   * on one line does the name wrap, and then in two lines with `wrap-break-word`
+   * (a name may be one long token, e.g. a config id).
+   */
+  type Props = {
     text: string;
     class?: string;
-  }
+  };
   let { text = "", class: className = "" }: Props = $props();
 
-  let containerRef = $state<HTMLElement | null>(null);
-  let probeLgRef = $state<HTMLElement | null>(null);
-  let probeBaseRef = $state<HTMLElement | null>(null);
-  type Mode = "lg" | "base" | "sm-clamp";
-  let mode = $state<Mode>("base");
-
-  $effect(() => {
-    // track on config name changes
-    text;
-    containerRef;
-    probeLgRef;
-    probeBaseRef;
-    if (!containerRef || !probeLgRef || !probeBaseRef) return;
-    const cw = containerRef.clientWidth;
-    if (probeLgRef.scrollWidth <= cw) {
-      mode = "lg";
-    } else if (probeBaseRef.scrollWidth <= cw) {
-      mode = "base";
-    } else {
-      mode = "sm-clamp";
-    }
-  });
+  const SIZES = [
+    { probe: "text-lg font-semibold", display: "truncate text-lg font-semibold" },
+    { probe: "text-base font-semibold", display: "truncate text-base font-semibold" },
+    { probe: "text-sm font-semibold", display: "text-sm font-semibold" },
+  ];
 </script>
 
-<div bind:this={containerRef} class={cn("relative overflow-hidden", className)}>
-  <!-- Probe text-lg -->
-  <span
-    bind:this={probeLgRef}
-    class="invisible absolute top-0 left-0 text-lg font-semibold whitespace-nowrap"
-    aria-hidden="true">{text}</span
-  >
-  <!-- Probe text-base -->
-  <span
-    bind:this={probeBaseRef}
-    class="invisible absolute top-0 left-0 text-base font-semibold whitespace-nowrap"
-    aria-hidden="true">{text}</span
-  >
-  <!-- Display -->
-  <span
-    class={cn(
-      "font-semibold",
-      mode === "lg" && "truncate text-lg",
-      mode === "base" && "truncate text-base",
-      mode === "sm-clamp" && "line-clamp-2 text-sm wrap-break-word",
-    )}>{text}</span
-  >
-</div>
+<FitText {text} sizes={SIZES} class={cn("min-w-0", className)} />

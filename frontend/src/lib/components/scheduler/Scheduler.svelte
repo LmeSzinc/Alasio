@@ -13,6 +13,7 @@
   import ActionSchedulerStop from "./ActionSchedulerStop.svelte";
   import ActionStart from "./ActionStart.svelte";
   import ConfigName from "./ConfigName.svelte";
+  import FitText from "./FitText.svelte";
   import NextRun from "./NextRun.svelte";
   import type { RestartPhase, TaskItem } from "./types";
 
@@ -58,6 +59,29 @@
   }: $props = $props();
 
   const isSheet = $derived(mode === "sheet");
+
+  // The label of the worker state, as the status at the right of the title row
+  const statusText = $derived.by(() => {
+    if (workerState === "idle") return t.Scheduler.Idle();
+    if (workerState === "starting") return t.Scheduler.Starting();
+    if (workerState === "running") return t.Scheduler.Running();
+    if (workerState === "disconnected") return t.Scheduler.Disconnected();
+    if (workerState === "error") return t.Scheduler.Error();
+    if (workerState === "scheduler-stopping") return t.Scheduler.SchedulerStopping();
+    if (workerState === "scheduler-waiting") return t.Scheduler.SchedulerWaiting();
+    if (workerState === "killing") return t.Scheduler.Killing();
+    if (workerState === "force-killing") return t.Scheduler.ForceKilling();
+    if (workerState === "restarting") return t.Scheduler.Restarting();
+    if (workerState === "updating") return t.Scheduler.Updating();
+    if (workerState === "resuming") return t.Scheduler.Resuming();
+    return workerState;
+  });
+  // Status sizes, largest first: the label steps down to text-xs when it does
+  // not fit the reserve at text-sm
+  const STATUS_SIZES = [
+    { probe: "text-sm", display: "text-sm" },
+    { probe: "text-xs", display: "text-xs" },
+  ];
 
   const displayState = useWorkerState(() => workerState);
   const isRunning = $derived(taskRunning && displayState.value !== "idle");
@@ -194,28 +218,26 @@
          different lengths line up on the right instead of moving the name. The
          reserve is the width this text had while the name was fixed at 120px:
          a 240px card, minus its two 12px paddings (216), minus the 1px pl-0.25
-         and the 4px gap of this row, minus those 120px, i.e. 91px. Longer
-         labels are cut with an ellipsis, as they were before. -->
-    <span
+         and the 4px gap of this row, minus those 120px, i.e. 90px.
+         The text steps down to text-xs when the label does not fit at text-sm
+         (the same mechanism the config name uses), so no label has to be cut:
+         "Desconectado" is 90px at text-sm and 77px at text-xs. A label that
+         still does not fit at text-xs wraps at its spaces into a second line,
+         and one that would need a third line ends in an ellipsis, so the 48px
+         title row can never grow.
+         A narrow sheet hands 10px of the reserve to the config name. The
+         smaller box is where the step down pays off: at 80px "Desconectado"
+         and "Disconnected" fit on one line at text-xs, while every label of
+         every locale stays within two lines. The breakpoint is the sheet's own
+         width (the sheet is the container `sheet`). -->
+    <div
       class={cn(
-        "w-[91px] shrink-0 truncate text-right text-sm font-semibold",
+        "w-22.5 shrink-0 text-right @max-[360px]/sheet:w-20",
         workerState === "error" ? "text-destructive" : "text-primary",
       )}
     >
-      {#if workerState === "idle"}{t.Scheduler.Idle()}
-      {:else if workerState === "starting"}{t.Scheduler.Starting()}
-      {:else if workerState === "running"}{t.Scheduler.Running()}
-      {:else if workerState === "disconnected"}{t.Scheduler.Disconnected()}
-      {:else if workerState === "error"}{t.Scheduler.Error()}
-      {:else if workerState === "scheduler-stopping"}{t.Scheduler.SchedulerStopping()}
-      {:else if workerState === "scheduler-waiting"}{t.Scheduler.SchedulerWaiting()}
-      {:else if workerState === "killing"}{t.Scheduler.Killing()}
-      {:else if workerState === "force-killing"}{t.Scheduler.ForceKilling()}
-      {:else if workerState === "restarting"}{t.Scheduler.Restarting()}
-      {:else if workerState === "updating"}{t.Scheduler.Updating()}
-      {:else if workerState === "resuming"}{t.Scheduler.Resuming()}
-      {:else}{workerState}{/if}
-    </span>
+      <FitText text={statusText} sizes={STATUS_SIZES} textClass="font-semibold" />
+    </div>
   </div>
 
   <hr class="mb-1" />
