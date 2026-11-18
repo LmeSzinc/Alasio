@@ -12,19 +12,92 @@
     class?: string;
   };
   let { data: logData, class: className }: Props = $props();
+  let logCard: HTMLDivElement | null = $state(null);
   let logContainer: HTMLDivElement | null = $state(null);
+  let lineProbe: HTMLPreElement | null = $state(null);
   let isInitial = $state(true);
+
+  /** Gap kept between the log and the card's top and bottom edges, in px */
+  const EDGE_GAP = 10;
+
+  /** Whether the card was fitted to whole lines at least once */
+  let fitted = false;
+
+  /**
+   * Scroll to the end of the log.
+   *
+   * An offset past the end is clamped to the end, so this reaches the newest
+   * entry without reading the layout: a batch of a thousand entries would
+   * otherwise force the layout early, in the middle of the update.
+   *
+   * Args:
+   *     view (HTMLDivElement): The scroll area viewport
+   */
+  function scrollToEnd(view: HTMLDivElement) {
+    view.scrollTop = Number.MAX_SAFE_INTEGER;
+    view.scrollLeft = 0;
+  }
+
+  /**
+   * Fit the scrolling area to a whole number of log lines.
+   *
+   * The log is read from the bottom, and every entry is a whole number of line
+   * boxes tall with no padding of its own (see LogData.svelte), so a viewport of
+   * a whole number of lines puts both of its edges on a line boundary: the
+   * bottom edge ends the last line and the top edge starts one, instead of
+   * cutting the glyphs off a line.
+   *
+   * The card is rarely a whole number of lines tall, so the rest of the last
+   * line is split between the two edge gaps. The gaps stay even at any card
+   * height, and the leftover pixels are part of the gap rather than content, so
+   * the newest entry stays the last thing the log can reach.
+   *
+   * Called on a card resize and on a change of the line height, not on a new
+   * entry: a new entry changes the content, never the geometry.
+   */
+  function fitLines() {
+    const card = logCard;
+    const probe = lineProbe;
+    if (!card || !probe) {
+      return;
+    }
+    const pitch = probe.getBoundingClientRect().height;
+    if (!(pitch > 0)) {
+      return;
+    }
+    // The card's own height does not depend on the gaps it carries, so it is the
+    // one stable reference for the fit
+    const bounds = getComputedStyle(card);
+    const borders = (parseFloat(bounds.borderTopWidth) || 0) + (parseFloat(bounds.borderBottomWidth) || 0);
+    const room = card.getBoundingClientRect().height - borders - 2 * EDGE_GAP;
+    if (!(room > 0)) {
+      return;
+    }
+    const rest = room >= pitch ? room % pitch : 0;
+    const gap = `${EDGE_GAP + rest / 2}px`;
+    if (card.style.paddingTop !== gap) {
+      card.style.paddingTop = gap;
+    }
+    if (card.style.paddingBottom !== gap) {
+      card.style.paddingBottom = gap;
+    }
+    fitted = true;
+  }
 
   // auto scroll on data changes
   let scrollRAF: number | null = null;
   function scrollToBottom() {
     scrollRAF = null;
-    if (logContainer) {
-      logContainer.scrollTop = logContainer.scrollHeight;
-      logContainer.scrollLeft = 0;
-      if (isInitial && logData && logData.length > 0) {
-        isInitial = false;
-      }
+    if (!logContainer) {
+      return;
+    }
+    if (!fitted) {
+      // The first batch can arrive before the resize observer reports the card
+      fitLines();
+    }
+    scrollToEnd(logContainer);
+    if (isInitial && logData && logData.length > 0) {
+      isInitial = false;
     }
   }
   $effect(() => {
@@ -34,24 +107,68 @@
       scrollRAF = requestAnimationFrame(scrollToBottom);
     }
   });
+  // The layout resizes the card (a window resize, a card shown or hidden next to
+  // it) and a font change resizes the line, and both move the geometry. Watching
+  // the card's border box and the line probe covers exactly those two cases: the
+  // gaps live in the card's padding, so fitting them does not resize the border
+  // box and the observer settles instead of looping.
+  $effect(() => {
+    const card = logCard;
+    const probe = lineProbe;
+    const view = logContainer;
+    if (!card || !probe || !view) {
+      return;
+    }
+    const observer = new ResizeObserver(() => {
+      fitLines();
+      // A narrower card re-wraps the messages, so the pixel offset of the old
+      // position means nothing any more; the log follows the newest entry, which
+      // is also where a resize leaves it
+      scrollToEnd(view);
+    });
+    observer.observe(card, { box: "border-box" });
+    observer.observe(probe);
+    return () => observer.disconnect();
+  });
 </script>
 
-<ScrollArea
-  class={cn("bg-card neushadow group @container relative h-full max-h-screen w-full rounded-lg px-2.5 py-4", className)}
-  orientation="both"
-  bind:viewportRef={logContainer}
+<div
+  bind:this={logCard}
+  data-slot="log-card"
+  class={cn("bg-card neushadow group @container relative h-full max-h-screen w-full rounded-lg px-2.5", className)}
 >
-  <div class={cn("flex flex-col", isInitial && logData && logData.length > 0 && "invisible")}>
-    {#if logData && logData.length > 0}
-      {#each logData as log (log)}
-        <LogData {...log} />
-      {/each}
-    {:else}
-      <div class="flex w-full items-start justify-center">
-        <span class="text-muted-foreground text-sm italic">{t.Overview.LogEmpty()}</span>
-      </div>
-    {/if}
-  </div>
+  <!--
+    One row of the log typography, out of the flow and invisible: its height is
+    one row of the log, measured on the spot. It has to carry the same classes as
+    an entry (see LogData.svelte) or the two disagree by a fraction of a row. The
+    row is measured rather than computed: a computed line-height is reported in
+    whole pixels while the box the layout produces can be a fraction less, and a
+    fraction per row adds up to a cut line over a thousand entries. The probe
+    does not depend on the entries either -- the log may be empty, and its first
+    message may wrap.
+  -->
+  <pre
+    bind:this={lineProbe}
+    data-slot="log-line-probe"
+    aria-hidden="true"
+    class="pointer-events-none invisible absolute top-0 left-0 font-mono text-xs leading-[1.125rem]">|</pre>
+  <ScrollArea class="h-full w-full" orientation="both" bind:viewportRef={logContainer}>
+    <!--
+      No vertical padding: an entry has to stay a whole number of line boxes
+      tall for the log to land on the line grid (see fitLines).
+    -->
+    <div data-slot="log-content" class={cn("flex flex-col", isInitial && logData && logData.length > 0 && "invisible")}>
+      {#if logData && logData.length > 0}
+        {#each logData as log (log)}
+          <LogData {...log} />
+        {/each}
+      {:else}
+        <div class="flex w-full items-start justify-center">
+          <span class="text-muted-foreground text-sm italic">{t.Overview.LogEmpty()}</span>
+        </div>
+      {/if}
+    </div>
+  </ScrollArea>
   <Button
     onclick={scrollToBottom}
     class="bg-card absolute top-4 right-4 z-10 opacity-0 transition-opacity group-hover:opacity-100"
@@ -60,4 +177,4 @@
   >
     <ArrowDownToLine />
   </Button>
-</ScrollArea>
+</div>

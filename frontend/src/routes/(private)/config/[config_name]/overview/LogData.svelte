@@ -41,7 +41,12 @@
 <div
   class={cn(
     "hover:bg-muted/50 hover:shadow-muted-foreground/15 hover:shadow-[inset_0_1px_0_0_currentColor,inset_0_-1px_0_0_currentColor]",
-    "block max-w-[calc(100cqw)] min-w-[calc(100cqw)] px-1 py-0.25 font-mono text-xs",
+    // Breathing room around the text comes from the line height (`text-xs` is
+    // 1rem, a row is 1.125rem here), not from vertical padding. Padding adds the
+    // same 2px to an entry of any line count, which walks every entry off the
+    // row grid the log viewer fits its viewport to; the line height keeps every
+    // entry a whole number of rows (see LogDisplay.svelte).
+    "block max-w-[calc(100cqw)] min-w-[calc(100cqw)] px-1 font-mono text-xs leading-[1.125rem]",
     levelClass,
   )}
 >
@@ -58,5 +63,6 @@
   {/if}
 </div>
 {#if exception}
-  <pre class="w-fit px-1 font-mono text-xs whitespace-pre">{exception}</pre>
+  <!-- Same row as an entry: the same leading, and the default pre margin removed -->
+  <pre class="m-0 w-fit px-1 font-mono text-xs leading-[1.125rem] whitespace-pre">{exception}</pre>
 {/if}
