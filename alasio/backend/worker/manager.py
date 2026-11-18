@@ -53,6 +53,11 @@ WORKER_STATE_ALLOWS = ['running', 'scheduler-waiting']
 WORKER_RUNNING_STATE = ['running', 'scheduler-stopping', 'scheduler-waiting']
 # Worker is considered stopped if state in the followings
 WORKER_STOPPED_STATE = ['idle', 'error', 'restarting', 'updating', 'resuming']
+# States in which the manager itself asked the worker to stop: the user's stop,
+# and the kill escalation. The worker ends because it was told to, so an exit
+# status that could not be read is not evidence of a failure of the worker
+# (see WorkerManager._handle_disconnect)
+WORKER_STOPPING_STATE = ['scheduler-stopping', 'killing', 'force-killing']
 # The park states (a subset of WORKER_STATE): the state a worker stopped by
 # a maintenance flow in progress is parked in -- 'updating' for an update /
 # daily / startup flow, 'restarting' for a restart flow. The flow in flight
@@ -353,6 +358,19 @@ class WorkerManager(metaclass=Singleton):
 
         exitcode = process.exitcode if process else None
         self.on_worker_info(state.config, f'[WorkerManager] Worker stopped: {state.config}, exitcode={exitcode}')
+        if exitcode is None:
+            # A process that is gone always has an exit status in the kernel, but
+            # only its parent can claim it and only once. multiprocessing reads the
+            # code out of the Popen object of the process and answers None whenever
+            # it has none to hand out: no value yet, and equally a status that was
+            # claimed elsewhere before the manager asked for it (its poll() drops
+            # the OSError of waitpid()). None therefore says nothing about why the
+            # worker ended, it only says the manager did not observe it -- record
+            # what is known, the decision below takes the rest of the entry into
+            # account.
+            logger.warning(f'[WorkerManager] No exit status to read for "{state.config}": '
+                           f'pid={process.pid if process else None}, '
+                           f'alive={bool(process and process.is_alive())}, state={state_before}')
 
         with self._lock:
             state.conn = None
@@ -368,6 +386,13 @@ class WorkerManager(metaclass=Singleton):
                 # new backend simply retries the same way a manual start does
                 self._set_state(state, self.park_state)
             elif exitcode == 0:
+                self._set_state(state, 'idle')
+            elif exitcode is None and state_before in WORKER_STOPPING_STATE:
+                # The manager asked the worker to stop and the worker is gone. The
+                # exit status was never observed (see the warning above), so there
+                # is no evidence of a failure: the entry ends as the clean stop it
+                # was asked to be, instead of an error the user would be asked to
+                # look at. A status that was read and is not 0 stays a failure.
                 self._set_state(state, 'idle')
             else:
                 if state_before in ['killing', 'force-killing']:

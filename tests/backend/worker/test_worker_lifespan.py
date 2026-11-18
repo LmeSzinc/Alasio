@@ -9,7 +9,8 @@ import time
 
 import pytest
 
-from alasio.backend.worker.manager import WorkerManager, WorkerState
+from alasio.backend.worker.manager import WORKER_STOPPING_STATE, WorkerManager, WorkerState
+from alasio.logger import logger
 from alasio.testing.timeout import AssertTimeout
 from tests.backend.worker.const import *
 
@@ -536,6 +537,158 @@ class TestResourceManagement:
         assert len(manager.state) <= 1, "State leak after repeated cycles"
         assert_worker_gone([state])
         assert_recv_thread_gone([config])
+
+
+# ============================================================================
+# Disconnect Tests
+# ============================================================================
+
+class _LostStatusProcess:
+    """
+    A gone worker whose exit status can no longer be claimed
+
+    This is what the manager sees when the status of a child that already
+    exited was claimed elsewhere: multiprocessing reads the exit code out of
+    its Popen object and answers None, while is_alive() keeps answering True
+    (its poll() returns None instead of raising) and a join returns at once.
+    """
+
+    pid = 4321
+
+    def is_alive(self):
+        return True
+
+    def join(self, timeout=None):
+        return None
+
+    @property
+    def exitcode(self):
+        return None
+
+    def terminate(self):
+        pass
+
+    def kill(self):
+        pass
+
+
+class _ExitedProcess:
+    """
+    A gone worker whose exit status is still readable
+
+    Args:
+        exitcode (int): The exit code the process exited with
+    """
+
+    pid = 4322
+
+    def __init__(self, exitcode):
+        self._exitcode = exitcode
+
+    def is_alive(self):
+        return False
+
+    def join(self, timeout=None):
+        return self._exitcode
+
+    @property
+    def exitcode(self):
+        return self._exitcode
+
+    def terminate(self):
+        pass
+
+    def kill(self):
+        pass
+
+
+class TestWorkerDisconnect:
+    """How the disconnect handler reads the exit status of a gone worker"""
+
+    @staticmethod
+    def disconnect(manager, state_before, process, config, pending_restart=False):
+        """
+        Run the disconnect handler on an entry in the given state
+
+        Args:
+            manager (WorkerManager): Manager of the test
+            state_before (str): State the entry is in when its pipe breaks
+            process: Stand-in for the process of the worker
+            config (str): Config name
+            pending_restart (bool): Whether the entry is parked for a restart
+
+        Returns:
+            WorkerState: The entry, after the handler decided its state
+        """
+        state = WorkerState(mod='WorkerTestScheduler', config=config, state=state_before,
+                            pending_restart=pending_restart)
+        state.process = process
+        manager.state[config] = state
+        manager._handle_disconnect(state)
+        return state
+
+    @pytest.mark.parametrize('state_before', WORKER_STOPPING_STATE)
+    def test_a_status_that_could_not_be_read_ends_a_requested_stop_as_idle(self, manager, state_before):
+        """
+        A worker that was told to stop and is gone ends as a clean stop
+
+        The exit status of a process can only be claimed once, and the manager
+        reads it from multiprocessing, which swallows the error of a status that
+        was already claimed elsewhere (see _handle_disconnect). A status that
+        could not be read says nothing about why the worker ended, so an entry
+        the manager itself was stopping must not turn into an error.
+        """
+        state = self.disconnect(manager, state_before, _LostStatusProcess(), 'cfg_lost_status')
+
+        assert state.state == 'idle'
+        assert state.process is None
+
+    @pytest.mark.parametrize('state_before', ['starting', 'running', 'scheduler-waiting'])
+    def test_a_status_that_could_not_be_read_is_an_error_without_a_stop_request(self, manager, state_before):
+        """A worker nobody asked to stop must not pass for a clean stop"""
+        state = self.disconnect(manager, state_before, _LostStatusProcess(), 'cfg_lost_crash')
+
+        assert state.state == 'error'
+
+    def test_an_exit_code_of_zero_ends_as_idle(self, manager):
+        """A worker that exited by itself with 0 was never a failure"""
+        state = self.disconnect(manager, 'running', _ExitedProcess(0), 'cfg_exit_zero')
+
+        assert state.state == 'idle'
+
+    def test_a_crash_is_an_error_even_under_a_stop_request(self, manager):
+        """An exit status that was read and is not 0 stays a failure of the worker"""
+        state = self.disconnect(manager, 'scheduler-stopping', _ExitedProcess(1), 'cfg_crash')
+
+        assert state.state == 'error'
+
+    @pytest.mark.parametrize('park_state', ['restarting', 'updating'])
+    def test_a_pending_restart_parks_the_entry(self, manager, park_state):
+        """The restart keeps its own state, whatever the exit status says"""
+        manager.park_state = park_state
+        state = self.disconnect(manager, 'scheduler-stopping', _LostStatusProcess(), 'cfg_parked',
+                                pending_restart=True)
+
+        assert state.state == park_state
+
+    def test_the_unreadable_status_is_logged(self, manager):
+        """
+        The status that could not be read is recorded with what is known
+
+        A failing worker that is reported as a clean stop must leave the
+        evidence behind: the process, whether it still looks alive and the
+        state the entry was stopping from are what a later investigation has.
+        """
+        with logger.mock_capture_writer() as capture:
+            self.disconnect(manager, 'scheduler-stopping', _LostStatusProcess(), 'cfg_lost_status')
+
+        assert capture.concat() == """\
+INFO | [WorkerManager] Graceful killing process: "cfg_lost_status"
+INFO | [WorkerManager] Worker did not terminate, force killing process: "cfg_lost_status"
+INFO | [WorkerManager] Worker still alive after force-kill: "cfg_lost_status"
+INFO | [WorkerManager] Worker stopped: cfg_lost_status, exitcode=None
+WARNING | [WorkerManager] No exit status to read for "cfg_lost_status": pid=4321, alive=True, state=scheduler-stopping
+"""
 
 
 # ============================================================================
