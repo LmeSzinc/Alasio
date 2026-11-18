@@ -4,6 +4,7 @@ import time
 import pytest
 
 from alasio.ext.concurrent.prioritythreadpool import PriorityThreadPool
+from alasio.testing.timeout import AssertTimeout
 
 pytestmark = [
     pytest.mark.parallel,
@@ -37,38 +38,44 @@ def test_exception_handling():
 
 def test_priority_ordering():
     """
-    测试优先级排序：
-    1. 提交两个长耗时任务占满 2 个线程。
-    2. 提交一个低优先级任务 (P10) 进入队列。
-    3. 提交一个高优先级任务 (P0) 进入队列。
-    4. 当长耗时任务结束，高优先级任务应先被执行。
+    Test the priority order of a busy pool.
+
+    1. Occupy the only thread with a long job.
+    2. Enqueue a low priority job (P10).
+    3. Enqueue a high priority job (P0).
+    4. When the long job ends, the high priority job runs first.
+
+    The jobs are waited on, never slept on: a fixed delay has to cover the
+    long job plus the scheduling of two more, and a loaded runner overshoots
+    it (the CI failure this pins: the assertions ran while the last job was
+    still queued, so the results list was short).
     """
     pool = PriorityThreadPool(1)
     results = []
     lock = threading.Lock()
+    started = threading.Event()
 
-    def record_fn(name, priority, duration):
+    def record_fn(name, duration):
+        started.set()
         time.sleep(duration)
         with lock:
             results.append(name)
 
-    # 1. 占满池
-    pool.enqueue(record_fn, 10, "Blocker-1", 10, 0.5)
+    # 1. Occupy the pool, and wait for the job to really run before queueing
+    # the others: enqueued against a free thread, the low priority job could
+    # be taken first and the order would prove nothing
+    blocker = pool.enqueue(record_fn, 10, "Blocker-1", 0.5)
+    assert started.wait(timeout=5), 'the blocker did not start'
 
-    # 确保任务已经开始执行
-    time.sleep(0.2)
+    # 2. Low priority first, then high priority
+    low = pool.enqueue(record_fn, 10, "Low-Priority", 0)
+    high = pool.enqueue(record_fn, 0, "High-Priority", 0)
 
-    # 2. 提交低优，再提交高优
-    pool.enqueue(record_fn, 10, "Low-Priority", 10, 0)
-    pool.enqueue(record_fn, 0, "High-Priority", 0, 0)
+    # 3. Wait for every job to finish, then assert the whole order
+    for job in (blocker, high, low):
+        job.get()
 
-    # 等待所有任务完成
-    time.sleep(0.4)
-
-    # 排序结果应该是：Blockers -> High-Priority -> Low-Priority
-    # 注意：两个 Blocker 顺序不固定，但 High 必须在 Low 之前
-    assert results[1] == "High-Priority"
-    assert results[2] == "Low-Priority"
+    assert results == ["Blocker-1", "High-Priority", "Low-Priority"]
 
 
 def test_dynamic_scaling_up():
@@ -81,11 +88,14 @@ def test_dynamic_scaling_up():
     pool.enqueue(task_fn, 10, n=2, duration=0.5)
     pool.enqueue(task_fn, 10, n=3, duration=0.5)
 
-    # 给一点点时间让线程启动
-    time.sleep(0.1)
-
-    # 检查当前活跃线程数
-    assert len(pool.all_workers) == 3
+    # Wait for the pool to reach the three workers instead of assuming the
+    # threads are up after a fixed delay: a worker that finds the queue empty
+    # between two enqueues registers itself idle, and the next enqueue then
+    # reuses it -- the pool settles at three a moment later, or never (which
+    # is what the assertion is about)
+    for _ in AssertTimeout(2.0):
+        with _:
+            assert len(pool.all_workers) == 3
     # 检查 idle 情况，此时因为都在 sleep，应该都不在 idle 字典里
     assert len(pool.idle_workers) == 0
 
@@ -100,14 +110,16 @@ def test_scale_down():
     job = pool.enqueue(task_fn, 10, n=1, duration=0.1)
     job.get()
 
-    # 此时应有 1 个线程在 idle 中
-    assert len(pool.idle_workers) == 1
+    # The result of the job is delivered before the worker loops back and
+    # registers itself idle, so the pool is polled rather than read once
+    for _ in AssertTimeout(2.0):
+        with _:
+            assert len(pool.idle_workers) == 1
 
-    # 等待超过 IDLE_TIMEOUT
-    time.sleep(1.0)
-
-    # 线程应该已经自动退出
-    assert len(pool.idle_workers) == 0
+    # The worker retires by itself once its timed wait expires
+    for _ in AssertTimeout(3.0):
+        with _:
+            assert len(pool.idle_workers) == 0
 
 
 def test_race_condition_stress():
