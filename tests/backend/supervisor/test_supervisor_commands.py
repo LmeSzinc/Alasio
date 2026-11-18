@@ -1,3 +1,4 @@
+import io
 import multiprocessing
 import os
 import signal
@@ -34,59 +35,6 @@ with PRINT_LOCK:
     except KeyboardInterrupt:
         # inside the lock on purpose: the handler must not need it released
         print('HANDLED', flush=True)
-"""
-
-# The shape of the CI failure reproduced on purpose: a supervisor blocked in a
-# buffered stdout write when the signal arrives. CPython runs the handler from
-# PyErr_CheckSignals() inside that write, with the stdout buffer lock held by
-# the same thread. The child probes for exactly that state (an empty write to
-# the same buffer raises "reentrant call inside" only for the owning thread)
-# and reports it before it calls the real handler, so the test cannot pass
-# without having reproduced the hazard.
-SIGNAL_DURING_A_BLOCKED_WRITE = r"""
-import io
-import os
-import signal
-import sys
-
-from alasio.backend.supervisor import Supervisor
-
-# Replace the inherited stdout with a block-buffered writer: an unbuffered
-# stdout (python -u, an inherited PYTHONUNBUFFERED) would hold no buffer lock
-# while writing, and the hazard would not exist
-sys.stdout = io.TextIOWrapper(io.BufferedWriter(io.FileIO(1, 'w')), encoding='utf-8')
-out = sys.stdout
-control = os.fdopen(os.dup(2), 'wb', 0)
-supervisor = Supervisor()
-
-
-def handler(signum, frame):
-    try:
-        # Re-enters the buffer only for the thread that owns it: this is how
-        # the child knows the signal was delivered inside a buffered write
-        out.buffer.write(b'')
-        where = b'OUTSIDE'
-    except RuntimeError:
-        where = b'INSIDE'
-    control.write(where + b'\n')
-    if where == b'INSIDE':
-        supervisor.handle_sigint(signum, frame)
-
-
-signal.signal(signal.SIGINT, handler)
-control.write(b'READY\n')
-
-try:
-    # Far more than a pipe holds: the write blocks until the parent reads,
-    # and the parent never reads
-    out.write('x' * 4_000_000)
-    out.flush()
-except KeyboardInterrupt:
-    control.write(b'HANDLED\n')
-
-control.write(b'EXIT\n')
-# Skip the interpreter's stdout flush: it would block on the same full pipe
-os._exit(0)
 """
 
 
@@ -1294,55 +1242,98 @@ class TestRunSignalHandlers:
         assert lines[-1].endswith('Supervisor loop ended')
 
 
+class _BufferedWriteHook(io.RawIOBase):
+    """
+    A raw stream that runs a callable from inside one of its writes.
+
+    That is where a POSIX signal handler lands when the signal interrupts a
+    buffered stdout write: CPython calls the handler from PyErr_CheckSignals()
+    while the BufferedWriter that is flushing still holds its lock in the same
+    thread. Entering the state through the raw stream keeps it on the calling
+    thread, so the case needs no signal that has to interrupt a syscall.
+    """
+
+    def __init__(self):
+        super().__init__()
+        # Callable that runs inside the next write, once
+        self.hook = None
+        # Bytes handed to the stream, to tell whether the handler flushed any
+        self.written = 0
+
+    def writable(self):
+        return True
+
+    def write(self, data):
+        self.written += len(data)
+        if self.hook is not None:
+            hook, self.hook = self.hook, None
+            hook()
+        return len(data)
+
+
 class TestSignalDuringStdoutWrite:
     """
     The signal context that broke the shutdown on py3.8 / ubuntu-22.04.
 
     A supervisor blocked in a buffered stdout write takes the signal inside
-    that write: CPython calls the handler from PyErr_CheckSignals() with the
-    buffer lock held by the same thread, so a handler that prints raises
-    "reentrant call inside <_io.BufferedWriter>" in place of the
-    KeyboardInterrupt it meant to raise. The child of this test reports where
-    the signal landed, so a passing run proves the handler survived exactly
-    that state.
+    that write: CPython calls the handler from PyErr_CheckSignals() while the
+    thread still holds the buffer lock, so a handler that writes there
+    re-enters the buffer and raises "reentrant call inside
+    <_io.BufferedWriter>" in place of the KeyboardInterrupt it meant to raise.
+    A signal inside a blocked write only exists on POSIX, and whether the write
+    is interrupted at all is up to the runner, so the state is entered here on
+    the calling thread instead: the raw stream of this stdout runs the handler
+    while the buffer is being flushed.
     """
 
-    @pytest.mark.skipif(
-        sys.platform == 'win32',
-        reason='needs a POSIX signal delivered inside a blocked write',
-    )
-    def test_a_signal_inside_a_blocked_stdout_write_is_still_handled(self):
-        proc = subprocess.Popen(
-            [sys.executable, '-c', SIGNAL_DURING_A_BLOCKED_WRITE],
-            cwd=str(env.ALASIO_ROOT),
-            env=child_env(),
-            # stdout is never read: the child stays blocked in write()
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-        # A child that never gets a signal in the right place must not hang
-        # the suite
-        watchdog = threading.Timer(30, proc.kill)
-        watchdog.start()
-        try:
-            assert proc.stderr.readline() == b'READY\n'
-            # The first signal can land between READY and the blocked write;
-            # the child reports that, the write blocks right after, so the
-            # next signal lands inside it
-            where = b''
-            for _ in range(20):
-                proc.send_signal(signal.SIGINT)
-                where = proc.stderr.readline()
-                if where != b'OUTSIDE\n':
-                    break
-            assert where == b'INSIDE\n', where
-            assert proc.stderr.readline() == b'HANDLED\n'
-            assert proc.wait(timeout=10) == 0
-        finally:
-            watchdog.cancel()
-            if proc.poll() is None:
-                proc.kill()
-            proc.wait()
+    def test_a_handler_inside_a_buffered_write_still_raises(self, monkeypatch):
+        """
+        The interrupt survives the write it lands in.
+
+        An empty write to the same buffer raises only for the thread that owns
+        its lock, so reaching that error from the handler proves the state is
+        the one a signal inside a buffered write creates. The handler must then
+        raise KeyboardInterrupt without writing anything: a write of its own
+        would re-enter the buffer the interrupted thread holds, and the
+        shutdown would be lost to that error.
+        """
+
+        class CountingStdout(io.TextIOWrapper):
+            """A stdout that counts its writes, a short one never raises by itself"""
+
+            def __init__(self, buffer):
+                super().__init__(buffer, encoding='utf-8')
+                self.writes = 0
+
+            def write(self, text):
+                self.writes += 1
+                return super().write(text)
+
+        raw = _BufferedWriteHook()
+        buffer = io.BufferedWriter(raw)
+        stdout = CountingStdout(buffer)
+        monkeypatch.setattr(sys, 'stdout', stdout)
+        supervisor = Supervisor()
+        observed = {}
+
+        def hook():
+            with pytest.raises(RuntimeError, match='reentrant call'):
+                buffer.write(b'')
+            observed['written'] = raw.written
+            observed['writes'] = stdout.writes
+            supervisor.handle_sigint(signal.SIGINT, None)
+
+        raw.hook = hook
+
+        with pytest.raises(KeyboardInterrupt):
+            stdout.write('x' * (2 * io.DEFAULT_BUFFER_SIZE))
+
+        # The handler wrote nothing and flushed nothing: the bytes and the
+        # writes the stdout had when the handler ran are all it ever saw
+        assert stdout.writes == observed['writes']
+        assert raw.written == observed['written']
+        assert supervisor.sigint_count == 1
+        assert supervisor._signal_name() == 'SIGINT'
 
 
 class TestHandleBackendMessage:
