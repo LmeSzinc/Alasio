@@ -138,9 +138,9 @@ class RemoteBase(Struct, forbid_unknown_fields=True):
     ]})] = 4
     GraceSeconds: Annotated[int, Meta(ge=1, extra={"help": [
         "Retire grace of this remote in seconds",
-        "The cleaner deletes a retired key only after the generation it belongs to",
-        "has stopped being the current one for this long -- that is, after the",
-        "barrier replacing it has been in place for this long",
+        "A generation the mirror no longer serves is kept for this long after the",
+        "generation replacing it was published, so a client that read the old",
+        "barrier a moment before the switch can finish its update",
         "Must cover the CDN TTL plus one full client update",
         "Must be positive: 0 would delete a generation a client may still be reading",
     ]})] = 3600

@@ -24,7 +24,6 @@ from alasio.deploy_dev.pack_server.publish.common import (
     BARRIER_KEY, MANIFEST_KEY, IncompleteStore, PublishError, PublishRunError
 )
 from alasio.deploy_dev.pack_server.publish.local import LocalGeneration, UploadItem
-from alasio.deploy_dev.pack_server.publish.retire import MAX_RETENTION
 from alasio.deploy_dev.pack_server.publish.upload import UploadRun
 from alasio.deploy_dev.store import Capabilities, ObjectInfo, ObjectListing
 from alasio.ext.path import PathStr
@@ -114,7 +113,7 @@ class OpaqueStore:
 
 
 def make_upload(generation, store, remote_name='cos-main', concurrency=1, local=None,
-                grace=3600, max_retention=MAX_RETENTION):
+                grace=3600):
     """
     A ChannelUpload of the workspace of the test.
 
@@ -130,16 +129,13 @@ def make_upload(generation, store, remote_name='cos-main', concurrency=1, local=
             the same channel. Defaults to None: one of its own
         grace (int): Seconds a replaced generation keeps its grace. Defaults to
             3600, the default of the config
-        max_retention (int): Upper bound of the retire wait. Defaults to
-            MAX_RETENTION, the constant of the tool
 
     Returns:
         ChannelUpload: The upload, ready to run
     """
     local = local or LocalGeneration(generation.workspace, concurrency)
     return ChannelUpload(
-        local, store, remote_name=remote_name, concurrency=concurrency,
-        grace=grace, max_retention=max_retention)
+        local, store, remote_name=remote_name, concurrency=concurrency, grace=grace)
 
 
 def keys_of(service):
@@ -342,27 +338,6 @@ class TestGrace:
                 ChannelUpload(
                     LocalGeneration(workspace.workspace), store,
                     remote_name='cos-main', grace=grace)
-        finally:
-            await store.aclose()
-
-    @pytest.mark.trio
-    async def test_the_retention_is_a_constant_of_the_tool(self, workspace, credentials_env):
-        """The disk bound is not a setting: the channel takes it from the module.
-
-        The grace is the operator's window; how long a superseded generation may
-        sit on the disk before it is waste is not. A grace larger than the
-        constant raises the bound, so the two rules never contradict each other.
-        """
-        store = make_store(make_remote(), CHANNEL, credentials_env)
-        try:
-            def upload(**kwargs):
-                return ChannelUpload(
-                    LocalGeneration(workspace.workspace), store, remote_name='cos-main', **kwargs)
-
-            assert upload().max_retention == MAX_RETENTION
-            assert upload(grace=MAX_RETENTION * 2).max_retention == MAX_RETENTION * 2
-            assert upload(grace=3600, max_retention=60).max_retention == 3600
-            assert upload(grace=3600, max_retention=7200).max_retention == 7200
         finally:
             await store.aclose()
 
@@ -1042,7 +1017,7 @@ INFO |   PUT 5/5 {pretty_size(manifest_size).rjust(SIZE_COLUMN)} manifest.json  
 
 
 class TestRetire:
-    """The keys of the previous generation go, once the barrier is old enough."""
+    """The generations the mirror no longer serves go, once their window is over."""
 
     @pytest.mark.trio
     async def test_the_old_generation_is_retired(self, workspace, credentials_env):
@@ -1111,12 +1086,12 @@ class TestRetire:
             not in credentials_env.objects
 
     @pytest.mark.trio
-    async def test_a_young_barrier_retires_nothing(self, workspace, credentials_env):
+    async def test_a_young_contract_retires_nothing(self, workspace, credentials_env):
         """A generation that stopped being current less than the grace ago stays.
 
-        The run writes nothing here (the version did not change), so the barrier
-        of the listing is the current one: its age is how long the keys the
-        manifest does not list have been out of service.
+        The run that switches the version replaces a generation that is still
+        inside the window of the clients that read it, and the run after it finds
+        a contract younger than the grace: neither may retire anything.
         """
         store = make_store(make_remote(), CHANNEL, credentials_env)
         try:
@@ -1132,30 +1107,190 @@ class TestRetire:
         assert f'{PREFIX}packrepo/aaaaaaaa/full.pack' in credentials_env.objects
 
     @pytest.mark.trio
-    async def test_a_key_past_the_retention_is_retired_within_the_grace(
+    async def test_the_generation_being_replaced_is_kept_however_old_it_is(
             self, workspace, credentials_env):
-        """The retention deletes an old key while the replacement keeps its grace.
+        """A generation that served for a week still belongs to the clients reading it.
 
-        A channel whose content changes on every run rewrites its barrier on
-        every run, so the grace alone would never let a generation go: the
-        retention is the upper bound of that wait.
+        The packs of a generation are written before the barrier that makes them
+        current, so a channel that publishes once a week hands the switching run
+        objects older than any window the tool could pick. Their generation stops
+        being served with this run, not a week ago: the contract of the mirror is
+        the clock, and the files it names stay whatever their own age says.
         """
         store = make_store(make_remote(), CHANNEL, credentials_env)
         try:
             await make_upload(workspace, store).run()
-            # only the key of the replaced generation is old: the barrier this
-            # run writes is new, so the grace still protects the other keys
-            age_objects(
-                credentials_env, 7200 + 1, keys=[f'{PREFIX}packrepo/aaaaaaaa/full.pack'])
+            # every object of the mirror is far older than the grace
+            age_objects(credentials_env, 86400 * 7)
+            workspace.write('bbbbbbbb', {
+                'packrepo/bbbbbbbb/full.pack': b'full pack of bbbbbbbb',
+                'wheel/msgspec/0.22.0/msgspec-0.22.0-py3-none-any.whl': b'wheel bytes',
+            })
+            switched = await make_upload(workspace, store).run()
+        finally:
+            await store.aclose()
+        assert switched.status == STATUS_OK
+        assert switched.deleted == 0
+        assert f'{PREFIX}packrepo/aaaaaaaa/full.pack' in credentials_env.objects
+        assert f'{PREFIX}packrepo/aaaaaaaa/update_00000001.pack' in credentials_env.objects
+
+    @pytest.mark.trio
+    async def test_a_switching_run_retires_what_both_contracts_dropped(
+            self, workspace, credentials_env):
+        """The generation the mirror served stays, the ones before it go.
+
+        A channel that publishes slower than the grace runs this way only: the
+        contract of the listing is older than the grace, so every generation it
+        does not name is out of its window, while the one it does name is only
+        now being replaced and keeps the grace of this run.
+        """
+        store = make_store(make_remote(), CHANNEL, credentials_env)
+        try:
+            await make_upload(workspace, store).run()
+            age_objects(credentials_env, 3600 + 1)
+            workspace.write('bbbbbbbb', {
+                'packrepo/bbbbbbbb/full.pack': b'full pack of bbbbbbbb',
+                'wheel/msgspec/0.22.0/msgspec-0.22.0-py3-none-any.whl': b'wheel bytes',
+            })
+            assert (await make_upload(workspace, store).run()).deleted == 0
+
+            age_objects(credentials_env, 3600 + 1)
+            workspace.write('cccccccc', {
+                'packrepo/cccccccc/full.pack': b'full pack of cccccccc',
+                'wheel/msgspec/0.22.0/msgspec-0.22.0-py3-none-any.whl': b'wheel bytes',
+            })
+            result = await make_upload(workspace, store).run()
+        finally:
+            await store.aclose()
+        assert result.status == STATUS_OK
+        assert result.deleted == 2
+        assert f'{PREFIX}packrepo/aaaaaaaa/full.pack' not in credentials_env.objects
+        assert f'{PREFIX}packrepo/aaaaaaaa/update_00000001.pack' not in credentials_env.objects
+        # the generation the contract of the mirror named is kept
+        assert f'{PREFIX}packrepo/bbbbbbbb/full.pack' in credentials_env.objects
+        assert f'{PREFIX}packrepo/cccccccc/full.pack' in credentials_env.objects
+
+    @pytest.mark.trio
+    async def test_the_generations_of_a_burst_accumulate_and_drain(
+            self, workspace, credentials_env):
+        """Releases faster than the grace pile up, and one round retires them all.
+
+        Every run replaces a generation that is still inside the window of the
+        one before it, so none of them may go yet. The run that finds a contract
+        older than the grace retires all of them at once, which is what keeps a
+        channel that published in a burst from growing for good.
+        """
+        store = make_store(make_remote(), CHANNEL, credentials_env)
+        try:
+            await make_upload(workspace, store).run()
+            for version in ('bbbbbbbb', 'cccccccc'):
+                workspace.write(version, {
+                    f'packrepo/{version}/full.pack': f'full pack of {version}'.encode(),
+                    'wheel/msgspec/0.22.0/msgspec-0.22.0-py3-none-any.whl': b'wheel bytes',
+                })
+                assert (await make_upload(workspace, store).run()).deleted == 0
+
+            # the three generations are on the mirror, and the contract of the
+            # last one has been in place for the grace
+            assert f'{PREFIX}packrepo/aaaaaaaa/full.pack' in credentials_env.objects
+            assert f'{PREFIX}packrepo/bbbbbbbb/full.pack' in credentials_env.objects
+            age_objects(credentials_env, 3600 + 1)
+            result = await make_upload(workspace, store).run()
+        finally:
+            await store.aclose()
+        assert result.status == STATUS_OK
+        assert result.deleted == 3
+        assert f'{PREFIX}packrepo/aaaaaaaa/full.pack' not in credentials_env.objects
+        assert f'{PREFIX}packrepo/aaaaaaaa/update_00000001.pack' not in credentials_env.objects
+        assert f'{PREFIX}packrepo/bbbbbbbb/full.pack' not in credentials_env.objects
+        assert f'{PREFIX}packrepo/cccccccc/full.pack' in credentials_env.objects
+
+    @pytest.mark.trio
+    async def test_a_mirror_mid_switch_is_left_alone(self, workspace, credentials_env):
+        """A barrier no contract names serves a generation nobody can list.
+
+        A run that switched the barrier and failed before it wrote the contract
+        leaves the mirror serving a generation whose file list is not on it. The
+        next run publishes both records again, but its listing is still that
+        state: nothing may be deleted from a generation whose files are unknown.
+        """
+        store = make_store(make_remote(), CHANNEL, credentials_env)
+        try:
+            await make_upload(workspace, store).run()
+            # a newer barrier than the contract beside it: the switch of a run
+            # that never published its contract
+            credentials_env.objects[f'{PREFIX}{BARRIER_KEY}'].last_modified = 1.0
+            credentials_env.objects[f'{PREFIX}{MANIFEST_KEY}'].last_modified = 0.0
             workspace.write('bbbbbbbb', {
                 'packrepo/bbbbbbbb/full.pack': b'full pack of bbbbbbbb',
             })
-            result = await make_upload(workspace, store, max_retention=7200).run()
+            result = await make_upload(workspace, store).run()
         finally:
             await store.aclose()
-        assert result.deleted == 1
-        assert f'{PREFIX}packrepo/aaaaaaaa/full.pack' not in credentials_env.objects
-        assert f'{PREFIX}packrepo/aaaaaaaa/update_00000001.pack' in credentials_env.objects
+        assert result.status == STATUS_OK
+        assert result.deleted == 0
+        assert f'{PREFIX}packrepo/aaaaaaaa/full.pack' in credentials_env.objects
+
+    @pytest.mark.trio
+    async def test_a_steady_run_reads_no_contract(self, workspace, credentials_env):
+        """A run that publishes nothing costs no request for the previous one.
+
+        The listing already proves the contract of the mirror is the contract of
+        this run: same ETag, so the same files, and the generation before it is
+        the only one to retire.
+        """
+        store = make_store(make_remote(), CHANNEL, credentials_env)
+        try:
+            await make_upload(workspace, store).run()
+            age_objects(credentials_env, 3600 + 1)
+            before = len(credentials_env.requests)
+            result = await make_upload(workspace, store).run()
+        finally:
+            await store.aclose()
+        assert result.status == STATUS_OK
+        assert [request for request in requests_of(credentials_env)[before:]
+                if request == ('GET', MANIFEST_KEY)] == []
+
+    @pytest.mark.trio
+    async def test_a_new_generation_reads_the_contract_once(
+            self, workspace, credentials_env):
+        """The previous generation is read once, before anything is written.
+
+        The read has to come before the first PUT: the contract that names the
+        generation being replaced is the one the mirror holds now, and this run
+        overwrites it at the end.
+        """
+        store = make_store(make_remote(), CHANNEL, credentials_env)
+        try:
+            await make_upload(workspace, store).run()
+            workspace.write('bbbbbbbb', {
+                'packrepo/bbbbbbbb/full.pack': b'full pack of bbbbbbbb',
+                'wheel/msgspec/0.22.0/msgspec-0.22.0-py3-none-any.whl': b'wheel bytes',
+            })
+            before = len(credentials_env.requests)
+            result = await make_upload(workspace, store).run()
+        finally:
+            await store.aclose()
+        assert result.status == STATUS_OK
+        requests = requests_of(credentials_env)[before:]
+        reads = [index for index, request in enumerate(requests)
+                 if request == ('GET', MANIFEST_KEY)]
+        puts = [index for index, request in enumerate(requests) if request[0] == 'PUT']
+        assert len(reads) == 1
+        assert reads[0] < puts[0]
+
+    @pytest.mark.trio
+    async def test_a_first_publication_reads_no_contract(self, workspace, credentials_env):
+        """An empty mirror has no previous generation to read or to keep."""
+        store = make_store(make_remote(), CHANNEL, credentials_env)
+        try:
+            result = await make_upload(workspace, store).run()
+        finally:
+            await store.aclose()
+        assert result.status == STATUS_OK
+        assert result.deleted == 0
+        assert [request for request in requests_of(credentials_env)
+                if request == ('GET', MANIFEST_KEY)] == []
 
     @pytest.mark.trio
     async def test_a_failed_delete_is_not_counted_as_freed(self, workspace, credentials_env):

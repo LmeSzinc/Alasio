@@ -33,6 +33,7 @@ Every request carries a numbered line, `PUT 3/12 wheel/x.whl 1.18MB`, so a long
 run reads as a progress report instead of a silence that ends in a summary.
 """
 
+import hashlib
 import itertools
 
 import msgspec
@@ -44,12 +45,13 @@ except NameError:  # python 3.8 / 3.9
     from exceptiongroup import BaseExceptionGroup
 
 from alasio.base.pretty import pretty_size
+from alasio.deploy_dev.pack_server.manifest import Manifest
 from alasio.deploy_dev.pack_server.model import ConfigError
 from alasio.deploy_dev.pack_server.publish.common import (
     BARRIER_KEY, MANIFEST_KEY, MAX_CONCURRENCY, MD5_HEX, IncompleteStore, PublishError, SkipChannel, cache_control,
     content_type, find_skip, first_failure, require_capabilities
 )
-from alasio.deploy_dev.pack_server.publish.retire import MAX_RETENTION, DeletePlan, SkipRetire, build_delete_plan
+from alasio.deploy_dev.pack_server.publish.retire import DeletePlan, SkipRetire, build_delete_plan
 from alasio.deploy_dev.store import BucketNotFound, ObjectNotFound, StoreError
 from alasio.ext.cache import cached_property_async_trio_lock
 from alasio.logger import logger
@@ -217,8 +219,7 @@ class ChannelUpload:
         result = await upload.run()
     """
 
-    def __init__(self, local, store, remote_name='', grace=3600, concurrency=MAX_CONCURRENCY,
-                 max_retention=MAX_RETENTION):
+    def __init__(self, local, store, remote_name='', grace=3600, concurrency=MAX_CONCURRENCY):
         """
         Args:
             local (LocalGeneration): The generation to publish, shared by every
@@ -228,9 +229,6 @@ class ChannelUpload:
             grace (int): Seconds a generation must have stopped being the
                 current one before its keys are removed. Defaults to 3600
             concurrency (int): Requests in flight at once, 1 to MAX_CONCURRENCY
-            max_retention (int): Upper bound of the wait, raised to the grace
-                when it is smaller. Defaults to MAX_RETENTION: the disk is
-                bounded by the tool, not by the config
         """
         self.local = local
         self.store = store
@@ -243,10 +241,6 @@ class ChannelUpload:
             # as well; this is the same refusal for a caller that builds the
             # channel by hand
             raise ValueError(f'grace must be > 0 seconds, got {self.grace}')
-        # The retention is the upper bound of the wait, so a value below the
-        # grace would undercut the floor: it is raised to it instead of being
-        # refused, the two rules cannot contradict each other
-        self.max_retention = max(int(max_retention), self.grace)
         # the cap is a property of the tool, not of the config: more requests in
         # flight than this only move the queue into the connection pool
         self.concurrency = max(1, min(int(concurrency), MAX_CONCURRENCY))
@@ -673,18 +667,24 @@ class ChannelUpload:
             self.local.start(nursery)
             listing = await self.snapshot
 
-            # the barrier is decided before the content starts: whether this run
-            # switches the version changes what is written, and the total of the
-            # progress report follows from both.
+            # the barrier and the contract are decided before the content
+            # starts: whether this run switches the version changes what is
+            # written, and the total of the progress report follows from both.
+            # The state of the contract is kept: it tells whether the mirror
+            # still serves the generation of this run, which decides whether
+            # the previous contract has to be read at all
             barrier_item = await self.local.item(BARRIER_KEY)
             contract_item = await self.local.item(MANIFEST_KEY)
             barrier_outcome = compare(barrier_item, await self._resolve(barrier_item))
-            contract_outcome = compare(contract_item, await self._resolve(contract_item))
+            contract_state = await self._resolve(contract_item)
+            contract_outcome = compare(contract_item, contract_state)
             write_barrier = barrier_outcome == COMPARE_UPLOAD
             write_contract = contract_outcome == COMPARE_UPLOAD
 
             content = [relative for relative in manifest.files if relative != BARRIER_KEY]
-            retire = self._retire_plan(manifest, listing, write_barrier)
+            previous = await self._previous_files(
+                listing, contract_state, contract_item, manifest)
+            retire = self._retire_plan(manifest, listing, previous)
             # the report is a progress bar: the entry of a line is its position
             # in the report, taken when the line is about to be written. A
             # position fixed by the queue would print out of order, because the
@@ -739,49 +739,122 @@ class ChannelUpload:
                 deleted=len(deleted_keys), deleted_size=deleted_size,
             )
 
-    def _retire_plan(self, manifest, listing, write_barrier):
+    async def _previous_files(self, listing, state, item, manifest):
         """
-        The keys of the mirror the generation being published no longer serves.
+        The files the mirror served when the run started, or None when unknown.
+
+        The retirement keeps the generation the mirror serves in addition to the
+        one this run publishes: it is the generation the clients that read the
+        barrier a moment ago are still downloading. Its file list is the
+        contract of the mirror, and the run did not read it yet.
+
+        The listing already answers it when it proves the remote contract is the
+        contract of this run: a run that changes nothing has nothing to retire
+        but the generation before, and that one is covered by both lists being
+        equal. So the read costs one request on a run that publishes a new
+        generation, and nothing at all on a run that publishes nothing.
+
+        A contract the run cannot read is not an error: the caller retires
+        nothing this round, because a generation whose file list is unknown must
+        not be deleted from. Only a store that cannot answer at all is one.
+
+        Args:
+            listing (ObjectListing): The mirror as it was before the writes
+            state (RemoteState): What the mirror reports about the contract
+            item (UploadItem): The local contract
+            manifest (Manifest): The generation this run publishes
+
+        Returns:
+            list[str]: The published files of the contract of the mirror, None
+                when the mirror holds none, or not one this run can trust
+
+        Raises:
+            StoreError: If the read fails
+        """
+        if state.md5 and state.md5 == item.md5:
+            # the ETag of the listing proves the mirror holds this very file, so
+            # its files are the files of this run
+            return manifest.files
+        if MANIFEST_KEY not in listing.objects:
+            # a first publication: no generation is being replaced
+            return None
+        try:
+            async with self.remote_limit:
+                # a line of its own, unnumbered: the plan it feeds is what the
+                # report counts, and the entries start once that is known
+                self._step('GET', MANIFEST_KEY, note='the contract of the mirror')
+                data = await self.store.get(MANIFEST_KEY)
+        except ObjectNotFound:
+            # the contract went away between the listing and the read
+            return None
+        if state.md5 and hashlib.md5(data).hexdigest() != state.md5:
+            # the contract was rewritten after the listing: the two name
+            # different generations, and neither is one this run can keep
+            logger.debug(
+                f'{self._where()}: no retire, {MANIFEST_KEY} changed between the '
+                f'listing and the read')
+            return None
+        try:
+            previous = Manifest.decode(data)
+        except msgspec.DecodeError as e:
+            logger.debug(
+                f'{self._where()}: no retire, {MANIFEST_KEY} of the mirror is not a '
+                f'manifest: {e}')
+            return None
+        if previous.channel != self.channel:
+            logger.debug(
+                f'{self._where()}: no retire, {MANIFEST_KEY} of the mirror names the '
+                f'channel "{previous.channel}"')
+            return None
+        return previous.files
+
+    def _retire_plan(self, manifest, listing, previous):
+        """
+        The keys of the mirror neither generation serves any more.
 
         The plan is built from the listing taken before the writes, so a key
-        written by this run is never a candidate. Whether those keys may go now
-        depends on when they stopped being current:
+        written by this run is never a candidate. The clock is the contract of
+        the listing, which is the current one: the generation it names stopped
+        being served when it landed, and every older generation stopped even
+        earlier.
 
-        - this run writes the barrier: the replaced generation stops being
-          current now, so its keys stay for the grace -- a client may have read
-          the old barrier a moment ago;
-        - this run writes nothing: the barrier of the listing is the current
-          one, so the keys stopped being current when it was written, and the
-          grace has run since then.
+        - the contract is younger than the grace: the generation this run
+          replaces is still inside the window of the clients that read its
+          barrier, and nothing may go;
+        - the contract is older: every generation but the one it names has been
+          out of service for the grace, and all of them go at once. A channel
+          that publishes slower than the grace keeps the previous generation
+          only, and one that published faster drains the window in one round.
 
-        A key older than the retention is retired in either case: a channel
-        whose content changes on every run would otherwise never retire
-        anything.
+        The generation the contract names is kept whatever the clock says: it
+        stops being served with this run, not when the contract landed. Its file
+        list comes from the contract of the mirror, see `_previous_files`.
 
-        A first publication has no barrier in the listing and nothing to
-        retire; a listing that lost the barrier is refused by the same rule.
+        A first publication has no contract in the listing and nothing to
+        retire; a mirror whose two records do not form one generation is
+        refused by the same rule.
 
         Args:
             manifest (Manifest): The generation that was published
             listing (ObjectListing): The mirror as it was before the writes
-            write_barrier (bool): Whether this run writes the barrier
+            previous (list[str]): The published files of the contract of the
+                mirror, None when it could not be read
 
         Returns:
             DeletePlan: The keys to delete, empty when nothing may go yet
         """
         try:
             plan = build_delete_plan(
-                manifest.files, listing, self.grace, listing.server_date, write_barrier,
-                max_retention=self.max_retention,
+                manifest.files, previous, listing, self.grace, listing.server_date,
                 capabilities_dirs=self.store.CAPABILITIES.dirs)
         except SkipRetire as e:
-            # a mirror without the barrier of its manifest is not one this run
-            # may delete from, and it is not a failure of the publication
+            # a mirror whose records do not name one generation is not one this
+            # run may delete from, and it is not a failure of the publication
             logger.debug(f'{self._where()}: no retire, {e}')
             return DeletePlan()
         if plan.within_grace and not plan.keys:
             logger.debug(
-                f'{self._where()}: no retire, the replaced generation has served less '
+                f'{self._where()}: no retire, the contract of the mirror is younger '
                 f'than the grace of {self.grace}s')
         return plan
 
