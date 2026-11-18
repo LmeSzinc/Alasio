@@ -21,11 +21,21 @@
     data: ArrayBuffer | null;
     previewMode: PreviewMode;
     workerState: WORKER_STATE;
+    /** Stretch the frame over the whole box instead of letterboxing it (object-fill) */
+    stretch?: boolean;
     onPreviewStart: () => void;
     onPreviewStop: () => void;
     onModeChange: (mode: PreviewMode) => void;
   };
-  let { class: className, config_name: _config_name, data, previewMode, workerState, onModeChange }: Props = $props();
+  let {
+    class: className,
+    config_name: _config_name,
+    data,
+    previewMode,
+    workerState,
+    stretch = false,
+    onModeChange,
+  }: Props = $props();
 
   // Derive whether preview is active (not disabled)
   const isPreviewActive = $derived(previewMode !== "disable");
@@ -160,8 +170,10 @@
   )}
 >
   <!-- Frame canvas: backing store = the frame's own size, the card box scales it through
-       CSS (object-contain, same letterboxing the <img> had) -->
-  <canvas bind:this={canvasEl} class={cn("h-full w-full rounded-md object-contain", showImage ? "block" : "hidden")}
+       CSS (object-contain, or object-fill when the box was widened to the whole column) -->
+  <canvas
+    bind:this={canvasEl}
+    class={cn("h-full w-full rounded-md", stretch ? "object-fill" : "object-contain", showImage ? "block" : "hidden")}
   ></canvas>
 
   {#if !showImage}

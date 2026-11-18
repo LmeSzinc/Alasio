@@ -11,8 +11,10 @@
   type Props = {
     class?: string;
     config_name: string;
+    /** Stretch the frame over the whole box instead of keeping its aspect ratio */
+    stretch?: boolean;
   };
-  let { class: className, config_name }: Props = $props();
+  let { class: className, config_name, stretch = false }: Props = $props();
 
   // Track whether the config's worker is running
   const workerClient = useTopic<Record<string, WORKER_STATE> | undefined>("Worker");
@@ -41,6 +43,7 @@
 <PreviewDisplay
   class={cn(className)}
   {config_name}
+  {stretch}
   data={topic.data ?? null}
   previewMode={previewMode.value}
   {workerState}
