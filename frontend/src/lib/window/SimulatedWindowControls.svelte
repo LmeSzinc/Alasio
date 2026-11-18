@@ -1,5 +1,5 @@
 <script lang="ts">
-  import Minimize2 from "@lucide/svelte/icons/minimize-2";
+  import ArrowDownToLine from "@lucide/svelte/icons/arrow-down-to-line";
   import Minus from "@lucide/svelte/icons/minus";
   import Square from "@lucide/svelte/icons/square";
   import X from "@lucide/svelte/icons/x";
@@ -27,7 +27,7 @@
   data-slot="simulated-window-controls"
 >
   <Button variant="ghost" size="icon" class="dark:hover:bg-muted" tabindex={-1}>
-    <Minimize2 class="h-4 w-4" strokeWidth={1.5} />
+    <ArrowDownToLine class="h-4 w-4" strokeWidth={1.5} />
   </Button>
   <Button variant="ghost" size="icon" class="dark:hover:bg-muted" tabindex={-1}>
     <Minus class="h-4 w-4" strokeWidth={1.5} />
