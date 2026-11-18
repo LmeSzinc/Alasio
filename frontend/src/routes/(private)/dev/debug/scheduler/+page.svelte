@@ -3,13 +3,24 @@
   import XIcon from "@lucide/svelte/icons/x";
   import Arg from "$lib/components/arg/Arg.svelte";
   import type { ArgData } from "$lib/components/arg/utils.svelte";
+  import ConfigItem from "$lib/components/aside/ConfigItem.svelte";
   import type { WORKER_STATE } from "$lib/components/aside/types";
   // Every worker state, in display order (the array the WORKER_STATE type is
   // derived from): this page can never miss a state
   import { WORKER_STATES } from "$lib/components/aside/types";
+  import type { ConfigLike } from "$lib/components/aside/types";
   import Scheduler from "$lib/components/scheduler/Scheduler.svelte";
   import type { RestartPhase, TaskItem } from "$lib/components/scheduler/types";
+  import { Button } from "$lib/components/ui/button";
   import * as Card from "$lib/components/ui/card";
+
+  // The config column of the sheet previews: fixed data so every preview shows
+  // the same column (see MockConfigColumn)
+  const MOCK_CONFIGS: ConfigLike[] = [
+    { id: 1, name: "example_mod2", mod: "alas", gid: 0, iid: 1 },
+    { id: 2, name: "alas", mod: "alas", gid: 0, iid: 2 },
+    { id: 3, name: "main", mod: "alas", gid: 0, iid: 3 },
+  ];
 
   // Restart topic phases: the phase decides which buttons a stopping or
   // parked worker gets. "none" is the empty topic (no restart in progress),
@@ -157,25 +168,57 @@
 </script>
 
 {#snippet MockCloseButton()}
-  <!-- Stands in for the close button of the mobile nav sheet: the real one is an
-       icon-sm ghost button placed at top-2.5 right-2.5 of the sheet, over the
-       nav column. The mock drawer is already the column, so the same insets
-       reproduce the same clearance. -->
-  <div
-    class="text-foreground pointer-events-none absolute top-2.5 right-2.5 z-10 flex size-8 items-center justify-center rounded-md"
+  <!-- The close button of the mobile nav sheet, rendered with the same component
+       and the same classes the real one uses (Button variant=ghost size=icon-sm
+       at top-2.5 right-2.5, moved by the sheet's closeClass), so the hover and
+       focus states match the sheet instead of being a flat icon. Only the
+       Sheet.Close wrapper is missing: it needs a Dialog context that a preview
+       has no reason to set up. -->
+  <Button
+    variant="ghost"
+    size="icon-sm"
+    class="absolute top-2.5 right-2.5 z-10 @max-[360px]/sheet:right-1"
+    onclick={() => {}}
   >
     <XIcon class="size-4" />
+    <span class="sr-only">Close</span>
+  </Button>
+{/snippet}
+
+<!-- The config column of the sheet, built from the real ConfigItem: the tiles,
+     the mod icon with its fallback and the state badge are what the app draws.
+     The data is fixed (three configs, all idle) instead of the ConfigAside that
+     reads the ConfigScan topic: a preview following the live list would change
+     under the reader and show a different column on every card. -->
+{#snippet MockConfigColumn()}
+  <div class="border-border flex w-20 shrink-0 flex-col gap-1 border-r p-1">
+    {#each MOCK_CONFIGS as config (config.id)}
+      <div class="px-1">
+        <ConfigItem {config} state="idle" />
+      </div>
+    {/each}
   </div>
 {/snippet}
 
-<!-- One drawer of the sheet previews: a column of the given width with the close
-     button over its top right corner, holding a scheduler in sheet mode. -->
-{#snippet sheetDrawer(width: number, workerState: WORKER_STATE)}
+<!-- One sheet preview: a box as wide as the sheet, with its config column and the
+     nav column beside it, holding a scheduler in sheet mode. The box is the size
+     container `sheet`, the same one the real sheet is, so the narrow breakpoint
+     (a sheet under 360px moves the close button and the title row's reserve)
+     shows up here exactly as it does in the app. -->
+{#snippet sheetDrawer(sheetWidth: number, workerState: WORKER_STATE)}
   <div class="flex flex-col gap-1">
     <div class="text-muted-foreground font-mono text-xs">{workerState}</div>
-    <div class="ring-border relative overflow-hidden rounded-md ring-1" style={`width: ${width}px`}>
+    <div
+      class="ring-border @container/sheet relative overflow-hidden rounded-md ring-1"
+      style={`width: ${sheetWidth}px`}
+    >
+      <div class="flex">
+        {@render MockConfigColumn()}
+        <div class="min-w-0 flex-1">
+          <Scheduler mode="sheet" config_name={SHEET_CONFIG_NAME} {workerState} restartPhase={null} {...SHEET_TASKS} />
+        </div>
+      </div>
       {@render MockCloseButton()}
-      <Scheduler mode="sheet" config_name={SHEET_CONFIG_NAME} {workerState} restartPhase={null} {...SHEET_TASKS} />
     </div>
   </div>
 {/snippet}
@@ -375,20 +418,20 @@
          wide as the phone leaves it (the sheet is 3/4 of the viewport, capped at
          384px, minus the 80px config column), and the drawer's close button
          floats over the top right corner of the scheduler title row. One card
-         per device size shows both ends of the range the sheet is used at: 360px
-         leaves 190px, 500px leaves 295px. The mock reproduces that column and
-         that button, so the reserved corner and the name/state split can be
-         checked without resizing the window. The ring draws the column edge
-         without a border: a border would take 2px off the width being
+         per device size shows both ends of the range the sheet is used at: a
+         360px phone leaves a sheet of 270px (190px column), a 500px phone one of
+         375px (295px column). Below 360px the sheet switches to its narrow
+         layout, so the first card previews that state. The ring draws the sheet
+         edge without a border: a border would take 2px off the width being
          previewed. -->
     <Card.Root class="neushadow border-none">
       <Card.Header>
-        <Card.Title>Sheet Mode — Narrow Drawer (360px phone, 190px column)</Card.Title>
+        <Card.Title>Sheet Mode — Narrow Sheet (360px phone: sheet 270px, column 190px)</Card.Title>
       </Card.Header>
       <Card.Content>
         <div class="flex flex-wrap items-start gap-4">
           {#each WORKER_STATES as workerState (workerState)}
-            {@render sheetDrawer(190, workerState)}
+            {@render sheetDrawer(270, workerState)}
           {/each}
         </div>
       </Card.Content>
@@ -396,12 +439,12 @@
 
     <Card.Root class="neushadow border-none">
       <Card.Header>
-        <Card.Title>Sheet Mode — Wide Drawer (500px phone, 295px column)</Card.Title>
+        <Card.Title>Sheet Mode — Wide Sheet (500px phone: sheet 375px, column 295px)</Card.Title>
       </Card.Header>
       <Card.Content>
         <div class="flex flex-wrap items-start gap-4">
           {#each WORKER_STATES as workerState (workerState)}
-            {@render sheetDrawer(295, workerState)}
+            {@render sheetDrawer(375, workerState)}
           {/each}
         </div>
       </Card.Content>

@@ -177,10 +177,16 @@
   <!-- Keep h-12 aligned with AppHeader bottom (h-12 = 48px) -->
   <!-- minor padding-left for visual compensation of title -->
   <!-- In a drawer the close button floats over the right end of this row: it
-       is 32px wide and sits 10px from the edge of the column, while the row
-       already ends 12px inside it (the card's px-3). Reserving 34px keeps the
-       right-aligned state 4px clear of the button (12 + 34 - 32 - 10). -->
-  <div class={cn("flex h-12 items-center gap-1 pl-0.25", isSheet && "pr-[34px]")}>
+       is 32px wide and sits `right` from the edge of the sheet, while the row
+       already ends 12px inside it (the card's px-3). The reserve is what keeps
+       a gap between the right-aligned state and the button:
+       gap = padding-right + 12 - 32 - right.
+       A wide drawer (right-2.5, 10px) keeps 4px (34 + 12 - 32 - 10); a narrow
+       one moves the button to 4px from the edge and closes the gap to 0
+       (24 + 12 - 32 - 4), so the reserve drops from 34px to 24px and the row
+       hands the config name 10px more. The breakpoint is the sheet's own width
+       (the sheet is the container `sheet`). -->
+  <div class={cn("flex h-12 items-center gap-1 pl-0.25", isSheet && "pr-8.5 @max-[360px]/sheet:pr-6")}>
     <!-- Config Name: takes whatever the state leaves, so a wider column shows
          more of the name (it is truncated, never wrapped past two lines) -->
     <ConfigName text={config_name} class="min-w-0 flex-1" />

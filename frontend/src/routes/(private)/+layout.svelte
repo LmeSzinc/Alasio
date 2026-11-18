@@ -118,9 +118,24 @@
          The insets follow the same rule on both sides: the painted cross is
          inset about 3.5px inside its 16px glyph box, so the default right-4
          (16px) leaves 27.3px of ink to the right edge against 26.3px above.
-         right-2.5 (10px) evens them out, 26.3px above against 25.7px right. -->
+         right-2.5 (10px) evens them out, 26.3px above against 25.7px right.
+
+         A narrow sheet moves the button further right: right-1 puts its 16px
+         glyph box on the right edge of the content below it (the card's px-3
+         keeps that at 12px from the sheet edge), so the X lines up with the end
+         of the divider and of the task rows and the title row has more room for
+         the config name (see the title row in Scheduler.svelte for the reserve).
+         The sheet is the size container `sheet`, so the breakpoint is on the
+         sheet's own width rather than on the viewport: a phone under 480px
+         leaves a sheet of 359px or less (the sheet is 3/4 of the viewport,
+         capped at 384px), which is where the name starts to be cut for no
+         reason. -->
     <Sheet.Root bind:open={isSheetOpen}>
-      <Sheet.Content side="left" closeClass="top-2.5 right-2.5" class="aside-shadow bg-card max-w-sm border-none p-0">
+      <Sheet.Content
+        side="left"
+        closeClass="top-2.5 right-2.5 @max-[360px]/sheet:right-1"
+        class="aside-shadow bg-card @container/sheet max-w-sm border-none p-0"
+      >
         <div class="flex h-full">
           <ConfigAside class="border-border border-r" />
           <!-- min-w-0 keeps the column at the width the sheet gives it: a flex
