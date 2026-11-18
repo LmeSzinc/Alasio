@@ -7,6 +7,7 @@
   let { class: className }: $Props = $props();
 </script>
 
-<div class={cn("neushadow bg-card rounded-lg p-4", className)}>
-  <h2 class="mb-6 text-2xl font-bold">Progress</h2>
-</div>
+<!-- Placeholder of the progress bar, which the backend does not report yet.
+     The box keeps its size on the overview page, so adding the bar later does
+     not reflow the preview above it. -->
+<div class={cn("neushadow bg-card rounded-lg p-4", className)}></div>
