@@ -223,7 +223,7 @@
   <!-- All Status Combinations. The grids pass restartPhase={null} ("no
        restart in progress") to stay on a deterministic baseline: the restart
        dimension is previewed by the matrix at the end of the page -->
-  <div class="flex flex-col gap-4">
+  <div class="scheduler-cards flex flex-col gap-4">
     <!-- Normal task list -->
     <Card.Root class="neushadow border-none">
       <Card.Header>
@@ -408,3 +408,34 @@
     </Card.Root>
   </div>
 </div>
+
+<style>
+  /* The page renders about a hundred schedulers, so their state icons animate
+     for nearly 200 elements at once (a spinning arc on every running task row,
+     the sway of a killing worker, the rising arrow of an updating one). While
+     such an element is painted, every frame repaints it on the main thread,
+     and a page that repaints hundreds of them per frame cannot also scroll.
+     Measured here (1400x900, a 3000px scroll in 50 steps, one frame per step):
+     2342ms with every scheduler painted against 834ms once the off-screen ones
+     are skipped, i.e. 25 fps against 60 fps.
+
+     content-visibility: auto takes a scheduler out of rendering while it is off
+     screen, and an unrendered subtree does not animate either, so the cards in
+     view keep their motion and the rest cost nothing. It is applied to the
+     scheduler and not to the card that holds it: a scheduler has a fixed
+     height, so the reserved space can be stated instead of guessed.
+
+     The value is the height of the scheduler's content box, not of the element.
+     `contain-intrinsic-size` replaces the content box, and the element's own
+     padding is added on top: the scheduler measures 168.8px and carries pb-3
+     (12px), so its content box is 156.8px and 157px is the exact estimate. 169px
+     here would reserve 181px per card and shift the list by 330px on the first
+     pass, and a value that is off by more moves it by thousands of pixels
+     (measured: 60px grows the list by 2.5k px, 320px shrinks it by 4.2k px).
+     The `auto` keyword remembers the measured height after the first render, so
+     the estimate only covers the cards that have never been rendered. */
+  .scheduler-cards :global([data-slot="scheduler"]) {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 157px;
+  }
+</style>

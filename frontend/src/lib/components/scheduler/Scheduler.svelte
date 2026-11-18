@@ -160,6 +160,7 @@
 </script>
 
 <div
+  data-slot="scheduler"
   class={cn(
     "border-muted-foreground/35 relative flex flex-col px-3 pb-3",
     // The sidebar column has a width of its own; a drawer hands the card the
