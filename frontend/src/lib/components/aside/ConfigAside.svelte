@@ -7,11 +7,16 @@
   import { cn } from "$lib/utils.js";
   import { useTopic } from "$lib/ws";
   import ConfigItem from "./ConfigItem.svelte";
-  import type { ConfigLike, ConfigTopicLike, WORKER_STATE } from "./types";
+  import type { ConfigLike, ConfigTopicLike, RestartTopicLike, WORKER_STATE } from "./types";
 
   // Subscribe to ConfigScan topic
   const topicClient = useTopic<ConfigTopicLike | undefined>("ConfigScan");
   const workerClient = useTopic<Record<string, WORKER_STATE> | undefined>("Worker");
+  // Restart topic: while the startup flow runs, the backend is applying its
+  // first full update and every config marks that update in its top right
+  // corner (see ConfigItem)
+  const restartClient = useTopic<RestartTopicLike>("Restart");
+  const restartFlow = $derived(restartClient.data?.flow);
 
   // props
   type $props = {
@@ -95,7 +100,7 @@
           {@const active = activeConfigName === item.name}
           {@const state = workerClient.data?.[item.name] ?? "idle"}
           <div role="listitem" class="px-1">
-            <ConfigItem config={item} {active} {state} {afspin} onclick={handleConfigClick} />
+            <ConfigItem config={item} {active} {state} flow={restartFlow} {afspin} onclick={handleConfigClick} />
           </div>
         {:else if group.items.length > 1}
           <!-- Multiple items in group - display with border -->
@@ -109,7 +114,7 @@
               {@const active = activeConfigName === item.name}
               {@const state = workerClient.data?.[item.name] ?? "idle"}
               <div role="listitem">
-                <ConfigItem config={item} {active} {state} {afspin} onclick={handleConfigClick} />
+                <ConfigItem config={item} {active} {state} flow={restartFlow} {afspin} onclick={handleConfigClick} />
               </div>
             {/each}
           </div>

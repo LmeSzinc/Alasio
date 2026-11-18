@@ -36,6 +36,7 @@
           { path: "/dev/debug/modmanager", name: "Mod Manager" },
           { path: "/dev/debug/updatetoast", name: "Update Toast" },
           { path: "/dev/debug/workerstatus", name: "Worker Status" },
+          { path: "/dev/debug/aside", name: "Config Aside" },
           { path: "/dev/debug/restartstatus", name: "Restart Status" },
           { path: "/dev/debug/scheduler", name: "Scheduler" },
           { path: "/dev/debug/preview", name: "Preview" },
