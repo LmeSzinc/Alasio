@@ -5,6 +5,11 @@ The middleware is the single web entrance: rule A (no password -> only
 electron token passes), rule B (lan mode -> lan sources only) and the
 login layer (JWT cookie) run inside one middleware in a fixed order
 (admission first, then login). It must never be split or reordered.
+
+The login layer keeps the endpoints that authenticate themselves and the
+requests carrying a valid electron token out: that token is the desktop
+client's own credential, because the page it embeds lives in an iframe of
+app://bundle where the browser never stores the SameSite=strict cookie.
 """
 
 import json
@@ -285,16 +290,18 @@ class TestRuleAWeakPassword:
     @pytest.mark.trio
     async def test_weak_password_with_electron_token_passes(self, gate, monkeypatch):
         # treated as unset: the local electron client still passes rule A.
-        # /api/test with the electron token but no JWT is admitted by rule
-        # A and then answered 401 by the login layer (not the 403 refusal)
+        # /api/test with the electron token but no JWT passes the login
+        # layer too: the token is the desktop client's own credential (it
+        # embeds the page in an iframe of app://bundle, a third-party
+        # context that never stores the SameSite=strict login cookie)
         set_password(monkeypatch, self.WEAK)
         token_table.seed_from_supervisor(('tok1',))
         mw, app = gate()
         sent = await call_gate(mw, make_http_scope(headers=[(b'x-alasio-token', b'tok1')]))
-        assert status_of(sent) == 401
-        assert not app.called
-        # the real electron flow renews its JWT through /api/auth/renew,
-        # which is exempt from the login layer: rule A is the only gate
+        assert status_of(sent) == 200
+        assert app.called
+        # the renewal endpoint stays exempt as well (it is what issues the
+        # JWT a remote browser holds)
         sent = await call_gate(mw, make_http_scope(
             path='/api/auth/renew', headers=[(b'x-alasio-token', b'tok1')]))
         assert status_of(sent) == 200
@@ -391,6 +398,30 @@ class TestLoginLayer:
         # no JWT cookie, but /api/auth/login performs the auth itself
         await call_gate(mw, make_http_scope(path='/api/auth/login'))
         assert app.called
+
+    @pytest.mark.trio
+    async def test_electron_token_skips_login(self, gate, monkeypatch):
+        # The desktop client embeds the page in an iframe of app://bundle, a
+        # third-party context where the browser never stores the
+        # SameSite=strict login cookie: its requests carry the electron
+        # token instead, the same proof the ws handshake accepts
+        set_password(monkeypatch)
+        token_table.seed_from_supervisor(('tok1',))
+        mw, app = gate()
+        await call_gate(mw, make_http_scope(headers=[(b'x-alasio-token', b'tok1')]))
+        assert app.called
+
+    @pytest.mark.trio
+    async def test_forged_electron_token_still_401(self, gate, monkeypatch):
+        # the exemption follows the token table, not the header: a cross-site
+        # page cannot forge the header into a capability, and it carries no
+        # JWT cookie either (SameSite=strict), so a cross-site request is
+        # refused exactly as it was before
+        set_password(monkeypatch)
+        mw, app = gate()
+        sent = await call_gate(mw, make_http_scope(headers=[(b'x-alasio-token', b'forged')]))
+        assert status_of(sent) == 401
+        assert not app.called
 
     @pytest.mark.trio
     async def test_ws_scope_not_login_gated(self, gate, monkeypatch):

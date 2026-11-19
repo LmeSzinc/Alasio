@@ -181,10 +181,16 @@ class DeploymentGateMiddleware:
     3. Login layer (JWT cookie): /api http routes require a valid JWT
        in the alasio_token cookie → 401, except the endpoints that
        perform the authentication themselves (/api/auth/login,
-       /api/auth/renew). Websocket scopes are NOT login-gated here: the
-       handshake validates the JWT inside serve() so it can close(4001)
-       after accept (a refused handshake only surfaces as 1006 to the
-       browser, the frontend cannot read the close code).
+       /api/auth/renew) and the requests carrying a valid electron
+       token. The token exemption is the same one the ws handshake
+       makes (ws_server._check_login): the desktop client embeds the
+       page in an iframe of app://bundle, a third-party context where
+       the browser never stores the SameSite=strict login cookie, so
+       that client could never satisfy the cookie layer. Websocket
+       scopes are NOT login-gated here: the handshake validates the JWT
+       inside serve() so it can close(4001) after accept (a refused
+       handshake only surfaces as 1006 to the browser, the frontend
+       cannot read the close code).
 
     The order matters: rule C runs first, then rule A before the login
     layer, so without a password the rejection is a 403 from rule A
@@ -521,8 +527,17 @@ class DeploymentGateMiddleware:
             return
 
         # Login layer (http only; the ws handshake validates inside
-        # serve() so it can close(4001) after accept)
-        if scope_type == 'http' and path not in self.EXEMPT:
+        # serve() so it can close(4001) after accept). A request carrying a
+        # valid electron token passes without the JWT, exactly like the ws
+        # handshake does (ws_server._check_login): the desktop client opens
+        # the page in an iframe of app://bundle, a third-party context in
+        # which the browser never stores the SameSite=strict login cookie,
+        # so that client can never satisfy this layer by cookie. The token
+        # is the stronger proof anyway: only the electron network layer can
+        # supply it and page JS never sees it, while a cross-site request
+        # carries neither the token nor (SameSite=strict) the cookie, so the
+        # protection this layer gives stays exactly as it was.
+        if scope_type == 'http' and path not in self.EXEMPT and not self._has_electron_token(scope):
             if not self._check_login(scope):
                 response = Response(
                     error_detail('AUTH_TOKEN_INVALID'),
