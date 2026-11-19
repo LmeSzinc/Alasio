@@ -32,6 +32,17 @@ class PackBroken(Exception):
     pass
 
 
+class PackNotSelfContained(PackBroken):
+    """
+    Raised when a pack refers to a delta base that the pack does not hold.
+
+    A thin pack is only valid on a transport that fixes it up afterwards
+    (`git fetch` then `index-pack --fix-thin`); a pack read back from the disk
+    must be self-contained. The message names the offset of the entry and the
+    base it needs.
+    """
+
+
 def convert_sha1(sha1):
     """
     Convert a user-input sha1 to string format
