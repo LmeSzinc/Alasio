@@ -133,10 +133,10 @@ class TestPublishConfig:
     def test_the_template_holds_the_group(self, fs, run_dir):
         """--init writes the defaults of the group with their comments, once.
 
-        The help of a field of a remote is not rendered: build_help_map() walks
-        Struct fields only, and the value of the Dict is a Union of Structs.
-        The example of the group comment is the documentation of the remote
-        fields instead.
+        The help of a field of a remote is not rendered: the template holds an
+        empty Publish map, so it has no remote to put a comment above. The
+        example of the group comment is the documentation of the fields
+        instead, a remote written back is commented field by field.
         """
         assert PackRepoConfig.write_template() is True
         with open(f'{run_dir}/config/template.yaml', encoding='utf-8') as f:

@@ -9,13 +9,33 @@ Comments are defined on the validation model with msgspec annotations::
     class Config(msgspec.Struct):
         port: Annotated[int, Meta(extra={"help": "Port to listen on"})] = 8080
 
-The yaml text is generated with pyyaml, then comment lines are inserted
-above the line of each key that has help text. Keys are matched by their
-full path in the yaml structure, so keys with the same name at different
-depth won't be confused: ::
+The yaml text is generated with pyyaml, then comment lines are inserted above
+the line of each key that has help text: ::
 
     # Port to listen on
     port: 8080
+
+The comments are placed in two steps, so no type has to be guessed from the
+text. :func:`build_help_map` reads the model and builds a flat map of every
+node it declares, keyed by its path: ::
+
+    {('Repo',): None,
+     ('Repo', 'Remote'): 'Remote url',
+     ('Publish',): 'the remotes',
+     ('Publish', ANY_KEY): None,
+     ('Publish', ANY_KEY, 'Bucket'): 'Bucket name'}
+
+The value is the help text of the node, or None when the model defines the
+node without a help. ``ANY_KEY`` is the path segment of a level the model does
+not name: the value of a map the operator keys, and the element of a sequence.
+A step of a path the map does not name is looked up through that segment, which
+is how a key of a map is told from a field of the model.
+
+:func:`iter_yaml_rows` then yields the key path of every line of the text, with
+``ANY_KEY`` for the rows of a sequence element, and
+:func:`insert_comments_iter` writes the comment of a path above its line::
+
+    text = insert_comments(text, build_help_map(Model))
 
 Nested structures and multiline strings are supported, pyyaml handles the
 parsing and dumping.
@@ -28,10 +48,11 @@ from typing import Generic, List, Type, TypeVar, Union
 import msgspec
 import yaml
 from msgspec import NODEFAULT, Struct
+from msgspec.inspect import (
+    DictType, FrozenSetType, ListType, Metadata, SetType, StructType, TupleType, UnionType, VarTupleType, type_info
+)
 from msgspec.msgpack import encode as msgpack_encode
-from msgspec.structs import fields
-from msgspecerror import ErrorInfo, get_class_annotation_dict, load_msgpack_with_default
-from msgspecerror.parse_type import is_struct_type, origin_args
+from msgspecerror import ErrorInfo, load_msgpack_with_default
 
 from alasio.config_dev.format.format_i18n import format_i18n
 from alasio.ext.cache import cached_property
@@ -43,137 +64,343 @@ from alasio.logger import logger
 
 T_model = TypeVar('T_model', bound=Struct)
 
+# the inspect types of a node that holds its items without keys of their own
+SEQUENCE_TYPES = (ListType, SetType, FrozenSetType, VarTupleType)
 
-def build_help_map(model, prefix=()):
+# A line of a yaml mapping, 'key: value' or 'key:'. The colon ends the key only
+# when a space or the end of the line follows it, so a scalar like a url
+# ('https://host/path') is not read as a key
+REGEX_KEY = re.compile(r'^([^:]+):(?=\s|$)')
+# The value of a key that opens a block scalar, e.g. '|-', '>' or '| # note'.
+# The explicit indent indicator may sit on either side of the chomping one:
+# '|2-', '|-2'
+REGEX_MULTILINE_STRING = re.compile(r'^[|>][+-]?\d?[+-]?(?:\s+#.*)?$')
+# A line of a yaml sequence, '- value' or a lone '-'. The dashes of a nested
+# sequence are matched one level at a time, see iter_yaml_rows
+REGEX_SEQUENCE_ITEM = re.compile(r'^(\s*)-(?:[ \t]+(.*))?$')
+
+
+class HelpKey:
     """
-    Build ``{path: help_text}`` mapping from model field annotations,
-    path is a tuple of keys, e.g. ('port',), ('inner', 'port').
-    Help text is parsed with ``format_i18n``, multiline help becomes a list of lines.
-    Nested struct fields are collected recursively
+    A path segment of the help map that is not a name of the yaml document
+
+    A node of a config does not always have a name: the value of a map is keyed
+    by the operator, the element of a sequence is keyed by nothing at all. Such
+    a level is stored under ``ANY_KEY``. It is an object, so a key of the
+    document can never collide with it.
+    """
+
+    __slots__ = ('_name',)
+
+    def __init__(self, name):
+        """
+        Args:
+            name (str): Name of the key, used by its repr
+        """
+        self._name = name
+
+    def __repr__(self):
+        return self._name
+
+
+# The path segment of a level whose keys the model does not name: the value of
+# a map the operator keys, and the element of a sequence
+ANY_KEY = HelpKey('ANY_KEY')
+
+
+def build_help_map(model):
+    """
+    Build the flat help map of a model
+
+    The map is read from the model, not from the data: a node of the document
+    exists because the model declares it, so a list of a thousand elements
+    documents its element type once, and the cost of the map follows the
+    number of types the model declares, not the number of values the file
+    holds.
+
+    A key of the map is the tuple path of a node of the yaml document, and its
+    value is the help text of the node, or None when the model declares the
+    node without a help. A level the model does not name -- the value of a map
+    the operator keys, the element of a sequence -- is the path segment
+    ``ANY_KEY``: ::
+
+        Repo:
+          # Remote url
+          Remote: ...
+
+        Publish:
+          cos-main:
+            # Bucket name
+            Bucket: ...
+
+        {
+            ('Repo',): None,
+            ('Repo', 'Remote'): 'Remote url',
+            ('Publish',): 'the remotes',
+            ('Publish', ANY_KEY): None,
+            ('Publish', ANY_KEY, 'Bucket'): 'Bucket name',
+        }
+
+    The types are read with :func:`msgspec.inspect.type_info`, the inspection
+    api of msgspec, and the help texts with the adapters of msgspecerror, so
+    neither side of the read depends on the shape msgspec happens to keep.
 
     Args:
-        model (type): Subclass of msgspec.Struct
-        prefix (tuple): Path prefix of the model, empty for the root model
+        model (type | Struct): Class of a msgspec.Struct, or an instance of
+            one, whose class is the model
 
     Returns:
-        dict: {path: help_text}
+        dict: {path: help_text | None}
     """
+    if not (isinstance(model, type) and issubclass(model, Struct)):
+        model = type(model)
     out = {}
-    metadata = get_field_metadata(model)
-    annotations = get_class_annotation_dict(model)
-    # Map python field name to encode name, as yaml keys are encode names
-    encode_names = {f.name: f.encode_name for f in fields(model)}
-    for name, hint in annotations.items():
-        path = prefix + (encode_names.get(name, name),)
-        meta = metadata.get(name)
-        help_text = meta.extra.get('help') if meta else None
-        if help_text:
-            out[path] = format_i18n(help_text)
-        # Collect help texts of nested struct fields
-        origin, args = origin_args(hint)
-        if is_struct_type(origin):
-            out.update(build_help_map(origin, prefix=path))
+    # the set guards a model that declares itself, e.g. a tree of its own nodes
+    _collect_help(out, type_info(model), (), frozenset())
     return out
+
+
+def _collect_help(out, node, path, seen):
+    """
+    Collect every node a type declares below a path
+
+    Args:
+        out (dict): {path: help_text | None} map to fill
+        node (msgspec.inspect.Type): Type of the node, from ``type_info``
+        path (tuple): Path of the node
+        seen (frozenset): Classes of the structs the path went through, so a
+            struct that holds one of itself ends the walk instead of looping
+    """
+    kind = type(node)
+    while kind is Metadata:
+        # ``Annotated[T, Meta(...)]`` is inspected as the type it wraps plus the
+        # metadata, the help of the node is read from the field of its struct
+        node = node.type
+        kind = type(node)
+    if kind is StructType:
+        if node.array_like:
+            # the document holds the values of such a struct without keys
+            return
+        if node.cls in seen:
+            return
+        seen = seen | {node.cls}
+        if node.tag_field and node.tag is not None:
+            # the tag is a key msgspec writes, no field of the model declares it
+            out[path + (node.tag_field,)] = f'{node.tag_field} selects the variant of this entry'
+        metadata = get_field_metadata(node.cls)
+        for field in node.fields:
+            child = path + (field.encode_name,)
+            meta = metadata.get(field.name)
+            help_text = meta.extra.get('help') if meta else None
+            out[child] = format_i18n(help_text) if help_text else None
+            _collect_help(out, field.type, child, seen)
+    elif kind is DictType:
+        # the keys of a map are chosen by the operator, the model names none
+        _collect_unnamed_help(out, [node.value_type], path, seen)
+    elif kind is TupleType:
+        _collect_unnamed_help(out, node.item_types, path, seen)
+    elif kind in SEQUENCE_TYPES:
+        # every other sequence holds items of one type: list, set, frozenset,
+        # and the variable length tuple, whose item type is ``item_type``
+        _collect_unnamed_help(out, [node.item_type], path, seen)
+    elif kind is UnionType:
+        # the file holds one of the variants, they document the same path
+        for variant in node.types:
+            _collect_help(out, variant, path, seen)
+
+
+def _collect_unnamed_help(out, item_types, path, seen):
+    """
+    Collect the nodes of a level whose keys the model does not name
+
+    Args:
+        out (dict): {path: help_text | None} map to fill
+        item_types (Iterable): Types of the items of the level
+        path (tuple): Path of the container
+        seen (frozenset): Classes of the structs the path went through
+    """
+    any_path = path + (ANY_KEY,)
+    # the level itself has no help, it is keyed by the operator
+    out.setdefault(any_path, None)
+    for item_type in item_types:
+        _collect_help(out, item_type, any_path, seen)
+
+
+def split_yaml_key(text):
+    """
+    Split a yaml line into the key of its mapping and the rest of the line
+
+    Args:
+        text (str): Line of yaml text, its indentation removed
+
+    Returns:
+        tuple: (key, rest), key is '' when the line holds no mapping key,
+            e.g. a scalar or a block scalar
+    """
+    result = REGEX_KEY.match(text)
+    if not result:
+        return '', ''
+    return result.group(1).strip(), text[result.end():].strip()
 
 
 def iter_yaml_rows(text):
     """
-    Iterate rows of yaml text, yield (key, row) for each line.
+    Iter the rows of a yaml text, yield (path, row) for each line
 
-    key is the tuple path of the key line, e.g. ('port',), ('inner', 'port').
-    Lines that are not key lines, such as block scalar content, comments
-    and empty lines, have key None. row is the original line content.
+    path is the tuple of keys of the line, e.g. ('port',), ('inner', 'port').
+    The element of a sequence has no name, so its level of the path is
+    ``ANY_KEY``: the line ``- Name: a`` under ``Items`` is the path
+    ('Items', ANY_KEY, 'Name').
+
+    The text says where the rows are, not what they mean: a config that names
+    a key the model does not know is read as any other key.
 
     Args:
         text (str): yaml text
 
     Yields:
-        tuple: (key, row)
+        tuple: (path, row), path is None for a line that holds no key of a
+            mapping, e.g. a scalar element of a sequence, the content of a
+            block scalar, a comment or an empty line. row is the line as it is
     """
-    regex_key = re.compile(r'^([^:]+):')
-    regex_multiline_string = re.compile(r'^[|>][+-]?(?:\s+#.*)?$')
-
-    # Stack of (indent, key) of parent mappings
-    stack: "deque[tuple[int, str]]" = deque()
-    # Indent of the current block scalar, None when not inside a block scalar
-    block_indent = None
+    # Stack of (column, key) of the open mappings and sequences
+    stack: "deque[tuple[int, object]]" = deque()
+    # Column of the block scalar the walk is inside, None when outside one
+    block_column = None
     for line in text.splitlines():
         stripped = line.lstrip()
         indent = len(line) - len(stripped)
         if not stripped:
-            # Empty line, doesn't affect mapping path or block scalar
+            # Empty line, doesn't close a mapping or a block scalar
             yield None, line
             continue
-        if block_indent is not None:
-            if indent > block_indent:
-                # Content line of block scalar
+        if block_column is not None:
+            if indent > block_column:
+                # Content of the block scalar
                 yield None, line
                 continue
-            # Exited block scalar
-            block_indent = None
-        # Skip existing comments
+            block_column = None
         if stripped.startswith('#'):
+            # Comment of the text, it is replaced by the ones of the model
             yield None, line
             continue
-        result = regex_key.match(stripped)
-        if not result:
+        # A sequence item is an unnamed level, possibly nested, e.g.
+        # '- - Name: a'. The column of the content moves past every dash, so
+        # the keys of an element are read at their own column
+        column = indent
+        content = stripped
+        item_column = indent
+        while True:
+            item = REGEX_SEQUENCE_ITEM.match(content)
+            if not item:
+                break
+            # A sequence may be indented under its key: the key at that column
+            # is its parent, while a marker at that column is the element that
+            # came before this one
+            while stack and column < stack[-1][0]:
+                stack.pop()
+            while stack and column == stack[-1][0] and stack[-1][1] is ANY_KEY:
+                stack.pop()
+            stack.append((column, ANY_KEY))
+            item_column = column
+            content = item.group(2) or ''
+            column += len(item.group(0)) - len(content)
+        key, rest = split_yaml_key(content)
+        if not key:
+            # A scalar element, e.g. '- master', or a block scalar of an
+            # element. The content of the block scalar is indented past the
+            # dash, not past the column of its indicator
+            if REGEX_MULTILINE_STRING.match(content):
+                block_column = item_column
             yield None, line
             continue
-        key = result.group(1).strip()
-        # Pop stack entries deeper than current indent
-        while stack and indent <= stack[-1][0]:
+        while stack and column <= stack[-1][0]:
             stack.pop()
         path = tuple([k for _, k in stack] + [key])
-        stack.append((indent, key))
-        # Check if this line starts a block scalar, e.g. 'desc: |-'
-        rest = stripped[len(result.group(0)):].strip()
-        if regex_multiline_string.match(rest):
-            block_indent = indent
+        stack.append((column, key))
+        if REGEX_MULTILINE_STRING.match(rest):
+            block_column = column
         yield path, line
+
+
+def resolve_help(help_map, path):
+    """
+    The help text of a key path of the yaml text
+
+    The whole path is looked up first, and only a path the map does not hold
+    is walked step by step: each step is looked up as it is, then as
+    ``ANY_KEY``, because a key the map does not name is chosen by the operator
+    or is the element of a sequence, and belongs to the unnamed level of its
+    parent. A step neither way names is not part of the model, and the path has
+    no help.
+
+    Args:
+        help_map (dict): Map built by ``build_help_map``
+        path (tuple): Key path of a line, from ``iter_yaml_rows``
+
+    Returns:
+        str | list[str] | None: Help text of the node, None when it has none
+            or the path is not in the map
+    """
+    try:
+        return help_map[path]
+    except KeyError:
+        pass
+    node = ()
+    for key in path:
+        candidate = node + (key,)
+        if candidate not in help_map:
+            candidate = node + (ANY_KEY,)
+            if candidate not in help_map:
+                return None
+        node = candidate
+    return help_map.get(node)
 
 
 def insert_comments_iter(rows, help_map):
     """
-    Iterate (key, row) pairs, yield the comment lines of keys that have
+    Iterate (path, row) pairs, yield the comment lines of keys that have
     help text before the row
 
     Args:
-        rows (Iterable): (key, row) pairs from ``iter_yaml_rows()``
-        help_map (dict): {path: help_text}, path is a tuple of keys
+        rows (Iterable): (path, row) pairs from ``iter_yaml_rows()``
+        help_map (dict): Map built by ``build_help_map``
 
     Yields:
-        str: comment lines of keys with help text, and rows
+        str: Comment lines of the rows that have help text, and the rows
     """
-    for key, row in rows:
-        if key and key in help_map:
-            help_text = help_map[key]
-            # format_i18n returns a list of lines for multiline help, str for single line
-            comments = [help_text] if isinstance(help_text, str) else help_text
-            indent = row[:len(row) - len(row.lstrip())]
-            for comment in comments:
-                yield f'{indent}# {comment}'
+    for path, row in rows:
+        if path:
+            help_text = resolve_help(help_map, path)
+            if help_text is not None:
+                # format_i18n returns a list of lines for multiline help, str for single line
+                comments = [help_text] if isinstance(help_text, str) else help_text
+                indent = row[:len(row) - len(row.lstrip())]
+                for comment in comments:
+                    yield f'{indent}# {comment}'
         yield row
 
 
 def insert_comments(text, help_map):
     """
-    Insert comment lines above the line of each key that has help text,
-    keys are matched by their full path in the yaml structure
+    Insert the comment lines of the help map above the lines of the yaml text
 
     Args:
         text (str): yaml text
-        help_map (dict): {path: help_text}, path is a tuple of keys
-            e.g. ('port',), ('inner', 'port'). Comment is inserted above the line of the key
+        help_map (dict): Map built by ``build_help_map`` from the data the
+            text was dumped from
 
     Returns:
-        str: yaml text with comments inserted
+        str: yaml text with the comments inserted
     """
-    if not help_map:
+    if not text or not help_map:
         return text
     lines = list(insert_comments_iter(iter_yaml_rows(text), help_map))
-    if lines:
-        return '\n'.join(lines) + '\n'
-    return text
+    commented = '\n'.join(lines)
+    # the dumped text ends with a newline, the commented text ends like it
+    if text.endswith('\n'):
+        return commented + '\n'
+    return commented
 
 
 class YamlConfig(Generic[T_model]):
@@ -182,7 +409,7 @@ class YamlConfig(Generic[T_model]):
 
     Comments are defined on the validation model fields with
     ``Annotated[str, Meta(extra={"help": "xxx"})]``, and written into the
-    yaml file above the line of the field key, matched by the full key path.
+    yaml file above the line of the key of the field.
 
     Attributes:
         file (str): YAML file path
@@ -195,8 +422,6 @@ class YamlConfig(Generic[T_model]):
             read or validate, empty before the data is read and if none.
             Exceptions are read failures such as FileNotFoundError,
             UnicodeDecodeError and yaml.YAMLError
-        help_map (dict): {path: help_text} mapping of the model, path is a tuple of keys,
-            cached as cached_property
 
     Args:
         file (str): YAML file path
@@ -269,13 +494,6 @@ class YamlConfig(Generic[T_model]):
             # errors stay in self.errors for the caller to look at
             self._write(data)
         return data
-
-    @cached_property
-    def help_map(self):
-        """
-        {path: help_text} mapping of the model, path is a tuple of keys
-        """
-        return build_help_map(self.model)
 
     @staticmethod
     def _log_errors(errors):
@@ -356,8 +574,7 @@ class YamlConfig(Generic[T_model]):
     def write(self, template=False, skip_same=True):
         """
         Write the yaml file, comments are inserted above the line of each key
-        from ``Meta(extra={"help": ...})`` annotations, matched by the full
-        key path
+        from ``Meta(extra={"help": ...})`` annotations
 
         Args:
             template (bool): True to build the content from the model
@@ -409,9 +626,10 @@ class YamlConfig(Generic[T_model]):
             bool: if write
         """
         # yaml_dumps from yamlfile returns utf-8 bytes, decode into str
-        data = msgspec.to_builtins(data)
-        text = yaml_dumps(data).decode('utf-8')
-        text = insert_comments(text, self.help_map)
+        text = yaml_dumps(msgspec.to_builtins(data)).decode('utf-8')
+        # the help map describes the model, so the cost of it follows the model
+        # and not the size of the file, a list documents its element type once
+        text = insert_comments(text, build_help_map(self.model))
         if skip_same:
             try:
                 old = atomic_read_text(self.file)

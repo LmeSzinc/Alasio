@@ -6,7 +6,7 @@ import yaml
 from msgspec import Meta, Struct
 from typing_extensions import Annotated
 
-from alasio.ext.file.yamlconfig import YamlConfig
+from alasio.ext.file.yamlconfig import ANY_KEY, YamlConfig, build_help_map
 from alasio.logger import logger
 from alasio.testing.filesystem import fs  # noqa: F401
 
@@ -57,6 +57,20 @@ class DictConfig(Struct):
     mapping: Annotated[Dict[str, int], Meta(extra={"help": "mapping"})] = msgspec.field(default_factory=dict)
 
 
+class ItemConfig(Struct):
+    """Element of the sequence of SequenceConfig, used in tests."""
+
+    Name: Annotated[str, Meta(extra={"help": "item name"})] = ""
+    Desc: Annotated[str, Meta(extra={"help": "item description"})] = ""
+
+
+class SequenceConfig(Struct):
+    """Model with a list of structs used in tests."""
+
+    Items: Annotated[List[ItemConfig], Meta(extra={"help": "the items"})] = msgspec.field(default_factory=list)
+    Names: Annotated[List[str], Meta(extra={"help": "the names"})] = msgspec.field(default_factory=list)
+
+
 class SecretPasswordConfig(Struct):
     """Model with a password field used in secret tests."""
 
@@ -86,31 +100,61 @@ class TestYamlConfigInit:
             YamlConfig('/config.yaml', NoDefault)
 
 
-class TestYamlConfigHelpMap:
-    def test_help_map(self, fs):
-        config = YamlConfig('/config.yaml', CommentedConfig)
-        assert config.help_map == {("port",): ["line 1", "line 2"], ("name",): "server name"}
+class TestBuildHelpMap:
+    def test_help_of_the_model(self):
+        """The comment of a node is the help of the field it came from."""
+        assert build_help_map(CommentedConfig) == {
+            ('port',): ['line 1', 'line 2'],
+            ('name',): 'server name',
+        }
 
-    def test_help_map_cached(self, fs):
-        config = YamlConfig('/config.yaml', CommentedConfig)
-        assert config.help_map is config.help_map
+    def test_a_key_without_help_is_in_the_map(self):
+        """The node is defined by the model, it is in the map with no help."""
+        assert build_help_map(Config) == {
+            ('port',): None,
+            ('name',): None,
+            ('debug',): None,
+        }
 
-    def test_help_map_no_help(self, fs):
-        config = YamlConfig('/config.yaml', Config)
-        assert config.help_map == {}
-
-    def test_help_map_same_key_different_levels(self, fs):
+    def test_same_key_different_levels(self):
         class Inner(Struct):
-            port: Annotated[int, Meta(extra={"help": "inner port help"})] = 1
+            port: Annotated[int, Meta(extra={'help': 'inner port help'})] = 1
 
         class Outer(Struct):
-            port: Annotated[int, Meta(extra={"help": "outer port help"})] = 2
+            port: Annotated[int, Meta(extra={'help': 'outer port help'})] = 2
             inner: Inner = msgspec.field(default_factory=Inner)
 
-        config = YamlConfig('/config.yaml', Outer)
-        assert config.help_map == {
-            ("port",): "outer port help",
-            ("inner", "port"): "inner port help",
+        assert build_help_map(Outer) == {
+            ('port',): 'outer port help',
+            ('inner',): None,
+            ('inner', 'port'): 'inner port help',
+        }
+
+    def test_sequence_element(self):
+        """The element of a sequence has no key, its level is ANY_KEY."""
+        assert build_help_map(SequenceConfig) == {
+            ('Items',): 'the items',
+            ('Items', ANY_KEY): None,
+            ('Items', ANY_KEY, 'Name'): 'item name',
+            ('Items', ANY_KEY, 'Desc'): 'item description',
+            ('Names',): 'the names',
+            ('Names', ANY_KEY): None,
+        }
+
+    def test_the_map_follows_the_model(self):
+        """The map is the same whatever the data holds, even an empty container."""
+        assert build_help_map(SequenceConfig()) == build_help_map(SequenceConfig)
+        assert build_help_map(SequenceConfig(Items=[ItemConfig(Name='a')])) == build_help_map(SequenceConfig)
+
+    def test_omit_defaults(self):
+        """The map describes the model, a field the dump may skip still has one."""
+        class Model(Struct, omit_defaults=True):
+            kept: Annotated[str, Meta(extra={'help': 'kept help'})] = 'k'
+            default: Annotated[str, Meta(extra={'help': 'default help'})] = 'd'
+
+        assert build_help_map(Model) == {
+            ('kept',): 'kept help',
+            ('default',): 'default help',
         }
 
 
@@ -447,6 +491,44 @@ port: [unclosed
 
 
 class TestYamlConfigWrite:
+    def test_write_comments_of_a_sequence_element(self, fs):
+        """A struct in a list is written with the help of its fields.
+
+        The element of a sequence has no name, so the help of its fields is
+        matched through a wildcard at the depth of the element: every element
+        of the list is commented, and the file reads back into the same data.
+        """
+        config = YamlConfig('/config.yaml', SequenceConfig)
+        config.data.Items = [
+            ItemConfig(Name='a', Desc='line1\nline2'),
+            ItemConfig(Name='b'),
+        ]
+        config.data.Names = ['master', 'dev']
+        config.write()
+        text = open('/config.yaml', encoding="utf-8").read()
+        assert text == """\
+# the items
+Items:
+# item name
+- Name: a
+  # item description
+  Desc: |-
+    line1
+    line2
+# item name
+- Name: b
+  # item description
+  Desc: ''
+# the names
+Names:
+- master
+- dev
+"""
+        # the comments are text of the file, not data: it reads back unchanged
+        read = YamlConfig('/config.yaml', SequenceConfig)
+        assert read.errors == []
+        assert read.data == config.data
+
     def test_write_comments(self, fs):
         config = YamlConfig('/config.yaml', CommentedConfig)
         config.write()

@@ -70,7 +70,7 @@ class TestAutoRestartTime:
 
     def test_help_is_found_by_the_config_writer(self):
         """The help lines survive the Optional annotation (YamlConfig writes them)"""
-        help_text = build_help_map(UpdateConfig)[('AutoRestartTime',)]
+        help_text = build_help_map(UpdateConfig())[('AutoRestartTime',)]
         assert 'Scheduled restart time' in help_text
 
 

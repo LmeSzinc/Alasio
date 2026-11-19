@@ -16,7 +16,7 @@ from alasio.deploy_dev.pack_server.model import (
     ConfigError, EnvConfig, LookbackConfig, PackRepoConfig, PackRepoModel, RepoConfig
 )
 from alasio.ext import env
-from alasio.ext.file.yamlconfig import build_help_map
+from alasio.ext.file.yamlconfig import ANY_KEY, build_help_map
 from alasio.ext.file.yamlfile import yaml_loads
 from alasio.ext.path import PathStr
 from alasio.logger import logger
@@ -64,15 +64,28 @@ def read_config(file):
         return yaml_loads(f.read().encode('utf-8'))
 
 
-def iter_help_line():
+def iter_help_line(help_map=None):
     """
-    Iter the help lines of PackRepoModel, the comment lines YamlConfig writes
-    above the keys of the generated file
+    Iter the help lines of the default PackRepoModel, the comment lines
+    YamlConfig writes above the keys of the generated file
+
+    The help map describes the model, and the default model publishes nowhere,
+    so the lines of a remote have no key in the file to be written above: a
+    path through ANY_KEY is skipped. The example of the group comment is the
+    documentation of the remote fields instead.
+
+    Args:
+        help_map (dict): {path: help_text | None} map of the model, the whole
+            map by default
 
     Yields:
         str: Help text line, the text after the "# " of a comment line
     """
-    for help_text in build_help_map(PackRepoModel).values():
+    if help_map is None:
+        help_map = build_help_map(PackRepoModel)
+    for path, help_text in help_map.items():
+        if help_text is None or ANY_KEY in path:
+            continue
         yield from ([help_text] if isinstance(help_text, str) else help_text)
 
 
@@ -322,6 +335,99 @@ Lookback:
         config = PackRepoConfig(FILE)
         assert config.errors == []
         assert config.data.Lookback.AdditionalCommit == ['abc', 'def']
+
+    def test_write_remote_comments(self, fs, run_dir):
+        """A remote of the Publish map is written with the help of its fields.
+
+        The keys of the map are chosen by the operator, so the help of a field
+        of a remote is matched through a wildcard at the depth of the key: a
+        remote written back gets the comments of the fields it holds.
+        """
+        fs.create_file(config_file(run_dir), contents="""\
+Repo:
+  Remote: https://github.com/LmeSzinc/AzurLaneAutoScript
+  Author: LmeSzinc
+  Repo: AzurLaneAutoScript
+  Branch: master
+Lookback:
+  MaxCommitDay: abc
+Publish:
+  cos-main:
+    Driver: cos
+    Bucket: alasio-1250000000
+    Region: ap-guangzhou
+  nas:
+    Driver: webdav
+    BaseUrl: https://nas.example/dav/pack
+""")
+        # the invalid lookback value forces the file to be written back
+        with logger.mock_capture_writer():
+            config = PackRepoConfig(FILE)
+        assert len(config.errors) == 1
+        with open(config.file, encoding='utf-8') as f:
+            text = f.read()
+        assert text[text.index('\nPublish:\n') + 1:] == '''\
+Publish:
+  cos-main:
+    # Driver selects the variant of this entry
+    Driver: cos
+    # Concurrent transfers in flight to this remote, 1 to 8
+    # Past 8 the queue only moves into the connection pool, the uplink is the limit
+    Concurrency: 4
+    # Retire grace of this remote in seconds
+    # A generation the mirror no longer serves is kept for this long after the
+    # generation replacing it was published, so a client that read the old
+    # barrier a moment before the switch can finish its update
+    # Must cover the CDN TTL plus one full client update
+    # Must be positive: 0 would delete a generation a client may still be reading
+    GraceSeconds: 3600
+    # Environment variable prefix of the credentials of this remote
+    # '' for the default prefix of the driver: ALASIO_COS for 'cos'
+    # 'ALASIO_COS_BACKUP' -> ALASIO_COS_BACKUP_SECRET_ID / _SECRET_KEY
+    EnvPrefix: ''
+    # Read/write timeout of one request
+    # A 100 MB pack on a 10 Mbit/s uplink takes about 80 s
+    TimeoutSeconds: 120
+    # COS bucket name with the APPID suffix, e.g. 'alasio-1250000000'
+    Bucket: alasio-1250000000
+    # COS region, e.g. 'ap-guangzhou'
+    Region: ap-guangzhou
+    # Custom origin endpoint, '' for https://{Bucket}.cos.{Region}.myqcloud.com
+    # A host only, never a CDN domain: the publication lists and writes the origin
+    Endpoint: ''
+    # Key prefix inside the bucket, 'pack' by default
+    # The object key is {Prefix}/{workspace}/{relative path}
+    # '' publishes at the root of the bucket: {workspace}/{relative path}
+    Prefix: pack
+  nas:
+    # Driver selects the variant of this entry
+    Driver: webdav
+    # Concurrent transfers in flight to this remote, 1 to 8
+    # Past 8 the queue only moves into the connection pool, the uplink is the limit
+    Concurrency: 4
+    # Retire grace of this remote in seconds
+    # A generation the mirror no longer serves is kept for this long after the
+    # generation replacing it was published, so a client that read the old
+    # barrier a moment before the switch can finish its update
+    # Must cover the CDN TTL plus one full client update
+    # Must be positive: 0 would delete a generation a client may still be reading
+    GraceSeconds: 3600
+    # Environment variable prefix of the credentials of this remote
+    # '' for the default prefix of the driver: ALASIO_COS for 'cos'
+    # 'ALASIO_COS_BACKUP' -> ALASIO_COS_BACKUP_SECRET_ID / _SECRET_KEY
+    EnvPrefix: ''
+    # Read/write timeout of one request
+    # A 100 MB pack on a 10 Mbit/s uplink takes about 80 s
+    TimeoutSeconds: 120
+    # URL of the collection that holds the workspaces, no trailing slash
+    # The object URL is {BaseUrl}/{workspace}/{relative path}
+    # The origin, never a CDN domain: the publication lists and writes the origin
+    # Example: 'https://nas.example:5006/dav/pack'
+    BaseUrl: https://nas.example/dav/pack
+    # Verify the TLS certificate of the server
+    # false only for a self-signed host in a network you trust
+    VerifyTls: true
+'''
 
     def test_invalid_value_falls_back(self, fs, run_dir):
         """A value that fails the validation falls back to the default and is written back."""
