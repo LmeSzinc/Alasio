@@ -63,15 +63,48 @@ export function authRegion(controlsWidth = 0): DragRegionLayer {
   return () => ({ left: 0, right: bandRightInset(controlsWidth) });
 }
 
-/** Width of the interactive cluster in the `/dev/assets` header: gap-1 (4) + ModSelector w-64 (256) */
-export const DEV_ASSETS_CLUSTER_WIDTH = 4 + 256;
+/** Width of the mod selector in a compact dev header: `w-30` = 120px */
+export const MOD_SELECTOR_WIDTH = 120;
 
 /**
- * Header band of `/dev/assets`, which puts a selector in the header.
+ * Classes that give a compact header's mod selector its width.
+ *
+ * `w-30` is 30 steps of the 4px spacing scale, which is `MOD_SELECTOR_WIDTH`:
+ * the drag band reserves exactly this width, so the two have to change
+ * together (a test asserts it). `max-w-1/2` caps the selector at half of the
+ * header row, which is what guarantees the title the other half at any window
+ * width.
+ *
+ * `min-w-0` and no `shrink-0` are what keep a narrow window from overflowing:
+ * the fixed parts of the header (menu button, language, theme, window controls)
+ * already take most of a 480px window, so the selector has to give way. Without
+ * it the header row's min-content is wider than the viewport and the whole
+ * right end of the header is pushed off screen.
+ */
+export const MOD_SELECTOR_CLASS = "w-30 max-w-1/2 min-w-0";
+
+/**
+ * Width the compact header cluster takes from the right edge of the header
+ * content box: the selector plus the gap the header puts before it.
+ *
+ * The selector is the last thing of the page snippet, so what the band has to
+ * clear is the selector itself plus the `gap-1` between the snippet and the
+ * language selector.
+ */
+export const MOD_SELECTOR_CLUSTER = 4 + MOD_SELECTOR_WIDTH;
+
+/**
+ * Header band of a compact dev page, which puts the mod selector in the header.
  *
  * Only the right side is narrowed: the left stays what the layout declared, so
- * the aside config column is still clickable.
+ * the aside config column is still clickable. The title of the page is plain
+ * text, so it can stay under the band.
+ *
+ * Args:
+ *   controlsWidth: Reserve width of the host window controls
+ *   clusterWidth: Width of the selector cluster, for a page whose selector is
+ *     narrower than the default (the 50% cap on small screens)
  */
-export function devAssetsRegion(controlsWidth = 0): DragRegionLayer {
-  return () => ({ right: bandRightInset(controlsWidth) + DEV_ASSETS_CLUSTER_WIDTH });
+export function modSelectorRegion(controlsWidth = 0, clusterWidth = MOD_SELECTOR_CLUSTER): DragRegionLayer {
+  return () => ({ right: bandRightInset(controlsWidth) + clusterWidth });
 }

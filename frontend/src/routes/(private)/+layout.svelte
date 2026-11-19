@@ -1,12 +1,15 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import { browser } from "$app/environment";
   import { invalidateAll } from "$app/navigation";
+  import { page } from "$app/state";
   import ConfigAside from "$lib/components/aside/ConfigAside.svelte";
   import { Header } from "$lib/components/header";
   import { Button } from "$lib/components/ui/button";
   import * as Card from "$lib/components/ui/card";
   import * as Sheet from "$lib/components/ui/sheet";
   import UpdateAvailableToast from "$lib/components/update/UpdateAvailableToast.svelte";
+  import { navColumnClass } from "$lib/dev/nav";
   import { HeaderContext, NavContext } from "$lib/slotcontext.svelte.js";
   import { screen } from "$lib/use/screen.svelte";
   import { cn } from "$lib/utils.js";
@@ -38,6 +41,12 @@
   const openSheet = () => (isSheetOpen = true);
   const closeSheet = () => (isSheetOpen = false);
 
+  // Width of the navigation column, as Tailwind classes. A compact dev page (the
+  // asset manager, the golden test review, the debug pages) hides it on medium
+  // screens: it is a workspace of its own and keeps only the config column
+  // beside it. Large screens show it for every page.
+  const navClass = $derived(navColumnClass(page.url.pathname, screen.isXL));
+
   // Declared by the layout, overridden by pages that put controls in the
   // header; svelte drops the page layer when the page is destroyed, so a page
   // change restores this one without watching the route. The insets are read
@@ -54,6 +63,16 @@
     if (browser && isSheetOpen && screen.isMD) {
       closeSheet();
     }
+  });
+
+  // Auto close sheet when the route changes: a nav entry inside the sheet is a
+  // plain link, and the sheet overlays the page it navigates to, so leaving it
+  // open would hide the destination behind the panel the user just clicked in.
+  // The open flag is read untracked: this effect belongs to the route, not to
+  // the sheet being open or closed.
+  $effect(() => {
+    page.url.pathname;
+    if (untrack(() => isSheetOpen)) closeSheet();
   });
 
   // Avoid double scrollbar when dropdown expanded
@@ -91,8 +110,10 @@
         <!-- The right border is the divider of the nav column in md..xl, the
              counterpart of the config column's one above: both are card
              borders, so the two dividers of the column look the same. The xl
-             block drops it together with the other card borders -->
-        <div class={cn("aside-item bg-card border-border w-50 border-r xl:pt-0", screen.isXL && "neushadow w-60")}>
+             block drops it together with the other card borders. The width (and
+             whether the column exists at all) comes from navColumnClass, so a
+             compact dev page hides it on md and shows it on xl. -->
+        <div class={cn("aside-item bg-card border-border border-r xl:pt-0", screen.isXL && "neushadow", navClass)}>
           {@render NavContext.snippet("sidebar")}
         </div>
       {/if}
@@ -210,6 +231,13 @@
   .area-header {
     grid-area: header;
     z-index: 40;
+    /* A grid track of `1fr` is `minmax(auto, 1fr)`, so a grid item wider than
+       the window grows the whole track: at 480px the header's own min-content
+       (menu button, title, mod selector, language, theme, window controls) is
+       wider than the viewport, and the header plus the page were pushed off
+       screen. min-width: 0 lets the track stay at the window width while the
+       header's own content shrinks (the title and the selector both truncate). */
+    min-width: 0;
   }
   @media (min-width: 768px) {
     .area-aside {
@@ -229,6 +257,10 @@
     grid-area: main;
     z-index: 0;
     min-height: 0;
+    /* Same reason as the header: the page below may be wider than the window
+       (the compact dev pages have a min-width), and that must scroll inside
+       this box instead of widening the track. */
+    min-width: 0;
   }
 
   @media (min-width: 1280px) {

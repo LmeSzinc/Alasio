@@ -13,19 +13,19 @@
     "zh-TW": "設定",
     "es-ES": "Ajustes"
   },
-  "AlasioSettings": {
-    "en-US": "Alasio Settings",
-    "zh-CN": "Alasio 设置",
-    "ja-JP": "Alasio 設定",
-    "zh-TW": "Alasio 設定",
-    "es-ES": "Ajustes de Alasio"
-  },
   "AlasioTool": {
     "en-US": "Alasio Tools",
     "zh-CN": "Alasio 工具",
     "ja-JP": "Alasio ツール",
     "zh-TW": "Alasio 工具",
     "es-ES": "Herramientas Alasio"
+  },
+  "AlasioSettings": {
+    "en-US": "Alasio Settings",
+    "zh-CN": "Alasio 设置",
+    "ja-JP": "Alasio 設定",
+    "zh-TW": "Alasio 設定",
+    "es-ES": "Ajustes de Alasio"
   },
   "DevTool": {
     "en-US": "Dev Tools",

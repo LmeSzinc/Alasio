@@ -6,20 +6,6 @@
     "zh-TW": "黃金測試審閱",
     "es-ES": "Revisión de Pruebas Golden"
   },
-  "ShowImages": {
-    "en-US": "Show images",
-    "zh-CN": "显示图片",
-    "ja-JP": "画像を表示",
-    "zh-TW": "顯示圖片",
-    "es-ES": "Mostrar imágenes"
-  },
-  "Refresh": {
-    "en-US": "Refresh",
-    "zh-CN": "刷新",
-    "ja-JP": "更新",
-    "zh-TW": "重新整理",
-    "es-ES": "Actualizar"
-  },
   "DesktopOnly": {
     "en-US": "Only available in the desktop app",
     "zh-CN": "仅在桌面客户端可用",
@@ -33,6 +19,20 @@
     "ja-JP": "Mod が選択されていません",
     "zh-TW": "未選擇模組",
     "es-ES": "Ningún mod seleccionado"
+  },
+  "ShowImages": {
+    "en-US": "Show images",
+    "zh-CN": "显示图片",
+    "ja-JP": "画像を表示",
+    "zh-TW": "顯示圖片",
+    "es-ES": "Mostrar imágenes"
+  },
+  "Refresh": {
+    "en-US": "Refresh",
+    "zh-CN": "刷新",
+    "ja-JP": "更新",
+    "zh-TW": "重新整理",
+    "es-ES": "Actualizar"
   },
   "SyntaxError": {
     "en-US": "The file could not be read",

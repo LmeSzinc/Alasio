@@ -1,11 +1,16 @@
 <script lang="ts">
   import Images from "@lucide/svelte/icons/images";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
-  import ModSelector from "$lib/components/arginput/ModSelector.svelte";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Toggle } from "$lib/components/ui/toggle/index.js";
+  import { PAGE_LAYER } from "$lib/context/stack.svelte";
+  import DevCompactHeader from "$lib/dev/DevCompactHeader.svelte";
   import { t } from "$lib/i18n";
+  import { HeaderContext } from "$lib/slotcontext.svelte";
   import { isElectron } from "$lib/use/useElectronEnv.svelte";
+  import { DragRegionContext } from "$lib/window/dragRegion.svelte";
+  import { frame } from "$lib/window/frame.svelte";
+  import { modSelectorRegion } from "$lib/window/regions";
   import { useTopic, websocketClient } from "$lib/ws";
   import SourceView from "./SourceView.svelte";
   import TestTree from "./TestTree.svelte";
@@ -22,6 +27,11 @@
    * The backend pushes the changes of the files it watches, so an edit made in
    * an editor arrives here without asking for it.
    */
+
+  // This page owns the header (title + mod selector) and the band that stops
+  // left of the selector, like every compact dev page.
+  HeaderContext.use(header, { priority: PAGE_LAYER });
+  DragRegionContext.use((inherited) => modSelectorRegion(frame.controls.width)(inherited), { priority: PAGE_LAYER });
 
   const modTopic = useTopic<ModOption[]>("ModList");
   const treeTopic = useTopic<GoldenTestTreeData>("GoldenTestTree");
@@ -105,38 +115,21 @@
   const desktopOnly = $derived(!isElectron.value);
 </script>
 
-<div class="bg-background flex h-full min-h-0 w-full flex-col">
-  <!-- The toolbar lives in the page, not in the app header: the dev nav owns the
-       header slot of this layout and would replace a snippet of the page. Its
-       first cell is as wide as the tree column, so the file path starts on the
-       same line as the code below it. -->
-  <div class="border-border flex shrink-0 items-center border-b pr-3">
-    <div class="border-border w-64 shrink-0 border-r p-2">
-      <ModSelector class="w-full" mod_name={chosen} handleEdit={handleModChange} />
-    </div>
-    <span class="text-muted-foreground min-w-0 flex-1 truncate px-2 font-mono text-xs" title={selected}>
-      {selected}
-    </span>
-    <div class="flex shrink-0 items-center gap-2">
-      <Toggle
-        bind:pressed={showImages}
-        variant="outline"
-        size="sm"
-        aria-label={t.GoldenTest.ShowImages()}
-        title={t.GoldenTest.ShowImages()}
-      >
-        <Images class="size-3.5" />
-        <span class="text-xs">{t.GoldenTest.ShowImages()}</span>
-      </Toggle>
-      <Button variant="outline" size="sm" disabled={selected === ""} onclick={handleRefresh}>
-        <RefreshCw class="size-3.5" />
-        <span class="text-xs">{t.GoldenTest.Refresh()}</span>
-      </Button>
-    </div>
-  </div>
+{#snippet header()}
+  <DevCompactHeader title={t.GoldenTest.Title()} mod_name={chosen} handleEdit={handleModChange} />
+{/snippet}
 
+<!--
+  The tree keeps its own column at 224px: it only has to hold test file names,
+  and every pixel it gives up goes to the source and the screenshots.
+
+  The page runs without the navigation column, so the width floor is what keeps
+  the three columns readable (224 tree + 420 source + 220 screenshots). Below
+  it the page scrolls sideways and shows a slice of the same layout.
+-->
+<div class="bg-background flex h-full min-h-0 w-full min-w-[864px] flex-col">
   <div class="flex min-h-0 flex-1">
-    <div class="border-border w-64 shrink-0 overflow-auto border-r">
+    <div class="border-border w-56 shrink-0 overflow-auto border-r">
       {#if modName === ""}
         <div class="text-muted-foreground p-3 text-xs">
           {desktopOnly ? t.GoldenTest.DesktopOnly() : t.GoldenTest.NoMod()}
@@ -155,8 +148,38 @@
       {/if}
     </div>
 
-    <div class="flex min-w-0 flex-1 flex-col">
-      <SourceView data={ready ? fileData : {}} {showImages} />
+    <div class="flex min-h-0 min-w-0 flex-1 flex-col">
+      <!-- The toolbar belongs to the file being reviewed, so it sits over the
+           source and the screenshots only: its first row is as tall as the
+           filter box of the tree (h-13 = 8 + 36 + 8), which puts the two
+           headers on one line and leaves every pixel of height to the tree.
+           The mod selector lives in the app header, next to the title. -->
+      <div class="border-border flex h-13 shrink-0 items-center gap-2 border-b px-2">
+        <span
+          class="text-muted-foreground min-w-0 flex-1 overflow-hidden font-mono text-xs whitespace-nowrap"
+          title={selected}
+        >
+          {selected || "—"}
+        </span>
+        <Toggle
+          bind:pressed={showImages}
+          variant="outline"
+          size="sm"
+          aria-label={t.GoldenTest.ShowImages()}
+          title={t.GoldenTest.ShowImages()}
+        >
+          <Images class="size-3.5" />
+          <span class="text-xs">{t.GoldenTest.ShowImages()}</span>
+        </Toggle>
+        <Button variant="outline" size="sm" disabled={selected === ""} onclick={handleRefresh}>
+          <RefreshCw class="size-3.5" />
+          <span class="text-xs">{t.GoldenTest.Refresh()}</span>
+        </Button>
+      </div>
+
+      <div class="flex min-h-0 flex-1 flex-col">
+        <SourceView data={ready ? fileData : {}} {showImages} />
+      </div>
     </div>
   </div>
 </div>

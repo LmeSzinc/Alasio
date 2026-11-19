@@ -40,8 +40,14 @@
 
 <div class={className}>
   <Select.Root type="single" bind:value={mod_name} {disabled} {onValueChange}>
-    <Select.Trigger class="w-full">
-      {triggerContent}
+    <Select.Trigger class="w-full overflow-hidden">
+      <!--
+        Hard truncation, no ellipsis: the trigger is now narrow enough that a
+        long mod name has to be cut. `truncate` would add a `…`, and the
+        `data-slot="select-value"` marker would apply the trigger's
+        `line-clamp-1` (which also ellipsizes), so this span carries neither.
+      -->
+      <span class="min-w-0 overflow-hidden whitespace-nowrap">{triggerContent}</span>
     </Select.Trigger>
     <Select.Content>
       <Select.Group>

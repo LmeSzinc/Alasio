@@ -1,25 +1,27 @@
 <script lang="ts">
-  import ModSelector from "$lib/components/arginput/ModSelector.svelte";
   import { PAGE_LAYER } from "$lib/context/stack.svelte";
+  import DevCompactHeader from "$lib/dev/DevCompactHeader.svelte";
+  import { t } from "$lib/i18n";
   import { HeaderContext } from "$lib/slotcontext.svelte";
   import { DragRegionContext } from "$lib/window/dragRegion.svelte";
   import { frame } from "$lib/window/frame.svelte";
-  import { devAssetsRegion } from "$lib/window/regions";
+  import { modSelectorRegion } from "$lib/window/regions";
   import { useTopic } from "$lib/ws";
   import AssetManager from "./AssetManager.svelte";
   import ImageViewer from "./ImageViewer.svelte";
   import PathBreadcrumb from "./PathBreadcrumb.svelte";
   import ResourceManager from "./ResourceManager.svelte";
   import StatusBar from "./StatusBar.svelte";
+  import { templateSelection } from "./selected.svelte";
   import type { FolderResponse } from "./types";
 
   // header context: this page owns the whole header bar (title + selector), so
   // its snippet outranks the one the dev layout declares.
   HeaderContext.use(header, { priority: PAGE_LAYER });
-  // The header of this page carries an interactive selector, so the drag band
-  // stops left of it. Only the right side is narrowed: the left stays what the
-  // layout declared, so the aside config column remains clickable.
-  DragRegionContext.use((inherited) => devAssetsRegion(frame.controls.width)(inherited), { priority: PAGE_LAYER });
+  // The selector sits in the header and is the only interactive control there,
+  // so the drag band stops left of it. The left side stays what the layout
+  // declared, which keeps the aside config column clickable.
+  DragRegionContext.use((inherited) => modSelectorRegion(frame.controls.width)(inherited), { priority: PAGE_LAYER });
 
   const topicClient = useTopic<FolderResponse>("DevAssetsManager");
   const modRpc = topicClient.rpc();
@@ -29,61 +31,57 @@
   const path = $derived(topicClient.data?.path || "");
   const mod_path_assets = $derived(topicClient.data?.mod_path_assets || "assets");
 
+  /** Template the viewer shows: the single selected one, if there is exactly one */
+  const viewedTemplate = $derived(
+    templateSelection.count === 1 ? (templateSelection.selectedItems[0]?.file ?? "") : "",
+  );
+  const viewedUrl = $derived(
+    viewedTemplate !== "" && mod_name !== "" ? `/api/dev_assets/${mod_name}/${viewedTemplate}` : null,
+  );
+
   function handleModChange(value: string) {
     modRpc.call("set_mod", { mod_name: value });
   }
   function handleNavigate(path: string) {
     pathRpc.call("set_path", { path: path });
   }
-  const url =
-    "https://raw.githubusercontent.com/LmeSzinc/StarRailCopilot/f1aea44bfe7e55595670d35adb6f7e731a8e523c/assets/share/base/popup/BUFF_FORGOTTEN_HALL.png";
 </script>
 
 {#snippet header()}
-  <!-- The selector is a fixed-width control, so the title sits on the centre
-       line of the header and the selector is pinned to the right end of it,
-       instead of the two sharing the right edge as a justify-end row does -->
-  <div class="grid w-full flex-1 grid-cols-[1fr_auto_1fr] items-center gap-4">
-    <h1 class="col-start-2 text-lg">Asset Browser</h1>
-    <div class="col-start-3 flex justify-end">
-      <ModSelector class="w-64" {mod_name} handleEdit={handleModChange} />
-    </div>
-  </div>
+  <DevCompactHeader title={t.AssetManager.AssetManager()} {mod_name} handleEdit={handleModChange} />
 {/snippet}
 
-<div class="bg-background flex h-full min-h-160 w-full min-w-240 flex-col">
-  <!-- Header -->
-  <!-- <div class="bg-card border-border border-b px-4 pt-3 pb-2 shadow-sm"></div> -->
+<!--
+  A 2×2 workspace, not a page with a sidebar: the four quadrants are the tree
+  of the folder, the template viewer, the assets and templates of the folder,
+  and the editor. It runs without the navigation column, so the aside holds
+  only the config column.
 
-  <!-- Main Content Area: Changed to flex-col for top-bottom layout -->
-  <div class="flex flex-1 flex-col overflow-hidden">
-    <!-- TOP ROW: ResourceManager + ImageViewer -->
-    <div class="flex flex-1 overflow-hidden">
-      <!-- Top Left: ResourceManager -->
-      <div class="border-border flex w-1/2 flex-col overflow-hidden border-r">
-        <PathBreadcrumb class="bg-card shrink-0" {mod_path_assets} {path} onNavigate={handleNavigate} />
-        <ResourceManager class="flex-1 overflow-hidden" {mod_name} {path} {topicClient} />
-        <StatusBar data={topicClient.data} class="bg-card shrink-0" />
-      </div>
-
-      <!-- Top Right: ImageViewer -->
-      <div class="flex flex-1 flex-col overflow-hidden">
-        <ImageViewer src={url} class="h-full w-full" />
-      </div>
+  The width floor keeps every quadrant usable (384px each, which fits three
+  108px resource tiles); below it the page scrolls sideways instead of folding
+  into a different layout. A narrow window therefore shows a slice of the same
+  workspace, which is all a phone needs from a desktop developer tool.
+-->
+<div class="bg-background flex h-full min-h-0 w-full min-w-[768px] flex-col">
+  <div class="grid min-h-0 flex-1 grid-cols-2 grid-rows-2">
+    <!-- Top left: the folder tree and the files it holds -->
+    <div class="border-border flex min-h-0 min-w-0 flex-col overflow-hidden border-r border-b">
+      <PathBreadcrumb class="bg-card shrink-0" {mod_path_assets} {path} onNavigate={handleNavigate} />
+      <ResourceManager class="min-h-0 flex-1 overflow-hidden" {mod_name} {path} {topicClient} />
+      <StatusBar data={topicClient.data} class="bg-card shrink-0" />
     </div>
 
-    <!-- BOTTOM ROW: AssetManager + Editor -->
-    <div class="border-border flex flex-1 overflow-hidden border-t">
-      <!-- Bottom Left: AssetManager -->
-      <div class="border-border flex w-1/2 flex-col overflow-hidden border-x">
-        <AssetManager class="flex-1" {mod_name} {path} {topicClient} />
-      </div>
-
-      <!-- Bottom Right: Editor -->
-      <div class="flex-1 p-4">
-        <!-- Added padding for visual clarity -->
-        Editor
-      </div>
+    <!-- Top right: the selected template -->
+    <div class="border-border flex min-h-0 min-w-0 flex-col overflow-hidden border-b">
+      <ImageViewer src={viewedUrl} class="min-h-0 flex-1" />
     </div>
+
+    <!-- Bottom left: assets of the folder, and the templates of the asset -->
+    <div class="border-border flex min-h-0 min-w-0 flex-col overflow-hidden border-r">
+      <AssetManager class="min-h-0 flex-1 border-t-0" {mod_name} {path} {topicClient} />
+    </div>
+
+    <!-- Bottom right: the asset editor -->
+    <div class="flex min-h-0 min-w-0 flex-col overflow-hidden p-3 text-sm">Editor</div>
   </div>
 </div>

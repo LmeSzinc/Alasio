@@ -20,10 +20,12 @@ import { HEADER_ACTIONS_WIDTH, bandRightInset, headerPaddingRight } from "$lib/c
 import { type DragRegion, type DragRegionLayer, mergeRegionLayers, toPayload } from "$lib/window/dragRegion.svelte";
 import {
   DEFAULT_BAND_LEFT,
+  MOD_SELECTOR_CLASS,
+  MOD_SELECTOR_WIDTH,
   authRegion,
   breakpointOf,
   defaultRegion,
-  devAssetsRegion,
+  modSelectorRegion,
   sheetRegion,
 } from "$lib/window/regions";
 
@@ -163,28 +165,69 @@ describe("TestAuthRegion", () => {
   });
 });
 
-describe("TestDevAssetsRegion", () => {
+describe("TestModSelectorRegion", () => {
+  it("keeps the selector class and the reserved width in step", () => {
+    // The band reserves MOD_SELECTOR_WIDTH; the header gives the selector that
+    // width with a utility class. Changing one without the other would either
+    // cover the control or leave a dead strip beside it, and neither shows up
+    // in a type check.
+    const step = /(?:^| )w-(\d+)(?: |$)/.exec(MOD_SELECTOR_CLASS)?.[1];
+    if (step === undefined) throw new Error(`no w-<n> class in ${MOD_SELECTOR_CLASS}`);
+
+    expect(Number(step) * 4).toBe(MOD_SELECTOR_WIDTH);
+  });
+
+  it("caps the selector so the title always keeps half the row", () => {
+    // The cap is what lets the selector stay in the header at every width: the
+    // title of a compact page is only shown there.
+    expect(MOD_SELECTOR_CLASS.split(" ")).toContain("max-w-1/2");
+  });
   it.each(CONTROLS)("stops left of the header selector (controls %i)", (controls) => {
     const width = WIDTHS.xl;
     // Page layer over the private layout layer, both pushed.
-    const payload = payloadOf([defaultRegion(breakpointOf(width), controls), devAssetsRegion(controls)], controls);
+    const payload = payloadOf([defaultRegion(breakpointOf(width), controls), modSelectorRegion(controls)], controls);
 
-    // Actions (92) + gap-1 (4) + ModSelector w-64 (256) = 352 from the content
+    // Actions (76) + gap-1 (4) + ModSelector w-30 (120) = 200 from the content
     // edge; the selector itself then spans up to the actions group.
-    expect(payload.right).toBe(bandRightInset(controls) + 4 + 256 + controls);
+    expect(payload.right).toBe(bandRightInset(controls) + 4 + MOD_SELECTOR_WIDTH + controls);
     const selectorRight = width - headerPaddingRight(controls) - HEADER_ACTIONS_WIDTH - 4;
-    const selectorLeft = selectorRight - 256;
+    const selectorLeft = selectorRight - MOD_SELECTOR_WIDTH;
     expect(bandRight(payload, width)).toBe(selectorLeft);
   });
 
   it.each(CONTROLS)("keeps the layout's left inset (controls %i)", (controls) => {
     for (const width of Object.values(WIDTHS)) {
       const breakpoint = breakpointOf(width);
-      const payload = payloadOf([defaultRegion(breakpoint, controls), devAssetsRegion(controls)], controls);
+      const payload = payloadOf([defaultRegion(breakpoint, controls), modSelectorRegion(controls)], controls);
 
       // The page narrows the right side only; the aside must stay clickable.
       expect(payload.left).toBe(DEFAULT_BAND_LEFT[breakpoint]);
     }
+  });
+
+  it("leaves a draggable middle on medium screens with a host", () => {
+    // The compact dev pages drop the nav column, so the band starts at the
+    // config column and runs to the selector: 511px at the default 960 window,
+    // which is the size the window opens with.
+    const width = 960;
+    const controls = 168;
+    const payload = payloadOf([defaultRegion(breakpointOf(width), controls), modSelectorRegion(controls)], controls);
+
+    expect(bandRight(payload, width) - Number(payload.left)).toBe(511);
+  });
+
+  it.each(CONTROLS)("accepts a narrower cluster for a capped selector (controls %i)", (controls) => {
+    // A page whose selector is capped below 120px (the 50% limit of a narrow
+    // header) passes its measured width, so the band never covers the control.
+    const width = 480;
+    const cluster = 4 + 88;
+    const payload = payloadOf(
+      [defaultRegion(breakpointOf(width), controls), modSelectorRegion(controls, cluster)],
+      controls,
+    );
+
+    const expected = width - (bandRightInset(controls) + cluster + controls) - DEFAULT_BAND_LEFT.sm;
+    expect(bandRight(payload, width) - Number(payload.left)).toBe(expected);
   });
 });
 
