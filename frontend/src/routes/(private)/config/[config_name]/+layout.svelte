@@ -6,6 +6,7 @@
   import { ScrollArea } from "$lib/components/ui/scroll-area";
   import { NavContext, type NavLayout } from "$lib/slotcontext.svelte";
   import { useTopic } from "$lib/ws";
+  import { configOverviewPath, firstConfig } from "$private/entry";
   import ConfigNav from "./ConfigNav.svelte";
   import { uiState as ui } from "./state.svelte";
 
@@ -40,13 +41,9 @@
       if (serverData === undefined) {
         return;
       }
-      const configs = Object.values(serverData);
-      if (configs.length > 0) {
-        configs.sort((a, b) => {
-          if (a.gid !== b.gid) return a.gid - b.gid;
-          return a.iid - b.iid;
-        });
-        goto(`/config/${configs[0].name}`, { replaceState: true });
+      const config = firstConfig(serverData);
+      if (config) {
+        goto(configOverviewPath(config.name), { replaceState: true });
       } else {
         goto("/dev/config", { replaceState: true });
       }
