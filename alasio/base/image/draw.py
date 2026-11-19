@@ -1,4 +1,7 @@
+import numbers
+
 import cv2
+import numpy as np
 
 from alasio.base.image.imfile import ImageNotSupported, image_channel, image_copy, image_size
 
@@ -22,7 +25,7 @@ def show_as_pillow(image):
 def resize(image, size):
     """
     Resize image like pillow image.resize(), but implement in opencv.
-    Pillow uses PIL.Image.NEAREST by default.
+    Nearest neighbor interpolation is used.
 
     Args:
         image (np.ndarray):
@@ -52,9 +55,15 @@ def resize_maxpx(image, maxpx):
 
     if w > h:
         h = round(maxpx / w * h)
+        # Keep at least 1 pixel, otherwise an extreme aspect ratio rounds to 0
+        if h < 1:
+            h = 1
         w = maxpx
     else:
         w = round(maxpx / h * w)
+        # Keep at least 1 pixel, otherwise an extreme aspect ratio rounds to 0
+        if w < 1:
+            w = 1
         h = maxpx
 
     return cv2.resize(image, (w, h), interpolation=cv2.INTER_NEAREST)
@@ -80,75 +89,72 @@ def image_paste(image, background, origin):
 
 def image_paint(image, area, color):
     """
-    Paint the area of image to given color
+    Paint the area of image to given color.
+    The color is adapted to the channels of the image:
+    a single number is painted as gray (opaque on an RGBA image), RGB is
+    converted to luma on a grayscale image, alpha is dropped on an RGB image,
+    and an opaque alpha is added on an RGBA image.
 
     Args:
         image (np.ndarray):
         area:
-        color: (r, g, b) or value if grayscale
+        color (int | float | tuple | list): (r, g, b), (r, g, b, a), or a single value.
+            A float value is truncated to an integer
+
+    Returns:
+        np.ndarray: The painted image, which is a copy if the input is read-only
+
+    Raises:
+        ValueError: if the color can't be adapted to the image channels,
+            or doesn't fit into the dtype of the image
     """
+    channel = image_channel(image)
+    # Numpy wraps out of range values silently on assignment, which would paint
+    # an unintended color, so the color is checked before painting.
+    # None means the dtype has no range to check, like a float image.
+    if np.issubdtype(image.dtype, np.integer):
+        info = np.iinfo(image.dtype)
+        color_min, color_max = info.min, info.max
+    else:
+        color_min, color_max = None, None
+
+    if isinstance(color, numbers.Real):
+        # A single number is a gray color, written to every channel explicitly
+        # instead of relying on the numpy broadcast.
+        # An RGBA image is painted opaque.
+        # nan fails the range check, and can't be painted either
+        if color_min is not None and not color_min <= color <= color_max:
+            raise ValueError(f'Cannot paint color={color} on an image of {image.dtype}')
+        value = int(color)
+        if channel == 4:
+            color = (value, value, value, 255)
+        else:
+            color = (value,) * channel
+    else:
+        length = len(color)
+        if length != channel:
+            if channel == 1 and length in (3, 4):
+                # Grayscale: drop alpha and convert RGB to luma,
+                # using the formula of cv2.COLOR_RGB2GRAY
+                r, g, b = color[:3]
+                color = ((r * 4899 + g * 9617 + b * 1868 + 8192) >> 14,)
+            elif channel == 3 and length == 4:
+                # RGB: drop alpha
+                color = color[:3]
+            elif channel == 4 and length == 3:
+                # RGBA: add an opaque alpha
+                color = (*color, 255)
+            else:
+                raise ValueError(f'Cannot paint color={color} on an image of {channel} channels')
+        if color_min is not None:
+            if any(not color_min <= channel_value <= color_max for channel_value in color):
+                raise ValueError(f'Cannot paint color={color} on an image of {image.dtype}')
+
     if not image.flags.writeable:
         image = image_copy(image)
 
     x1, y1, x2, y2 = area
     image[y1:y2, x1:x2] = color
-
-
-def image_paint_white(image, area):
-    """
-    Paint the area of image to black
-
-    Args:
-        image (np.ndarray):
-        area:
-    """
-    if not image.flags.writeable:
-        image = image_copy(image)
-
-    channel = image_channel(image)
-    x1, y1, x2, y2 = area
-    if channel == 3:
-        # RGB
-        image[y1:y2, x1:x2] = (255, 255, 255)
-    elif channel == 1:
-        # grayscale
-        image[y1:y2, x1:x2] = 255
-    elif channel == 4:
-        # RGBA
-        image[y1:y2, x1:x2] = (255, 255, 255, 255)
-    else:
-        # ImageNotSupported, but we can still paint
-        color = tuple([255] * channel)
-        image[y1:y2, x1:x2] = color
-    return image
-
-
-def image_paint_black(image, area):
-    """
-    Paint the area of image to black
-
-    Args:
-        image (np.ndarray):
-        area:
-    """
-    if not image.flags.writeable:
-        image = image_copy(image)
-
-    channel = image_channel(image)
-    x1, y1, x2, y2 = area
-    if channel == 3:
-        # RGB
-        image[y1:y2, x1:x2] = (0, 0, 0)
-    elif channel == 1:
-        # grayscale
-        image[y1:y2, x1:x2] = 0
-    elif channel == 4:
-        # RGBA
-        image[y1:y2, x1:x2] = (0, 0, 0, 255)
-    else:
-        # ImageNotSupported, but we can still paint
-        color = tuple([0] * channel)
-        image[y1:y2, x1:x2] = color
     return image
 
 
@@ -216,7 +222,7 @@ def get_bbox(image, threshold=0):
 def get_bbox_reversed(image, threshold=255):
     """
     Get outbound box of the content in image
-    A opencv implementation of the getbbox() in pillow
+    A opencv implementation, the reversed version of get_bbox()
 
     Args:
         image (np.ndarray):
@@ -235,14 +241,15 @@ def get_bbox_reversed(image, threshold=255):
     if channel == 3:
         # RGB
         mask = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
-        cv2.threshold(mask, 0, threshold, cv2.THRESH_BINARY, dst=mask)
+        # threshold - 1 makes color == threshold background, as documented
+        cv2.threshold(mask, threshold - 1, 255, cv2.THRESH_BINARY_INV, dst=mask)
     elif channel == 1:
         # grayscale
-        _, mask = cv2.threshold(image, 0, threshold, cv2.THRESH_BINARY)
+        _, mask = cv2.threshold(image, threshold - 1, 255, cv2.THRESH_BINARY_INV)
     elif channel == 4:
         # RGBA
         mask = cv2.cvtColor(image, cv2.COLOR_RGBA2GRAY)
-        cv2.threshold(mask, 0, threshold, cv2.THRESH_BINARY, dst=mask)
+        cv2.threshold(mask, threshold - 1, 255, cv2.THRESH_BINARY_INV, dst=mask)
     else:
         raise ImageNotSupported(f'shape={image.shape}')
 
@@ -251,9 +258,9 @@ def get_bbox_reversed(image, threshold=255):
     min_y, min_x = mask.shape
     max_x = 0
     max_y = 0
-    # all black
+    # no content
     if not contours:
-        raise ImageNotSupported(f'Cannot get bbox from a pure black image')
+        raise ImageNotSupported(f'Cannot get bbox from an image without content')
     for contour in contours:
         # x, y, w, h
         x1, y1, x2, y2 = cv2.boundingRect(contour)
