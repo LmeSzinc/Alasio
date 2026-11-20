@@ -14,6 +14,26 @@ import { appState } from "./app-state";
 import { ShutdownStage, setQuittingProbe, shutdownBackend } from "./backend";
 import { type StartupWindowMode, getStartupWindowMode } from "./startup-args";
 
+// Minimum size of the main window, in DIP -- the same unit as `width` and
+// `height` below and as the renderer's CSS pixels, at any display scaling.
+// Both are 480, so the window can be shrunk to a 480x480 square: the smallest
+// box the frontend still lays out legibly.
+//
+// Width: 480 is below the frontend's 640 `sm` breakpoint, so the client
+// falls back to the same mobile layout the remote web page serves to a phone
+// (nav in a 3/4 width Sheet, header keeping the menu button, title, mod
+// selector, language/theme buttons and all 168px of window controls). That
+// layout is a first-class one, not a degraded desktop: the drag band still has
+// 180px to grab (480 - 56 menu button - 244 for the actions and window
+// controls). The compact dev pages keep their own wider min-width and scroll
+// sideways, which the layout handles by design.
+//
+// Height: 480 keeps the 48px title band plus a usable page area, and stays
+// below the default 660 so the floor never fills a small screen (a 1366x768
+// laptop at 125% scaling has about 1092x574 DIP of work area).
+const MIN_WINDOW_WIDTH = 480;
+const MIN_WINDOW_HEIGHT = 480;
+
 let mainWindow: BrowserWindow | null = null;
 let isQuitting = false;
 // In-flight graceful shutdown, shared by every entry point that quits the
@@ -42,6 +62,8 @@ export function createWindow(): BrowserWindow {
   mainWindow = new BrowserWindow({
     width: 960,
     height: 660,
+    minWidth: MIN_WINDOW_WIDTH,
+    minHeight: MIN_WINDOW_HEIGHT,
     frame: false,
     title: "Alasio",
     show: showImmediately,
