@@ -1,8 +1,9 @@
 import numpy as np
 import pytest
 
-from alasio.base.image import draw
-from alasio.base.image.draw import get_bbox, get_bbox_reversed, image_paint, image_paste, resize, resize_maxpx
+from alasio.base.image.draw import (
+    _image_grayscale, get_bbox, get_bbox_reversed, image_paint, image_paste, resize, resize_maxpx
+)
 from alasio.base.image.imfile import ImageNotSupported
 
 pytestmark = [
@@ -497,13 +498,138 @@ class TestGetBbox:
         with pytest.raises(ImageNotSupported, match='shape='):
             get_bbox(image)
 
-    def test_bbox_empty_bounding_rect_raises(self, monkeypatch):
-        """A zero-area bounding rect should raise instead of returning an empty bbox"""
-        monkeypatch.setattr(draw.cv2, 'findContours', lambda *args, **kwargs: ([object()], None))
-        monkeypatch.setattr(draw.cv2, 'boundingRect', lambda contour: (5, 5, 0, 0))
-        image = make_image(10, 10, 1, color=255)
-        with pytest.raises(ImageNotSupported, match='Empty bbox'):
+    def test_bbox_grayscale_with_channel_axis(self):
+        """A (height, width, 1) image is grayscale too"""
+        image = np.zeros((10, 12, 1), dtype=np.uint8)
+        image[3:7, 4:9] = 255
+        assert get_bbox(image) == (4, 3, 9, 7)
+
+
+class TestGetBboxRgbFastPath:
+    """
+    Tests for the RGB path of get_bbox(), which measures the row band on the
+    channels of the image and only converts that band to grayscale.
+    """
+
+    @staticmethod
+    def reference(image, threshold=0):
+        """
+        The plain path: convert the whole image to grayscale, then measure it.
+
+        Args:
+            image (np.ndarray):
+            threshold (int):
+
+        Returns:
+            tuple[int, int, int, int]: area
+        """
+        gray = _image_grayscale(image)
+        row_content = gray.max(axis=1) > threshold
+        y1 = int(row_content.argmax())
+        if not row_content[y1]:
+            raise ImageNotSupported('Cannot get bbox from a pure black image')
+        y2 = int(row_content.size - row_content[::-1].argmax())
+        col_content = gray[y1:y2].max(axis=0) > threshold
+        x1 = int(col_content.argmax())
+        x2 = int(col_content.size - col_content[::-1].argmax())
+        return x1, y1, x2, y2
+
+    @pytest.mark.parametrize("threshold", [0, 1, 50, 128, 254])
+    def test_matches_the_grayscale_path(self, threshold):
+        """The RGB path must return exactly what the grayscale path returns"""
+        rng = np.random.default_rng(0)
+        for _ in range(50):
+            height = int(rng.integers(1, 30))
+            width = int(rng.integers(1, 30))
+            image = rng.integers(0, 256, size=(height, width, 3), dtype=np.uint8)
+            try:
+                expected = self.reference(image, threshold)
+            except ImageNotSupported:
+                with pytest.raises(ImageNotSupported):
+                    get_bbox(image, threshold)
+                continue
+            assert get_bbox(image, threshold) == expected
+
+    def test_matches_on_black_border(self):
+        """A black border must not enter the bbox of the RGB path"""
+        image = make_image(12, 15, 3, color=black(3))
+        fill_area(image, (3, 2, 9, 7), white(3))
+        assert get_bbox(image) == (3, 2, 9, 7)
+
+    def test_dark_pixel_outside_the_content(self):
+        """
+        A pixel whose luma is zero although a channel is not must stay out of
+        the bbox, which is where a per channel test would differ
+        """
+        image = make_image(12, 15, 3, color=black(3))
+        fill_area(image, (3, 2, 9, 7), white(3))
+        # (0, 0, 1) and (1, 0, 0) have a luma of 0 but a channel above zero
+        image[10, 12] = (0, 0, 1)
+        image[11, 14] = (1, 0, 0)
+        assert get_bbox(image) == (3, 2, 9, 7)
+
+    def test_content_at_the_border_rows(self):
+        """Content touching the first and the last row keeps the whole height"""
+        image = make_image(12, 15, 3, color=black(3))
+        image[0, 4] = white(3)
+        image[11, 9] = white(3)
+        assert get_bbox(image) == (4, 0, 10, 12)
+
+    def test_channel_that_is_not_the_brightest(self):
+        """The bbox follows the luma, not the brightest channel"""
+        image = make_image(10, 10, 3, color=black(3))
+        # blue only, luma 29, above a threshold of 20 and below 30
+        fill_area(image, (2, 2, 5, 5), (0, 0, 255))
+        assert get_bbox(image, threshold=20) == (2, 2, 5, 5)
+        with pytest.raises(ImageNotSupported, match='Cannot get bbox'):
+            get_bbox(image, threshold=30)
+
+    def test_non_contiguous_image(self):
+        """A view that cannot be reshaped for free still measures correctly"""
+        image = make_image(12, 15, 3, color=black(3))
+        fill_area(image, (3, 2, 9, 7), white(3))
+        view = image[:, :, :].transpose(1, 0, 2)
+        assert not view.flags.c_contiguous
+        assert get_bbox(view) == (2, 3, 7, 9)
+
+    def test_negative_threshold_keeps_black_content(self):
+        """A negative threshold makes black pixels content, so the whole image is"""
+        image = make_image(12, 15, 3, color=black(3))
+        fill_area(image, (3, 2, 9, 7), white(3))
+        assert get_bbox(image, threshold=-1) == (0, 0, 15, 12)
+
+    def test_all_black_raises(self):
+        """An RGB image without content has no bbox"""
+        image = make_image(12, 15, 3, color=black(3))
+        with pytest.raises(ImageNotSupported, match='Cannot get bbox'):
             get_bbox(image)
+
+    def test_dark_content_below_a_high_threshold_raises(self):
+        """Pure black rows around dim content are not content themselves"""
+        image = make_image(12, 15, 3, color=black(3))
+        fill_area(image, (3, 2, 9, 7), (20, 20, 20))
+        assert get_bbox(image, threshold=19) == (3, 2, 9, 7)
+        with pytest.raises(ImageNotSupported, match='Cannot get bbox'):
+            get_bbox(image, threshold=20)
+
+    def test_band_keeps_rows_the_luma_rejects(self):
+        """
+        A row with a bright channel but a luma below the threshold is inside the
+        candidate band and still excluded, because the luma decides the box
+        """
+        image = make_image(12, 15, 3, color=black(3))
+        # luma 100, above the threshold
+        fill_area(image, (3, 2, 9, 7), (100, 100, 100))
+        # luma 76 with a channel of 255, so the row is a candidate row only
+        image[9, 4] = (255, 0, 0)
+        assert get_bbox(image, threshold=90) == (3, 2, 9, 7)
+
+    def test_band_keeps_columns_the_luma_rejects(self):
+        """The same for a column, which the band narrowing does not handle"""
+        image = make_image(12, 15, 3, color=black(3))
+        fill_area(image, (3, 2, 9, 7), (100, 100, 100))
+        image[3, 12] = (0, 0, 255)
+        assert get_bbox(image, threshold=90) == (3, 2, 9, 7)
 
 
 class TestGetBboxReversed:
@@ -565,10 +691,8 @@ class TestGetBboxReversed:
         with pytest.raises(ImageNotSupported, match='shape='):
             get_bbox_reversed(image)
 
-    def test_bbox_empty_bounding_rect_raises(self, monkeypatch):
-        """A zero-area bounding rect should raise instead of returning an empty bbox"""
-        monkeypatch.setattr(draw.cv2, 'findContours', lambda *args, **kwargs: ([object()], None))
-        monkeypatch.setattr(draw.cv2, 'boundingRect', lambda contour: (5, 5, 0, 0))
-        image = make_image(10, 10, 1, color=0)
-        with pytest.raises(ImageNotSupported, match='Empty bbox'):
-            get_bbox_reversed(image)
+    def test_bbox_grayscale_with_channel_axis(self):
+        """A (height, width, 1) image is grayscale too"""
+        image = np.full((10, 12, 1), 255, dtype=np.uint8)
+        image[3:7, 4:9] = 0
+        assert get_bbox_reversed(image) == (4, 3, 9, 7)
