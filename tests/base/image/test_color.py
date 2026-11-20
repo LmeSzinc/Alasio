@@ -1,9 +1,21 @@
+"""
+Tests of the per pixel helpers and the scalar color distances of
+alasio.base.image.color: rgbmax(), rgbmin(), rgbminmax(), rgb2gray(),
+rgb2hsv(), get_color(), color_similarity(), color_similar() and
+color_similar_1d().
+
+The 2D functions that scan a whole screenshot have a file of their own
+(test_color_luma.py, test_color_rgb565.py, test_color_similarity.py,
+test_color_mask.py, test_color_letters.py and test_color_white_letters.py), so
+the exhaustive color space scans of the module run side by side instead of one
+after another.
+"""
 import cv2
 import numpy as np
 import pytest
 
 from alasio.base.image.color import (
-    color_mask, color_similarity_2d, extract_letters, extract_white_letters, rgb2luma, rgb565_to_rgb888
+    color_similar, color_similar_1d, color_similarity, get_color, rgb2gray, rgb2hsv, rgbmax, rgbmin, rgbminmax
 )
 
 pytestmark = [
@@ -11,343 +23,354 @@ pytestmark = [
 ]
 
 
-def create_rgb888():
+def channel_extremes(image):
     """
-    Create a 4096x4096 image containing every color in RGB888
-    for testing purpose
-    """
-    size = 4096
+    The per pixel minimum and maximum of the three channels.
 
-    b = np.tile(np.arange(256, dtype=np.uint8), 65536)
-    g = np.repeat(np.arange(256, dtype=np.uint8), 256)
-    g = np.tile(g, 256)
-    r = np.repeat(np.arange(256, dtype=np.uint8), 65536)
-
-    b = b.reshape(size, size)
-    g = g.reshape(size, size)
-    r = r.reshape(size, size)
-
-    img_array = cv2.merge([b, g, r])
-    return img_array
-
-
-def create_rgb565():
-    """
-    Create a 256x256 single-channel image (np.uint16).
-    Contains every possible value for RGB565 (0 to 65535).
-
-    Format:
-    - Shape: (256, 256)
-    - Type:  np.uint16 (Single Channel)
-    - Bit Layout: [ RRRRR (5) | GGGGGG (6) | BBBBB (5) ]
-    """
-    size = 256  # 256 * 256 = 65536 pixels
-    img_rgb565 = np.arange(65536, dtype=np.uint16)
-    img_rgb565 = img_rgb565.reshape(size, size)
-    return img_rgb565
-
-
-def rgb565_to_rgb888_reference(arr):
-    # Implement the simple reference version from the comments
-    # Reference implementation (rgb565_to_rgb888() in color.py):
-    r = (arr & 0b1111100000000000) >> (11 - 3)
-    g = (arr & 0b0000011111100000) >> (5 - 2)
-    b = (arr & 0b0000000000011111) << 3
-    r |= (r & 0b11100000) >> 5
-    g |= (g & 0b11000000) >> 6
-    b |= (b & 0b11100000) >> 5
-    r = r.astype(np.uint8)
-    g = g.astype(np.uint8)
-    b = b.astype(np.uint8)
-    return cv2.merge([r, g, b])
-
-
-@pytest.fixture(scope="module")
-def rgb888_image():
-    """
-    Fixture to create the RGB888 test image once for all tests.
-    Contains every possible RGB888 color, covering all input cases.
-    """
-    return create_rgb888()
-
-
-@pytest.fixture(scope="module")
-def rgb565_image():
-    """
-    Fixture to create the RGB565 test image once for all tests.
-    This contains all possible RGB565 colors (0-65535) in a 256x256 image.
-    """
-    return create_rgb565()
-
-
-def color_blocks(image, size=173):
-    """
-    Yield non-overlapping size x size blocks covering the whole image.
-    173x173 = 29929 pixels, which is below the 30000-pixel branch threshold.
+    The reference of rgbmin(), rgbmax() and rgbminmax(), computed with numpy
+    rather than with the cv2.max() / cv2.min() of the implementation.
 
     Args:
-        image (np.ndarray): Input image
-        size (int): Block size in pixels
+        image (np.ndarray): uint8 image of shape (height, width, 3)
 
-    Yields:
-        np.ndarray: Image block
+    Returns:
+        np.ndarray: minimum, shape (height, width)
+        np.ndarray: maximum, shape (height, width)
     """
-    for y in range(0, image.shape[0], size):
-        for x in range(0, image.shape[1], size):
-            yield image[y:y + size, x:x + size]
+    channel_0, channel_1, channel_2 = cv2.split(image)
+    minimum = np.minimum(np.minimum(channel_0, channel_1), channel_2)
+    maximum = np.maximum(np.maximum(channel_0, channel_1), channel_2)
+    return minimum, maximum
 
 
-class TestRgb2Luma:
-    """Tests for rgb2luma"""
+def gray_reference(minimum, maximum):
+    """
+    (MIN + MAX) / 2, rounded to the nearest even value.
 
-    def test_rgb2luma(self, rgb888_image):
+    The integer form of the rounding: a half rounds to the even neighbour,
+    which is what np.rint() and cv2.addWeighted() do.
+
+    Args:
+        minimum (np.ndarray): uint8 per pixel minimum
+        maximum (np.ndarray): uint8 per pixel maximum
+
+    Returns:
+        np.ndarray: uint8, shape of minimum
+    """
+    total = minimum.astype(np.int16) + maximum
+    half = total >> 1
+    # a half rounds up when the floor is odd, which is rounding to even
+    expected = half + ((total & 1) & (half & 1))
+    return expected.astype(np.uint8)
+
+
+class TestRgbMax:
+    """rgbmax() must be the per pixel maximum of the three channels"""
+
+    def test_every_color(self, rgb888_image):
+        """Every RGB888 color gives the maximum of its channels"""
+        result = rgbmax(rgb888_image)
+        assert result.shape == rgb888_image.shape[:2]
+        assert result.dtype == np.uint8
+        np.testing.assert_array_equal(result, channel_extremes(rgb888_image)[1])
+
+    def test_pure_channels(self):
+        """A pixel with one bright channel answers that channel"""
+        image = np.array([[[255, 0, 0], [0, 255, 0], [0, 0, 255], [1, 2, 3]]], dtype=np.uint8)
+        assert rgbmax(image).tolist() == [[255, 255, 255, 3]]
+
+
+class TestRgbMin:
+    """rgbmin() must be the per pixel minimum of the three channels"""
+
+    def test_every_color(self, rgb888_image):
+        """Every RGB888 color gives the minimum of its channels"""
+        result = rgbmin(rgb888_image)
+        assert result.shape == rgb888_image.shape[:2]
+        assert result.dtype == np.uint8
+        np.testing.assert_array_equal(result, channel_extremes(rgb888_image)[0])
+
+    def test_pure_channels(self):
+        """A pixel with one dark channel answers that channel"""
+        image = np.array([[[255, 0, 0], [0, 255, 0], [0, 0, 255], [1, 2, 3]]], dtype=np.uint8)
+        assert rgbmin(image).tolist() == [[0, 0, 0, 1]]
+
+
+class TestRgbMinMax:
+    """rgbminmax() must answer both the minimum and the maximum of the channels"""
+
+    def test_every_color(self, rgb888_image):
+        """Every RGB888 color gives its minimum and its maximum"""
+        minimum, maximum = rgbminmax(rgb888_image)
+        expected_minimum, expected_maximum = channel_extremes(rgb888_image)
+        assert minimum.shape == rgb888_image.shape[:2]
+        assert maximum.shape == rgb888_image.shape[:2]
+        assert minimum.dtype == np.uint8
+        assert maximum.dtype == np.uint8
+        np.testing.assert_array_equal(minimum, expected_minimum)
+        np.testing.assert_array_equal(maximum, expected_maximum)
+
+    def test_order_of_the_result(self):
+        """The minimum is the first value and the maximum the second"""
+        image = np.array([[[10, 200, 30]]], dtype=np.uint8)
+        minimum, maximum = rgbminmax(image)
+        assert minimum.tolist() == [[10]]
+        assert maximum.tolist() == [[200]]
+
+
+class TestRgb2Gray:
+    """rgb2gray() must be (MAX(r, g, b) + MIN(r, g, b)) / 2"""
+
+    def test_every_color(self, rgb888_image):
+        """Every RGB888 color gives the middle of its extreme channels"""
+        result = rgb2gray(rgb888_image)
+        assert result.shape == rgb888_image.shape[:2]
+        assert result.dtype == np.uint8
+        minimum, maximum = channel_extremes(rgb888_image)
+        np.testing.assert_array_equal(result, gray_reference(minimum, maximum))
+
+    @pytest.mark.parametrize(
+        'pixel, expected',
+        [
+            ((10, 200, 30), 105),
+            ((0, 0, 0), 0),
+            ((255, 255, 255), 255),
+            ((0, 255, 0), 128),  # 127.5 rounds to the nearest even value
+            ((0, 1, 0), 0),  # 0.5 rounds to the nearest even value
+        ],
+        ids=['mid', 'black', 'white', 'half_up_even', 'half_down_even'],
+    )
+    def test_one_pixel(self, pixel, expected):
+        """A pixel gives the middle of its minimum and maximum"""
+        image = np.array([[pixel]], dtype=np.uint8)
+        assert rgb2gray(image)[0, 0] == expected
+
+
+class TestRgb2Hsv:
+    """rgb2hsv() must be the HSV of the module, in its own units"""
+
+    # Hue of opencv is 0~180, the module reports 0~360, saturation and value
+    # are 0~255 in opencv and 0~100 here
+    SCALE = np.array([360 / 180, 100 / 255, 100 / 255])
+
+    def test_sample_of_colors(self, rgb888_image):
         """
-        Test if the functions are approximately equal (within tolerance).
-        This is useful if exact equality fails due to floating point precision.
+        A stride sample of the color space.
+
+        The conversion of opencv is a lookup of the input, so a sample of the
+        colors is the same statement as the whole space and costs a sixteenth
+        of it. The primary colors below pin the hue sectors, and
+        test_gray_has_no_hue pins the saturation.
         """
-        result1 = rgb2luma(rgb888_image)
-        result2 = rgb2luma(rgb888_image, fast=False)
+        sample = rgb888_image[::8, ::8]
+        result = rgb2hsv(sample)
+        expected = cv2.cvtColor(sample, cv2.COLOR_RGB2HSV).astype(float) * self.SCALE
+        assert result.shape == sample.shape
+        assert result.dtype == np.float64
+        np.testing.assert_array_equal(result, expected)
 
-        # Test that both functions return the same output shape
-        assert result1.shape == result2.shape, \
-            f"Shape mismatch: {result1.shape} vs {result2.shape}"
-        assert result1.shape == (4096, 4096), \
-            f"Expected shape (4096, 4096), got {result1.shape}"
-        assert result1.dtype == result2.dtype, \
-            f"Dtype mismatch: {result1.dtype} vs {result2.dtype}"
+    @pytest.mark.parametrize(
+        'pixel, expected',
+        [
+            ((255, 0, 0), (0.0, 100.0, 100.0)),
+            ((255, 255, 0), (60.0, 100.0, 100.0)),
+            ((0, 255, 0), (120.0, 100.0, 100.0)),
+            ((0, 255, 255), (180.0, 100.0, 100.0)),
+            ((0, 0, 255), (240.0, 100.0, 100.0)),
+            ((255, 0, 255), (300.0, 100.0, 100.0)),
+            ((255, 255, 255), (0.0, 0.0, 100.0)),
+            ((0, 0, 0), (0.0, 0.0, 0.0)),
+            ((128, 128, 128), (0.0, 0.0, 50.19607843137255)),
+        ],
+        ids=['red', 'yellow', 'green', 'cyan', 'blue', 'magenta', 'white', 'black', 'gray'],
+    )
+    def test_primary_colors(self, pixel, expected):
+        """The hue sectors pin the RGB order and the unit of each channel"""
+        image = np.array([[pixel]], dtype=np.uint8)
+        assert tuple(rgb2hsv(image)[0, 0]) == pytest.approx(expected)
 
-        # Allow a small tolerance for potential rounding differences
-        are_close = np.allclose(result1, result2, atol=1, rtol=0)
+    def test_ranges(self, rgb888_image):
+        """Hue is in 0~360, saturation and value are in 0~100"""
+        result = rgb2hsv(rgb888_image[::128, ::128])
+        assert result[..., 0].min() >= 0
+        assert result[..., 0].max() < 360
+        assert result[..., 1].min() >= 0
+        assert result[..., 1].max() <= 100
+        assert result[..., 2].min() >= 0
+        assert result[..., 2].max() <= 100
 
-        if not are_close:
-            diff = np.abs(result1.astype(np.int16) - result2.astype(np.int16))
-            max_diff = np.max(diff)
-            mean_diff = np.mean(diff)
-
-            pytest.fail(
-                f"Arrays are not close within tolerance!\n"
-                f"Maximum difference: {max_diff}\n"
-                f"Mean difference: {mean_diff:.4f}\n"
-                f"Tolerance: atol=1"
-            )
-
-
-class TestRgb565ToRgb888:
-    """Tests for rgb565_to_rgb888"""
-
-    @staticmethod
-    def reference(arr):
-        """
-        Simple reference version from the comments in color.py
-
-        Args:
-            arr (np.ndarray): RGB565 image, uint16
-
-        Returns:
-            np.ndarray: RGB888 image, uint8
-        """
-        r = (arr & 0b1111100000000000) >> (11 - 3)
-        g = (arr & 0b0000011111100000) >> (5 - 2)
-        b = (arr & 0b0000000000011111) << 3
-        r |= (r & 0b11100000) >> 5
-        g |= (g & 0b11000000) >> 6
-        b |= (b & 0b11100000) >> 5
-        r = r.astype(np.uint8)
-        g = g.astype(np.uint8)
-        b = b.astype(np.uint8)
-        return cv2.merge([r, g, b])
-
-    def test_rgb565_to_rgb888(self, rgb565_image):
-        """
-        Test rgb565_to_rgb888 by comparing the optimized implementation
-        with the simple, commented reference implementation.
-        """
-        # Get result from the optimized implementation
-        result_fast = rgb565_to_rgb888(rgb565_image)
-        result_reference = self.reference(rgb565_image.copy())
-
-        # Test that both functions return the same output shape
-        assert result_fast.shape == result_reference.shape, \
-            f"Shape mismatch: {result_fast.shape} vs {result_reference.shape}"
-        assert result_fast.shape == (256, 256, 3), \
-            f"Expected shape (256, 256, 3), got {result_fast.shape}"
-        assert result_fast.dtype == result_reference.dtype, \
-            f"Dtype mismatch: {result_fast.dtype} vs {result_reference.dtype}"
-        assert result_fast.dtype == np.uint8, \
-            f"Expected dtype uint8, got {result_fast.dtype}"
-
-        # Allow a small tolerance for potential rounding differences
-        are_close = np.allclose(result_reference, result_fast, atol=1, rtol=0)
-
-        if not are_close:
-            diff = np.abs(result_reference.astype(np.int16) - result_fast.astype(np.int16))
-            max_diff = np.max(diff)
-            mean_diff = np.mean(diff)
-
-            pytest.fail(
-                f"Arrays are not close within tolerance!\n"
-                f"Maximum difference: {max_diff}\n"
-                f"Mean difference: {mean_diff:.4f}\n"
-                f"Tolerance: atol=1"
-            )
+    def test_gray_has_no_hue(self):
+        """A gray pixel has no saturation"""
+        values = np.arange(256, dtype=np.uint8)
+        image = np.repeat(np.repeat(values[:, None], 3, axis=1)[None, :, :], 2, axis=0)
+        result = rgb2hsv(image)
+        np.testing.assert_array_equal(result[..., 1], np.zeros_like(result[..., 1]))
+        np.testing.assert_array_equal(result[..., 0], np.zeros_like(result[..., 0]))
 
 
-class TestColorSimilarity2d:
-    """color_similarity_2d must match the unoptimized reference algorithm"""
+class TestGetColor:
+    """get_color() must be the average of an area, in the channel order of the image"""
+
+    def test_whole_image(self, rgb888_image):
+        """Every channel of the image holds each value the same number of times"""
+        color = get_color(rgb888_image)
+        assert len(color) == 3
+        assert color == pytest.approx((127.5, 127.5, 127.5))
+
+    def test_area(self, rgb888_image):
+        """The area is averaged on its own, the rest of the image is ignored"""
+        area = (3, 2, 15, 10)
+        color = get_color(rgb888_image, area)
+        expected = rgb888_image[2:10, 3:15].reshape(-1, 3).mean(axis=0)
+        assert color == pytest.approx(tuple(expected))
+
+    def test_area_outside_the_image(self):
+        """An area past the edge is padded black by the crop, and averaged with it"""
+        image = np.full((4, 4, 3), 100, dtype=np.uint8)
+        # the 4x4 area holds the 2x2 pixels inside the image, the rest is black
+        assert get_color(image, (2, 2, 6, 6)) == pytest.approx((25.0, 25.0, 25.0))
+
+    def test_grayscale(self):
+        """A grayscale image reports its single channel, the other two are zero"""
+        image = np.full((4, 4), 7, dtype=np.uint8)
+        assert get_color(image) == (7.0, 0.0, 0.0)
+
+    def test_channel_order_is_kept(self):
+        """The three channels are not reordered, the image is read as it is"""
+        image = np.full((2, 2, 3), (1, 2, 3), dtype=np.uint8)
+        assert get_color(image) == (1.0, 2.0, 3.0)
+
+
+class TestColorSimilarity:
+    """color_similarity() must be the Photoshop tolerance of two colors"""
+
+    @pytest.mark.parametrize(
+        'color1, color2, expected',
+        [
+            ((1, 2, 3), (1, 2, 3), 0),
+            ((110, 100, 100), (100, 100, 100), 10),
+            ((100, 100, 100), (110, 100, 100), 10),
+            ((110, 90, 100), (100, 100, 100), 20),
+            ((12, 198, 31), (10, 200, 30), 4),
+            ((0, 0, 0), (255, 255, 255), 255),
+            ((255, 0, 0), (0, 255, 0), 510),
+        ],
+        ids=[
+            'same',
+            'one_channel_up',
+            'one_channel_up_reversed',
+            'one_up_one_down',
+            'two_channels',
+            'black_white',
+            'red_green',
+        ],
+    )
+    def test_tolerance(self, color1, color2, expected):
+        """The tolerance is the largest positive difference plus the largest negative one"""
+        assert color_similarity(color1, color2) == expected
+
+    @pytest.mark.parametrize(
+        'color1, color2',
+        [
+            ((110, 90, 100), (100, 100, 100)),
+            ((255, 0, 0), (0, 255, 0)),
+            ((1, 2, 3), (4, 5, 6)),
+        ],
+        ids=['mixed', 'opposite', 'small'],
+    )
+    def test_symmetric(self, color1, color2):
+        """The order of the two colors does not change the tolerance"""
+        assert color_similarity(color1, color2) == color_similarity(color2, color1)
+
+
+class TestColorSimilar:
+    """color_similar() must be color_similarity() cut at a threshold"""
+
+    @pytest.mark.parametrize(
+        'color1, color2, threshold, expected',
+        [
+            ((100, 100, 100), (100, 100, 100), 10, True),
+            ((110, 100, 100), (100, 100, 100), 10, True),
+            ((110, 100, 100), (100, 100, 100), 9, False),
+            ((111, 100, 100), (100, 100, 100), 10, False),
+            ((90, 100, 130), (100, 100, 100), 10, False),
+            ((90, 100, 130), (100, 100, 100), 40, True),
+        ],
+        ids=['same', 'on_threshold', 'below_threshold', 'above_threshold', 'two_channels', 'two_channels_wide'],
+    )
+    def test_threshold(self, color1, color2, threshold, expected):
+        """A tolerance equal to the threshold is similar, one above is not"""
+        assert color_similar(color1, color2, threshold) is expected
+
+    def test_default_threshold(self):
+        """The default threshold is 10"""
+        assert color_similar((110, 100, 100), (100, 100, 100)) is True
+        assert color_similar((111, 100, 100), (100, 100, 100)) is False
+
+    @pytest.mark.parametrize('threshold', [0, 1, 10, 30, 128, 255, 510])
+    def test_agrees_with_similarity(self, threshold):
+        """The two functions answer the same question"""
+        pairs = [
+            ((1, 2, 3), (1, 2, 3)),
+            ((110, 90, 100), (100, 100, 100)),
+            ((255, 0, 0), (0, 255, 0)),
+            ((12, 198, 31), (10, 200, 30)),
+        ]
+        for color1, color2 in pairs:
+            assert color_similar(color1, color2, threshold) == (color_similarity(color1, color2) <= threshold)
+
+
+class TestColorSimilar1D:
+    """color_similar_1d() must be the per pixel tolerance of a list of colors"""
 
     @staticmethod
     def reference(image, color):
         """
-        Unoptimized reference algorithm, copied from the comments in color.py
+        The tolerance of color_similarity(), one row at a time.
 
         Args:
-            image (np.ndarray): 2D BGR image
+            image (np.ndarray): uint8 array of shape (pixel, 3)
             color (tuple): (r, g, b)
 
         Returns:
-            np.ndarray: uint8
+            np.ndarray: int32, the tolerance of every row
         """
-        r, g, b = cv2.split(cv2.subtract(image, (*color, 0)))
-        positive = cv2.max(cv2.max(r, g), b)
-        r, g, b = cv2.split(cv2.subtract((*color, 0), image))
-        negative = cv2.max(cv2.max(r, g), b)
-        return cv2.subtract(255, cv2.add(positive, negative))
+        diff = image.astype(int) - np.array(color, dtype=int)
+        return np.maximum(diff, 0).max(axis=1) - np.minimum(diff, 0).min(axis=1)
 
-    @pytest.mark.parametrize("color", [
-        (128, 100, 200),
-        (0, 0, 0),
-        (255, 255, 255),
-        (10, 245, 3),
-    ])
-    def test_matches_reference(self, rgb888_image, color):
-        # Large image path (per-channel, >= 30000 pixels)
-        result = color_similarity_2d(rgb888_image, color)
-        reference = self.reference(rgb888_image, color)
-        assert np.array_equal(result, reference), f"color={color}"
-        # Small image path (< 30000 pixels): every 173x173 block together
-        # covers the full color space
-        for index, block in enumerate(color_blocks(rgb888_image)):
-            result = color_similarity_2d(block, color)
-            reference = self.reference(block, color)
-            assert np.array_equal(result, reference), \
-                f"color={color} block {index}"
+    def test_every_difference(self):
+        """A gray of i against black has the tolerance i, for every i"""
+        values = np.arange(256, dtype=np.uint8)
+        image = np.repeat(values[:, None], 3, axis=1)
+        result = color_similar_1d(image, (0, 0, 0), 10)
+        assert result.dtype == np.bool_
+        np.testing.assert_array_equal(result, values <= 10)
 
+    def test_against_reference(self):
+        """The result is the tolerance of every row, cut at the threshold"""
+        image = np.array(
+            [
+                [1, 2, 3],
+                [11, 2, 3],
+                [1, 12, 3],
+                [1, 2, 13],
+                [110, 90, 100],
+                [255, 0, 0],
+            ],
+            dtype=np.uint8,
+        )
+        color = (1, 2, 3)
+        tolerance = self.reference(image, color)
+        for threshold in (0, 5, 10, 20, 255):
+            result = color_similar_1d(image, color, threshold)
+            np.testing.assert_array_equal(result, tolerance <= threshold)
 
-class TestColorMask:
-    """color_mask must match color_similarity_2d followed by cv2.inRange"""
+    def test_threshold_boundary(self):
+        """A tolerance equal to the threshold is similar, one above is not"""
+        image = np.array([[10, 10, 10], [11, 11, 11]], dtype=np.uint8)
+        np.testing.assert_array_equal(color_similar_1d(image, (0, 0, 0), 10), [True, False])
 
-    @staticmethod
-    def reference(image, color, threshold):
-        """
-        Unoptimized reference algorithm, copied from the comments in color.py
-
-        Args:
-            image (np.ndarray): 2D BGR image
-            color (tuple): (r, g, b)
-            threshold (int):
-
-        Returns:
-            np.ndarray: uint8
-        """
-        similarity = color_similarity_2d(image, color)
-        return cv2.inRange(similarity, 255 - threshold, 255)
-
-    @pytest.mark.parametrize("color", [
-        (128, 100, 200),
-        (0, 0, 0),
-        (255, 255, 255),
-        (10, 245, 3),
-    ])
-    @pytest.mark.parametrize("threshold", [1, 30, 255])
-    def test_matches_reference(self, rgb888_image, color, threshold):
-        # Large image path (per-channel, >= 30000 pixels)
-        result = color_mask(rgb888_image, color, threshold)
-        reference = self.reference(rgb888_image, color, threshold)
-        assert np.array_equal(result, reference), \
-            f"color={color} threshold={threshold}"
-        # Small image path (< 30000 pixels): every 173x173 block together
-        # covers the full color space
-        for index, block in enumerate(color_blocks(rgb888_image)):
-            result = color_mask(block, color, threshold)
-            reference = self.reference(block, color, threshold)
-            assert np.array_equal(result, reference), \
-                f"color={color} threshold={threshold} block {index}"
-
-
-class TestExtractLetters:
-    """extract_letters must match the unoptimized reference algorithm"""
-
-    @staticmethod
-    def reference(image, letter, threshold):
-        """
-        Unoptimized reference algorithm, copied from the comments in color.py
-
-        Args:
-            image (np.ndarray): 2D BGR image
-            letter (tuple): Letter RGB.
-            threshold (int):
-
-        Returns:
-            np.ndarray: uint8
-        """
-        r, g, b = cv2.split(cv2.subtract(image, (*letter, 0)))
-        positive = cv2.max(cv2.max(r, g), b)
-        r, g, b = cv2.split(cv2.subtract((*letter, 0), image))
-        negative = cv2.max(cv2.max(r, g), b)
-        return cv2.multiply(cv2.add(positive, negative), 255.0 / threshold)
-
-    @pytest.mark.parametrize("letter", [
-        (255, 255, 255),
-        [255, 255, 255],
-        (100, 150, 200),
-        (0, 0, 0),
-    ])
-    @pytest.mark.parametrize("threshold", [64, 128, 255])
-    def test_matches_reference(self, rgb888_image, letter, threshold):
-        # Large image path (per-channel, >= 30000 pixels)
-        result = extract_letters(rgb888_image, letter=letter, threshold=threshold)
-        reference = self.reference(rgb888_image, tuple(letter), threshold)
-        assert np.array_equal(result, reference), \
-            f"letter={letter} threshold={threshold}"
-        # Small image path (< 30000 pixels): every 173x173 block together
-        # covers the full color space
-        for index, block in enumerate(color_blocks(rgb888_image)):
-            result = extract_letters(block, letter=letter, threshold=threshold)
-            reference = self.reference(block, tuple(letter), threshold)
-            assert np.array_equal(result, reference), \
-                f"letter={letter} threshold={threshold} block {index}"
-
-
-class TestExtractWhiteLetters:
-    """extract_white_letters must match the unoptimized reference algorithm"""
-
-    @staticmethod
-    def reference(image, threshold):
-        """
-        Unoptimized reference algorithm, copied from the comments in color.py
-
-        The 0.5 scaling uses cv2.convertScaleAbs() like the implementation, not
-        cv2.multiply(): that is the rounding step of the function, and the two
-        ops round differently on some HALs (macOS arm64 with opencv 4.5.4
-        truncates convertScaleAbs() where multiply() rounds), which would
-        compare the choice of primitive rather than the optimization.
-
-        Args:
-            image (np.ndarray): 2D BGR image
-            threshold (int):
-
-        Returns:
-            np.ndarray: uint8
-        """
-        r, g, b = cv2.split(cv2.subtract((255, 255, 255, 0), image))
-        minimum = cv2.min(cv2.min(r, g), b)
-        maximum = cv2.max(cv2.max(r, g), b)
-        maximum = cv2.convertScaleAbs(maximum, alpha=0.5)
-        minimum = cv2.convertScaleAbs(minimum, alpha=0.5)
-        return cv2.multiply(cv2.add(maximum, cv2.subtract(maximum, minimum)), 255.0 / threshold)
-
-    @pytest.mark.parametrize("threshold", [64, 128, 255])
-    def test_matches_reference(self, rgb888_image, threshold):
-        result = extract_white_letters(rgb888_image, threshold=threshold)
-        reference = self.reference(rgb888_image, threshold)
-        assert np.array_equal(result, reference), f"threshold={threshold}"
+    def test_default_threshold(self):
+        """The default threshold is 10"""
+        image = np.array([[10, 10, 10], [11, 11, 11]], dtype=np.uint8)
+        np.testing.assert_array_equal(color_similar_1d(image, (0, 0, 0)), [True, False])

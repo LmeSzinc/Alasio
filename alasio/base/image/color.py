@@ -151,6 +151,14 @@ def rgb565_to_rgb888(image):
     # The same as the code above but costs about 2.7ms instead of 16ms.
     # Note that cv2.convertScaleAbs is 5x fast as cv2.multiply, cv2.add is 8x fast as cv2.convertScaleAbs
     # Note that cv2.convertScaleAbs includes rounding
+
+    # opencv reads a matrix of a single pixel as a scalar: bitwise_and then
+    # answers a 4 element scalar array instead of writing the buffer, which
+    # would leave the channels uninitialized. The pixel is converted as a row
+    # of two and the first column is the answer.
+    if image.size == 1:
+        return rgb565_to_rgb888(np.repeat(image.reshape(1, 1), 2, axis=1))[:, :1]
+
     tmp = np.empty_like(image)
     cv2.bitwise_and(image, 0b1111100000000000, dst=tmp)
     r = cv2.convertScaleAbs(tmp, alpha=0.0040283203125)  # 0.00390625 * 1.03125
