@@ -22,7 +22,10 @@ byte for byte, which is a check of the pack itself as much as of the idx.
 """
 import hashlib
 import os
+import secrets
+import shutil
 import struct
+import tempfile
 from collections import Counter
 
 import pytest
@@ -542,25 +545,39 @@ class TestRequirement:
 
 
 class TestReadOnly:
-    def test_a_build_writes_no_file(self, history, tool):
+    def test_a_build_writes_no_file(self, history, tool, monkeypatch):
         """
         A pack and its idx never touch the disk.
 
         `pack-objects --stdout` writes the pack to a pipe and `idx()` reads
         those bytes, so the first write of an artifact is the zip a client
         downloads, and an interrupted build leaves nothing behind to clean up.
-        The temp folder of the project is watched instead of a folder of the
-        test: there is no folder of the test to watch.
+
+        The build runs against a temporary root of its own, and only that root
+        is watched: the temp folder of the project is shared with the other
+        workers of the run, so its listing says nothing about this build. The
+        root is the one the code reads (`env.ALASIO_TEMP`) and the one python
+        and git inherit (`TMPDIR` / `TEMP` / `TMP`, and `tempfile.tempdir`), so
+        every place the build could write to points into the folder this test
+        owns.
         """
-        before = sorted(os.listdir(env.ALASIO_TEMP)) if env.ALASIO_TEMP.isdir() else []
+        root = env.ALASIO_TEMP.joinpath(f'pack_readonly_{secrets.token_hex(8)}')
+        root.makedirs()
+        monkeypatch.setattr(env, 'ALASIO_TEMP', root)
+        monkeypatch.setattr(tempfile, 'tempdir', str(root))
+        for name in ('TMPDIR', 'TEMP', 'TMP'):
+            monkeypatch.setenv(name, str(root))
+        try:
+            pack = tool.pack(want=history.at(0), have=history.at(FAR))
+            idx = tool.idx(pack)
 
-        pack = tool.pack(want=history.at(0), have=history.at(FAR))
-        idx = tool.idx(pack)
-
-        assert pack[:4] == b'PACK'
-        assert idx[:4] == b'\xfftOc'
-        after = sorted(os.listdir(env.ALASIO_TEMP)) if env.ALASIO_TEMP.isdir() else []
-        assert after == before
+            assert pack[:4] == b'PACK'
+            assert idx[:4] == b'\xfftOc'
+            assert os.listdir(root) == []
+        finally:
+            # the folder is removed once the temp root stops pointing at it
+            monkeypatch.undo()
+            shutil.rmtree(root, ignore_errors=True)
 
     def test_a_build_leaves_the_object_store_alone(self, history, tool):
         """
