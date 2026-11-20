@@ -1,13 +1,68 @@
 import httpx2
 
+from alasio.deploy.httpclient.client_async import AsyncHttpClient
 from alasio.ext.path.atomic import atomic_write
 from alasio.git.fetch.pkt import FetchPayload, agather_bytes, aparse_packfile_stream, aparse_pkt_line, parse_pkt_line
 from alasio.git.fetch.transport import BaseTransport
 from alasio.logger import logger
 
 
+class GitHttpClient(AsyncHttpClient):
+    """
+    The retrying http client of the domain, with the options of the git protocol.
+
+    http2 and the redirects are the options of a smart-http request of git, and
+    the proxy is the one of the arguments: an explicit proxy, never the one of
+    the environment, so a proxy tool that left its variables behind cannot route
+    a fetch. The rest is the design of AsyncHttpClient: a transport error is
+    retried up to the attempts of the call, an http status is the answer of the
+    server and is raised as it is.
+    """
+
+    def __init__(self, proxy=None):
+        """
+        Args:
+            proxy (str, optional): Proxy of the arguments, None for a direct
+                connection. Defaults to None
+        """
+        super().__init__()
+        self._proxy = proxy
+
+    def create_client(self):
+        """
+        The client of this instance: the client of the domain, with the options
+        above.
+
+        An instance method rather than the classmethod of the domain, because
+        the proxy belongs to one fetch. The base creates the client of an
+        instance through self, see HttpClientBase._get_aclient().
+
+        Returns:
+            httpx2.AsyncClient: The client to send the requests with
+        """
+        return httpx2.AsyncClient(
+            http2=True, follow_redirects=True, trust_env=False, proxy=self._proxy)
+
+
 class HttpTransport(BaseTransport):
-    """Transport implementation for HTTP/S protocol using `httpx2`."""
+    """
+    Transport implementation for HTTP/S protocol using `httpx2`.
+
+    Every request goes through GitHttpClient, so a connection that never opened
+    is retried instead of failing the fetch.
+    """
+
+    def _client(self):
+        """
+        The client of one request of this transport.
+
+        A client per request, closed by the request that created it: the
+        transport has no lifetime of its own to close one with.
+
+        Returns:
+            GitHttpClient: The client to send the request with
+        """
+        return GitHttpClient(self.arguments.proxy)
 
     async def fetch_refs(self):
         """
@@ -21,12 +76,12 @@ class HttpTransport(BaseTransport):
         logger.info(f'fetch_refs: {url}')
 
         headers = self.capabilities.headers(protocol_v2=False)
-        async with httpx2.AsyncClient(
-            http2=True, follow_redirects=True, trust_env=False, proxy=self.arguments.proxy
-        ) as client:
+        client = self._client()
+        try:
             response = await client.get(url, headers=headers)
-            response.raise_for_status()
-            content = response.content
+        finally:
+            await client.aclose()
+        content = response.content
 
         out = {}
         for line in parse_pkt_line(content):
@@ -70,14 +125,21 @@ class HttpTransport(BaseTransport):
         })
         content = payload.build()
 
-        async with httpx2.AsyncClient(
-            http2=True, follow_redirects=True, trust_env=False, proxy=self.arguments.proxy
-        ) as client:
-            async with client.stream('POST', url, content=content, headers=headers) as response:
-                response.raise_for_status()
-                pkt_stream = aparse_pkt_line(response.aiter_raw())
-                file_stream = aparse_packfile_stream(pkt_stream)
-                data = await agather_bytes(file_stream)
+        # the pack is read out of the streamed answer, and a transfer that
+        # failed leaves its parsed bytes behind with the attempt
+        data = None
+
+        async def consume(response):
+            nonlocal data
+            pkt_stream = aparse_pkt_line(response.aiter_raw())
+            file_stream = aparse_packfile_stream(pkt_stream)
+            data = await agather_bytes(file_stream)
+
+        client = self._client()
+        try:
+            await client.stream(url, consume, method='POST', headers=headers, content=content)
+        finally:
+            await client.aclose()
 
         atomic_write(output_file, data)
 
@@ -106,14 +168,19 @@ class HttpTransport(BaseTransport):
         # Build v2 payload: command=fetch + delimiter + want/have/done
         content = self._build_v2_payload(payload)
 
-        async with httpx2.AsyncClient(
-            http2=True, follow_redirects=True, trust_env=False, proxy=self.arguments.proxy
-        ) as client:
-            async with client.stream('POST', url, content=content, headers=headers) as response:
-                response.raise_for_status()
-                pkt_stream = aparse_pkt_line(response.aiter_raw())
-                file_stream = aparse_packfile_stream(pkt_stream)
-                data = await agather_bytes(file_stream)
+        data = None
+
+        async def consume(response):
+            nonlocal data
+            pkt_stream = aparse_pkt_line(response.aiter_raw())
+            file_stream = aparse_packfile_stream(pkt_stream)
+            data = await agather_bytes(file_stream)
+
+        client = self._client()
+        try:
+            await client.stream(url, consume, method='POST', headers=headers, content=content)
+        finally:
+            await client.aclose()
 
         atomic_write(output_file, data)
 

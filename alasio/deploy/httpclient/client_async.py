@@ -260,10 +260,10 @@ class AsyncHttpClient(HttpClientBase):
             'HEAD', url, headers=headers, timeout=timeout, attempts=attempts, **kwargs)
 
     async def stream(self, url, consume, headers=None, timeout=None, attempts=HttpClientBase.REQUEST_ATTEMPTS,
-                     **kwargs):
+                     *, method='GET', **kwargs):
         """
-        Get a url and hand the streamed response to an async consumer,
-        retrying the whole transfer.
+        Send a request and hand the streamed response to an async
+        consumer, retrying the whole transfer.
 
         The async twin of HttpClient.stream(), see it for the contract:
         the response body is not read into memory, the consumer reads it
@@ -280,7 +280,7 @@ class AsyncHttpClient(HttpClientBase):
         request itself).
 
         Args:
-            url (str): URL to get
+            url (str): URL to request
             consume (Callable[[httpx2.Response], Awaitable]): Async
                 consumer of one attempt, awaited with the open response
                 of a fresh request; every byte it does not read is
@@ -291,6 +291,12 @@ class AsyncHttpClient(HttpClientBase):
                 given, see request()
             attempts (int): Attempts of the transfer. Defaults to
                 REQUEST_ATTEMPTS, a single-shot transfer passes 1
+            method (str): Http method of the request, keyword only.
+                Defaults to 'GET': a transfer that streams the answer
+                of another verb passes it here, and the body of the
+                call with the content keyword of **kwargs (a git
+                upload-pack answers a POST). The sync twin streams a
+                GET, no caller of it needs another verb
             **kwargs: Any other argument of httpx2.AsyncClient.stream(),
                 see request()
 
@@ -310,7 +316,8 @@ class AsyncHttpClient(HttpClientBase):
                 # network: wait a moment, then retry the same transfer
                 await trio.sleep(self.RETRY_BACKOFF)
             try:
-                async with client.stream('GET', url, headers=headers, timeout=timeout, **kwargs) as response:
+                async with client.stream(
+                        method, url, headers=headers, timeout=timeout, **kwargs) as response:
                     self._raise_for_status(response)
                     await consume(response)
                 return

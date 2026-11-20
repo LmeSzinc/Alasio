@@ -161,6 +161,44 @@ WARNING | Request to "http://test/a" failed (attempt 1/3): ReadTimeout: read tim
         assert b''.join(chunks) == b'wheel'
         assert requests == ['http://mirror/wheel.whl', 'http://mirror/cdn/wheel.whl']
 
+    @pytest.mark.trio
+    async def test_stream_sends_the_method_and_the_body(self):
+        """A streamed transfer is not always a GET: the method of the call
+        reaches the server, with the body of the call."""
+        requests = []
+
+        def handler(request):
+            requests.append((request.method, request.content))
+            return httpx2.Response(200, content=b'answer')
+
+        client = AsyncHttpClient(make_aclient(handler))
+        chunks = []
+
+        async def consume(response):
+            async for chunk in response.aiter_bytes():
+                chunks.append(chunk)
+
+        await client.stream('http://git/upload-pack', consume, method='POST', content=b'want 1')
+        assert b''.join(chunks) == b'answer'
+        assert requests == [('POST', b'want 1')]
+
+    @pytest.mark.trio
+    async def test_stream_is_a_get_by_default(self):
+        """A call that names no method streams a GET."""
+        requests = []
+
+        def handler(request):
+            requests.append(request.method)
+            return httpx2.Response(200, content=b'answer')
+
+        client = AsyncHttpClient(make_aclient(handler))
+
+        async def consume(response):
+            await response.aread()
+
+        await client.stream('http://git/upload-pack', consume)
+        assert requests == ['GET']
+
 
 class TestAsyncRetry:
     """A transport error is retried up to the attempts of the request,
