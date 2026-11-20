@@ -12,7 +12,9 @@ The shapes worth covering are all found in the history rather than built:
 - a range with a couple of changed files, where `have` matters most;
 - a range that holds hundreds of objects, so the pack has real delta chains;
 - the one merge commit of the history, the only place where a pack crosses a
-  second parent.
+  second parent;
+- a pinned pair of commits with a file moved between the two, the shape where
+  a sparse edge walk would pack an object the client already has.
 
 The pack is checked by reading it back with `GenIdx.pack_to_idx` (the Python
 writer) and comparing it with the idx `git index-pack` writes: the two agree
@@ -21,6 +23,7 @@ byte for byte, which is a check of the pack itself as much as of the idx.
 import hashlib
 import os
 import struct
+from collections import Counter
 
 import pytest
 
@@ -44,6 +47,15 @@ GIT_TIMEOUT = 120
 # together they cover a pack without deltas and one with them
 NEAR = 5
 FAR = 50
+
+# The pair of commits where a sparse edge walk packs an object the client
+# already has: between the two, `tests/deploy_dev/pack_deps/conftest.py` sits
+# at `tests/deploy_dev/compile/pack_deps/conftest.py`, so the blob of that file
+# is at a path of `have` that `want` no longer has. Written as a sha1 and not
+# as a depth from HEAD on purpose: HEAD moves on, and a depth would stop
+# covering the move once it is a few hundred commits back.
+SPARSE_WANT = 'a2dff97c0eb640a619f5fceafce90441dc93df9f'
+SPARSE_HAVE = 'cf46ea975cca466a5dd2629a63115b954a885686'
 
 
 def git(*args):
@@ -79,6 +91,23 @@ def git_is_installed():
         return True
     except CmdlineError:
         return False
+
+
+def commit_exists(sha):
+    """
+    Whether this checkout can read a commit.
+
+    Args:
+        sha (str): Commit to look up
+
+    Returns:
+        bool: True when `git cat-file -e` finds it
+    """
+    try:
+        git('cat-file', '-e', f'{sha}^{{commit}}')
+    except AssertionError:
+        return False
+    return True
 
 
 class History:
@@ -121,19 +150,37 @@ class History:
                 'range that crosses a merge is not covered by any test')
         return merges[0]
 
-    def range_size(self, want, have=None):
+    def paths(self, want, have=None):
         """
+        The objects of a range, with the path git lists each of them under.
+
         Args:
             want (str): Commit the range ends at
             have (str): Commit the range starts after, None for no bound
 
         Returns:
-            int: Objects in `want ^have`, the object set of a non-thin pack
+            dict[bytes, str]: Sha1 of every object of `want ^have`, mapped to
+                the path git printed for it. A commit has no path here, so
+                its path is an empty string
         """
         args = ['rev-list', '--objects', want]
         if have is not None:
             args.append(f'^{have}')
-        return len(git(*args).splitlines())
+        return {bytes.fromhex(sha): path
+                for sha, _, path in (line.partition(' ') for line in git(*args).splitlines())}
+
+    def objects(self, want, have=None):
+        """
+        The objects of a range, as git lists them.
+
+        Args:
+            want (str): Commit the range ends at
+            have (str): Commit the range starts after, None for no bound
+
+        Returns:
+            set[bytes]: Sha1 of every object of `want ^have`
+        """
+        return set(self.paths(want, have))
 
 
 def require(available, reason):
@@ -206,6 +253,48 @@ def objects_of(pack):
     return GenIdx('')._parse_pack_info(pack)
 
 
+def describe(shas):
+    """
+    Args:
+        shas (set[bytes]): Objects to name in the message of a failure
+
+    Returns:
+        str: The sha1 of each object with the type git reads it as
+    """
+    return ', '.join(f'{sha.hex()} ({git("cat-file", "-t", sha.hex())})' for sha in sorted(shas))
+
+
+def assert_pack_is_the_range(history, pack, want, have):
+    """
+    Check the object set of a pack against the range it was built for.
+
+    The set is an equality and not a bound: `pack()` walks the edge in full, so
+    the pack holds the range and nothing else, the same set `rev-list
+    --objects want ^have` prints. An object of `have` in the pack is what a
+    sparse walk adds, and `TestSparseWalk` pins the pair where it does.
+
+    Args:
+        history (History): The checkout
+        pack (bytes): The pack, from `GitPackTool.pack`
+        want (str): Commit the pack updates to
+        have (str): Commit the client already has
+
+    Raises:
+        AssertionError: When the pack holds an object twice, when an object of
+            the range is missing, or when it holds an object outside the range
+    """
+    packed = [info.sha for info in objects_of(pack)]
+    unique = set(packed)
+    duplicate = {sha for sha, count in Counter(packed).items() if count > 1}
+    assert not duplicate, f'the pack holds {describe(duplicate)} more than once'
+
+    wanted = history.objects(want, have)
+    missing = wanted - unique
+    assert not missing, f'the pack is missing {describe(missing)} of the range {want} ^{have}'
+    extra = unique - wanted
+    assert not extra, f'the pack holds {describe(extra)} outside the range {want} ^{have}'
+
+
 def idx_fanout_count(idx):
     """
     The object count an idx declares in the last entry of its fanout table.
@@ -221,12 +310,12 @@ def idx_fanout_count(idx):
 
 class TestPackObjectsWhenRange:
     def test_the_pack_holds_the_objects_of_the_range(self, history, tool):
-        """The object set of a pack is `want ^have`, as git lists it."""
+        """The pack holds `want ^have`, as git lists it, and no object from elsewhere."""
         want, have = history.at(0), history.at(FAR)
 
         pack = tool.pack(want=want, have=have)
 
-        assert history.range_size(want, have) == len(objects_of(pack))
+        assert_pack_is_the_range(history, pack, want, have)
 
     def test_have_shrinks_the_pack(self, history, tool):
         """The nearer the commit the client has, the smaller the pack."""
@@ -262,7 +351,64 @@ class TestPackObjectsWhenRange:
         pack = tool.pack(want=merge, have=parent)
 
         assert len(pack) > 12
-        assert history.range_size(merge, parent) == len(objects_of(pack))
+        assert_pack_is_the_range(history, pack, merge, parent)
+
+
+class TestSparseWalk:
+    """
+    The pair where a sparse edge walk packs an object the client already has.
+
+    A sparse walk marks what the client has by path, so a blob that sits at one
+    path in `have` and another in `want` is packed again. `pack()` passes
+    `--no-sparse` for that reason, and these tests keep the case reachable: the
+    pair is written as a sha1, so it outlives the commits that come after it.
+    """
+
+    @pytest.fixture(scope='class')
+    def pair(self, history):
+        """
+        Args:
+            history (History): The checkout
+
+        Returns:
+            tuple[str, str]: The commits `want` and `have` of the pinned range
+        """
+        missing = [sha for sha in (SPARSE_WANT, SPARSE_HAVE) if not commit_exists(sha)]
+        require(not missing,
+                f'commits {", ".join(missing)} are not in this checkout, so the move '
+                f'that this class packs has left the history')
+        return SPARSE_WANT, SPARSE_HAVE
+
+    def test_the_pair_holds_a_blob_at_two_paths(self, history, pair):
+        """
+        The pair is only special while a blob sits under two paths.
+
+        That blob is what a sparse walk gets wrong: it reaches the blob from
+        `have` under the old path, so it stays in the pack, while `rev-list`
+        leaves it out of the range because the client already has it. The
+        equality of the next test is only meaningful while this holds.
+        """
+        want, have = pair
+        in_want = history.paths(want)
+        in_have = history.paths(have)
+        in_range = history.paths(want, have)
+
+        moved = {sha for sha in in_want.keys() & in_have.keys()
+                 if in_want[sha] and in_have[sha] and in_want[sha] != in_have[sha]
+                 and sha not in in_range}
+
+        assert len(moved) == 1, (
+            f'{len(moved)} objects of {want} sit at a path of {have} and outside the range, '
+            f'this pair is expected to hold exactly one: {describe(moved) or "none"}. '
+            f'Pick another pair, this one no longer covers the sparse walk')
+
+    def test_the_pack_holds_the_range_and_nothing_else(self, history, tool, pair):
+        """`pack()` turns the sparse walk off, so the artifact carries no object of `have`."""
+        want, have = pair
+
+        pack = tool.pack(want=want, have=have)
+
+        assert_pack_is_the_range(history, pack, want, have)
 
 
 class TestPackObjectsWhenThin:

@@ -138,10 +138,18 @@ class GitPackTool:
         """
         The pack of one version pair: `want` minus `have`.
 
-        The command is the one `git-upload-pack` runs internally: the object
-        set is `rev-list want ^have`, and git decides the delta encoding. The
-        pack comes back on the standard output, so a build writes no temporary
-        file at all.
+        The command is the one `git-upload-pack` runs internally: `rev-list`
+        of the range decides the objects, and git decides the delta encoding.
+        The pack comes back on the standard output, so a build writes no
+        temporary file at all.
+
+        The object set is the range and nothing else. `--no-sparse` is passed
+        rather than left to the default, which differs between git versions and
+        follows `pack.useSparse` of the operator: the sparse edge walk marks
+        what the client has by path, so a blob behind a rename is packed again
+        although the client holds it. The flag costs a walk of the trees of the
+        edge commit, and buys an object set that does not move with the git
+        that builds the artifact.
 
         Args:
             want (str): Commit the client updates to, the latest version
@@ -157,7 +165,7 @@ class GitPackTool:
         Raises:
             GitPackError: If git fails or times out
         """
-        cmd = self._command('pack-objects', '--stdout', '--revs', '--delta-base-offset')
+        cmd = self._command('pack-objects', '--stdout', '--revs', '--delta-base-offset', '--no-sparse')
         if thin:
             cmd.append('--thin')
         # --revs reads revision expressions, not a list of object ids
