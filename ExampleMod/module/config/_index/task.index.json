@@ -29,6 +29,7 @@
   "Dashboard": {
     "group": {
       "Oil": {"file": "dashboard/dashboard_model.py", "cls": "Oil", "task": "Dashboard"},
+      "Coin": {"file": "dashboard/dashboard_model.py", "cls": "Coin", "task": "Dashboard"},
       "Gems": {"file": "dashboard/dashboard_model.py", "cls": "Gems", "task": "Dashboard"},
       "Progress": {"file": "dashboard/dashboard_model.py", "cls": "Progress", "task": "Dashboard"},
       "Planner": {"file": "dashboard/dashboard_model.py", "cls": "Planner", "task": "Dashboard"}
@@ -117,6 +118,7 @@
       "OldRetire": {"file": "general/general_model.py", "cls": "OldRetire", "task": "General"},
       "DropRecord": {"file": "general/general_model.py", "cls": "DropRecord", "task": "General"},
       "Oil": {"file": "dashboard/dashboard_model.py", "cls": "Oil", "task": "Dashboard"},
+      "Coin": {"file": "dashboard/dashboard_model.py", "cls": "Coin", "task": "Dashboard"},
       "Gems": {"file": "dashboard/dashboard_model.py", "cls": "Gems", "task": "Dashboard"},
       "Progress": {"file": "dashboard/dashboard_model.py", "cls": "Progress", "task": "Dashboard"},
       "Planner": {"file": "dashboard/dashboard_model.py", "cls": "Planner", "task": "Dashboard"}

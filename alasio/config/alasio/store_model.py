@@ -388,6 +388,150 @@ class DashboardDynamicTotal(DashboardAmount):
         return f'{self.Value}/{self.Total}'
 
 
+class DashboardSoftTotal(DashboardAmount):
+    """
+    Dashboard amount/total, where the total is dynamic and may be exceeded
+
+    Typical usage:
+        A weekly reward track holds at most 25000 points, the hard total.
+        How many points the account can reach this week is dynamic, e.g. 23145,
+        the soft total. Value may pass the soft total, but neither Value nor
+        Total may pass the hard total.
+
+    Write this in {nav}.args.yaml
+        SimulatedUniverse:
+            parent: DashboardSoftTotal
+            args:
+                # the range of `Value` is the hard total
+                Value:
+                    value: 0
+                    range: "0~25000"
+                ServerUpdate: "weekday1-04:00"
+
+    `Total` is the soft total of the runtime record, it gets the same upper
+    bound as `Value` when the config is generated, so the hard total is written
+    once, as the range of `Value`.
+    """
+    Total: a.T_INT_GE0 = 0
+
+    @cached_property
+    def meta_total(self):
+        return self.get_meta('Total')
+
+    @property
+    def hard_total(self):
+        """
+        Hard upper bound of both Value and Total
+
+        Returns:
+            int: Upper bound of Value, e.g. 25000
+
+        Raises:
+            DataInconsistent: Value has no upper bound
+        """
+        if self.meta.le is None:
+            raise DataInconsistent(f'Class {self.__class__.__name__} does not have le defined')
+        return self.meta.le
+
+    @batch_set
+    def add(self, value=1, error: DASHBOARD_VALUE_ERROR_MODE = 'drop'):
+        """
+        Add value to current value
+        Soft total remains unchanged
+        """
+        return self.set(self.Value + value, self.Total, error)
+
+    @batch_set
+    def sub(self, value=1, error: DASHBOARD_VALUE_ERROR_MODE = 'drop'):
+        """
+        Subtract value from current value
+        Soft total remains unchanged
+        """
+        return self.set(self.Value - value, self.Total, error)
+
+    @batch_set
+    def set(self, value, total, error: DASHBOARD_VALUE_ERROR_MODE = 'drop'):
+        """
+        Args:
+            value (int): value to set, may exceed the soft total
+            total (int): soft total to set
+            error (DASHBOARD_VALUE_ERROR_MODE):
+                'raise': raise error if value or total is out of range
+                'drop': drop current set operation, do nothing
+                'cap': cap value and total to range
+
+        Returns:
+            bool: True if value is set
+                False if value is capped or value is dropped
+        """
+        meta = self.meta
+        meta_total = self.meta_total
+        # The hard total bounds both numbers, the range of Total only bounds
+        # itself (a type built by hand may not have one)
+        hard = self.hard_total
+        cap = cap_value(value, meta)
+        cap_total = cap_value(total, meta_total)
+        if cap_total > hard:
+            cap_total = hard
+
+        if error == 'raise':
+            if cap != value:
+                raise ValueError(
+                    f'{self.__class__.__name__}.set({value}, {total}) is out of range {meta.ge}~{hard}')
+            if cap_total != total:
+                raise ValueError(
+                    f'{self.__class__.__name__}.set({value}, {total}) is out of range {meta_total.ge}~{hard}')
+            self.Value = value
+            self.Total = total
+            self.Time = getnow()
+            return True
+        elif error == 'drop':
+            if cap != value:
+                logger.warning(
+                    f'{self.__class__.__name__}.set({value}, {total}) is out of range '
+                    f'{meta.ge}~{hard}, drop set operation')
+                return False
+            if cap_total != total:
+                logger.warning(
+                    f'{self.__class__.__name__}.set({value}, {total}) is out of range '
+                    f'{meta_total.ge}~{hard}, drop set operation')
+                return False
+            self.Value = value
+            self.Total = total
+            self.Time = getnow()
+            return True
+        elif error == 'cap':
+            if cap != value:
+                logger.warning(
+                    f'{self.__class__.__name__}.set({value}, {total}) is out of range '
+                    f'{meta.ge}~{hard}, cap value to {cap}')
+            if cap_total != total:
+                logger.warning(
+                    f'{self.__class__.__name__}.set({value}, {total}) is out of range '
+                    f'{meta_total.ge}~{hard}, cap total to {cap_total}')
+            self.Value = cap
+            self.Total = cap_total
+            self.Time = getnow()
+            return cap == value and cap_total == total
+        else:
+            raise ValueError(f'Invalid error mode: {error}')
+
+    def is_full(self):
+        """
+        Check if value has reached the soft total
+        """
+        return self.Value >= self.Total
+
+    def pretty(self):
+        """
+        Return human-readable representation
+
+        Returns:
+            str:
+        """
+        return f'{self.Value}/{self.Total}'
+
+
 class DashboardProgress(DashboardBase):
     """
     Dashboard a progress in percent

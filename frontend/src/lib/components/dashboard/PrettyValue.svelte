@@ -21,9 +21,34 @@
 
   const dashboardType = $derived(data._info?.dashboard ?? "");
 
+  /**
+   * Denominator of the value line, never a guessed number.
+   *
+   * A pair whose value is unknown is unknown as a whole, so it reads
+   * "NaN / NaN": showing the total next to a missing value would suggest the
+   * item knows how far it got. A missing denominator alone reads "value / NaN".
+   *
+   * @param val Numerator of the pair
+   * @param denom Denominator of the pair
+   * @returns The denominator to render
+   */
+  function pairDenominator(val: unknown, denom: unknown): unknown {
+    if (val === undefined || val === null) return "NaN";
+    return denom ?? "NaN";
+  }
+
+  /**
+   * Progress as a percentage, never a guessed number.
+   *
+   * A missing value reads "NaN" instead of 0.00%, which would claim the
+   * progress is empty. A real value is shown within 0-100.
+   *
+   * @param val Progress value
+   * @returns Formatted percentage without the sign
+   */
   const formattedProgress = (val: any) => {
     const num = typeof val === "number" ? val : parseFloat(val);
-    if (isNaN(num)) return "0.00";
+    if (isNaN(num)) return "NaN";
     return Math.min(100, Math.max(0, num)).toFixed(2);
   };
 </script>
@@ -46,7 +71,7 @@
   <span
     class={cn("max-w-max min-w-0 grow basis-[2.5em] truncate text-[0.8em] transition-colors duration-200", mutedClass)}
   >
-    / {denom ?? "NaN"}
+    / {pairDenominator(val, denom)}
   </span>
 {/snippet}
 
@@ -71,6 +96,10 @@
     {@render valueTotal(data.Value?.value, data.Value?.le)}
   {:else if dashboardType === "DynamicTotal"}
     <!-- 8000 / 14000 -->
+    {@render valueTotal(data.Value?.value, data.Total?.value)}
+  {:else if dashboardType === "SoftTotal"}
+    <!-- 8000 / 23145, the value may exceed the total. Neither half is guessed:
+         an item without a value reads "NaN / NaN". -->
     {@render valueTotal(data.Value?.value, data.Total?.value)}
   {:else if dashboardType === "Progress"}
     <!-- 86.54% -->

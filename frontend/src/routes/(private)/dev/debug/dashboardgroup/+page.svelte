@@ -63,6 +63,12 @@
       Total: arg("DynamicTotal", "Total", "static", 40000),
       Time: timeArg("DynamicTotal", 30 * 60 * 1000),
     },
+    SoftTotal: {
+      _info: info("SoftTotal", "SoftTotal", "#00acc1", "Weekly Points"),
+      Value: arg("SoftTotal", "Value", "input-int", 12345, { ge: 0, le: 25000 }),
+      Total: arg("SoftTotal", "Total", "static", 23145, { ge: 0, le: 25000 }),
+      Time: timeArg("SoftTotal", 30 * 60 * 1000),
+    },
     Progress: {
       _info: info("Progress", "Progress", "#1e88e5", "Campaign"),
       Value: arg("Progress", "Value", "input-float", 45.67),
@@ -165,8 +171,8 @@
   <section class="space-y-3">
     <h2 class="text-xl font-semibold">All Dashboard Types</h2>
     <p class="text-muted-foreground text-sm">
-      Amount, Total, Remain, DynamicTotal, Progress, and Planner types &mdash; each rendered as a single arg row with
-      PrettyValue on the right and time below.
+      Amount, Total, Remain, DynamicTotal, SoftTotal, Progress, and Planner types &mdash; each rendered as a single arg
+      row with PrettyValue on the right and time below.
     </p>
     <ArgCard
       bind:cardData={dashboardCard}

@@ -2,6 +2,7 @@ Dashboard:
   global_bind: true
   groups:
     Oil:
+    Coin:
     Gems:
     Progress:
     Planner:

@@ -1,3 +1,4 @@
+import copy
 from typing import Dict, Optional, Tuple
 
 import msgspec
@@ -10,6 +11,20 @@ from alasio.config_dev.parse.parse_arg_utils import has_range_constraint, valida
 from alasio.config_dev.parse.parse_args import TYPE_ARG_NUMERIC, ArgData
 from alasio.ext.cache import cached_property
 from alasio.ext.deep import deep_iter_depth1
+
+# Args a dashboard item renders, by dashboard type.
+# The item is exactly these args: a hidden one is not written to {nav}_config.json,
+# so the view carries no such row and the item would have nothing to show.
+# Keep in sync with the branches of frontend PrettyValue.svelte.
+DASHBOARD_DISPLAY_ARGS = {
+    'Amount': ('Value',),
+    'Total': ('Value',),
+    'Remain': ('Value',),
+    'DynamicTotal': ('Value', 'Total'),
+    'SoftTotal': ('Value', 'Total'),
+    'Progress': ('Value',),
+    'Planner': ('Progress', 'Eta'),
+}
 
 
 class GroupData(Struct, forbid_unknown_fields=True, dict=True):
@@ -159,11 +174,13 @@ class GroupData(Struct, forbid_unknown_fields=True, dict=True):
         would be generated into the model and only fail when a config is loaded.
 
         Raises:
-            DefinitionError: The args of a Planner group are not paired, or the
-                range of an arg excludes its default value
+            DefinitionError: The args of a Planner group are not paired, the
+                hard total of a SoftTotal group is missing, a rendered arg is
+                hidden, or the range of an arg excludes its default value
         """
         if not self.dashboard:
             return
+        self._validate_display_args()
         if self.dashboard == 'Planner':
             self._validate_planner_pairs()
         for arg_name, arg in self.args.items():
@@ -180,6 +197,87 @@ class GroupData(Struct, forbid_unknown_fields=True, dict=True):
                 e.file = self.parser.file if self.parser else ''
                 e.keys = [self.name, arg_name]
                 raise
+        if self.dashboard == 'SoftTotal':
+            # after the automatic ge=0, so Total keeps it when the hard total
+            # is the only bound the type fills in
+            self._populate_soft_total()
+
+    def _validate_display_args(self):
+        """
+        Validate that the args a dashboard item renders are not hidden
+
+        A hidden arg is left out of {nav}_config.json, and the view the GUI reads
+        is built from that file, so the item would receive a group without the
+        value it is made of. Hiding Time / ServerUpdate stays allowed: the item
+        shows the record time on its own, it does not read those args.
+
+        Raises:
+            DefinitionError: A rendered arg of this dashboard type is hidden
+        """
+        for arg_name in DASHBOARD_DISPLAY_ARGS.get(self.dashboard, ()):
+            arg = self.args.get(arg_name, None)
+            if arg is None or not arg.hide:
+                continue
+            raise DefinitionError(
+                f'Dashboard arg "{arg_name}" must not be hidden, '
+                f'the {self.dashboard} item renders it',
+                file=self.parser.file if self.parser else '',
+                keys=[self.name, arg_name])
+
+    def _populate_soft_total(self):
+        """
+        Bound the soft total of a SoftTotal group by the hard total of Value
+
+        The author declares the hard total as the upper bound of Value, e.g.
+        `range: "0~25000"`. Total is the soft total the game reports at
+        runtime: Value may exceed it, but neither of them may exceed the hard
+        total, so Total gets the same upper bound here.
+
+        A Total inherited from the base group is copied before it is bounded:
+        the merged `args` of the inheritance chain share the ArgData objects,
+        and the base group is shared by every SoftTotal group, each with a hard
+        total of its own.
+
+        Raises:
+            DefinitionError: Value has no upper bound, Total is missing, or the
+                bound the author wrote on Total exceeds the hard total
+        """
+        if self.name.startswith('Dashboard'):
+            # A base group declares the fields only, its hard total is written
+            # by every concrete group as the range of Value
+            return
+        file = self.parser.file if self.parser else ''
+        value = self.args.get('Value', None)
+        if value is None or value.le is msgspec.UNSET:
+            raise DefinitionError(
+                'Dashboard SoftTotal group requires an upper bound (le) on "Value", '
+                'e.g. range: "0~25000"',
+                file=file, keys=[self.name, 'args', 'Value'])
+        hard = value.le
+        total = self.args.get('Total', None)
+        if total is None:
+            raise DefinitionError(
+                'Dashboard SoftTotal group requires arg "Total"',
+                file=file, keys=[self.name, 'args'])
+        if 'Total' not in self.override_args:
+            # Inherited from the base group: this group's hard total decides
+            total = copy.copy(total)
+            total.le = hard
+            self.args['Total'] = total
+        elif total.le is msgspec.UNSET:
+            total.le = hard
+        elif total.le > hard:
+            raise DefinitionError(
+                f'Dashboard SoftTotal arg "Total" must not exceed the hard total of "Value" (le={hard})',
+                file=file, keys=[self.name, 'args', 'Total'], value=total.le)
+        try:
+            # the bound of Total is final now, its default was validated against
+            # the range it had before
+            validate_range_default(total)
+        except DefinitionError as e:
+            e.file = file
+            e.keys = [self.name, 'args', 'Total']
+            raise
 
     def _validate_planner_pairs(self):
         """

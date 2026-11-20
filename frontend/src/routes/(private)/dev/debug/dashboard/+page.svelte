@@ -270,9 +270,10 @@
     [1, 2, 3].flatMap((copy) => Object.entries(baseItems).map(([name, data]) => [`${name}-${copy}`, data])),
   );
 
-  // The three value forms, one item each: a plain amount, an amount over its
-  // limit (`Total`), and an amount over a dynamic total. Names and times are
-  // long enough to squeeze the info line as well.
+  // The four value forms, one item each: a plain amount, an amount over its
+  // limit (`Total`), an amount over a dynamic total, and an amount over a soft
+  // total that it may pass. Names and times are long enough to squeeze the
+  // info line as well.
   const valueFormItems: Record<string, Record<string, ArgData>> = {
     Amount: {
       _info: {
@@ -362,6 +363,43 @@
         value: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
       },
     },
+    SoftTotal: {
+      _info: {
+        group: "SoftTotal",
+        arg: "_info",
+        task: "Dashboard",
+        dt: "dashboard-total",
+        dashboard: "SoftTotal",
+        dashboard_color: "#4caf50",
+        name: "Weekly Points",
+        value: "",
+      },
+      Value: {
+        task: "Dashboard",
+        group: "SoftTotal",
+        arg: "Value",
+        dt: "input-int",
+        value: 12345,
+        ge: 0,
+        le: 25000,
+      },
+      Total: {
+        task: "Dashboard",
+        group: "SoftTotal",
+        arg: "Total",
+        dt: "static",
+        value: 23145,
+        ge: 0,
+        le: 25000,
+      },
+      Time: {
+        task: "Dashboard",
+        group: "SoftTotal",
+        arg: "Time",
+        dt: "datetime",
+        value: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
+      },
+    },
   };
 
   // Card widths from the full container down to w-40, one card per step
@@ -433,6 +471,9 @@
       if (args.Value) args.Value.value = Math.round(Math.random() * (args.Value.le ?? 25000));
     } else if (dashboard === "DynamicTotal") {
       if (args.Value) args.Value.value = Math.round(Math.random() * (args.Total?.value ?? 40000));
+    } else if (dashboard === "SoftTotal") {
+      // The value may pass the soft total, the hard total of the value is the limit
+      if (args.Value) args.Value.value = Math.round(Math.random() * (args.Value.le ?? 25000));
     } else if (args.Value) {
       args.Value.value = Math.round(Math.random() * 999999);
     }
@@ -538,7 +579,7 @@
     <div class="space-y-1">
       <h2 class="text-xl font-semibold">Value Forms by Width</h2>
       <p class="text-muted-foreground text-sm">
-        The three value forms only (Amount, Total, DynamicTotal), from the full container width down to
+        The four value forms only (Amount, Total, DynamicTotal, SoftTotal), from the full container width down to
         <code class="bg-muted rounded px-1">w-40</code>. Both lines degrade in one direction only as the card gets
         narrower. The value line reads <code class="bg-muted rounded px-1">1234 / 25000</code> &rarr;
         <code class="bg-muted rounded px-1">1234 / 2...</code> &rarr; <code class="bg-muted rounded px-1">1234</code>

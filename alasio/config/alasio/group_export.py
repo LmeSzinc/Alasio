@@ -33,6 +33,7 @@ from alasio.config.alasio.store_model import (
     DashboardPlanner,
     DashboardProgress,
     DashboardRemain,
+    DashboardSoftTotal,
     DashboardTotal,
 )
 

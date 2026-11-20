@@ -8,7 +8,7 @@ import typing_extensions as e
 
 from alasio.base.servertime import ServerTime
 from alasio.config.alasio.store_model import (
-    DashboardAmount, DashboardDynamicTotal, DashboardRemain, DashboardTotal, cap_value
+    DashboardAmount, DashboardDynamicTotal, DashboardRemain, DashboardSoftTotal, DashboardTotal, cap_value
 )
 from alasio.config.const import DataInconsistent
 from alasio.logger import logger
@@ -132,6 +132,43 @@ class _DashboardDynamicTotalNoGe(DashboardDynamicTotal):
 
     Value: e.Annotated[int, m.Meta(le=200)] = 0
     Total: e.Annotated[int, m.Meta(ge=0)] = 0
+
+
+class _DashboardSoftTotalLimited(DashboardSoftTotal):
+    """
+    Test helper: DashboardSoftTotal with ge=0, le=200 for Value and Total
+    """
+
+    Value: e.Annotated[int, m.Meta(ge=0, le=200)] = 0
+    Total: e.Annotated[int, m.Meta(ge=0, le=200)] = 0
+
+
+class _DashboardSoftTotalTotalNoLe(DashboardSoftTotal):
+    """
+    Test helper: DashboardSoftTotal whose Total has no upper bound of its own,
+    as a type built by hand may be
+    """
+
+    Value: e.Annotated[int, m.Meta(ge=0, le=200)] = 0
+    Total: e.Annotated[int, m.Meta(ge=0)] = 0
+
+
+class _DashboardSoftTotalNoLe(DashboardSoftTotal):
+    """
+    Test helper: DashboardSoftTotal with no hard total (no le on Value)
+    """
+
+    Value: e.Annotated[int, m.Meta(ge=0)] = 0
+    Total: e.Annotated[int, m.Meta(ge=0)] = 0
+
+
+class _DashboardSoftTotalWeekly(DashboardSoftTotal):
+    """
+    Test helper: DashboardSoftTotal with a hard total of 25000
+    """
+
+    Value: e.Annotated[int, m.Meta(ge=0, le=25000)] = 0
+    Total: e.Annotated[int, m.Meta(ge=0, le=25000)] = 0
 
 
 # ---- Tests: DashboardBase.is_expired ----
@@ -1059,3 +1096,223 @@ class TestDashboardDynamicTotalInherited:
         obj.update()
         assert obj.Value == 50
         assert obj.Total == 100
+
+
+# ---- Tests: DashboardSoftTotal ----
+
+
+class TestDashboardSoftTotalHardTotal:
+    """Test suite for DashboardSoftTotal.hard_total"""
+
+    def test_hard_total_is_le_of_value(self):
+        """The hard total is the upper bound of Value"""
+        obj = _DashboardSoftTotalLimited(Value=0, Total=0)
+        assert obj.hard_total == 200
+
+    def test_hard_total_without_le_raises(self):
+        """A type without a hard total can not report one"""
+        obj = _DashboardSoftTotalNoLe(Value=0, Total=0)
+        with pytest.raises(DataInconsistent, match="does not have le defined"):
+            _ = obj.hard_total
+
+
+class TestDashboardSoftTotalSet:
+    """Test suite for DashboardSoftTotal.set"""
+
+    def test_set_both_within_range(self):
+        """set with value and total within range succeeds"""
+        obj = _DashboardSoftTotalLimited(Value=0, Total=0)
+        result = obj.set(30, 100)
+        assert result is True
+        assert obj.Value == 30
+        assert obj.Total == 100
+
+    def test_set_value_above_soft_total(self):
+        """Value may pass the soft total, the difference to DynamicTotal"""
+        obj = _DashboardSoftTotalLimited(Value=0, Total=0)
+        result = obj.set(150, 100)
+        assert result is True
+        assert obj.Value == 150
+        assert obj.Total == 100
+
+    def test_set_value_at_hard_total(self):
+        """The hard total itself is reachable"""
+        obj = _DashboardSoftTotalLimited(Value=0, Total=0)
+        result = obj.set(200, 100)
+        assert result is True
+        assert obj.Value == 200
+        assert obj.Total == 100
+
+    def test_set_value_above_hard_total_caps(self):
+        """set caps Value to the hard total"""
+        obj = _DashboardSoftTotalLimited(Value=0, Total=0)
+        with logger.mock_capture_writer() as capture:
+            result = obj.set(250, 100, error="cap")
+        assert result is False
+        assert obj.Value == 200
+        assert obj.Total == 100
+        assert capture.backend.any_contains("out of range")
+
+    def test_set_value_above_hard_total_drop(self):
+        """set drops the whole operation when Value is above the hard total"""
+        obj = _DashboardSoftTotalLimited(Value=10, Total=100)
+        with logger.mock_capture_writer() as capture:
+            result = obj.set(250, 100, error="drop")
+        assert result is False
+        assert obj.Value == 10
+        assert obj.Total == 100
+        assert capture.backend.any_contains("out of range")
+
+    def test_set_value_above_hard_total_raises(self):
+        """set raises when Value is above the hard total"""
+        obj = _DashboardSoftTotalLimited(Value=0, Total=0)
+        with pytest.raises(ValueError, match="out of range"):
+            obj.set(250, 100, error="raise")
+
+    def test_set_total_above_hard_total_caps(self):
+        """set caps Total to the hard total, Value within range stays"""
+        obj = _DashboardSoftTotalLimited(Value=0, Total=0)
+        with logger.mock_capture_writer() as capture:
+            result = obj.set(50, 250, error="cap")
+        assert result is False
+        assert obj.Value == 50
+        assert obj.Total == 200
+        assert capture.backend.any_contains("out of range")
+
+    def test_set_total_above_hard_total_drop(self):
+        """set drops the whole operation when Total is above the hard total"""
+        obj = _DashboardSoftTotalLimited(Value=10, Total=100)
+        with logger.mock_capture_writer() as capture:
+            result = obj.set(50, 250, error="drop")
+        assert result is False
+        assert obj.Value == 10
+        assert obj.Total == 100
+        assert capture.backend.any_contains("out of range")
+
+    def test_set_total_above_hard_total_raises(self):
+        """set raises when Total is above the hard total"""
+        obj = _DashboardSoftTotalLimited(Value=0, Total=0)
+        with pytest.raises(ValueError, match="out of range"):
+            obj.set(50, 250, error="raise")
+
+    def test_set_total_capped_without_le_on_total(self):
+        """The hard total bounds Total even when Total declares no bound"""
+        obj = _DashboardSoftTotalTotalNoLe(Value=0, Total=0)
+        with logger.mock_capture_writer() as capture:
+            result = obj.set(50, 250, error="cap")
+        assert result is False
+        assert obj.Value == 50
+        assert obj.Total == 200
+        assert capture.backend.any_contains("out of range")
+
+    def test_set_value_below_ge_caps(self):
+        """set caps Value when going below ge"""
+        obj = _DashboardSoftTotalLimited(Value=50, Total=100)
+        with logger.mock_capture_writer() as capture:
+            result = obj.set(-5, 100, error="cap")
+        assert result is False
+        assert obj.Value == 0
+        assert obj.Total == 100
+        assert capture.backend.any_contains("out of range")
+
+    def test_set_within_range_drop(self):
+        """set within range does not log"""
+        obj = _DashboardSoftTotalLimited(Value=0, Total=0)
+        with logger.mock_capture_writer() as capture:
+            result = obj.set(150, 100, error="drop")
+        assert result is True
+        assert obj.Value == 150
+        assert obj.Total == 100
+        assert len(capture.backend.logs) == 0
+
+    def test_set_invalid_error_mode(self):
+        """An unknown error mode is rejected"""
+        obj = _DashboardSoftTotalLimited(Value=0, Total=0)
+        with pytest.raises(ValueError, match="Invalid error mode"):
+            obj.set(10, 20, error="unknown")
+
+    def test_set_updates_time(self):
+        """set updates Time"""
+        obj = _DashboardSoftTotalLimited(Value=0, Total=0)
+        result = obj.set(30, 100)
+        assert result is True
+        assert obj.Time > d.datetime(2020, 1, 1, 0, 0, tzinfo=d.timezone.utc)
+
+
+class TestDashboardSoftTotalIsFull:
+    """Test suite for DashboardSoftTotal.is_full"""
+
+    def test_value_below_total_is_not_full(self):
+        obj = _DashboardSoftTotalLimited(Value=99, Total=100)
+        assert obj.is_full() is False
+
+    def test_value_at_total_is_full(self):
+        obj = _DashboardSoftTotalLimited(Value=100, Total=100)
+        assert obj.is_full() is True
+
+    def test_value_above_total_is_full(self):
+        """A value that passed the soft total is full, not overflowing"""
+        obj = _DashboardSoftTotalLimited(Value=150, Total=100)
+        assert obj.is_full() is True
+
+
+class TestDashboardSoftTotalPretty:
+    """Test suite for DashboardSoftTotal.pretty"""
+
+    def test_pretty_uses_soft_total(self):
+        """The denominator is the soft total, not the hard one"""
+        obj = _DashboardSoftTotalWeekly(Value=12345, Total=23145)
+        assert obj.pretty() == '12345/23145'
+
+    def test_pretty_without_total(self):
+        """An unknown soft total shows as 0, as DynamicTotal does"""
+        obj = _DashboardSoftTotalWeekly(Value=0, Total=0)
+        assert obj.pretty() == '0/0'
+
+
+class TestDashboardSoftTotalInherited:
+    """Test suite for DashboardSoftTotal inherited methods"""
+
+    def test_add_preserves_total(self):
+        obj = _DashboardSoftTotalLimited(Value=50, Total=100)
+        result = obj.add()
+        assert result is True
+        assert obj.Value == 51
+        assert obj.Total == 100
+
+    def test_add_may_exceed_soft_total(self):
+        """add passes the soft total and stops at the hard total"""
+        obj = _DashboardSoftTotalLimited(Value=199, Total=100)
+        with logger.mock_capture_writer() as capture:
+            result = obj.add(5, error="cap")
+        assert result is False
+        assert obj.Value == 200
+        assert obj.Total == 100
+        assert capture.backend.any_contains("out of range")
+
+    def test_sub_preserves_total(self):
+        obj = _DashboardSoftTotalLimited(Value=50, Total=100)
+        result = obj.sub()
+        assert result is True
+        assert obj.Value == 49
+        assert obj.Total == 100
+
+    def test_sub_caps_at_ge(self):
+        obj = _DashboardSoftTotalLimited(Value=1, Total=100)
+        with logger.mock_capture_writer() as capture:
+            result = obj.sub(5, error="cap")
+        assert result is False
+        assert obj.Value == 0
+        assert obj.Total == 100
+        assert capture.backend.any_contains("out of range")
+
+    def test_reset_keeps_total(self):
+        """DashboardSoftTotal inherits DashboardAmount.reset"""
+        obj = _DashboardSoftTotalLimited(Value=50, Total=100)
+        obj.reset()
+        assert obj.Value == 0
+        assert obj.Total == 100
+
+    def test_is_empty_at_ge(self):
+        obj = _DashboardSoftTotalLimited(Value=0, Total=100)
+        assert obj.is_empty() is True

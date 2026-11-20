@@ -9,6 +9,16 @@
       "en-US": {"name": "Oil.Value", "help": ""}
     }
   },
+  "Coin": {
+    "_info": {
+      "zh-CN": {"name": "Coin", "help": ""},
+      "en-US": {"name": "Coin", "help": ""}
+    },
+    "Value": {
+      "zh-CN": {"name": "Coin.Value", "help": ""},
+      "en-US": {"name": "Coin.Value", "help": ""}
+    }
+  },
   "Gems": {
     "_info": {
       "zh-CN": {"name": "Gems", "help": ""},

@@ -1,6 +1,14 @@
 Oil:
-  parent: DashboardTotal
+  parent: DashboardSoftTotal
   dashboard_color: "#7f7f7f"
+  args:
+    Value:
+      value: 0
+      range: "0~25000"
+
+Coin:
+  parent: DashboardSoftTotal
+  dashboard_color: "#ffb300"
   args:
     Value:
       value: 0

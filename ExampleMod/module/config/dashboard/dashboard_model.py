@@ -8,8 +8,14 @@ import typing_extensions as e
 # This file was auto-generated, do not modify it manually. To generate:
 # ``` python -m module.config.gen ```
 
-class Oil(a.DashboardTotal):
+class Oil(a.DashboardSoftTotal):
     Value: e.Annotated[int, m.Meta(ge=0, le=25000)] = 0
+    Total: e.Annotated[int, m.Meta(ge=0, le=25000)] = 0
+
+
+class Coin(a.DashboardSoftTotal):
+    Value: e.Annotated[int, m.Meta(ge=0, le=25000)] = 0
+    Total: e.Annotated[int, m.Meta(ge=0, le=25000)] = 0
 
 
 class Gems(a.DashboardAmount):

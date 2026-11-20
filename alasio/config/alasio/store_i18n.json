@@ -65,6 +65,22 @@
       "es-ES": {"name": "DashboardDynamicTotal.Total", "help": ""}
     }
   },
+  "DashboardSoftTotal": {
+    "_info": {
+      "zh-CN": {"name": "DashboardSoftTotal", "help": ""},
+      "en-US": {"name": "DashboardSoftTotal", "help": ""},
+      "ja-JP": {"name": "DashboardSoftTotal", "help": ""},
+      "zh-TW": {"name": "DashboardSoftTotal", "help": ""},
+      "es-ES": {"name": "DashboardSoftTotal", "help": ""}
+    },
+    "Total": {
+      "zh-CN": {"name": "DashboardSoftTotal.Total", "help": ""},
+      "en-US": {"name": "DashboardSoftTotal.Total", "help": ""},
+      "ja-JP": {"name": "DashboardSoftTotal.Total", "help": ""},
+      "zh-TW": {"name": "DashboardSoftTotal.Total", "help": ""},
+      "es-ES": {"name": "DashboardSoftTotal.Total", "help": ""}
+    }
+  },
   "DashboardProgress": {
     "_info": {
       "zh-CN": {"name": "DashboardProgress", "help": ""},

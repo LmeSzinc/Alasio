@@ -260,6 +260,26 @@ class Oil(a.DashboardTotal):
     Value: a.T_INT_GE0 = 0
 """
 
+    def test_dashboard_soft_total(self, fs):
+        """The soft total gets the hard total of Value as its upper bound."""
+        gen = make_generator(fs, yaml="""\
+WeeklyPoints:
+  parent: DashboardSoftTotal
+  args:
+    Value:
+      value: 0
+      range: 0~25000
+    Total: 0
+""")
+        group = gen.groups_data['WeeklyPoints']
+        group.dashboard = 'SoftTotal'
+        group.populate_dashboard()
+        assert definitions(model_code(gen)) == """\
+class WeeklyPoints(a.DashboardSoftTotal):
+    Value: e.Annotated[int, m.Meta(ge=0, le=25000)] = 0
+    Total: e.Annotated[int, m.Meta(ge=0, le=25000)] = 0
+"""
+
     def test_parent_defined_later_in_file(self, fs):
         """A parent declared after the group inheriting it is rejected."""
         with pytest.raises(DefinitionError) as e:

@@ -22,6 +22,13 @@ DashboardDynamicTotal:
       value: 0
       range: x>=0
 
+DashboardSoftTotal:
+  parent: DashboardAmount
+  args:
+    Total:
+      value: 0
+      range: x>=0
+
 DashboardProgress:
   parent: DashboardBase
   args:

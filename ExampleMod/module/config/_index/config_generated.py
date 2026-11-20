@@ -93,6 +93,7 @@ class ConfigGenerated(AlasioConfigBase):
     """
     # ----- Dashboard -----
     Oil: "dashboard.Oil"
+    Coin: "dashboard.Coin"
     Gems: "dashboard.Gems"
     Progress: "dashboard.Progress"
     Planner: "dashboard.Planner"

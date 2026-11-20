@@ -16,9 +16,11 @@ describe("TestIsDashboardInternalArg", () => {
     ["Value", "Amount"],
     ["Value", "Progress"],
     ["Value", "DynamicTotal"],
+    ["Value", "SoftTotal"],
     ["Time", "Progress"],
     ["ServerUpdate", "Planner"],
     ["Total", "DynamicTotal"],
+    ["Total", "SoftTotal"],
     ["Progress", "Planner"],
     ["Eta", "Planner"],
   ])("hides %s of %s", (argKey, dashboardType) => {

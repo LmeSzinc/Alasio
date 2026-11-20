@@ -25,7 +25,7 @@ export type ArgData = {
 
   /**
    * Dashboard type if arg is dashboard arg (`dt` startswith "dashboard")
-   * Might be "Amount", "Total", "Remain", "DynamicTotal", "Progress", "Planner"
+   * Might be "Amount", "Total", "Remain", "DynamicTotal", "SoftTotal", "Progress", "Planner"
    */
   dashboard?: string;
   /**
@@ -199,7 +199,7 @@ export function isDashboardInternalArg(argKey: string, dashboardType: string): b
   // Value is the built-in dashboard value of every type except Planner, where
   // it is a regular arg and may be used as a Value/Total pair.
   if (argKey === "Value" && dashboardType !== "Planner") return true;
-  if (dashboardType === "DynamicTotal" && argKey === "Total") return true;
+  if ((dashboardType === "DynamicTotal" || dashboardType === "SoftTotal") && argKey === "Total") return true;
   if (dashboardType === "Planner" && (argKey === "Progress" || argKey === "Eta")) return true;
   return false;
 }

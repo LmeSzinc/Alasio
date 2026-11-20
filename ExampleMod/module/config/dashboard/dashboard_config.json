@@ -1,7 +1,7 @@
 {
   "card-Dashboard-Oil": {
     "Oil": {
-      "_info": {"group": "Oil", "arg": "_info", "dashboard": "Total", "dashboard_color": "#7f7f7f"},
+      "_info": {"group": "Oil", "arg": "_info", "dashboard": "SoftTotal", "dashboard_color": "#7f7f7f"},
       "Time": {
         "task": "Dashboard",
         "group": "Oil",
@@ -14,6 +14,46 @@
         "task": "Dashboard",
         "group": "Oil",
         "arg": "Value",
+        "dt": "input-int",
+        "value": 0,
+        "ge": 0,
+        "le": 25000
+      },
+      "Total": {
+        "task": "Dashboard",
+        "group": "Oil",
+        "arg": "Total",
+        "i18ngroup": "DashboardSoftTotal",
+        "dt": "input-int",
+        "value": 0,
+        "ge": 0,
+        "le": 25000
+      }
+    },
+    "Coin": {
+      "_info": {"group": "Coin", "arg": "_info", "dashboard": "SoftTotal", "dashboard_color": "#ffb300"},
+      "Time": {
+        "task": "Dashboard",
+        "group": "Coin",
+        "arg": "Time",
+        "i18ngroup": "DashboardBase",
+        "dt": "datetime",
+        "value": "2020-01-01T00:00:00Z"
+      },
+      "Value": {
+        "task": "Dashboard",
+        "group": "Coin",
+        "arg": "Value",
+        "dt": "input-int",
+        "value": 0,
+        "ge": 0,
+        "le": 25000
+      },
+      "Total": {
+        "task": "Dashboard",
+        "group": "Coin",
+        "arg": "Total",
+        "i18ngroup": "DashboardSoftTotal",
         "dt": "input-int",
         "value": 0,
         "ge": 0,

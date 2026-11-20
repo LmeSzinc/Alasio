@@ -287,10 +287,20 @@ class ConfigGenerator(ParseGroups, ParseTasks):
         literal_names: "dict[tuple, str]" = {}
 
         for group_name, group in groups:
+            # Args emitted in the class body. A SoftTotal group gets its Total
+            # from populate_dashboard(), bounded by the hard total of its own
+            # Value, so the bound differs per group and can not be inherited
+            # from the base class annotation.
+            emit_args = group.override_args
+            if group.dashboard == 'SoftTotal' and 'Total' not in emit_args:
+                total = group.args.get('Total', None)
+                if total is not None:
+                    emit_args = dict(emit_args)
+                    emit_args['Total'] = total
             # Get the literal variable of each arg of this group,
             # the new ones are emitted before the class
             refs = {}
-            for arg_name, arg in group.override_args.items():
+            for arg_name, arg in emit_args.items():
                 if arg.dt not in TYPE_ARG_LITERAL:
                     continue
                 name = f'LITERAL_{group_name}_{arg_name}'
@@ -324,7 +334,7 @@ class ConfigGenerator(ParseGroups, ParseTasks):
             else:
                 cls.set_inherit('a.GroupBase')
             with cls:
-                for arg_name, arg in group.override_args.items():
+                for arg_name, arg in emit_args.items():
                     arg: ArgData
                     literal_ref = refs.get(arg_name, '')
                     # Expand tuple
