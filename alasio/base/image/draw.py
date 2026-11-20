@@ -187,6 +187,28 @@ def _image_grayscale(image):
         raise ImageNotSupported(f'shape={image.shape}')
 
 
+def _row_flags(flat, threshold, foreground):
+    """
+    Get the per row content flags of a 2D image view.
+
+    Args:
+        flat (np.ndarray): 2D view of the image, shape (height, width * channel)
+        threshold (int):
+        foreground (bool): True to test color > threshold, False for color < threshold
+
+    Returns:
+        np.ndarray: bool array of shape (height,)
+    """
+    if not foreground:
+        return flat.min(axis=1) < threshold
+    if threshold == 0 and flat.dtype == np.uint8 and flat.shape[1] % 8 == 0:
+        # A 64 bit word is non zero exactly when one of its bytes is, which is
+        # the same test as max > 0, but reducing 8 bytes per step vectorizes
+        # better than reducing single bytes on a 1280 wide screenshot.
+        return np.bitwise_or.reduce(flat.view(np.uint64), axis=1) != 0
+    return flat.max(axis=1) > threshold
+
+
 def _bbox_of_gray(gray, threshold, foreground, error_message):
     """
     Get the bounding box of the content pixels of a grayscale image.
@@ -210,10 +232,7 @@ def _bbox_of_gray(gray, threshold, foreground, error_message):
         ImageNotSupported: if the image has no content pixel
     """
     height, width = gray.shape
-    if foreground:
-        row_content = gray.max(axis=1) > threshold
-    else:
-        row_content = gray.min(axis=1) < threshold
+    row_content = _row_flags(gray, threshold, foreground)
     # argmax() answers 0 on an all False array, so the row has to be checked
     y1 = int(row_content.argmax())
     if not row_content[y1]:
@@ -228,50 +247,6 @@ def _bbox_of_gray(gray, threshold, foreground, error_message):
         col_content = band.min(axis=0) < threshold
     x1 = int(col_content.argmax())
     x2 = int(width - col_content[::-1].argmax())
-    return x1, y1, x2, y2
-
-
-def _bbox_of_rgb(image, threshold):
-    """
-    Get the bounding box of the content of an RGB image without converting the
-    whole image to grayscale.
-
-    The luma is a weighted average whose weights sum to 2 ** 14, so a luma above
-    the threshold needs a channel above the threshold: every content row is a
-    row holding a channel above the threshold. Only that band is converted to
-    grayscale, and the luma decides the box inside it, so the result is the same
-    as converting the whole image first.
-
-    Args:
-        image (np.ndarray): 3 channel image, C contiguous
-        threshold (int):
-
-    Returns:
-        tuple[int, int, int, int]: area, (x1, y1, x2, y2)
-
-    Raises:
-        ImageNotSupported: if the image has no content pixel
-    """
-    height, width = image.shape[:2]
-    # max over the channels of a row, one contiguous pass instead of the
-    # grayscale conversion plus a second pass over the gray image
-    row_max = image.reshape(height, -1).max(axis=1)
-    candidates = np.flatnonzero(row_max > threshold)
-    if not candidates.size:
-        raise ImageNotSupported('Cannot get bbox from a pure black image')
-    top = int(candidates[0])
-    band = cv2.cvtColor(image[top:int(candidates[-1]) + 1], cv2.COLOR_RGB2GRAY)
-
-    rows = band.max(axis=1) > threshold
-    # argmax() answers 0 on an all False array, so the row has to be checked
-    row_index = int(rows.argmax())
-    if not rows[row_index]:
-        raise ImageNotSupported('Cannot get bbox from a pure black image')
-    y1 = top + row_index
-    y2 = top + band.shape[0] - int(rows[::-1].argmax())
-    cols = band[y1 - top:y2 - top].max(axis=0) > threshold
-    x1 = int(cols.argmax())
-    x2 = int(width - cols[::-1].argmax())
     return x1, y1, x2, y2
 
 
@@ -292,15 +267,6 @@ def get_bbox(image, threshold=0):
     Raises:
         ImageNotSupported: if failed to get bbox
     """
-    # An RGB image is measured on its own channels first, which is faster on the
-    # usual screenshot with a small content area. A negative threshold makes a
-    # black pixel content as well, and a copy of the image for the reshape would
-    # cost more than the grayscale conversion, so both take the plain path.
-    # An RGBA image has no such shortcut: the alpha channel joins the reduction
-    # and it is opaque everywhere on a screenshot, so the band would cover every
-    # row and the narrowing would cost a pass without saving one.
-    if threshold >= 0 and image.flags.c_contiguous and image_channel(image) == 3:
-        return _bbox_of_rgb(image, threshold)
     gray = _image_grayscale(image)
     return _bbox_of_gray(gray, threshold, True, 'Cannot get bbox from a pure black image')
 
