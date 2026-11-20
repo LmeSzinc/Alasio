@@ -87,6 +87,9 @@ def crop(image, area, copy=True):
 
     Returns:
         np.ndarray:
+
+    Raises:
+        ValueError: If the area has reversed coordinates
     """
     # map(round, area)
     x1, y1, x2, y2 = area
@@ -94,6 +97,11 @@ def crop(image, area, copy=True):
     y1 = round(y1)
     x2 = round(x2)
     y2 = round(y2)
+    # Reversed coordinates would produce a negative crop size, pillow refuses them too
+    if x2 < x1:
+        raise ValueError(f'Invalid area, right is less than left: {area}')
+    if y2 < y1:
+        raise ValueError(f'Invalid area, lower is less than upper: {area}')
     # h, w = image.shape[:2]
     shape = image.shape
     h = shape[0]
@@ -149,7 +157,11 @@ def crop(image, area, copy=True):
             value = 0
         else:
             value = tuple(0 for _ in range(image.shape[2]))
-        return cv2.copyMakeBorder(image, top, bottom, left, right, borderType=cv2.BORDER_CONSTANT, value=value)
+        result = cv2.copyMakeBorder(image, top, bottom, left, right, borderType=cv2.BORDER_CONSTANT, value=value)
+        if len(shape) == 3 and result.ndim == 2:
+            # OpenCV drops the channel axis of a single channel image
+            result = result[:, :, np.newaxis]
+        return result
     elif copy:
         return image_copy(image)
     else:
@@ -161,7 +173,7 @@ def cvt_color_decode(image, area=None):
     Convert color from opencv to RGB or grayscale
 
     Args:
-        data (np.ndarray):
+        image (np.ndarray):
         area (tuple):
 
     Returns:
@@ -210,7 +222,11 @@ def image_decode(data, area=None):
 
     Raises:
         ImageBroken:
+        ImageNotSupported:
     """
+    # cv2.imdecode raises instead of returning None on an empty array
+    if not data.size:
+        raise ImageBroken('Empty image data')
     # Decode image
     image = cv2.imdecode(data, cv2.IMREAD_UNCHANGED)
     if image is None:
@@ -220,6 +236,35 @@ def image_decode(data, area=None):
         raise ImageBroken('Empty image after cv2.imdecode')
 
     return cvt_color_decode(image, area=area)
+
+
+def _gif_open_error(file):
+    """
+    Build the error of a gif that cv2.VideoCapture failed to open.
+
+    VideoCapture answers isOpened() False both for a missing file and for a
+    file that is not a decodable gif, so the disk is asked which one it is.
+    The check runs on the failure path only, the normal path pays no io.
+
+    Args:
+        file (str): Gif file path
+
+    Returns:
+        Exception: FileNotFoundError for a path that is not there, an OSError
+            keeping the errno of the disk for a path that cannot be read,
+            ImageBroken otherwise
+    """
+    try:
+        os.stat(file)
+    except (FileNotFoundError, NotADirectoryError):
+        # the path is not there, and a folder of the path that is a file
+        return FileNotFoundError(f'No such GIF file: {file}')
+    except OSError as e:
+        # the path is there but the disk refuses to report it:
+        # a permission, a path too long, a loop of links. The errno is kept,
+        # so a caller can still tell a permission from another refusal
+        return OSError(e.errno, f'Cannot read GIF file: {file}, {e.strerror}')
+    return ImageBroken(f'Failed to decode GIF file: {file}')
 
 
 def gif_load_fframe(file, area=None):
@@ -235,11 +280,12 @@ def gif_load_fframe(file, area=None):
 
     Raises:
         FileNotFoundError:
+        OSError: If the file cannot be read
         ImageBroken:
     """
     cap = cv2.VideoCapture(file)
     if not cap.isOpened():
-        raise FileNotFoundError(f'Failed to open GIF file: {file}')
+        raise _gif_open_error(file)
 
     try:
         ret, image = cap.read()
@@ -266,11 +312,12 @@ def gif_load(file, area=None):
 
     Raises:
         FileNotFoundError:
+        OSError: If the file cannot be read
         ImageBroken:
     """
     cap = cv2.VideoCapture(file)
     if not cap.isOpened():
-        raise FileNotFoundError(f'Failed to open GIF file: {file}')
+        raise _gif_open_error(file)
 
     frames = []
     try:
@@ -304,9 +351,10 @@ def image_load(file, area=None):
 
     Raises:
         FileNotFoundError:
+        OSError: If the file cannot be read
         ImageBroken:
     """
-    if file.endswith('.gif'):
+    if file.lower().endswith('.gif'):
         return gif_load_fframe(file, area=area)
     # cv2.imread can't handle non-ascii filepath and PIL.Image.open is slow
     # Here we read with numpy first
@@ -417,6 +465,9 @@ def image_fixup(file, need_crop=False):
     libpng warning: iCCP: known incorrect sRGB profile
     libpng warning: iCCP: cHRM chunk does not match sRGB
     libpng warning: sBIT: invalid
+    The alpha channel is dropped, the image is saved as RGB or grayscale,
+    which is what an asset of the framework is.
+    A jpeg is never re-encoded, because every encode of a jpeg loses quality.
 
     Args:
         file (str):
@@ -426,6 +477,9 @@ def image_fixup(file, need_crop=False):
         bool: If file changed
     """
     _, _, ext = file.rpartition('.')
+    # Re-encoding a jpeg is lossy, every call would change the image again
+    if ext.lower() in ('jpg', 'jpeg'):
+        return False
 
     # image_load
     try:
@@ -438,8 +492,8 @@ def image_fixup(file, need_crop=False):
         return False
     try:
         image = image_decode(data)
-    except ImageBroken:
-        # Ignore error because truncated image don't need fixup
+    except (ImageBroken, ImageNotSupported):
+        # Ignore errors because broken or unsupported images don't need fixup
         return False
 
     if need_crop:
@@ -455,8 +509,8 @@ def image_fixup(file, need_crop=False):
     # image_save
     try:
         data = image_encode(image, ext=ext)
-    except ImageBroken:
-        # Ignore error because truncated image don't need fixup
+    except (ImageBroken, ImageNotSupported):
+        # Ignore errors because broken or unsupported images don't need fixup
         return False
 
     # Convert numpy array to bytes is slower than directly writing into file
@@ -482,23 +536,19 @@ def image_fixup_any(path):
     Returns:
         int: Amount of fixed up images
     """
-    # Fixup image directly
-    if path.endswith('.png'):
-        if image_fixup(path):
-            return 1
-        else:
-            return 0
     # If path is a directory fixup .png files recursively
     if os.path.isdir(path):
         count = 0
         # Local import
         from alasio.ext.path.iter import iter_files
-        files = iter_files(path, ext='.png', recursive=True)
+
+        # The extension of an image may be uppercase, as image_encode accepts
+        files = (file for file in iter_files(path, recursive=True) if file.lower().endswith('.png'))
         for file in files:
             if image_fixup(file):
                 count += 1
         return count
-    # Proceed as image anyway
+    # Fixup image directly
     if image_fixup(path):
         return 1
     else:
