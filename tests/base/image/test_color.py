@@ -43,25 +43,27 @@ def channel_extremes(image):
     return minimum, maximum
 
 
-def gray_reference(minimum, maximum):
+def gray_neighbours(minimum, maximum):
     """
-    (MIN + MAX) / 2, rounded to the nearest even value.
+    The two values (MIN + MAX) / 2 may round to.
 
-    The integer form of the rounding: a half rounds to the even neighbour,
-    which is what np.rint() and cv2.addWeighted() do.
+    An even sum has one answer, the midpoint is an integer. An odd sum is a
+    tie, and rounding a tie is the business of `cv2.addWeighted`: its scalar
+    path rounds the tie to the even neighbour, its SIMD kernels round it up, so
+    the same color answers the next level on a machine whose opencv took the
+    other path. Both neighbours are the midpoint within one level, a value
+    beside them is a different conversion.
 
     Args:
         minimum (np.ndarray): uint8 per pixel minimum
         maximum (np.ndarray): uint8 per pixel maximum
 
     Returns:
-        np.ndarray: uint8, shape of minimum
+        np.ndarray: uint8, the floor of the midpoint, shape of minimum
+        np.ndarray: uint8, the ceiling of the midpoint, shape of minimum
     """
     total = minimum.astype(np.int16) + maximum
-    half = total >> 1
-    # a half rounds up when the floor is odd, which is rounding to even
-    expected = half + ((total & 1) & (half & 1))
-    return expected.astype(np.uint8)
+    return (total >> 1).astype(np.uint8), ((total + 1) >> 1).astype(np.uint8)
 
 
 class TestRgbMax:
@@ -126,24 +128,28 @@ class TestRgb2Gray:
         result = rgb2gray(rgb888_image)
         assert result.shape == rgb888_image.shape[:2]
         assert result.dtype == np.uint8
-        minimum, maximum = channel_extremes(rgb888_image)
-        np.testing.assert_array_equal(result, gray_reference(minimum, maximum))
+        low, high = gray_neighbours(*channel_extremes(rgb888_image))
+        # an odd sum is a tie, which may answer either neighbour
+        missed = (result != low) & (result != high)
+        assert not missed.any(), f'{int(missed.sum())} pixels are not the midpoint'
+        # an even sum is no tie, the midpoint is exactly that value
+        np.testing.assert_array_equal(result[low == high], low[low == high])
 
     @pytest.mark.parametrize(
         'pixel, expected',
         [
-            ((10, 200, 30), 105),
-            ((0, 0, 0), 0),
-            ((255, 255, 255), 255),
-            ((0, 255, 0), 128),  # 127.5 rounds to the nearest even value
-            ((0, 1, 0), 0),  # 0.5 rounds to the nearest even value
+            ((10, 200, 30), (105,)),
+            ((0, 0, 0), (0,)),
+            ((255, 255, 255), (255,)),
+            ((0, 255, 0), (127, 128)),  # 127.5, a tie the conversion rounds its own way
+            ((0, 1, 0), (0, 1)),  # 0.5, the same tie at the other end
         ],
-        ids=['mid', 'black', 'white', 'half_up_even', 'half_down_even'],
+        ids=['mid', 'black', 'white', 'half_up', 'half_down'],
     )
     def test_one_pixel(self, pixel, expected):
         """A pixel gives the middle of its minimum and maximum"""
         image = np.array([[pixel]], dtype=np.uint8)
-        assert rgb2gray(image)[0, 0] == expected
+        assert rgb2gray(image)[0, 0] in expected
 
 
 class TestRgb2Hsv:

@@ -62,6 +62,11 @@ def rgb2gray(image):
     """
     gray = ( MAX(r, g, b) + MIN(r, g, b)) / 2
 
+    An odd sum is a tie, and rounding it belongs to `cv2.addWeighted`: the
+    scalar and the SIMD paths of opencv round it differently, so a tie answers
+    one of its two neighbours and which one is up to the machine. An even sum is
+    always the exact midpoint.
+
     Args:
         image (np.ndarray): Shape (height, width, channel)
 
