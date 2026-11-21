@@ -1,6 +1,7 @@
 {
   "extends": "$app/tsconfig",
   "compilerOptions": {
+    "strict": true,
     "types": ["node", "vite/client", "$app/types"],
     "paths": {
       "$lib": ["./renderer/lib"],
