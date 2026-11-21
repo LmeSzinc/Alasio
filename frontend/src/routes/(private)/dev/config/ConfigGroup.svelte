@@ -14,12 +14,16 @@
 
   type Props = {
     group: ConfigGroupData;
+    // The number shown in the header, i.e. the position of the group. It is
+    // passed by the page because the gid of an optimistically created group is
+    // only a placeholder until the server snapshot arrives.
+    number?: number;
     dropIndicator?: DropIndicatorState | null;
     onCopy?: (config: Config) => void;
     onRename?: (config: Config) => void;
     onDelete?: (config: Config) => void;
   };
-  let { group, dropIndicator = null, onCopy, onRename, onDelete }: Props = $props();
+  let { group, number = group.gid, dropIndicator = null, onCopy, onRename, onDelete }: Props = $props();
 
   const dndData = $derived({
     id: group.id,
@@ -39,7 +43,7 @@
     <div class="absolute -top-2 left-6 z-2 flex items-center">
       <!-- icon and text cover the border -->
       <span class="text-muted-foreground bg-background pl-2 text-xs">
-        {t.ConfigScan.SchedulerGroup({ n: group.gid })}
+        {t.ConfigScan.SchedulerGroup({ n: number })}
       </span>
       <div
         {...listeners.current}
