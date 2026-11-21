@@ -1,41 +1,16 @@
+import inspect
 import sys
 import threading
 import time
 
 import pytest
 
+from alasio.base import sleep as sleep_module
 from alasio.base.sleep import get_resolution, sleep
 
 pytestmark = [
     pytest.mark.parallel,
 ]
-
-
-def system_period():
-    """
-    Query the current timer period of the system, the granularity of a waitable
-    timer.
-
-    Returns:
-        float | None: Period in seconds, None when it is not available
-    """
-    if sys.platform != 'win32':
-        return None
-    import ctypes
-    from ctypes import wintypes
-
-    try:
-        query = ctypes.WinDLL('ntdll').NtQueryTimerResolution
-    except (AttributeError, OSError):
-        return None
-    query.restype = ctypes.c_long
-    query.argtypes = (
-        ctypes.POINTER(wintypes.ULONG), ctypes.POINTER(wintypes.ULONG), ctypes.POINTER(wintypes.ULONG),
-    )
-    coarse, fine, current = wintypes.ULONG(), wintypes.ULONG(), wintypes.ULONG()
-    if query(ctypes.byref(coarse), ctypes.byref(fine), ctypes.byref(current)) != 0:
-        return None
-    return current.value * 1e-7 or None
 
 
 class TestSleepDuration:
@@ -273,26 +248,24 @@ class TestSleepThreads:
         assert wall < 0.07
 
 
-@pytest.mark.skipif(sys.platform != 'win32', reason='the timer period is a Windows setting')
 class TestSleepSystemTimerPeriod:
-    """sleep() never changes the timer period of the system"""
+    """sleep() cannot change the timer period of the system"""
 
-    def test_sleep_does_not_raise_the_system_period(self):
-        """A sleep is not allowed to make the whole machine tick faster.
+    @pytest.mark.parametrize('api', ['NtSetTimerResolution', 'timeBeginPeriod', 'timeEndPeriod'])
+    def test_the_module_never_names_the_api(self, api):
+        """No code path of the module can ask the system for a timer period
 
-        The timer period is a system wide setting before Windows 10 version
-        2004, so raising it in a library call would slow every other process
-        down and fight with whatever else adjusts it.
+        The period is a system wide setting before Windows 10 version 2004:
+        raising it makes the whole machine tick faster and fights with whatever
+        else adjusts it, so a library call must not keep the capability at all.
+
+        The source is read instead of the timer period of the machine on
+        purpose. The period is shared, any other process may change it while
+        this test runs, so comparing the period before and after a sleep says
+        nothing about what this process did.
         """
-        before = system_period()
-        if before is None:
-            pytest.skip('the timer period cannot be queried')
+        assert api not in inspect.getsource(sleep_module)
 
-        sleep(0.005)
-        sleep(0.001)
-
-        after = system_period()
-        assert after is not None
-        # A finer period means this process raised it, another process may only
-        # make it coarser while the test runs
-        assert after >= before
+    def test_the_public_surface_is_the_sleep_and_its_resolution(self):
+        """Nothing else is exported, in particular no way to ask for a period"""
+        assert list(sleep_module.__all__) == ['sleep', 'get_resolution']
