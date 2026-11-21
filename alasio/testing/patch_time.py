@@ -106,6 +106,18 @@ class PatchTime:
         def mock_sleep(seconds):
             self._sleep_calls.append(seconds)
             self.shift(seconds)
+
+        # The precise sleep of this project is resolved once, and on a platform
+        # with a high resolution timer its implementation is time.sleep(), so it
+        # must be resolved before time.sleep is patched. Resolve it here, so the
+        # implementation stays the real one and the reported resolution stays
+        # truthful, then point it at the mock below: a frozen clock must stay
+        # frozen, a real sleep would not advance the mocked timestamp and a loop
+        # that waits for the clock to pass a deadline would never end.
+        from alasio.base import sleep as precise_sleep
+
+        precise_sleep._resolve()
+
         # Capture originals before patching
         original_datetime_cls = datetime.datetime
         original_date_cls = datetime.date
@@ -122,16 +134,6 @@ class PatchTime:
         self._monkeypatch.setattr(time, "perf_counter", mock_perf_counter)
         self._monkeypatch.setattr(time, "perf_counter_ns", mock_perf_counter_ns)
         self._monkeypatch.setattr(time, "sleep", mock_sleep)
-
-        # The precise sleep of this project does not call time.sleep() on a
-        # platform with a high resolution timer, its implementation is resolved
-        # once. Resolve it first so the reported resolution stays truthful, then
-        # point it at the mock, so a frozen clock stays frozen: a real sleep
-        # would not advance the mocked timestamp and a loop that waits for the
-        # clock to pass a deadline would never end.
-        from alasio.base import sleep as precise_sleep
-
-        precise_sleep._resolve()
         self._monkeypatch.setattr(precise_sleep, '_impl', mock_sleep)
 
         # Also redirect modules that already imported datetime/date via
