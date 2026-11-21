@@ -40,10 +40,16 @@ def get_resolution():
     """
     Get the resolution of sleep() on this platform.
 
-    The resolution is the granularity of the timer the sleep waits on, the
-    overshoot of a sleep is at most one such step. A platform without a high
-    resolution timer answers with the timer period of the system right now, so
-    the value follows a period raised by another process.
+    The resolution is the granularity of the timer the sleep waits on. A
+    platform without a high resolution timer answers with the timer period of
+    the system right now, so the value follows a period raised by another
+    process.
+
+    The granularity bounds the overshoot only as far as the timer itself goes.
+    It is not a promise about the wake-up: a system may coalesce timers to save
+    power, which macOS does, and a busy machine delays a woken thread. Neither
+    is visible here, so a caller that needs a bound on the overshoot has to
+    measure it.
 
     Returns:
         float: Resolution in seconds

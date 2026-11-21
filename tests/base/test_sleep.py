@@ -168,11 +168,16 @@ class TestSleepPrecision:
         quantized to the 15.6ms system tick cannot return a 3ms sleep within
         1ms at all.
 
-        A platform without a high resolution timer, Windows 7 and Windows 10
-        before 1803, cannot do better than its system timer period without
-        raising that period, which sleep() does not do. The test skips there
-        and the period stays the documented floor.
+        The test skips where there is no timer of this project to measure. On
+        POSIX, and on Windows from Python 3.11, the wake-up belongs to
+        time.sleep() and to the system, and macOS coalesces timers to save
+        power, which costs a few milliseconds on its own. A platform without a
+        high resolution timer, Windows 7 and Windows 10 before 1803, cannot do
+        better than its system timer period without raising that period, which
+        sleep() does not do.
         """
+        if _delegates_to_time_sleep():
+            pytest.skip('sleep() is time.sleep() on this platform, the timer is not ours')
         resolution = get_resolution()
         if resolution >= 0.001:
             pytest.skip(f'the platform timer resolution is {resolution * 1e3:.3f}ms')
