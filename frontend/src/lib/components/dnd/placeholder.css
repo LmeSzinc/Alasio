@@ -12,8 +12,10 @@
       border-radius: inherit; /* Inherits the parent's border-radius */
       border-width: 2px;
       border-style: dashed;
-      border-color: hsl(var(--primary) / 0.5);
-      background-color: hsl(var(--primary) / 0.1);
+      /* The theme foreground is black in the light theme and white in the dark
+         one, so the placeholder keeps its contrast in both themes without the
+         primary color */
+      border-color: rgb(var(--foreground-rgb) / 0.5);
     }
 
     /* The direct child (the actual content) becomes invisible. */
