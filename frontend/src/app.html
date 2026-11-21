@@ -4,13 +4,13 @@
     <meta charset="utf-8" />
     <link rel="icon" href="%sveltekit.assets%/favicon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <!-- The Content-Security-Policy is owned by SvelteKit (`kit.csp`, hash
-         mode): it writes the meta tag below with the hashes of the inline
-         scripts it renders itself, and svelte.config.js supplies the hashes of
-         the template script further down. The backend mirrors that meta into
-         the response header. Do not add a CSP meta here: a second policy would
-         be enforced on top of the generated one. The hashes are checked
-         against this file by `scripts/csp/verify.js` after every build. -->
+    <!-- The Content-Security-Policy is owned by SvelteKit (`csp` in
+         kit.config.ts, hash mode): it writes the meta tag below with the hashes
+         of the inline scripts it renders itself, and kit.config.ts supplies the
+         hashes of the template script further down. The backend mirrors that
+         meta into the response header. Do not add a CSP meta here: a second
+         policy would be enforced on top of the generated one. The hashes are
+         checked against this file by `scripts/csp/verify.js` after every build. -->
     %sveltekit.head%
     <script>
       // Embedded sessions: the host (webapp) passes its display theme in the

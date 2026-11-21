@@ -11,7 +11,7 @@
 // controls. `simulateMode` exists so a `vite dev` page can be laid out like
 // the webapp anyway: it decides what the width falls back to when no host
 // value arrived (see resolveControlsWidth()).
-import { browser } from "$app/environment";
+import { browser } from "$app/env";
 import { isElectronSession } from "$lib/use/useElectronEnv.svelte";
 import { readStored, writeStored } from "./storage";
 

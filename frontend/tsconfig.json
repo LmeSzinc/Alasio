@@ -1,22 +1,31 @@
 {
-  "extends": "./.svelte-kit/tsconfig.json",
+  // SvelteKit 3 generates this base config into node_modules/$app/tsconfig.json
+  // (ambient types, module resolution, module detection); the compiler options
+  // it already sets are not repeated here.
+  "extends": "$app/tsconfig",
   "compilerOptions": {
-    "allowJs": true,
-    // scripts/ and vite.config.ts import each other with explicit .ts
-    // extensions (required by Vite 8); type-checking them needs this flag
-    "allowImportingTsExtensions": true,
-    "checkJs": true,
-    "esModuleInterop": true,
-    "forceConsistentCasingInFileNames": true,
-    "resolveJsonModule": true,
-    "skipLibCheck": true,
-    "sourceMap": true,
     "strict": true,
-    "moduleResolution": "bundler"
-  }
-  // Path aliases are handled by https://svelte.dev/docs/kit/configuration#alias
-  // except $lib which is handled by https://svelte.dev/docs/kit/configuration#files
-  //
-  // If you want to overwrite includes/excludes, make sure to copy over the relevant includes/excludes
-  // from the referenced tsconfig.json - TypeScript does not merge them in
+    "sourceMap": true,
+    // The same aliases resolve.alias maps in vite.config.ts (and
+    // vitest.config.ts). SvelteKit 3 no longer generates them, so this list is
+    // the type checker's copy and has to be kept in sync with the bundler's.
+    "paths": {
+      "$lib": ["./src/lib"],
+      "$lib/*": ["./src/lib/*"],
+      "$src": ["./src"],
+      "$src/*": ["./src/*"],
+      "$routes": ["./src/routes"],
+      "$routes/*": ["./src/routes/*"],
+      "$public": ["./src/routes/(public)"],
+      "$public/*": ["./src/routes/(public)/*"],
+      "$private": ["./src/routes/(private)"],
+      "$private/*": ["./src/routes/(private)/*"]
+    }
+  },
+  // src and the configs of the build are type-checked together. The build
+  // scripts under scripts/ are not part of this program: svelte-check is run
+  // on them by `pnpm run codegen` when they change (their own declarations and
+  // build-time imports stay out of the app program).
+  "include": ["src", "vite.config.ts", "vitest.config.ts", "kit.config.ts"],
+  "exclude": ["src/service-worker"]
 }

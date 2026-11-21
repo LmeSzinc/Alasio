@@ -1,6 +1,6 @@
 <!-- src/routes/+error.svelte -->
 <script lang="ts">
-  import { page } from "$app/stores";
+  import { page } from "$app/state";
 
   // SvelteKit provides these props when the router renders the error page.
   // They are undefined on a direct load of 404.html, before the router
@@ -14,11 +14,11 @@
   let { status, error }: Props = $props();
 
   // 2. Create derived values. These will use the props if they exist,
-  //    otherwise, they will reactively fall back to the $page store.
-  //    The SvelteKit router in the browser will update the $page store
+  //    otherwise, they will reactively fall back to the page state.
+  //    The SvelteKit router in the browser will update the page state
   //    once it initializes, populating the values.
-  const displayStatus = $derived(status ?? $page.status);
-  const displayError = $derived(error ?? $page.error);
+  const displayStatus = $derived(status ?? page.status);
+  const displayError = $derived(error ?? page.error);
 </script>
 
 <div class="error-page">

@@ -1,11 +1,33 @@
 import { readFileSync, readdirSync } from "fs";
 import { join } from "path";
+import { fileURLToPath } from "url";
 import { sveltekit } from "@sveltejs/kit/vite";
 import tailwindcss from "@tailwindcss/vite";
 import { type Plugin, defineConfig } from "vite";
+import config from "./kit.config.ts";
 import { i18nConfig } from "./scripts/i18n/config.ts";
 import { i18nPlugin } from "./scripts/i18n/vite.ts";
 import { svelteDropDevPage } from "./scripts/svelte-drop-dev-page/vite.ts";
+
+/**
+ * Path aliases of the source tree. The type checker reads the same names from
+ * `paths` in tsconfig.json, and the tests from vitest.config.ts; SvelteKit 3 no
+ * longer generates them (it deprecated its `alias` option).
+ */
+const srcAliases = {
+  $lib: "./src/lib",
+  $src: "./src",
+  $routes: "./src/routes",
+  $public: "./src/routes/(public)",
+  $private: "./src/routes/(private)",
+};
+
+/** The aliases above as absolute paths, the form vite expects. */
+function resolveAliases(): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(srcAliases).map(([name, path]) => [name, fileURLToPath(new URL(path, import.meta.url))]),
+  );
+}
 
 /**
  * vite's mergeConfig replaces array values, so the `server.watch.ignored`
@@ -97,6 +119,9 @@ function svelteKitGeneratedHmrGuard(): Plugin {
 }
 
 export default defineConfig({
+  resolve: {
+    alias: resolveAliases(),
+  },
   // i18nPlugin must come first: its config hook scans source files before
   // svelteDropDevPage renames dev route files for the build
   // svelteDropDevPage must be placed before sveltekit so it sees the raw svelte source
@@ -104,7 +129,7 @@ export default defineConfig({
     i18nPlugin([i18nConfig]),
     svelteDropDevPage(),
     tailwindcss(),
-    sveltekit(),
+    sveltekit(config),
     svelteKitGeneratedHmrGuard(),
     ignoreBuildOutput("**/build/**"),
   ],

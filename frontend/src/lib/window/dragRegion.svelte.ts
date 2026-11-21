@@ -18,7 +18,7 @@
 // Layering: a layout declares its band, a page that puts controls in the
 // header narrows it, and `createStackContext` drops the page layer when the
 // page is destroyed (see `$lib/context/stack.svelte`).
-import { browser } from "$app/environment";
+import { browser } from "$app/env";
 import { type StackHandle, createStackContext } from "$lib/context/stack.svelte";
 import { isElectron, isElectronSession } from "$lib/use/useElectronEnv.svelte";
 import { frame } from "$lib/window/frame.svelte";

@@ -11,7 +11,7 @@
 // startup command-line switch (force-device-scale-factor), so changes
 // apply on the next launch. Remote browser sessions have no parent
 // container and never sync.
-import { browser } from "$app/environment";
+import { browser } from "$app/env";
 import { isElectron } from "$lib/use/useElectronEnv.svelte";
 
 let dpiScaling = $state(true);

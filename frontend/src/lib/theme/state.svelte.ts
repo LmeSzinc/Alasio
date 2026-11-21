@@ -14,7 +14,7 @@
 // Remote browser sessions have no parent container and keep the per-client
 // mode-watcher behavior.
 import { setMode } from "mode-watcher";
-import { browser } from "$app/environment";
+import { browser } from "$app/env";
 import { isElectron } from "$lib/use/useElectronEnv.svelte";
 
 export type ConfigTheme = "system" | "light" | "dark";

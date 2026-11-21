@@ -1,4 +1,4 @@
-import { browser } from "$app/environment";
+import { browser } from "$app/env";
 import { goto, invalidateAll } from "$app/navigation";
 import { deepDel, deepSet } from "./deep";
 import type { RequestEvent, ResponseEvent } from "./event";

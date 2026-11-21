@@ -1,14 +1,14 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import config from "../../svelte.config.js";
+import config from "../../kit.config.ts";
 import { cspMetaContent, inlineScripts, scriptHashes } from "./inline-scripts.js";
 
 /**
  * Wiring tests between the page template and the CSP SvelteKit writes.
  *
  * The policy is split in two: SvelteKit hashes the inline scripts it renders
- * itself, and svelte.config.js supplies the hashes of the scripts written in
+ * itself, and kit.config.ts supplies the hashes of the scripts written in
  * app.html. Nothing forces the two sides to agree at build time (a missing
  * hash only shows up as a blocked script in the browser), so the agreement is
  * checked here, where a failing expectation names the cause.
@@ -19,7 +19,7 @@ import { cspMetaContent, inlineScripts, scriptHashes } from "./inline-scripts.js
 // vitest runs with the project root as the working directory, and
 // `import.meta.url` of a transformed module is not a file url.
 const template = readFileSync(resolve(process.cwd(), "src/app.html"), "utf8");
-const csp = config.kit?.csp;
+const csp = config.csp;
 const directives = csp?.directives ?? {};
 const scriptSources = directives["script-src"] ?? [];
 const templateScripts = inlineScripts(template);
