@@ -345,7 +345,18 @@ class TestTimerReset:
 class TestTimerWait:
     """Test wait() method"""
 
-    def test_wait_with_remaining_time(self):
+    def test_wait_uses_the_precise_sleep(self):
+        """wait() sleeps on the precise sleep of the package, not time.sleep
+
+        A timer that is short by a fraction of a millisecond must not sleep
+        for a whole coarse tick, and time.sleep() on Windows rounds the request
+        up to a millisecond before it sleeps at all.
+        """
+        from alasio.base import sleep as sleep_module, timer as timer_module
+
+        assert timer_module.sleep is sleep_module.sleep
+
+    def test_wait_with_remaining_time(self, monkeypatch):
         """Test waiting when there is remaining time"""
         with PatchTime(100.0) as pt:
             t = Timer(limit=5.0, count=10)
@@ -353,18 +364,37 @@ class TestTimerWait:
             t.start()
             pt.shift(2.0)  # advance to 102.0
 
-            # Capture current sleep calls before wait
-            pt.clear_sleep_calls()
+            # Record the request and let the mocked clock advance by it
+            calls = []
+
+            def fake_sleep(seconds):
+                calls.append(seconds)
+                pt.shift(seconds)
+
+            monkeypatch.setattr('alasio.base.timer.sleep', fake_sleep)
             t.wait()
 
             # Should wait for 5 - 2 = 3 seconds
-            assert len(pt.sleep_calls) == 1
-            assert abs(pt.sleep_calls[0] - 3.0) < 0.001
+            assert calls == [pytest.approx(3.0)]
 
             # Time should have advanced by the sleep duration
             assert t.current_time() == 5.0
 
-    def test_wait_with_no_remaining_time(self):
+    def test_wait_on_a_timer_that_was_never_started(self, monkeypatch):
+        """An unstarted timer is reached, so wait() returns at once
+
+        `_start` is 0 while the timer is not running, computing a remaining
+        time from it yields a meaningless value that can be a full limit on a
+        clock whose zero point is recent, such as right after boot.
+        """
+        calls = []
+        monkeypatch.setattr('alasio.base.timer.sleep', calls.append)
+
+        t = Timer(limit=5.0)
+        assert t.wait() is t
+        assert calls == []
+
+    def test_wait_with_no_remaining_time(self, monkeypatch):
         """Test no waiting when time has already expired"""
         with PatchTime(100.0) as pt:
             t = Timer(limit=5.0, count=10)
@@ -372,11 +402,12 @@ class TestTimerWait:
             t.start()
             pt.shift(6.0)  # advance to 106.0, already timed out
 
-            pt.clear_sleep_calls()
+            calls = []
+            monkeypatch.setattr('alasio.base.timer.sleep', calls.append)
             t.wait()
 
             # Should not call sleep
-            assert len(pt.sleep_calls) == 0
+            assert calls == []
 
 
 class TestTimerIntegration:

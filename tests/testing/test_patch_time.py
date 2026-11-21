@@ -328,6 +328,36 @@ class TestEdgeCases:
             assert time.time() == 100.0
 
 
+class TestPreciseSleep:
+    """The precise sleep of the project follows the frozen clock
+
+    It does not call time.sleep() on a platform with a high resolution timer,
+    its implementation is resolved once, so patching time.sleep alone would
+    leave a real sleep inside a frozen clock: nothing advances and a loop that
+    waits for a deadline never ends.
+    """
+
+    def test_sleep_advances_the_frozen_clock(self):
+        """A sleep of the project advances the mocked time and is recorded"""
+        from alasio.base.sleep import sleep
+
+        with PatchTime(100.0) as pt:
+            sleep(0.25)
+            assert time.time() == pytest.approx(100.25)
+            assert pt.sleep_calls == [0.25]
+
+    def test_the_platform_implementation_is_restored(self):
+        """The mock is removed on exit, the real implementation comes back"""
+        from alasio.base import sleep as sleep_module
+
+        with PatchTime(100.0):
+            assert sleep_module._impl.__name__ == 'mock_sleep'
+
+        assert sleep_module._impl.__name__ != 'mock_sleep'
+        sleep_module.sleep(0.001)
+        assert sleep_module._impl.__name__ != 'mock_sleep'
+
+
 class TestTimestampConversionConsistency:
     """Test that round-trip conversions (timestamp → datetime → timestamp) are consistent."""
 

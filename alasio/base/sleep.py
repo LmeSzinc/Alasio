@@ -298,6 +298,18 @@ if sys.platform == 'win32':
 
 else:
 
+    def _system_period():
+        """
+        Query the current timer period of the system.
+
+        POSIX has no system wide timer period, a sleep always waits on a high
+        resolution timer, so there is nothing to report.
+
+        Returns:
+            float | None: Always None
+        """
+        return None
+
     def _init():
         """
         Resolve the sleep of the platform.

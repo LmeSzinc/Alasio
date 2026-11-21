@@ -78,3 +78,47 @@ def test_other_exception_propagation():
 
     assert count == 1
     assert end - start < 0.1  # Should not retry (no mock sleep advance)
+
+
+def test_poll_interval_uses_the_precise_sleep(monkeypatch):
+    """The poll interval is passed to the precise sleep of the project
+
+    time.sleep() rounds the interval up to a whole millisecond on Windows and
+    the wake-up is quantized to the system timer tick, so a 5ms poll can take
+    three times as long as asked.
+    """
+    calls = []
+    monkeypatch.setattr('alasio.testing.timeout.sleep', calls.append)
+
+    count = 0
+    for _ in AssertTimeout(timeout=1.0, interval=0.01):
+        with _:
+            count += 1
+            assert count >= 3
+
+    assert count == 3
+    # The first two rounds fail, each one is followed by a poll interval
+    assert calls == [0.01, 0.01]
+
+
+def test_zero_interval_yields_instead_of_polling_hard(monkeypatch):
+    """A zero interval is a busy poll, it yields the GIL to the polled thread
+
+    The precise sleep returns at once on a zero time without yielding, which
+    would let a polling thread starve the thread it is waiting for.
+    """
+    yields = []
+    monkeypatch.setattr(time, 'sleep', yields.append)
+    monkeypatch.setattr(
+        'alasio.testing.timeout.sleep',
+        lambda seconds: pytest.fail('the precise sleep must not be used for a zero interval'),
+    )
+
+    count = 0
+    for _ in AssertTimeout(timeout=1.0, interval=0):
+        with _:
+            count += 1
+            assert count >= 3
+
+    assert count == 3
+    assert yields == [0, 0]

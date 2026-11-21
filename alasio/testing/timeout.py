@@ -1,5 +1,7 @@
 import time
 
+from alasio.base.sleep import sleep
+
 
 class AssertTimeout:
     def __init__(self, timeout, interval=0.005):
@@ -25,8 +27,15 @@ class AssertTimeout:
             # If the with block failed (suppressed), code execution reaches here
             if self._finished:
                 break
+            elif self.interval > 0:
+                # A precise sleep keeps the poll interval it was asked for: on
+                # Windows, time.sleep() rounds the interval up to a whole
+                # millisecond and the wake-up is quantized to the system tick
+                sleep(self.interval)
             else:
-                time.sleep(self.interval)
+                # A zero interval is a busy poll, time.sleep(0) yields the GIL
+                # so the thread that is being polled keeps running
+                time.sleep(0)
 
     def __enter__(self):
         return self

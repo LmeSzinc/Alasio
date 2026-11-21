@@ -11,6 +11,7 @@ from msgspec.msgpack import encode
 from alasio.backend.app.restart.restart_manager import RESTART_MANAGER
 from alasio.backend.worker.entry import mod_entry
 from alasio.backend.worker.event import DECODER_CACHE, CommandEvent, ConfigEvent
+from alasio.base.sleep import sleep
 from alasio.ext.singleton import Singleton
 from alasio.logger import logger
 
@@ -216,15 +217,20 @@ class WorkerState(msgspec.Struct):
         process = self.process
         if not process:
             return None
-        deadline = time.monotonic() + timeout
+        # perf_counter() for the deadline: time.monotonic() only ticks every
+        # 15.6ms on the Windows runtime of this project, which is the same order
+        # as the whole timeout here
+        deadline = time.perf_counter() + timeout
         while True:
             code = process.exitcode
             if code is not None:
                 return code
-            remaining = deadline - time.monotonic()
+            remaining = deadline - time.perf_counter()
             if remaining <= 0:
                 return None
-            time.sleep(min(EXIT_POLL_INTERVAL, remaining))
+            # The poll interval is short, a precise sleep keeps it instead of
+            # rounding it up and quantizing it to the system tick
+            sleep(min(EXIT_POLL_INTERVAL, remaining))
 
     def process_terminate(self):
         """

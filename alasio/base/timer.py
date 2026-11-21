@@ -5,6 +5,8 @@ from typing import Tuple, Union
 
 from typing_extensions import Self
 
+from alasio.base.sleep import sleep
+
 
 def timer(function):
     """
@@ -209,10 +211,20 @@ class Timer:
     def wait(self) -> Self:
         """
         Wait until timer reached.
+
+        The wait sleeps on the precise sleep of this package, so a timer that
+        is short by a fraction of a millisecond does not sleep for a whole
+        coarse tick. It never returns before the limit is reached.
+
+        A timer that was never started is already reached, the same as
+        `reached()` reports, so it returns at once instead of sleeping for the
+        whole limit.
         """
+        if self._start <= 0:
+            return self
         diff = self._start + self.limit - time.perf_counter()
         if diff > 0:
-            time.sleep(diff)
+            sleep(diff)
         return self
 
     def show(self):

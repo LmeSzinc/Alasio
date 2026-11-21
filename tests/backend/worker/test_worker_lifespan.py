@@ -883,6 +883,52 @@ class TestProcessWaitExit:
         assert state.process_wait_exit() is None
         assert time.monotonic() - start < 0.05
 
+    def test_the_poll_uses_the_precise_sleep(self, monkeypatch):
+        """The poll interval is passed to the precise sleep of the project
+
+        time.sleep() rounds a sub-millisecond remainder up to a whole
+        millisecond on Windows and quantizes the wake-up to the system timer
+        tick, which is the same order as the whole poll interval here.
+        """
+        from alasio.backend.worker import manager as manager_module
+
+        calls = []
+        monkeypatch.setattr(manager_module, 'sleep', calls.append)
+        state = self.state_with(_LostStatusProcess())
+
+        assert state.process_wait_exit(timeout=0.05) is None
+
+        assert calls
+        assert all(0 < seconds <= manager_module.EXIT_POLL_INTERVAL for seconds in calls)
+
+    def test_the_deadline_is_measured_with_the_high_resolution_clock(self, monkeypatch):
+        """The deadline does not depend on the 15.6ms tick of time.monotonic()
+
+        The whole timeout of a poll is a few tens of milliseconds, so a clock
+        that only advances on the system tick would stretch it by a tick. The
+        wait is driven by perf_counter(), which advances by the requested
+        duration of every poll.
+        """
+        from alasio.backend.worker import manager as manager_module
+
+        precise = [0.0]
+        calls = []
+
+        def fake_sleep(seconds):
+            calls.append(seconds)
+            precise[0] += seconds
+            if len(calls) > 100:
+                raise AssertionError('the wait did not follow perf_counter()')
+
+        # monotonic is frozen: a deadline read from it would never arrive
+        monkeypatch.setattr(manager_module.time, 'perf_counter', lambda: precise[0])
+        monkeypatch.setattr(manager_module.time, 'monotonic', lambda: 0.0)
+        monkeypatch.setattr(manager_module, 'sleep', fake_sleep)
+        state = self.state_with(_LostStatusProcess())
+
+        assert state.process_wait_exit(timeout=0.05) is None
+        assert precise[0] >= 0.05
+
     def test_a_graceful_kill_of_a_gone_process_only_reads_its_status(self):
         """A process that ended by itself is never signaled, its status is the answer"""
         process = _ExitedProcess(0)
