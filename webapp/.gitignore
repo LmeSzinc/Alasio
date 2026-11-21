@@ -31,5 +31,8 @@ main/i18ngen/*
 !main/i18ngen/state.ts
 
 # Vite
+# vite-plugin-electron writes a placeholder renderer entry when the root
+# index.html is missing; the renderer is built by SvelteKit into dist/renderer
+/index.html
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*

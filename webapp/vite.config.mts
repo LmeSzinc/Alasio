@@ -14,6 +14,17 @@ import { i18nPlugin } from "./scripts/i18n/vite.ts";
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 
 /**
+ * Path aliases of the renderer tree. The type checker reads the same names from
+ * `paths` in tsconfig.json; SvelteKit 3 removed `files.lib` and deprecated its
+ * `alias` option, so `$lib` (which pointed at `files.lib`) is declared here.
+ */
+const rendererAliases: Record<string, string> = {
+  $lib: join(__dirname, "renderer/lib"),
+  $src: join(__dirname, "renderer"),
+  $routes: join(__dirname, "renderer/routes"),
+};
+
+/**
  * vite's mergeConfig replaces array values, so the `server.watch.ignored`
  * set by sveltekit's config hook would wipe out any ignored patterns
  * declared in defineConfig. This plugin runs after kit (kit is
@@ -119,6 +130,9 @@ function svelteKitGeneratedHmrGuard(): Plugin {
 }
 
 export default defineConfig({
+  resolve: {
+    alias: rendererAliases,
+  },
   // i18nPlugin is listed first so its config hook scans sources before the
   // sveltekit build starts. It owns every i18n config of the project:
   // only this top-level config is resolved by `svelte-kit sync`, so the
@@ -142,17 +156,8 @@ export default defineConfig({
 
       // Keep the existing electron project layout under renderer/
       files: {
-        lib: "renderer/lib",
         routes: "renderer/routes",
         appTemplate: "renderer/app.html",
-      },
-
-      // Path aliases are declared here instead of tsconfig.json "paths",
-      // so svelte-kit sync generates them into .svelte-kit/tsconfig.json.
-      // $lib is generated automatically from kit.files.lib.
-      alias: {
-        $src: "renderer",
-        $routes: "renderer/routes",
       },
 
       // The policy is written by SvelteKit (a meta tag in the built page, the

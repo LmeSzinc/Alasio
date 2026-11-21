@@ -1,22 +1,15 @@
 {
-  "extends": "./.svelte-kit/tsconfig.json",
+  "extends": "$app/tsconfig",
   "compilerOptions": {
-    "target": "ES2020",
-    "module": "ESNext",
-    "lib": ["ES2021", "DOM", "DOM.Iterable"],
-    "moduleResolution": "bundler",
-    "resolveJsonModule": true,
-    "allowJs": true,
-    "allowImportingTsExtensions": true,
-    "checkJs": false,
-    "strict": true,
-    "esModuleInterop": true,
-    "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true,
-    "isolatedModules": true,
-    "noEmit": true,
-    "verbatimModuleSyntax": false,
-    "types": ["node", "vite/client"]
+    "types": ["node", "vite/client", "$app/types"],
+    "paths": {
+      "$lib": ["./renderer/lib"],
+      "$lib/*": ["./renderer/lib/*"],
+      "$src": ["./renderer"],
+      "$src/*": ["./renderer/*"],
+      "$routes": ["./renderer/routes"],
+      "$routes/*": ["./renderer/routes/*"]
+    }
   },
   "include": [
     "main/**/*",

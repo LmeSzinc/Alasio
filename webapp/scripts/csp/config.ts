@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { KitConfig } from "@sveltejs/kit";
+import type { Config } from "@sveltejs/kit/vite";
 import { inlineScriptHashes } from "./inline-scripts.ts";
 
 /**
@@ -40,9 +40,9 @@ export function appTemplatePath(): string {
  * Build the csp config of the renderer.
  *
  * @param templatePath Path of the app template. Defaults to appTemplatePath()
- * @returns The `kit.csp` value, every template inline script covered by hash
+ * @returns The `csp` value, every template inline script covered by hash
  */
-export function rendererCsp(templatePath: string = appTemplatePath()): NonNullable<KitConfig["csp"]> {
+export function rendererCsp(templatePath: string = appTemplatePath()): NonNullable<Config["csp"]> {
   const html = readFileSync(templatePath, "utf8");
   return {
     mode: "hash",
