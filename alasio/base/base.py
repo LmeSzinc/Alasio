@@ -16,8 +16,10 @@ class LoopState(msgspec.Struct):
     The device state yielded by ModuleBase.loop()
 
     Attributes:
-        image (np.ndarray): Screenshot of the iteration, None if the device has no screenshot
-        hierarchy (etree._Element): UI hierarchy of the iteration, None if the device has no hierarchy
+        image (np.ndarray): Screenshot captured by the iteration,
+            None if the loop did not take a screenshot in this iteration
+        hierarchy (etree._Element): UI hierarchy dumped by the iteration,
+            None if the loop did not dump the hierarchy in this iteration
         timeout (T_TIMER_LIMIT): Timer of the loop, None if the loop has no timeout
         count (int): Number of iterations that captured the device,
             a screenshot and a hierarchy dump of the same iteration count 1
@@ -98,14 +100,18 @@ class ModuleBase:
 
         Args:
             skip_first (bool): Usually to be True to reuse the screenshot and hierarchy
-                of the device, False to capture them before the first iteration
+                of the device, False to capture them before the first iteration.
+                The loop captures nothing in the first iteration when True, so the
+                yielded image and hierarchy are None
             timeout: Seconds of timeout, or (second, count), or a Timer object
             screenshot (bool): True to take a screenshot on each iteration
             hierarchy (bool): True to dump the UI hierarchy on each iteration
 
         Yields:
-            LoopState: The device state of the iteration, `count` is the number
-                of iterations this loop captured the device for so far
+            LoopState: The device state of the iteration, `image` and `hierarchy`
+                are the values the capture of this iteration returned, None if the
+                loop did not capture it. `count` is the number of iterations this
+                loop captured the device for so far
 
         Examples:
             # state machine that handle clicking until destination
@@ -139,21 +145,25 @@ class ModuleBase:
                 if timeout.reached():
                     return
 
+            captured_image = None
+            captured_hierarchy = None
             if skip_first:
                 skip_first = False
             else:
+                # the return value rather than self.device.image, a skipped capture
+                # (by the loop or by the device itself) must not yield the previous one
                 if screenshot:
-                    self.device.screenshot()
+                    captured_image = self.device.screenshot()
                 if hierarchy:
-                    self.device.dump_hierarchy()
+                    captured_hierarchy = self.device.dump_hierarchy()
                 # the screenshot and the hierarchy dump of an iteration are one
                 # capture of the device state
                 if screenshot or hierarchy:
                     count += 1
 
             yield LoopState(
-                image=self.device.image,
-                hierarchy=self.device.hierarchy,
+                image=captured_image,
+                hierarchy=captured_hierarchy,
                 timeout=timeout,
                 count=count,
             )

@@ -41,6 +41,28 @@ class FakeDevice(DeviceBase):
         return self.hierarchy
 
 
+class IntervalDevice(FakeDevice):
+    """
+    A device that skips a capture inside its own interval, like a screenshot
+    interval of the device config does
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.screenshot_skipped = False
+        self.hierarchy_skipped = False
+
+    def screenshot(self):
+        if self.screenshot_skipped:
+            return None
+        return super().screenshot()
+
+    def dump_hierarchy(self):
+        if self.hierarchy_skipped:
+            return None
+        return super().dump_hierarchy()
+
+
 class StubModule(ModuleBase):
     """
     A module of the loop tests, it carries the device only
@@ -62,21 +84,19 @@ class TestLoopState:
         assert state.timeout is None
         assert state.count == 0
 
-    def test_holds_the_device_state(self):
-        """The state carries the screenshot and hierarchy of the device"""
+    def test_holds_the_capture_of_the_iteration(self):
+        """The state carries the screenshot and hierarchy captured by the iteration"""
         device = FakeDevice()
-        device.screenshot()
-        device.dump_hierarchy()
         module = StubModule(device)
 
-        state = next(module.loop())
+        state = next(module.loop(screenshot=True, hierarchy=True, skip_first=False))
 
         assert isinstance(state, LoopState)
         assert state.image is device.image
         assert state.hierarchy is device.hierarchy
 
     def test_empty_without_capture(self):
-        """The state carries None when the device has no screenshot or hierarchy"""
+        """The state carries None when the loop captures nothing"""
         device = FakeDevice()
         module = StubModule(device)
 
@@ -90,8 +110,8 @@ class TestLoopState:
 class TestLoopScreenshot:
     """Tests for the screenshot option of loop()"""
 
-    def test_skip_first_reuses_the_previous_screenshot(self):
-        """The first iteration does not take a screenshot when skip_first is set"""
+    def test_skip_first_yields_no_screenshot(self):
+        """The first iteration takes no screenshot and does not yield the previous one"""
         device = FakeDevice()
         device.screenshot()
         module = StubModule(device)
@@ -99,7 +119,7 @@ class TestLoopScreenshot:
         state = next(module.loop())
 
         assert device.screenshots == 1
-        assert state.image is device.image
+        assert state.image is None
         assert state.count == 0
 
     def test_screenshot_on_each_later_iteration(self):
@@ -110,6 +130,7 @@ class TestLoopScreenshot:
 
         first = next(it)
         assert device.screenshots == 0
+        assert first.image is None
         assert first.count == 0
 
         second = next(it)
@@ -133,10 +154,9 @@ class TestLoopScreenshot:
         assert state.count == 1
 
     def test_screenshot_disabled(self):
-        """screenshot=False never takes a screenshot"""
+        """screenshot=False never takes a screenshot and never yields the previous one"""
         device = FakeDevice()
         device.screenshot()
-        image = device.image
         module = StubModule(device)
         it = module.loop(screenshot=False, skip_first=False)
 
@@ -144,10 +164,24 @@ class TestLoopScreenshot:
         second = next(it)
 
         assert device.screenshots == 1
-        assert first.image is image
-        assert second.image is image
+        assert first.image is None
+        assert second.image is None
         assert first.count == 0
         assert second.count == 0
+
+    def test_yields_the_return_value_of_the_capture(self):
+        """A screenshot skipped by the device yields None, not the previous screenshot"""
+        device = IntervalDevice()
+        device.screenshot()
+        image = device.image
+        device.screenshot_skipped = True
+        module = StubModule(device)
+
+        state = next(module.loop(skip_first=False))
+
+        assert state.image is None
+        assert device.image is image
+        assert device.screenshots == 1
 
 
 class TestLoopHierarchy:
@@ -179,18 +213,31 @@ class TestLoopHierarchy:
         assert device.hierarchies == 2
         assert second.count == 2
 
-    def test_hierarchy_skips_the_first_iteration(self):
-        """The first iteration reuses the hierarchy dumped by the caller"""
+    def test_hierarchy_skip_first_yields_no_hierarchy(self):
+        """The first iteration dumps no hierarchy and does not yield the previous one"""
         device = FakeDevice()
         device.dump_hierarchy()
-        hierarchy = device.hierarchy
         module = StubModule(device)
 
         state = next(module.loop(screenshot=False, hierarchy=True))
 
         assert device.hierarchies == 1
-        assert state.hierarchy is hierarchy
+        assert state.hierarchy is None
         assert state.count == 0
+
+    def test_yields_the_return_value_of_the_capture(self):
+        """A hierarchy dump skipped by the device yields None, not the previous one"""
+        device = IntervalDevice()
+        device.dump_hierarchy()
+        hierarchy = device.hierarchy
+        device.hierarchy_skipped = True
+        module = StubModule(device)
+
+        state = next(module.loop(screenshot=False, hierarchy=True, skip_first=False))
+
+        assert state.hierarchy is None
+        assert device.hierarchy is hierarchy
+        assert device.hierarchies == 1
 
     def test_screenshot_and_hierarchy(self):
         """A screenshot and a hierarchy dump of one iteration are one capture"""
@@ -207,7 +254,7 @@ class TestLoopHierarchy:
         assert second.count == 2
 
     def test_no_capture(self):
-        """Both options disabled yields the cached state of the device"""
+        """Both options disabled yield no capture, the cached device state is not exposed"""
         device = FakeDevice()
         device.screenshot()
         device.dump_hierarchy()
@@ -217,8 +264,8 @@ class TestLoopHierarchy:
         state = next(it)
 
         assert (device.screenshots, device.hierarchies) == (1, 1)
-        assert state.image is device.image
-        assert state.hierarchy is device.hierarchy
+        assert state.image is None
+        assert state.hierarchy is None
         assert state.count == 0
 
 
@@ -347,6 +394,8 @@ class TestLoopShortcuts:
             state = next(getattr(module, name)())
 
             assert (device.screenshots, device.hierarchies) == (0, 0), name
+            assert state.image is None, name
+            assert state.hierarchy is None, name
             assert state.count == 0, name
 
     def test_shortcuts_pass_the_timeout(self):
