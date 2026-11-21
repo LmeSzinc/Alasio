@@ -30,7 +30,7 @@
   </div>
 {:else}
   <!-- Keep h-12 aligned with AppHeader bottom in the embedded web app -->
-  <div class="bg-card border-border z-100 flex h-12 items-center border-b select-none">
+  <div class="z-100 flex h-12 items-center border-b border-border bg-card select-none">
     <!-- self-stretch makes the drag region span the full 48px title bar height -->
     <div class="flex flex-1 items-center self-stretch px-4" style="-webkit-app-region: drag">
       <span class="text-sm font-semibold">Alasio</span>

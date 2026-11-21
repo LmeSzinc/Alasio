@@ -63,7 +63,7 @@
       <FlaskConical class="size-4" />
     </Popover.Trigger>
     <Popover.Content side="top" align="end" class="z-100 w-64 p-2">
-      <div class="text-muted-foreground px-2 py-1.5 text-xs font-medium">Dev Routes</div>
+      <div class="px-2 py-1.5 text-xs font-medium text-muted-foreground">Dev Routes</div>
       {#each PAGES as item}
         <Popover.Close
           class={cn(
@@ -81,9 +81,9 @@
         </Popover.Close>
       {/each}
 
-      <div class="bg-border mx-2 my-1 h-px"></div>
+      <div class="mx-2 my-1 h-px bg-border"></div>
 
-      <div class="text-muted-foreground px-2 py-1.5 text-xs font-medium">Error</div>
+      <div class="px-2 py-1.5 text-xs font-medium text-muted-foreground">Error</div>
       {#each ERROR_KEYS as key}
         <Popover.Close
           class={cn(

@@ -16,10 +16,10 @@
   });
 </script>
 
-<div class="dotbg bg-background text-foreground flex h-full items-center justify-center">
+<div class="dotbg flex h-full items-center justify-center bg-background text-foreground">
   <Card.Root class="neushadow w-120 border-none">
     <Card.Header>
-      <Card.Title class="text-destructive text-4xl font-bold">Error</Card.Title>
+      <Card.Title class="text-4xl font-bold text-destructive">Error</Card.Title>
     </Card.Header>
 
     <Card.Content>

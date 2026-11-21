@@ -42,9 +42,9 @@
     <Select.Trigger
       {id}
       class={cn(
-        "group bg-card dark:bg-card relative h-9! w-full border-0 p-1 pl-2 shadow-none",
+        "group relative h-9! w-full border-0 bg-card p-1 pl-2 shadow-none dark:bg-card",
         "focus:shadow-none",
-        "focus:ring-ring focus:ring-offset-background focus:z-10 focus:ring-2 focus:ring-offset-5",
+        "focus:z-10 focus:ring-2 focus:ring-ring focus:ring-offset-5 focus:ring-offset-background",
         "transition-shadow duration-200",
       )}
       bind:ref={triggerEl}
@@ -53,7 +53,7 @@
       <!-- Draw bottom border with peer -->
       <div
         class={cn(
-          "group-focus:border-foreground/35 absolute right-0 bottom-0 left-0 border-b-2 transition-colors duration-200",
+          "absolute right-0 bottom-0 left-0 border-b-2 transition-colors duration-200 group-focus:border-foreground/35",
           "border-primary",
         )}
       ></div>

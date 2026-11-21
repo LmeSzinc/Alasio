@@ -184,13 +184,13 @@
          Styling follows the frontend overview LogDisplay/LogData: card
          surface, scroll area, and a per-line hover highlight. The backend
          log has no level/time, so only the shared skeleton is kept. -->
-    <ScrollArea bind:viewportRef={logViewport} type="always" class="bg-card min-h-0 w-full flex-1 border-t border-b">
+    <ScrollArea bind:viewportRef={logViewport} type="always" class="min-h-0 w-full flex-1 border-t border-b bg-card">
       <div class="flex flex-col">
         {#each logs as log}
           <div
-            class="hover:bg-muted/50 hover:shadow-muted-foreground/15 block px-1 py-0.25 font-mono text-xs hover:shadow-[inset_0_1px_0_0_currentColor,inset_0_-1px_0_0_currentColor]"
+            class="block px-1 py-0.25 font-mono text-xs hover:bg-muted/50 hover:shadow-[inset_0_1px_0_0_currentColor,inset_0_-1px_0_0_currentColor] hover:shadow-muted-foreground/15"
           >
-            <pre class="text-muted-foreground m-0 break-all whitespace-pre-wrap">{log}</pre>
+            <pre class="m-0 break-all whitespace-pre-wrap text-muted-foreground">{log}</pre>
           </div>
         {/each}
       </div>
@@ -202,7 +202,7 @@
     <div class="mt-2 flex h-8 w-full shrink-0 items-center justify-end gap-4">
       {#if failed}
         <div class="flex items-center gap-2">
-          <TriangleAlert class="text-destructive size-4" />
+          <TriangleAlert class="size-4 text-destructive" />
           <p class="ml-0">{t.Loading.BackendStartFailed()}</p>
         </div>
         <Button onclick={retry} disabled={retrying} class="h-8 w-16 font-semibold">
@@ -210,8 +210,8 @@
         </Button>
       {:else if starting}
         <div class="flex items-center gap-2">
-          <LoaderCircle class="text-muted-foreground size-4 animate-spin" />
-          <p class="text-muted-foreground ml-0">{t.Loading.StartingBackend()}</p>
+          <LoaderCircle class="size-4 animate-spin text-muted-foreground" />
+          <p class="ml-0 text-muted-foreground">{t.Loading.StartingBackend()}</p>
         </div>
       {/if}
     </div>

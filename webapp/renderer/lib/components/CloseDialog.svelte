@@ -52,8 +52,8 @@
 
     {#if isClosing}
       <div class="flex flex-col items-center gap-4 py-4">
-        <div class="border-border border-t-muted-foreground h-8 w-8 animate-spin rounded-full border-4"></div>
-        <p class="text-muted-foreground text-sm">
+        <div class="h-8 w-8 animate-spin rounded-full border-4 border-border border-t-muted-foreground"></div>
+        <p class="text-sm text-muted-foreground">
           {stageMessages[shutdownStage] || t.CloseDialog.Closing()}
         </p>
       </div>

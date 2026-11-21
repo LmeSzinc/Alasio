@@ -84,6 +84,6 @@
     {t.Setup.Start()}
   </Button>
   {#if failed}
-    <p class="text-destructive mt-4 text-lg">{t.Error.BackendStartFailed()}</p>
+    <p class="mt-4 text-lg text-destructive">{t.Error.BackendStartFailed()}</p>
   {/if}
 </StartupCard>
