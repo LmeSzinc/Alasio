@@ -1,3 +1,5 @@
+import time
+
 import pytest
 
 from alasio.base.timer import Timer
@@ -173,6 +175,62 @@ class TestTimerCurrent:
 
         t.add_count()
         assert t.current_count() == 2
+
+
+class TestTimerPrecision:
+    """Timer must resolve elapsed time finer than 1ms."""
+
+    def test_current_time_resolution_below_1ms(self):
+        """The smallest step of current_time() must be below 1ms.
+
+        A tick based clock only moves in whole system ticks, so the smallest
+        observed step exposes the real resolution of the clock behind Timer.
+        On the Python 3.8 runtime for Windows 7 that clock used to be
+        GetTickCount64() with a 15.625ms tick, which made a 5-10ms screenshot
+        cost unmeasurable.
+        """
+        t = Timer(limit=1).start()
+        prev = t.current_time()
+        smallest = None
+        # A bounded number of reads, so the probe itself never waits on the
+        # clock it is measuring. A coarse tick clock still advances several
+        # times within this budget, which is enough to expose its resolution.
+        for _ in range(1_000_000):
+            cur = t.current_time()
+            if cur == prev:
+                continue
+            delta = cur - prev
+            prev = cur
+            if smallest is None or delta < smallest:
+                smallest = delta
+                if smallest < 0.001:
+                    break
+
+        assert smallest is not None, 'current_time() never advanced within 1000000 reads'
+        assert smallest < 0.001, f'timer resolution is {smallest * 1e3:.3f}ms, expected below 1ms'
+
+    def test_current_time_reports_sub_millisecond_elapsed(self, monkeypatch):
+        """Elapsed time below 1ms is reported as is, not truncated to 0 or a tick."""
+        now = [100.0]
+        monkeypatch.setattr(time, 'perf_counter', lambda: now[0])
+
+        t = Timer(limit=1).start()
+        now[0] += 0.00025
+        assert t.current_time() == pytest.approx(0.00025, abs=1e-9)
+
+    def test_reached_honors_sub_millisecond_limit(self, monkeypatch):
+        """reached() compares the limit with full precision, not rounded to a tick."""
+        now = [100.0]
+        monkeypatch.setattr(time, 'perf_counter', lambda: now[0])
+
+        t = Timer(limit=0.0005, count=0).start()
+        assert not t.reached()  # 0.0ms elapsed
+
+        now[0] += 0.0004
+        assert not t.reached()  # 0.4ms elapsed, limit is 0.5ms
+
+        now[0] += 0.0002
+        assert t.reached()  # 0.6ms elapsed
 
 
 class TestTimerReached:
