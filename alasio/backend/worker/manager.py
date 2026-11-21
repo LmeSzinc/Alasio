@@ -71,6 +71,20 @@ WORKER_PARKED_STATE = ['restarting', 'updating']
 # before the kill is escalated to worker_force_kill()
 KILL_WAIT_TIMEOUT = 1.0
 
+# Seconds the manager waits for a child to hand over its exit status before it
+# stops the child itself: after the pipe of a worker broke (see
+# WorkerManager._handle_disconnect) and while close() stops the workers.
+EXIT_WAIT_TIMEOUT = 0.5
+
+# Seconds the manager waits for a killed worker to be reaped after each signal:
+# the graceful terminate() step and the escalation to force-kill.
+KILL_TERMINATE_TIMEOUT = 1.0
+KILL_FORCE_TIMEOUT = 1.0
+
+# Poll interval while the manager waits for the exit status of a child that is
+# already closing its fds (see WorkerState.process_wait_exit).
+EXIT_POLL_INTERVAL = 0.01
+
 # Poll interval of restart_wait() while it blocks for the workers to stop.
 # The wait itself is a 10-minute scale wait; the poll only has to keep the
 # abort event (restart_cancel) and worker stops reasonably responsive.
@@ -176,10 +190,41 @@ class WorkerState(msgspec.Struct):
         except Exception:
             pass
 
-    def process_join(self, timeout):
+    def process_wait_exit(self, timeout=0):
+        """
+        Wait for the process to be reaped and read its exit status
+
+        The death of a child is observable before its exit status exists. On
+        POSIX the kernel closes the fds of an exiting process first, and the
+        process becomes waitable (a zombie) some moments later; multiprocessing's
+        join() waits on exactly that fd notification, so it returns while
+        waitpid() still has no status to hand out, and is_alive() / exitcode read
+        that moment as "still running". A worker that finished its entry is in
+        that window when its pipe breaks, so the status must not be read once but
+        waited for. (On Windows the wait is on the process handle, which is
+        signalled by the end itself, so the first read answers.)
+
+        Args:
+            timeout (float): Seconds to wait for the status to be readable, 0 for
+                a single non-blocking read
+
+        Returns:
+            Optional[int]: The exit status of the process, None when it did not
+                become reapable within the timeout or when this process cannot
+                claim its status (see WorkerManager._handle_disconnect)
+        """
         process = self.process
-        if process and process.is_alive():
-            process.join(timeout)
+        if not process:
+            return None
+        deadline = time.monotonic() + timeout
+        while True:
+            code = process.exitcode
+            if code is not None:
+                return code
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return None
+            time.sleep(min(EXIT_POLL_INTERVAL, remaining))
 
     def process_terminate(self):
         """
@@ -195,47 +240,75 @@ class WorkerState(msgspec.Struct):
             except Exception as e:
                 logger.error(f'[WorkerManager] Error while terminating "{self.config}": {e}')
 
-    def process_kill(self, timeout=1):
+    def process_kill(self, timeout=0):
         """
-        Close process if process started
-        """
-        process = self.process
-        if not process:
-            return
-        if process.is_alive():
-            logger.info(f'[WorkerManager] Force killing worker process: "{self.config}"')
-            try:
-                process.kill()
-                process.join(timeout=timeout)
-                # no luck
-                if process.is_alive():
-                    logger.info(f'[WorkerManager] Worker still alive after force-kill: "{self.config}"')
-            except Exception as e:
-                logger.error(f'[WorkerManager] Error while force-killing "{self.config}": {e}')
+        Kill the process and wait for it to be reaped
 
-    def process_graceful_kill(self, terminate_timeout=1, kill_timeout=1):
-        """
-        Close process if process started
+        Args:
+            timeout (float): Seconds to wait for the exit status after the kill,
+                0 for a single non-blocking read
+
+        Returns:
+            Optional[int]: The exit status, None when the process did not end
+                within the timeout or its status cannot be claimed
         """
         process = self.process
         if not process:
-            return
-        if process.is_alive():
-            logger.info(f'[WorkerManager] Graceful killing process: "{self.config}"')
-            try:
-                # try graceful terminate() first
-                process.terminate()
-                process.join(timeout=terminate_timeout)
-                if process.is_alive():
-                    # then try force-kill
-                    logger.info(f'[WorkerManager] Worker did not terminate, force killing process: "{self.config}"')
-                    process.kill()
-                    process.join(timeout=kill_timeout)
-                # no luck
-                if process.is_alive():
-                    logger.info(f'[WorkerManager] Worker still alive after force-kill: "{self.config}"')
-            except Exception as e:
-                logger.error(f'[WorkerManager] Error while force-killing "{self.config}": {e}')
+            return None
+        # a process that ended already needs no signal, only its status
+        code = self.process_wait_exit(timeout=0)
+        if code is not None:
+            return code
+        logger.info(f'[WorkerManager] Force killing worker process: "{self.config}"')
+        try:
+            process.kill()
+        except Exception as e:
+            logger.error(f'[WorkerManager] Error while force-killing "{self.config}": {e}')
+        code = self.process_wait_exit(timeout=timeout)
+        if code is None:
+            logger.info(f'[WorkerManager] Worker still alive after force-kill: "{self.config}"')
+        return code
+
+    def process_graceful_kill(self, terminate_timeout=0, kill_timeout=0):
+        """
+        Stop the process, escalating from terminate to kill, and wait for it
+
+        Args:
+            terminate_timeout (float): Seconds to wait for the exit status after
+                terminate(), 0 for a single non-blocking read
+            kill_timeout (float): Seconds to wait for the exit status after
+                kill(), 0 for a single non-blocking read
+
+        Returns:
+            Optional[int]: The exit status, None when the process did not end
+                within the timeouts or its status cannot be claimed
+        """
+        process = self.process
+        if not process:
+            return None
+        # a process that ended already needs no signal, only its status
+        code = self.process_wait_exit(timeout=0)
+        if code is not None:
+            return code
+
+        logger.info(f'[WorkerManager] Graceful killing process: "{self.config}"')
+        try:
+            process.terminate()
+        except Exception as e:
+            logger.error(f'[WorkerManager] Error while terminating "{self.config}": {e}')
+        code = self.process_wait_exit(timeout=terminate_timeout)
+        if code is not None:
+            return code
+        logger.info(f'[WorkerManager] Worker did not terminate, force killing process: "{self.config}"')
+
+        try:
+            process.kill()
+        except Exception as e:
+            logger.error(f'[WorkerManager] Error while force-killing "{self.config}": {e}')
+        code = self.process_wait_exit(timeout=kill_timeout)
+        if code is None:
+            logger.info(f'[WorkerManager] Worker still alive after force-kill: "{self.config}"')
+        return code
 
 
 class RestartRun:
@@ -338,14 +411,21 @@ class WorkerManager(metaclass=Singleton):
                 self._set_state(state, 'disconnected')
 
         process = state.process
+        exitcode = None
         if process:
-            # after pipe broken, process should terminate every soon
-            if process.is_alive():
-                # On Windows, process needs a bit of time for handle cleanup
-                # 0.5s is usually enough if child closed pipe manually
-                process.join(timeout=0.5)
-            # otherwise, kill it manually
-            state.process_graceful_kill()
+            # The end of the pipe is not the end of the process: on POSIX the
+            # kernel closes the fds of an exiting process first, and only later
+            # does the process become waitable, so the status of a worker that
+            # just finished its entry does not exist yet when its pipe breaks (see
+            # process_wait_exit). The worker is given the moment it needs to
+            # finish that exit first: a signal now would race with the exit status
+            # the worker decided.
+            exitcode = state.process_wait_exit(timeout=EXIT_WAIT_TIMEOUT)
+            if exitcode is None:
+                # still there although its pipe broke: it did not stop by itself,
+                # stop it and read the status of that stop
+                exitcode = state.process_graceful_kill(terminate_timeout=KILL_TERMINATE_TIMEOUT,
+                                                       kill_timeout=KILL_FORCE_TIMEOUT)
 
         # Close connection to unblock recv thread
         state.conn_close()
@@ -356,18 +436,16 @@ class WorkerManager(metaclass=Singleton):
             if recv_thread.is_alive():
                 recv_thread.join(timeout=1)
 
-        exitcode = process.exitcode if process else None
         self.on_worker_info(state.config, f'[WorkerManager] Worker stopped: {state.config}, exitcode={exitcode}')
         if exitcode is None:
-            # A process that is gone always has an exit status in the kernel, but
-            # only its parent can claim it and only once. multiprocessing reads the
-            # code out of the Popen object of the process and answers None whenever
-            # it has none to hand out: no value yet, and equally a status that was
-            # claimed elsewhere before the manager asked for it (its poll() drops
-            # the OSError of waitpid()). None therefore says nothing about why the
-            # worker ended, it only says the manager did not observe it -- record
-            # what is known, the decision below takes the rest of the entry into
-            # account.
+            # The status of a process is claimed by its parent, and only once. The
+            # manager waits for it above, so None means the status could not be
+            # claimed at all (waitpid() answers ECHILD, e.g. because the status was
+            # read elsewhere), or the process survived the kill escalation: a
+            # process that is gone always has a status in the kernel. None says
+            # nothing about why the worker ended, it only says the manager did not
+            # observe it -- record what is known, the decision below takes the rest
+            # of the entry into account.
             logger.warning(f'[WorkerManager] No exit status to read for "{state.config}": '
                            f'pid={process.pid if process else None}, '
                            f'alive={bool(process and process.is_alive())}, state={state_before}')
@@ -884,7 +962,8 @@ class WorkerManager(metaclass=Singleton):
             return True, 'Success'
 
         # cleanup
-        state.process_graceful_kill()
+        state.process_graceful_kill(terminate_timeout=KILL_TERMINATE_TIMEOUT,
+                                    kill_timeout=KILL_FORCE_TIMEOUT)
         state.conn_close()
         if state.recv_thread and state.recv_thread.is_alive():
             state.recv_thread.join(timeout=1)
@@ -1469,8 +1548,8 @@ class WorkerManager(metaclass=Singleton):
 
             # Wait for processes
             for state in states:
-                state.process_join(timeout=1)
-                state.process_kill(timeout=1)
+                state.process_wait_exit(timeout=EXIT_WAIT_TIMEOUT)
+                state.process_kill(timeout=KILL_FORCE_TIMEOUT)
 
             # Close connections
             for state in states:

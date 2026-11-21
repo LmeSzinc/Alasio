@@ -584,6 +584,7 @@ class _ExitedProcess:
 
     def __init__(self, exitcode):
         self._exitcode = exitcode
+        self.signals = []
 
     def is_alive(self):
         return False
@@ -596,14 +597,124 @@ class _ExitedProcess:
         return self._exitcode
 
     def terminate(self):
-        pass
+        self.signals.append('terminate')
 
     def kill(self):
-        pass
+        self.signals.append('kill')
+
+
+class _ExitingProcess:
+    """
+    A process whose fds are closed but whose exit status does not exist yet
+
+    This is the window the manager has to tell apart from a worker that is still
+    running: the kernel closes the fds of an exiting process first, and only
+    afterwards does the process become waitable. multiprocessing's join() waits on
+    the fd, so it returns in this window while exitcode still answers None.
+
+    Args:
+        exitcode (int): The code the process exits with
+        polls (int): Number of status reads that answer None before the code exists
+    """
+
+    pid = 4323
+
+    def __init__(self, exitcode=0, polls=2):
+        self._exitcode = exitcode
+        self._polls = polls
+        self.signals = []
+
+    def is_alive(self):
+        return self._polls > 0
+
+    def join(self, timeout=None):
+        # the fd notification is already there
+        return None
+
+    @property
+    def exitcode(self):
+        if self._polls > 0:
+            self._polls -= 1
+            return None
+        return self._exitcode
+
+    def terminate(self):
+        self.signals.append('terminate')
+
+    def kill(self):
+        self.signals.append('kill')
+
+
+class _StuckProcess:
+    """A worker whose pipe broke but which keeps running until it is terminated"""
+
+    pid = 4324
+
+    def __init__(self):
+        self.signals = []
+        self._exitcode = None
+
+    def is_alive(self):
+        return self._exitcode is None
+
+    def join(self, timeout=None):
+        return None
+
+    @property
+    def exitcode(self):
+        return self._exitcode
+
+    def terminate(self):
+        self.signals.append('terminate')
+        self._exitcode = -15
+
+    def kill(self):
+        self.signals.append('kill')
+        self._exitcode = -9
+
+
+class _UnresponsiveProcess:
+    """A worker that ignores terminate() and only ends when it is killed"""
+
+    pid = 4325
+
+    def __init__(self):
+        self.signals = []
+        self._exitcode = None
+
+    def is_alive(self):
+        return self._exitcode is None
+
+    def join(self, timeout=None):
+        return None
+
+    @property
+    def exitcode(self):
+        return self._exitcode
+
+    def terminate(self):
+        self.signals.append('terminate')
+
+    def kill(self):
+        self.signals.append('kill')
+        self._exitcode = -9
 
 
 class TestWorkerDisconnect:
     """How the disconnect handler reads the exit status of a gone worker"""
+
+    @pytest.fixture(autouse=True)
+    def fast_timeouts(self, monkeypatch):
+        """
+        Shorten the waits of the disconnect handler
+
+        The stand-in processes of this class decide every scenario themselves, so
+        the production timeouts would only slow the tests down. They stay long
+        enough for the stand-in that becomes reapable after a few polls.
+        """
+        monkeypatch.setattr('alasio.backend.worker.manager.EXIT_WAIT_TIMEOUT', 0.1)
+        monkeypatch.setattr('alasio.backend.worker.manager.KILL_TERMINATE_TIMEOUT', 0.05)
+        monkeypatch.setattr('alasio.backend.worker.manager.KILL_FORCE_TIMEOUT', 0.05)
 
     @staticmethod
     def disconnect(manager, state_before, process, config, pending_restart=False):
@@ -650,6 +761,35 @@ class TestWorkerDisconnect:
 
         assert state.state == 'error'
 
+    def test_a_worker_that_is_still_exiting_is_waited_for(self, manager):
+        """
+        The window between the closed fds and the exit status must not read as a failure
+
+        A worker whose entry returned closes its pipe while its process is still
+        exiting: join() is already answered by the fd notification, while the exit
+        status does not exist yet. A single non-blocking read turns that completed
+        worker into an error; waiting for the status reads the 0 it exited with.
+        """
+        process = _ExitingProcess(exitcode=0, polls=2)
+        state = self.disconnect(manager, 'running', process, 'cfg_exiting')
+
+        assert state.state == 'idle'
+        assert process.signals == []
+
+    def test_a_worker_that_keeps_running_after_its_pipe_broke_is_terminated(self, manager):
+        """
+        A worker that did not stop by itself is stopped, and that stop is its status
+
+        The grace the manager gives a worker after its pipe broke must not turn a
+        worker that is still there into a clean stop: it is terminated, and the
+        status the terminate produces is what the entry ends with.
+        """
+        process = _StuckProcess()
+        state = self.disconnect(manager, 'running', process, 'cfg_stuck')
+
+        assert process.signals == ['terminate']
+        assert state.state == 'error'
+
     def test_an_exit_code_of_zero_ends_as_idle(self, manager):
         """A worker that exited by itself with 0 was never a failure"""
         state = self.disconnect(manager, 'running', _ExitedProcess(0), 'cfg_exit_zero')
@@ -689,6 +829,83 @@ INFO | [WorkerManager] Worker still alive after force-kill: "cfg_lost_status"
 INFO | [WorkerManager] Worker stopped: cfg_lost_status, exitcode=None
 WARNING | [WorkerManager] No exit status to read for "cfg_lost_status": pid=4321, alive=True, state=scheduler-stopping
 """
+
+
+class TestProcessWaitExit:
+    """Reading the exit status only once the process is reapable"""
+
+    @staticmethod
+    def state_with(process):
+        """
+        An entry holding the given process
+
+        Args:
+            process: Stand-in for the process of the worker
+
+        Returns:
+            WorkerState: The entry
+        """
+        state = WorkerState(mod='WorkerTestRun3', config='cfg_wait_exit', state='running')
+        state.process = process
+        return state
+
+    def test_no_process_has_no_status(self):
+        """An entry without a process has nothing to wait for"""
+        state = WorkerState(mod='WorkerTestRun3', config='cfg_no_process', state='running')
+
+        assert state.process_wait_exit(timeout=1) is None
+
+    def test_a_status_that_exists_is_read_at_once(self):
+        """A reaped process answers on the first read"""
+        state = self.state_with(_ExitedProcess(0))
+
+        assert state.process_wait_exit(timeout=1) == 0
+
+    def test_the_wait_ends_when_the_status_appears(self):
+        """A process that is still exiting is waited for, not abandoned"""
+        state = self.state_with(_ExitingProcess(exitcode=0, polls=3))
+
+        assert state.process_wait_exit(timeout=1) == 0
+
+    def test_a_status_that_never_appears_ends_at_the_deadline(self):
+        """The wait is bounded: an unreadable status does not hang the caller"""
+        state = self.state_with(_LostStatusProcess())
+
+        start = time.monotonic()
+        assert state.process_wait_exit(timeout=0.2) is None
+        assert 0.15 < time.monotonic() - start < 2.0
+
+    def test_the_default_timeout_reads_once(self):
+        """A call without a timeout does not wait, it only looks at the status"""
+        state = self.state_with(_ExitingProcess(exitcode=0, polls=2))
+
+        start = time.monotonic()
+        assert state.process_wait_exit() is None
+        assert time.monotonic() - start < 0.05
+
+    def test_a_graceful_kill_of_a_gone_process_only_reads_its_status(self):
+        """A process that ended by itself is never signaled, its status is the answer"""
+        process = _ExitedProcess(0)
+        state = self.state_with(process)
+
+        assert state.process_graceful_kill() == 0
+        assert process.signals == []
+
+    def test_a_force_kill_of_a_gone_process_only_reads_its_status(self):
+        """A process that ended by itself is not killed again"""
+        process = _ExitedProcess(0)
+        state = self.state_with(process)
+
+        assert state.process_kill() == 0
+        assert process.signals == []
+
+    def test_an_unresponsive_process_is_escalated_to_kill(self):
+        """A process that ignores terminate() is killed, and the kill is its status"""
+        process = _UnresponsiveProcess()
+        state = self.state_with(process)
+
+        assert state.process_graceful_kill(terminate_timeout=0.05, kill_timeout=0.05) == -9
+        assert process.signals == ['terminate', 'kill']
 
 
 # ============================================================================
