@@ -101,10 +101,14 @@ async function clickByText(selector: string, text: string) {
 
 /**
  * The popup renders through the presence layer and a portal, which settle
- * after more microtask turns than a single flushEffects().
+ * after more microtask turns than a single flushEffects(). The presence layer
+ * also waits for one animation frame before it unmounts a closed popup, so the
+ * frame has to run for a close to be visible in the DOM.
  */
 async function settle() {
   await flushEffects();
+  await flushEffects();
+  await vi.advanceTimersByTimeAsync(20);
   await flushEffects();
 }
 

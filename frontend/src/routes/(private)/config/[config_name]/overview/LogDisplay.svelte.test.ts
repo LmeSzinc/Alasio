@@ -34,29 +34,38 @@ const CARD_HEIGHT = 600.6;
 
 /**
  * jsdom has no ResizeObserver; the stub records the callbacks so a test can
- * report a card resize by hand.
+ * report a card resize by hand. Like the browser it reports entries, not a bare
+ * call: bits-ui's pooled observer dispatches on `entry.target` and iterates the
+ * list, so a callback without entries would throw there.
  */
-class ResizeObserverStub {
-  static callbacks: (() => void)[] = [];
-  #callback: () => void;
+type ResizeCallback = (entries: { target: Element }[]) => void;
 
-  constructor(callback: () => void) {
+class ResizeObserverStub {
+  static callbacks: ResizeCallback[] = [];
+  static observed = new Map<ResizeCallback, Element[]>();
+  #callback: ResizeCallback;
+
+  constructor(callback: ResizeCallback) {
     this.#callback = callback;
     ResizeObserverStub.callbacks.push(callback);
+    ResizeObserverStub.observed.set(callback, []);
   }
 
-  observe() {}
+  observe(element: Element) {
+    ResizeObserverStub.observed.get(this.#callback)?.push(element);
+  }
 
   unobserve() {}
 
   disconnect() {
     ResizeObserverStub.callbacks = ResizeObserverStub.callbacks.filter((callback) => callback !== this.#callback);
+    ResizeObserverStub.observed.delete(this.#callback);
   }
 
-  /** Reports a resize to every live observer */
+  /** Reports a resize to every live observer, with the elements it observes */
   static trigger() {
     for (const callback of [...ResizeObserverStub.callbacks]) {
-      callback();
+      callback((ResizeObserverStub.observed.get(callback) ?? []).map((target) => ({ target })));
     }
   }
 }

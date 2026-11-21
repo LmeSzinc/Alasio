@@ -5,6 +5,15 @@
   import { cn } from "$lib/utils";
 
   // --- Component Props ---
+  type Props = {
+    src?: string | null;
+    class?: string;
+    initScale?: number;
+    minScale?: number;
+    maxScale?: number;
+    zoomFactor?: number;
+    pixelGridThreshold?: number;
+  };
   let {
     src,
     class: className = "",
@@ -13,15 +22,7 @@
     maxScale = 64,
     zoomFactor = 1.2,
     pixelGridThreshold = 6,
-  } = $props<{
-    src?: string | null;
-    class?: string;
-    initScale?: number;
-    minScale?: number;
-    maxScale?: number;
-    zoomFactor?: number;
-    pixelGridThreshold?: number;
-  }>();
+  }: Props = $props();
 
   // --- Reactive State ---
   let scale = $state(untrack(() => initScale));
