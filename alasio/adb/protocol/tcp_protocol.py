@@ -1,7 +1,7 @@
 import socket
 from struct import Struct
 from threading import Lock, Thread
-from time import time
+from time import perf_counter
 from typing import Literal
 
 from alasio.adb.protocol.cnxn import DeviceFeatures
@@ -46,15 +46,17 @@ class AdbStreamTCP:
 
     def recv_until_close(self, timeout: "int | float" = 20) -> bytes:
         while 1:
-            # timeout on 1ms because time.time() has accuracy of 0.5ms
+            # the accounting is only reached when a message woke the wait, and
+            # the clock must not move under it: a wall clock correction would
+            # stretch the timeout by the size of the jump, or cut it short
             if timeout < 0.001:
                 raise AdbStreamTimeout('Timeout when receiving stream until close')
-            start = time()
+            start = perf_counter()
             if self.recv_event.acquire(timeout=timeout):
                 if self.state == 'closed' or self.state == 'closing':
                     break
                 # else: message
-            timeout -= time() - start
+            timeout -= perf_counter() - start
 
         # build output
         data = b''.join(self.data_buffer)
@@ -323,17 +325,18 @@ class AdbProtocolTCP:
             # use connection-level timeout as this should be fast and not related to stream
             timeout = self.timeout
             while 1:
-                # timeout on 1ms because time.time() has accuracy of 0.5ms
+                # the clock must not move under the accounting: a wall clock
+                # correction would stretch the timeout or cut it short
                 if timeout < 0.001:
                     raise AdbConnectionTimeout(f'Timeout when opening stream {stream}')
-                start = time()
+                start = perf_counter()
                 if stream.send_event.acquire(timeout=timeout):
                     if stream.state == 'opened':
                         break
                     if stream.state == 'closed':
                         break
                     # else: unknown message (not OPEN)
-                timeout -= time() - start
+                timeout -= perf_counter() - start
         except Exception:
             # drop stream on error
             with self._connect_lock:
