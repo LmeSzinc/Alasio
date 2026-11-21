@@ -35,11 +35,11 @@
     // same metrics, so a card lines up with the entries and the groups above
     // it (see sidebar-accordion/row.ts). No w-full: the row is stretched by
     // the list it sits in, so the margins of the metrics inset it.
-    "hover:text-primary h-auto justify-start text-left",
+    "h-auto justify-start text-left hover:text-primary",
     sidebarRowClass,
     active
-      ? "text-primary hover:bg-card dark:hover:bg-card font-semibold"
-      : "text-foreground/80 hover:bg-card/80 dark:hover:bg-card font-medium",
+      ? "font-semibold text-primary hover:bg-card dark:hover:bg-card"
+      : "font-medium text-foreground/80 hover:bg-card/80 dark:hover:bg-card",
     className,
   )}
   {...restprops}
@@ -71,7 +71,7 @@
     -->
     <span
       class={cn(
-        "border-muted-foreground/60 mr-[3px] h-2.5 w-2.5 shrink-0 rounded-full border",
+        "mr-[3px] h-2.5 w-2.5 shrink-0 rounded-full border border-muted-foreground/60",
         // filled disc of 2px radius, the remaining 1px inside the border is the gap
         scheduler && "border-primary bg-[radial-gradient(circle,var(--primary)_0_2.5px,transparent_2.5px)]",
       )}

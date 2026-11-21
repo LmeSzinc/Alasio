@@ -43,7 +43,7 @@
        wrappers carrying the same px-1 the sidebar list uses. The ring stands in
        for the sidebar edge, so the column is readable on the card background. -->
   <aside
-    class="ring-border flex w-20 flex-col gap-1 rounded-md p-1 ring-1"
+    class="flex w-20 flex-col gap-1 rounded-md p-1 ring-1 ring-border"
     aria-label="Config column, state {workerState}"
   >
     {#each ASIDE_CONFIGS as config (config.id)}
@@ -56,7 +56,7 @@
 
 <div class="container mx-auto flex h-full w-full flex-col gap-4 overflow-auto p-4">
   <h1 class="text-3xl font-bold">Config Aside Debug Page</h1>
-  <p class="text-muted-foreground text-xs">
+  <p class="text-xs text-muted-foreground">
     Every worker state in a vertical config column of three configs. The middle config of each column is the selected
     one, so both the active and the inactive look of a state are visible.
   </p>
@@ -68,7 +68,7 @@
     <Card.Root class="neushadow shrink-0 border-none">
       <Card.Header>
         <Card.Title>{card.title}</Card.Title>
-        <p class="text-muted-foreground text-xs">{card.note}</p>
+        <p class="text-xs text-muted-foreground">{card.note}</p>
       </Card.Header>
       <Card.Content>
         <!-- The aside is 80px wide and vertical, so the columns pack with a
@@ -78,7 +78,7 @@
             <div class="flex w-20 flex-col items-center gap-1">
               <!-- min-h-8: the longest state name wraps at this width, a fixed
                    reserve keeps the asides of one row on the same line -->
-              <div class="text-muted-foreground flex min-h-8 w-full items-center justify-center font-mono text-xs">
+              <div class="flex min-h-8 w-full items-center justify-center font-mono text-xs text-muted-foreground">
                 {workerState}
               </div>
               {@render MockAside(workerState, card.flow)}

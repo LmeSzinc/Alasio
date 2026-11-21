@@ -18,7 +18,7 @@
     <Tooltip.Trigger>
       <button
         class={cn(
-          "text-muted-foreground/50 hover:text-primary inline-flex shrink-0 cursor-pointer items-center justify-center p-1 transition-colors",
+          "inline-flex shrink-0 cursor-pointer items-center justify-center p-1 text-muted-foreground/50 transition-colors hover:text-primary",
           helpVisible ? "text-primary" : "",
           className,
         )}

@@ -46,7 +46,7 @@
       <!-- Bottom-left: help text -->
       <div class={cn("flex min-w-0 flex-col justify-center gap-0.5", PlaceholderSnippet ? "flex-1" : "")}>
         {#if data.help}
-          <I18nText text={data.help} class="text-muted-foreground text-xs" />
+          <I18nText text={data.help} class="text-xs text-muted-foreground" />
         {/if}
       </div>
 

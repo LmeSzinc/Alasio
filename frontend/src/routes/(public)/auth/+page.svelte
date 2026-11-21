@@ -65,7 +65,7 @@
             <Label for="password" class="text-sm">{t.Auth.Password()}</Label>
             <Button
               variant="link"
-              class="text-muted-foreground ml-auto h-auto p-0 text-xs"
+              class="ml-auto h-auto p-0 text-xs text-muted-foreground"
               onclick={() => (showTip = !showTip)}
             >
               {t.Auth.ForgotPassword()}

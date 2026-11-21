@@ -290,9 +290,9 @@
 <div class="container mx-auto flex flex-col gap-6 overflow-auto p-6 pb-20">
   <div class="space-y-2">
     <h1 class="text-3xl font-bold">Arg Input</h1>
-    <p class="text-muted-foreground text-sm">
+    <p class="text-sm text-muted-foreground">
       One card per arginput component, rendered by
-      <code class="bg-muted rounded px-1">ArgCardList</code>. The values are mock data: an edit only updates the page
+      <code class="rounded bg-muted px-1">ArgCardList</code>. The values are mock data: an edit only updates the page
       state (the payload is logged to console) and the reset button restores the initial values, no backend request is
       made.
     </p>

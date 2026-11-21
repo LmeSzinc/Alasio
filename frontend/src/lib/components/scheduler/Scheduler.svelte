@@ -186,7 +186,7 @@
 <div
   data-slot="scheduler"
   class={cn(
-    "border-muted-foreground/35 relative flex flex-col px-3 pb-3",
+    "relative flex flex-col border-muted-foreground/35 px-3 pb-3",
     // The sidebar column has a width of its own; a drawer hands the card the
     // whole column and expects it to fill it
     isSheet ? "max-w-none" : "max-w-60",
@@ -268,12 +268,12 @@
            the hourglass never spin. The hourglass is a solid glyph (the circles
            are dashed): /70 compensates its heavier look -->
       {#each nextTasksToShow as row}
-        <div class="text-muted-foreground flex items-center gap-1">
+        <div class="flex items-center gap-1 text-muted-foreground">
           {#if row.waiting}
-            <Hourglass class="text-muted-foreground/70 h-3 w-3 shrink-0" strokeWidth="2" />
+            <Hourglass class="h-3 w-3 shrink-0 text-muted-foreground/70" strokeWidth="2" />
           {:else}
             <CircleDotDashed
-              class={cn("text-muted-foreground h-3 w-3 shrink-0", spinTaskIcon ? "animate-spin" : "")}
+              class={cn("h-3 w-3 shrink-0 text-muted-foreground", spinTaskIcon ? "animate-spin" : "")}
               strokeWidth="2"
             />
           {/if}
@@ -287,7 +287,7 @@
            zero half is dropped and the other keeps its place; the pending
            icon spins with the task rows, the hourglass never does. -->
       {#if hasTaskSummary}
-        <div class="text-muted-foreground row-start-4 flex items-center gap-2">
+        <div class="row-start-4 flex items-center gap-2 text-muted-foreground">
           {#if taskPending.length > 0}
             <div class="flex min-w-0 items-center gap-1">
               <CircleDotDashed class={cn("h-3 w-3 shrink-0", spinTaskIcon ? "animate-spin" : "")} strokeWidth="2" />
@@ -296,14 +296,14 @@
           {/if}
           {#if taskWaiting.length > 0}
             <div class="flex min-w-0 items-center gap-1">
-              <Hourglass class="text-muted-foreground/70 h-3 w-3 shrink-0" strokeWidth="2" />
+              <Hourglass class="h-3 w-3 shrink-0 text-muted-foreground/70" strokeWidth="2" />
               <span class="min-w-0 truncate text-xs">{t.Scheduler.WaitingCount({ count: taskWaiting.length })}</span>
             </div>
           {/if}
         </div>
       {/if}
     {:else if showNoTask}
-      <div class="text-muted-foreground flex items-center justify-center gap-1">
+      <div class="flex items-center justify-center gap-1 text-muted-foreground">
         <span class="shrink-0 text-xs">{t.Scheduler.NoTask()}</span>
       </div>
     {/if}

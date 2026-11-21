@@ -175,13 +175,13 @@
   <Popover.Root bind:open {onOpenChangeComplete}>
     <Popover.Trigger
       class={cn(
-        "group bg-card relative flex h-7! w-full items-center gap-1 rounded-md border-0 p-1 pl-2 shadow-none",
+        "group relative flex h-7! w-full items-center gap-1 rounded-md border-0 bg-card p-1 pl-2 shadow-none",
         "focus:shadow-none",
-        "focus:ring-ring focus:ring-offset-background focus:z-10 focus:ring-2 focus:ring-offset-5",
+        "focus:z-10 focus:ring-2 focus:ring-ring focus:ring-offset-5 focus:ring-offset-background",
         // Focus moves into the popup, so the trigger cannot show a real :focus
         // ring; the open state draws the same ring a focused trigger would.
-        "data-[state=open]:ring-offset-background data-[state=open]:z-10 data-[state=open]:shadow-none data-[state=open]:ring-offset-5",
-        "data-[state=open]:ring-ring data-[state=open]:ring-2",
+        "data-[state=open]:z-10 data-[state=open]:shadow-none data-[state=open]:ring-offset-5 data-[state=open]:ring-offset-background",
+        "data-[state=open]:ring-2 data-[state=open]:ring-ring",
         "transition-shadow duration-200",
       )}
       bind:ref={triggerEl}
@@ -189,12 +189,12 @@
       <span class="flex-1 truncate text-left">
         {triggerContent}
       </span>
-      <ChevronDown class="text-muted-foreground pointer-events-none size-4 shrink-0" />
+      <ChevronDown class="pointer-events-none size-4 shrink-0 text-muted-foreground" />
       <!-- Draw bottom border with peer -->
       <div
         class={cn(
-          "group-focus:border-foreground/35 absolute right-0 bottom-0 left-0 border-b-2 transition-colors duration-200",
-          isDesc ? "group-hover:border-primary border-transparent" : "border-primary",
+          "absolute right-0 bottom-0 left-0 border-b-2 transition-colors duration-200 group-focus:border-foreground/35",
+          isDesc ? "border-transparent group-hover:border-primary" : "border-primary",
         )}
       ></div>
     </Popover.Trigger>
@@ -222,7 +222,7 @@
             tabindex={-1}
             bind:this={tablistEl}
             onpointerenter={() => (focusColumn = "group")}
-            class="border-border max-h-(--bits-floating-available-height) overflow-y-auto overscroll-contain border-r py-1"
+            class="max-h-(--bits-floating-available-height) overflow-y-auto overscroll-contain border-r border-border py-1"
           >
             {#each groups as group, index (group)}
               <button
@@ -298,7 +298,7 @@
           </div>
         </div>
       {:else}
-        <div class="text-muted-foreground p-2 text-sm">No options available</div>
+        <div class="p-2 text-sm text-muted-foreground">No options available</div>
       {/if}
     </Popover.Content>
   </Popover.Root>

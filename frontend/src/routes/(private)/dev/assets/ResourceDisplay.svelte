@@ -77,7 +77,7 @@
   class={cn(
     "group relative aspect-square h-27 w-27",
     "cursor-pointer overflow-hidden outline-none",
-    "hover:bg-card rounded-md hover:shadow-md",
+    "rounded-md hover:bg-card hover:shadow-md",
     "flex flex-col border-2",
     selected ? "border-primary" : "border-transparent",
     className,
@@ -92,7 +92,7 @@
       </div>
     {:else}
       <div class="flex h-full w-full items-center justify-center">
-        <div class="text-muted-foreground text-sm">No content</div>
+        <div class="text-sm text-muted-foreground">No content</div>
       </div>
     {/if}
 
@@ -109,8 +109,8 @@
     <RenameTextarea {name} {isRenaming} selectionState={resourceSelection} {gridcellElement} {onSubmit}>
       <p
         class={cn(
-          "text-card-foreground font-consolas text-center text-xs",
-          "group-hover:text-primary line-clamp-2 break-all transition-colors",
+          "text-center font-consolas text-xs text-card-foreground",
+          "line-clamp-2 break-all transition-colors group-hover:text-primary",
         )}
       >
         {name}

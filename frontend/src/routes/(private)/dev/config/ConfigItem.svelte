@@ -60,17 +60,17 @@
   class="drag-placeholder relative rounded-md"
 >
   <div
-    class="bg-card text-card-foreground group flex h-14 items-center rounded-md border p-2 shadow-sm transition-shadow hover:shadow-md"
+    class="group flex h-14 items-center rounded-md border bg-card p-2 text-card-foreground shadow-sm transition-shadow hover:shadow-md"
   >
     <div
       {...listeners.current}
       {...attributes.current}
-      class="text-muted-foreground flex h-full cursor-grab items-center px-2 active:cursor-grabbing"
+      class="flex h-full cursor-grab items-center px-2 text-muted-foreground active:cursor-grabbing"
     >
       <GripVertical class="h-5 w-5" />
     </div>
     <div class="grow font-mono text-sm">{config.name}</div>
-    <div class="bg-secondary text-secondary-foreground ml-4 rounded px-2 py-1 text-xs">
+    <div class="ml-4 rounded bg-secondary px-2 py-1 text-xs text-secondary-foreground">
       {config.mod}
     </div>
 
@@ -88,7 +88,7 @@
       <Button
         variant="ghost"
         size="sm"
-        class="text-destructive hover:text-destructive h-8 w-8 p-0"
+        class="h-8 w-8 p-0 text-destructive hover:text-destructive"
         onclick={handleDelete}
         title={t.ConfigScan.DeleteConfig()}
       >

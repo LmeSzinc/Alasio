@@ -73,7 +73,7 @@
       </Select.Root>
     {/snippet}
     {#snippet PlaceholderSnippet()}
-      <span class="text-muted-foreground text-xs">
+      <span class="text-xs text-muted-foreground">
         {t.DevTool.SimulateSource({ width: frame.controls.width, source: frame.controls.source })}
         · {isElectronSession ? t.DevTool.SessionElectron() : t.DevTool.SessionBrowser()}
       </span>

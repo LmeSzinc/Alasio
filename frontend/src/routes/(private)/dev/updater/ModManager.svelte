@@ -44,7 +44,7 @@
   <div class={cn("mx-auto flex w-full flex-col gap-4", cardClass)}>
     {#if mods.length === 0}
       <div
-        class="text-muted-foreground flex items-center justify-center rounded-lg border-2 border-dashed py-16 text-sm"
+        class="flex items-center justify-center rounded-lg border-2 border-dashed py-16 text-sm text-muted-foreground"
       >
         {t.Mod.NoMod()}
       </div>

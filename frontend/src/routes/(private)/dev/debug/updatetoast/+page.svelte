@@ -224,7 +224,7 @@
 <div class="container mx-auto flex flex-col gap-8 p-4 pb-20">
   <div class="space-y-2">
     <h1 class="text-3xl font-bold">Update Toast Debug Page</h1>
-    <p class="text-muted-foreground text-sm">
+    <p class="text-sm text-muted-foreground">
       Every scenario of the "update available" toast: the persistent notification of the mod update flow. It stays on
       screen until the user closes it, and a newer set of updates replaces it (the previous toast is dismissed with its
       exit animation while the new one enters -- the toasts never stack, and the newest toast always carries the whole
@@ -242,7 +242,7 @@
       {#each actions as action (action.label)}
         <div class="flex items-center gap-4">
           <Button variant="outline" class="w-60 justify-start" onclick={action.run}>{action.label}</Button>
-          <p class="text-muted-foreground text-xs">{action.note}</p>
+          <p class="text-xs text-muted-foreground">{action.note}</p>
         </div>
       {/each}
     </div>
@@ -250,7 +250,7 @@
 
   <section class="space-y-2">
     <h2 class="text-lg font-semibold">Mock topic</h2>
-    <p class="text-muted-foreground text-xs">
+    <p class="text-xs text-muted-foreground">
       The Update topic the page hands to the trigger, the way the backend would report it. The Update topic owns this
       state in production; the page only fakes it.
     </p>
@@ -265,7 +265,7 @@
 
   <section class="space-y-2">
     <h2 class="text-lg font-semibold">Live toasts</h2>
-    <p class="text-muted-foreground text-xs">
+    <p class="text-xs text-muted-foreground">
       The active toasts of the Toaster, polled every 500 ms. The update toast is the entry whose id starts with
       <code>update-available</code> and shows <code>duration=never</code>; a replacement keeps the list at a single
       update entry at any moment (the one leaving is already dismissed, the next one is a fresh id).
@@ -275,7 +275,7 @@
       <span class="font-medium">{updateToastOnScreen ? "yes" : "no"}</span>
     </p>
     {#if liveToasts.length === 0}
-      <p class="text-muted-foreground font-mono text-xs">(no toast on screen)</p>
+      <p class="font-mono text-xs text-muted-foreground">(no toast on screen)</p>
     {:else}
       <ul class="font-mono text-xs">
         {#each liveToasts as entry (entry.id)}

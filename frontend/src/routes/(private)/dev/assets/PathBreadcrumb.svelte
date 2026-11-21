@@ -72,7 +72,7 @@
 <Breadcrumb class={cn("px-4 py-2", className)}>
   <BreadcrumbList>
     <div class="flex items-center gap-2">
-      <FolderOpen class="text-muted-foreground h-4 w-4" />
+      <FolderOpen class="h-4 w-4 text-muted-foreground" />
 
       {#each breadcrumbs as crumb, index}
         {#if index > 0}

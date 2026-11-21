@@ -183,8 +183,8 @@
     oncompositionend={handleCompositionEnd}
     class={cn(
       "w-full resize-none overflow-hidden",
-      "text-card-foreground font-consolas! text-center text-xs! break-all transition-none",
-      "bg-background rounded-xs border-none! px-0 py-0.5",
+      "text-center font-consolas! text-xs! break-all text-card-foreground transition-none",
+      "rounded-xs border-none! bg-background px-0 py-0.5",
       "min-h-0 leading-tight",
       className,
     )}
@@ -193,7 +193,7 @@
 {:else if children}
   {@render children()}
 {:else}
-  <p class={cn("text-card-foreground font-consolas line-clamp-2 text-center text-xs break-all", className)}>
+  <p class={cn("line-clamp-2 text-center font-consolas text-xs break-all text-card-foreground", className)}>
     {name}
   </p>
 {/if}

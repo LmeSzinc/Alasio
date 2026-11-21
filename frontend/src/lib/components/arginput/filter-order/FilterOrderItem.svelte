@@ -76,19 +76,19 @@
 >
   <div
     class={cn(
-      "bg-card flex items-center gap-1 rounded-md border py-0.5 pr-0.5 pl-1.5 text-sm",
+      "flex items-center gap-1 rounded-md border bg-card py-0.5 pr-0.5 pl-1.5 text-sm",
       isOver.current && column === "unused" && "bg-accent",
     )}
   >
     {#if column === "selected"}
-      <span class="text-muted-foreground w-5 shrink-0 text-right text-xs tabular-nums">#{index + 1}</span>
+      <span class="w-5 shrink-0 text-right text-xs text-muted-foreground tabular-nums">#{index + 1}</span>
     {/if}
     <!-- Only the grip activates a drag; the row body must not start one, so a
          click on a row never moves the item by accident -->
     <div
       {...listeners.current}
       {...attributes.current}
-      class="text-muted-foreground flex h-6 shrink-0 cursor-grab items-center px-1"
+      class="flex h-6 shrink-0 cursor-grab items-center px-1 text-muted-foreground"
       aria-label={`${t.Input.FilterOrderDrag()} ${label}`}
     >
       <GripVertical class="size-4" />
@@ -99,7 +99,7 @@
         <Tooltip.Root>
           <Tooltip.Trigger>
             <span role="img" class="inline-flex" aria-label={t.Input.FilterOrderInvalid()}>
-              <TriangleAlert class="text-destructive size-3 shrink-0" />
+              <TriangleAlert class="size-3 shrink-0 text-destructive" />
             </span>
           </Tooltip.Trigger>
           <Tooltip.Content>

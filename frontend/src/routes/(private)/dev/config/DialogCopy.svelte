@@ -56,12 +56,12 @@
     <form onsubmit={handleSubmit} class="space-y-4">
       <div class="space-y-2">
         <Label>{t.ConfigScan.CopyFrom()}</Label>
-        <div class="bg-card text-card-foreground flex h-12 items-center rounded-md border p-2 shadow-sm">
+        <div class="flex h-12 items-center rounded-md border bg-card p-2 text-card-foreground shadow-sm">
           <div class="ml-2 grow font-mono text-sm">
             {sourceConfig?.name || t.ConfigScan.Unknown()}
           </div>
           {#if sourceConfig?.mod}
-            <div class="bg-secondary text-secondary-foreground ml-4 rounded px-2 py-1 text-xs">
+            <div class="ml-4 rounded bg-secondary px-2 py-1 text-xs text-secondary-foreground">
               {sourceConfig.mod}
             </div>
           {/if}

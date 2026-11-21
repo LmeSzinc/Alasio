@@ -163,14 +163,14 @@
 <div class="container mx-auto flex flex-col gap-8 p-6 pb-20" use:elementSize={containerSize}>
   <h1 class="text-3xl font-bold">Dashboard Group Types</h1>
   <p class="text-muted-foreground">
-    Each group with <code class="bg-muted rounded px-1">_info.dashboard</code> is rendered as a single compact arg row. Compare
+    Each group with <code class="rounded bg-muted px-1">_info.dashboard</code> is rendered as a single compact arg row. Compare
     with normal (non-dashboard) groups below.
   </p>
 
   <!-- Dashboard-only card -->
   <section class="space-y-3">
     <h2 class="text-xl font-semibold">All Dashboard Types</h2>
-    <p class="text-muted-foreground text-sm">
+    <p class="text-sm text-muted-foreground">
       Amount, Total, Remain, DynamicTotal, SoftTotal, Progress, and Planner types &mdash; each rendered as a single arg
       row with PrettyValue on the right and time below.
     </p>
@@ -186,8 +186,8 @@
   <!-- Non-dashboard comparison -->
   <section class="space-y-3">
     <h2 class="text-xl font-semibold">Non-Dashboard (normal args)</h2>
-    <p class="text-muted-foreground text-sm">
-      Groups without <code class="bg-muted rounded px-1">_info.dashboard</code> &mdash; each arg renders individually as separate
+    <p class="text-sm text-muted-foreground">
+      Groups without <code class="rounded bg-muted px-1">_info.dashboard</code> &mdash; each arg renders individually as separate
       rows.
     </p>
     <ArgCard
@@ -202,7 +202,7 @@
   <!-- Mixed card -->
   <section class="space-y-3">
     <h2 class="text-xl font-semibold">Mixed: Dashboard + Normal Groups</h2>
-    <p class="text-muted-foreground text-sm">
+    <p class="text-sm text-muted-foreground">
       Dashboard and normal groups interleaved in the same card, as they would appear in the real config overview.
     </p>
     <ArgCard

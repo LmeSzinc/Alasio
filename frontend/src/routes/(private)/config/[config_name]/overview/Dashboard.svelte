@@ -25,4 +25,4 @@
   );
 </script>
 
-<DashboardCard class={cn("neushadow bg-card rounded-lg", className)} items={itemList} />
+<DashboardCard class={cn("neushadow rounded-lg bg-card", className)} items={itemList} />

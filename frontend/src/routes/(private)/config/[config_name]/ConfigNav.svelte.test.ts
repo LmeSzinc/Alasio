@@ -137,10 +137,11 @@ describe("TestConfigNavEmptyConfig", () => {
     await flushEffects();
     expect(target.textContent).not.toContain("main");
 
-    // ... the placeholder replaces it, in the style of the empty log panel
+    // ... the placeholder replaces it, in the style of the empty log panel.
+    // The order is the one prettier sorts the classes into.
     const placeholder = emptyPlaceholder(target);
     expect(placeholder?.textContent).toBe("No navigation data");
-    expect(placeholder?.className).toBe("text-muted-foreground text-sm italic");
+    expect(placeholder?.className).toBe("text-sm text-muted-foreground italic");
 
     // ... laid out as a row of the sidebar family: the metrics of a row and
     // the space of the select indicator before the label, so the placeholder

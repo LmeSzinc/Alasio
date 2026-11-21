@@ -15,5 +15,5 @@
 </script>
 
 <div class={cn("group flex w-full items-center justify-end", className)}>
-  <span class="text-muted-foreground truncate text-xs">{displayValue} {tzOffset}</span>
+  <span class="truncate text-xs text-muted-foreground">{displayValue} {tzOffset}</span>
 </div>

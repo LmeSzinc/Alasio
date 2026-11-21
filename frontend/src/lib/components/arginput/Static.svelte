@@ -17,7 +17,7 @@
 <div class={cn("relative flex h-7 w-fit items-center p-1 px-2", className)}>
   <span
     class={cn(
-      "text-primary/80 truncate font-semibold",
+      "truncate font-semibold text-primary/80",
       isRevtColor ? "text-white" : "text-primary",
       isDesc ? "text-xs" : "",
     )}

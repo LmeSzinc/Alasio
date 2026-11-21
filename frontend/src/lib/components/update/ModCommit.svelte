@@ -30,7 +30,7 @@
   <div class="grid h-8 grid-cols-[90px_110px_160px_minmax(0,1fr)_28px] items-center gap-x-2">
     <span class="truncate font-mono text-xs" title={item.version}>{prettyVersion(item.version)}</span>
     <span class="truncate text-sm" title={item.author}>{item.author}</span>
-    <span class="text-muted-foreground truncate text-xs">{formatTime(item.time)}</span>
+    <span class="truncate text-xs text-muted-foreground">{formatTime(item.time)}</span>
     <span class="min-w-0 truncate text-sm" title={item.title}>{item.title}</span>
     <div class="flex justify-end">
       {#if item.detail}
@@ -50,7 +50,7 @@
     </div>
   </div>
   {#if expanded}
-    <div class="text-muted-foreground mt-1 ml-[92px] space-y-1 pb-2 text-sm">
+    <div class="mt-1 ml-[92px] space-y-1 pb-2 text-sm text-muted-foreground">
       <div class="font-medium whitespace-pre-wrap">{item.title}</div>
       <div class="whitespace-pre-wrap">{item.detail}</div>
     </div>

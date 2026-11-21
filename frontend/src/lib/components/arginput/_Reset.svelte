@@ -22,5 +22,5 @@
   {onmousedown}
   aria-label="Reset value"
 >
-  <RotateCcw class="text-muted-foreground size-3 opacity-50" />
+  <RotateCcw class="size-3 text-muted-foreground opacity-50" />
 </Button>

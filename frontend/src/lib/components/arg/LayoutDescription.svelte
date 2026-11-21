@@ -9,7 +9,7 @@
 </script>
 
 <div class={cn("flex flex-row items-center gap-x-1.5", className)}>
-  <I18nText text={displayName} class="text-muted-foreground flex-1 text-sm" />
+  <I18nText text={displayName} class="flex-1 text-sm text-muted-foreground" />
   <div class="flex w-9/20 max-w-50 justify-center">
     <InputComponent {data} {handleEdit} {handleReset} isDesc={true} />
   </div>

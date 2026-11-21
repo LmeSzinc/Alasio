@@ -65,8 +65,8 @@
 
   <!-- Scenario 1: Limited height -->
   <section class="flex flex-col gap-2">
-    <h2 class="text-muted-foreground text-sm font-medium">Limited height</h2>
-    <p class="text-muted-foreground/70 text-xs">Log area constrained to 300px — scroll to reveal older entries.</p>
+    <h2 class="text-sm font-medium text-muted-foreground">Limited height</h2>
+    <p class="text-xs text-muted-foreground/70">Log area constrained to 300px — scroll to reveal older entries.</p>
     <div class="max-h-[300px] overflow-hidden rounded-lg border">
       <LogDisplay class="h-full rounded-none border-none shadow-none" data={sampleLogs} />
     </div>
@@ -74,15 +74,15 @@
 
   <!-- Scenario 2: Two columns with half width log -->
   <section class="flex flex-col gap-2">
-    <h2 class="text-muted-foreground text-sm font-medium">Half width</h2>
-    <p class="text-muted-foreground/70 text-xs">
+    <h2 class="text-sm font-medium text-muted-foreground">Half width</h2>
+    <p class="text-xs text-muted-foreground/70">
       Log viewer spans half the page width on wide screens, with a companion panel beside it.
     </p>
     <div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
       <div class="min-h-0 rounded-lg border">
         <LogDisplay class="rounded-none border-none shadow-none" data={sampleLogs} />
       </div>
-      <div class="bg-card text-muted-foreground flex items-center justify-center rounded-lg border p-8 text-sm">
+      <div class="flex items-center justify-center rounded-lg border bg-card p-8 text-sm text-muted-foreground">
         Companion panel — resize the browser to see how the log viewer behaves at different viewport widths.
       </div>
     </div>

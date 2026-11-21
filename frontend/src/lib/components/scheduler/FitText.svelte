@@ -93,8 +93,10 @@
     <span
       bind:this={probeRefs[i]}
       class={cn("invisible absolute top-0 left-0 whitespace-nowrap", size.probe, textClass)}
-      aria-hidden="true">{text}</span
+      aria-hidden="true"
     >
+      {text}
+    </span>
   {/each}
   <span class={cn(textClass, sizes[shownIndex]?.display, "wrap-break-word", wraps && "line-clamp-2")}>
     {text}

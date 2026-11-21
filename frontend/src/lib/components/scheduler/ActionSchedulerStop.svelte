@@ -27,7 +27,7 @@
           <button
             {...props}
             class={cn(
-              "text-primary flex h-7 w-7 cursor-pointer items-center justify-center",
+              "flex h-7 w-7 cursor-pointer items-center justify-center text-primary",
               disabled ? "cursor-not-allowed opacity-50" : "group",
             )}
             {onclick}

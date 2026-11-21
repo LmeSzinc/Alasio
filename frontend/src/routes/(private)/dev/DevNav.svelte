@@ -36,7 +36,7 @@
     {:else}
       <SidebarTitle>{group.title}</SidebarTitle>
     {/if}
-    <div class="border-border mx-1 border-t"></div>
+    <div class="mx-1 border-t border-border"></div>
     <SidebarContent>
       {#each group.items as item (item.path)}
         {@const isActive = matchPath(item.path)}

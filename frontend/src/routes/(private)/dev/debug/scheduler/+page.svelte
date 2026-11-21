@@ -191,7 +191,7 @@
      reads the ConfigScan topic: a preview following the live list would change
      under the reader and show a different column on every card. -->
 {#snippet MockConfigColumn()}
-  <div class="border-border flex w-20 shrink-0 flex-col gap-1 border-r p-1">
+  <div class="flex w-20 shrink-0 flex-col gap-1 border-r border-border p-1">
     {#each MOCK_CONFIGS as config (config.id)}
       <div class="px-1">
         <ConfigItem {config} state="idle" />
@@ -207,9 +207,9 @@
      shows up here exactly as it does in the app. -->
 {#snippet sheetDrawer(sheetWidth: number, workerState: WORKER_STATE)}
   <div class="flex flex-col gap-1">
-    <div class="text-muted-foreground font-mono text-xs">{workerState}</div>
+    <div class="font-mono text-xs text-muted-foreground">{workerState}</div>
     <div
-      class="ring-border @container/sheet relative overflow-hidden rounded-md ring-1"
+      class="@container/sheet relative overflow-hidden rounded-md ring-1 ring-border"
       style={`width: ${sheetWidth}px`}
     >
       <div class="flex">
@@ -287,13 +287,13 @@
 
         <!-- Summary row: both sides, each zero side and the empty queue -->
         <div class="mt-6 flex flex-col gap-2">
-          <div class="text-muted-foreground text-xs">
+          <div class="text-xs text-muted-foreground">
             Queue: pending + waiting, each zero side (it drops out of the summary) and the empty queue
           </div>
           <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             {#each QUEUE_CASES as counts (counts.label)}
               <div class="flex flex-col gap-1">
-                <div class="text-muted-foreground font-mono text-xs">{counts.label}</div>
+                <div class="font-mono text-xs text-muted-foreground">{counts.label}</div>
                 <Scheduler
                   config_name="CountConfig"
                   workerState={counts.running ? "running" : "idle"}
@@ -381,7 +381,7 @@
       </Card.Header>
       <Card.Content>
         <div class="flex flex-col gap-6">
-          <p class="text-muted-foreground text-xs">
+          <p class="text-xs text-muted-foreground">
             Restart phase: <span class="font-mono">none</span> = no restart in progress,
             <span class="font-mono">stopping</span> = waiting for the workers to stop,
             <span class="font-mono">shutting-down</span> = all workers stopped, the backend is about to exit (the resume
@@ -392,12 +392,12 @@
             <div class="flex flex-col gap-2">
               <div>
                 <h3 class="font-mono text-lg font-medium">{workerState}</h3>
-                <p class="text-muted-foreground text-xs">{RESTART_STATE_NOTES[workerState]}</p>
+                <p class="text-xs text-muted-foreground">{RESTART_STATE_NOTES[workerState]}</p>
               </div>
               <div class="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                 {#each RESTART_PHASES as phase (phase.label)}
                   <div class="flex flex-col gap-1">
-                    <div class="text-muted-foreground font-mono text-xs">phase={phase.label}</div>
+                    <div class="font-mono text-xs text-muted-foreground">phase={phase.label}</div>
                     <Scheduler
                       config_name="RestartConfig"
                       {workerState}

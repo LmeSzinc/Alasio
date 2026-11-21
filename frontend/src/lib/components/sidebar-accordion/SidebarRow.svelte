@@ -34,8 +34,8 @@
     // margins of the metrics inset it without overflowing
     "relative h-auto justify-start text-left",
     sidebarRowClass,
-    "hover:bg-accent dark:hover:bg-accent hover:text-primary hover:underline",
-    active ? "text-primary font-semibold" : "text-foreground font-medium",
+    "hover:bg-accent hover:text-primary hover:underline dark:hover:bg-accent",
+    active ? "font-semibold text-primary" : "font-medium text-foreground",
     className,
   )}
   {...restProps}

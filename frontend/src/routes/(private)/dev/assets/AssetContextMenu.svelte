@@ -121,7 +121,7 @@
 
     <!-- Delete -->
     <ContextMenuPrimitive.Item disabled={!hasSelection} onclick={openDeleteDialog}>
-      <Trash2 class="text-destructive mr-2 h-4 w-4" />
+      <Trash2 class="mr-2 h-4 w-4 text-destructive" />
       <span>Delete</span>
     </ContextMenuPrimitive.Item>
   </ContextMenuPrimitive.Content>
@@ -174,7 +174,7 @@
             <div class="space-y-1">
               {#each selectedAssets as asset}
                 <div class="flex items-center gap-2 pl-2 text-sm">
-                  <Package class="text-muted-foreground h-4 w-4" />
+                  <Package class="h-4 w-4 text-muted-foreground" />
                   <span class="font-mono">{asset}</span>
                 </div>
               {/each}

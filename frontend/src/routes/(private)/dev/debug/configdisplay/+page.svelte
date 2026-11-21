@@ -111,10 +111,10 @@
   <!-- 1. Header test -->
   <section class="space-y-3">
     <h2 class="text-xl font-semibold">1. Header Test</h2>
-    <p class="text-muted-foreground text-sm">
-      <code class="bg-muted rounded px-1">_info.help</code> × Scheduler group, 2×2 = 4 combinations. Scheduler
-      <code class="bg-muted rounded px-1">Enable</code> / <code class="bg-muted rounded px-1">NextRun</code> are
-      rendered as the card badge; extra Scheduler args (e.g. <code class="bg-muted rounded px-1">ServerUpdate</code>)
+    <p class="text-sm text-muted-foreground">
+      <code class="rounded bg-muted px-1">_info.help</code> × Scheduler group, 2×2 = 4 combinations. Scheduler
+      <code class="rounded bg-muted px-1">Enable</code> / <code class="rounded bg-muted px-1">NextRun</code> are
+      rendered as the card badge; extra Scheduler args (e.g. <code class="rounded bg-muted px-1">ServerUpdate</code>)
       appear inside the header.
     </p>
     <div class="space-y-4">
@@ -133,7 +133,7 @@
   <!-- 2. Single group test -->
   <section class="space-y-3">
     <h2 class="text-xl font-semibold">2. Single Group Test</h2>
-    <p class="text-muted-foreground text-sm">One group with 0 / 1 / 2 / 3 args.</p>
+    <p class="text-sm text-muted-foreground">One group with 0 / 1 / 2 / 3 args.</p>
     <div class="space-y-4">
       {#each singleGroupCases as _, i (i)}
         <ArgCard
@@ -150,7 +150,7 @@
   <!-- 3. Multi group test -->
   <section class="space-y-3">
     <h2 class="text-xl font-semibold">3. Multi Group Test</h2>
-    <p class="text-muted-foreground text-sm">0 / 1 / 2 / 3 groups, 3 args each.</p>
+    <p class="text-sm text-muted-foreground">0 / 1 / 2 / 3 groups, 3 args each.</p>
     <div class="space-y-4">
       {#each multiGroupCases as _, i (i)}
         <ArgCard

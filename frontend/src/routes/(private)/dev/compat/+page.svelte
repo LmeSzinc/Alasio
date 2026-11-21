@@ -41,7 +41,7 @@
     <div class="space-y-2">
       <h1 class="text-3xl font-bold">Browser Compatibility Test</h1>
       <p class="text-muted-foreground">Testing PostCSS polyfills for Tailwind v4 backwards compatibility</p>
-      <div class="text-muted-foreground text-sm">Target: Chrome 99+, Safari 15.5+, iOS Safari 16.1+</div>
+      <div class="text-sm text-muted-foreground">Target: Chrome 99+, Safari 15.5+, iOS Safari 16.1+</div>
     </div>
 
     <!-- Feature Support Status -->
@@ -51,31 +51,31 @@
       </Card.Header>
       <Card.Content>
         <div class="grid gap-2">
-          <div class="bg-muted/50 flex items-center justify-between rounded p-2">
+          <div class="flex items-center justify-between rounded bg-muted/50 p-2">
             <span>Transform Shortcuts (translate/scale/rotate)</span>
             <span class={transformSupported ? "text-green-600" : "text-orange-600"}>
               {transformSupported ? "✓ Native" : "⚠ Polyfilled"}
             </span>
           </div>
-          <div class="bg-muted/50 flex items-center justify-between rounded p-2">
+          <div class="flex items-center justify-between rounded bg-muted/50 p-2">
             <span>OKLAB Color Space</span>
             <span class={oklabSupported ? "text-green-600" : "text-orange-600"}>
               {oklabSupported ? "✓ Native" : "⚠ Polyfilled"}
             </span>
           </div>
-          <div class="bg-muted/50 flex items-center justify-between rounded p-2">
+          <div class="flex items-center justify-between rounded bg-muted/50 p-2">
             <span>color-mix() Function</span>
             <span class={colorMixSupported ? "text-green-600" : "text-orange-600"}>
               {colorMixSupported ? "✓ Native" : "⚠ Polyfilled"}
             </span>
           </div>
-          <div class="bg-muted/50 flex items-center justify-between rounded p-2">
+          <div class="flex items-center justify-between rounded bg-muted/50 p-2">
             <span>CSS Nesting</span>
             <span class={nestingSupported ? "text-green-600" : "text-orange-600"}>
               {nestingSupported ? "✓ Native" : "⚠ Polyfilled"}
             </span>
           </div>
-          <div class="bg-muted/50 flex items-center justify-between rounded p-2">
+          <div class="flex items-center justify-between rounded bg-muted/50 p-2">
             <span>Media Query Range Syntax</span>
             <span class={mediaRangeSupported ? "text-green-600" : "text-orange-600"}>
               {mediaRangeSupported ? "✓ Native" : "⚠ Polyfilled"}
@@ -97,7 +97,7 @@
         <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
           <div class="space-y-2">
             <div class="text-sm font-medium">Translate</div>
-            <div class="bg-muted flex h-24 items-center justify-center rounded">
+            <div class="flex h-24 items-center justify-center rounded bg-muted">
               <div
                 class="h-16 w-16 translate-x-4 translate-y-2 rounded-lg bg-linear-to-br from-blue-500 to-purple-600 shadow-lg"
               ></div>
@@ -107,7 +107,7 @@
 
           <div class="space-y-2">
             <div class="text-sm font-medium">Scale</div>
-            <div class="bg-muted flex h-24 items-center justify-center rounded">
+            <div class="flex h-24 items-center justify-center rounded bg-muted">
               <div class="h-16 w-16 scale-125 rounded-lg bg-linear-to-br from-green-500 to-teal-600 shadow-lg"></div>
             </div>
             <code class="text-xs">scale-125</code>
@@ -115,7 +115,7 @@
 
           <div class="space-y-2">
             <div class="text-sm font-medium">Rotate</div>
-            <div class="bg-muted flex h-24 items-center justify-center rounded">
+            <div class="flex h-24 items-center justify-center rounded bg-muted">
               <div class="h-16 w-16 rotate-12 rounded-lg bg-linear-to-br from-orange-500 to-red-600 shadow-lg"></div>
             </div>
             <code class="text-xs">rotate-12</code>
@@ -124,13 +124,13 @@
 
         <div class="space-y-2">
           <div class="text-sm font-medium">Combined Transform</div>
-          <div class="bg-muted flex h-24 items-center justify-center rounded">
+          <div class="flex h-24 items-center justify-center rounded bg-muted">
             <div
               class="h-16 w-16 translate-x-8 scale-110 rotate-6 rounded-lg bg-linear-to-br from-pink-500 to-rose-600 shadow-lg"
             ></div>
           </div>
           <code class="text-xs">translate-x-8 scale-110 rotate-6</code>
-          <div class="text-muted-foreground text-xs">
+          <div class="text-xs text-muted-foreground">
             ⚠️ Note: Independent transforms need @apply for older browsers
           </div>
         </div>
@@ -216,7 +216,7 @@
             style="background: linear-gradient(to right, red 0%, yellow 50%, green 100%);"
           ></div>
           <code class="text-xs">linear-gradient(to right, red 0%, yellow 50%, green 100%)</code>
-          <div class="text-muted-foreground text-xs">
+          <div class="text-xs text-muted-foreground">
             ⚠️ Always use 'via' stop in gradients for Safari compatibility
           </div>
         </div>
@@ -272,7 +272,7 @@
               <span class="hidden lg:inline">🖥️ Desktop (Green)</span>
             </p>
           </div>
-          <div class="text-muted-foreground space-y-1 text-xs">
+          <div class="space-y-1 text-xs text-muted-foreground">
             <div>Uses Tailwind breakpoints: sm (640px), md (768px), lg (1024px)</div>
             <div>Polyfill converts: (width >= 768px) → (min-width: 768px)</div>
           </div>
@@ -292,7 +292,7 @@
             <p class="font-medium text-white">Fallback Color Test</p>
             <code class="text-xs text-white/80">var(--test-undefined-color, #8b5cf6)</code>
           </div>
-          <div class="text-muted-foreground text-xs">
+          <div class="text-xs text-muted-foreground">
             Polyfill ensures var(--foo,) becomes var(--foo, ) with a space
           </div>
         </div>
@@ -314,22 +314,22 @@
           <div class="grid grid-cols-2 gap-4 md:grid-cols-4">
             <div class="space-y-2">
               <div class="text-xs font-medium">100% Opacity</div>
-              <div class="bg-primary h-20 rounded-lg shadow-md"></div>
+              <div class="h-20 rounded-lg bg-primary shadow-md"></div>
               <code class="block text-xs">bg-primary</code>
             </div>
             <div class="space-y-2">
               <div class="text-xs font-medium">75% Opacity</div>
-              <div class="bg-primary/75 h-20 rounded-lg shadow-md"></div>
+              <div class="h-20 rounded-lg bg-primary/75 shadow-md"></div>
               <code class="block text-xs">bg-primary/75</code>
             </div>
             <div class="space-y-2">
               <div class="text-xs font-medium">50% Opacity</div>
-              <div class="bg-primary/50 h-20 rounded-lg shadow-md"></div>
+              <div class="h-20 rounded-lg bg-primary/50 shadow-md"></div>
               <code class="block text-xs">bg-primary/50</code>
             </div>
             <div class="space-y-2">
               <div class="text-xs font-medium">20% Opacity</div>
-              <div class="bg-primary/20 h-20 rounded-lg shadow-md"></div>
+              <div class="h-20 rounded-lg bg-primary/20 shadow-md"></div>
               <code class="block text-xs">bg-primary/20</code>
             </div>
           </div>
@@ -337,22 +337,22 @@
           <div class="grid grid-cols-2 gap-4 md:grid-cols-4">
             <div class="space-y-2">
               <div class="text-xs font-medium">Destructive</div>
-              <div class="bg-destructive h-20 rounded-lg shadow-md"></div>
+              <div class="h-20 rounded-lg bg-destructive shadow-md"></div>
               <code class="block text-xs">bg-destructive</code>
             </div>
             <div class="space-y-2">
               <div class="text-xs font-medium">Destructive 75%</div>
-              <div class="bg-destructive/75 h-20 rounded-lg shadow-md"></div>
+              <div class="h-20 rounded-lg bg-destructive/75 shadow-md"></div>
               <code class="block text-xs">bg-destructive/75</code>
             </div>
             <div class="space-y-2">
               <div class="text-xs font-medium">Foreground</div>
-              <div class="bg-foreground h-20 rounded-lg shadow-md"></div>
+              <div class="h-20 rounded-lg bg-foreground shadow-md"></div>
               <code class="block text-xs">bg-foreground</code>
             </div>
             <div class="space-y-2">
               <div class="text-xs font-medium">Foreground 20%</div>
-              <div class="bg-foreground/20 h-20 rounded-lg shadow-md"></div>
+              <div class="h-20 rounded-lg bg-foreground/20 shadow-md"></div>
               <code class="block text-xs">bg-foreground/20</code>
             </div>
           </div>
@@ -414,17 +414,17 @@
           <div class="grid grid-cols-2 gap-4 md:grid-cols-3">
             <div class="space-y-2">
               <div class="text-xs font-medium">Border Border</div>
-              <div class="bg-muted border-border h-20 rounded-lg border-4 shadow-md"></div>
+              <div class="h-20 rounded-lg border-4 border-border bg-muted shadow-md"></div>
               <code class="block text-xs">border-border</code>
             </div>
             <div class="space-y-2">
               <div class="text-xs font-medium">Border Border/50</div>
-              <div class="bg-muted border-border/50 h-20 rounded-lg border-4 shadow-md"></div>
+              <div class="h-20 rounded-lg border-4 border-border/50 bg-muted shadow-md"></div>
               <code class="block text-xs">border-border/50</code>
             </div>
             <div class="space-y-2">
               <div class="text-xs font-medium">Border Primary/50</div>
-              <div class="bg-muted border-primary/50 h-20 rounded-lg border-4 shadow-md"></div>
+              <div class="h-20 rounded-lg border-4 border-primary/50 bg-muted shadow-md"></div>
               <code class="block text-xs">border-primary/50</code>
             </div>
           </div>
@@ -435,21 +435,21 @@
           <h3 class="text-base font-semibold">Text Colors with Opacity</h3>
           <div class="grid grid-cols-2 gap-4 md:grid-cols-3">
             <div class="space-y-2">
-              <div class="bg-muted text-primary rounded-lg p-4 font-bold">Text Primary</div>
+              <div class="rounded-lg bg-muted p-4 font-bold text-primary">Text Primary</div>
               <code class="block text-xs">text-primary</code>
             </div>
             <div class="space-y-2">
-              <div class="bg-muted text-primary/50 rounded-lg p-4 font-bold">Text Primary 50%</div>
+              <div class="rounded-lg bg-muted p-4 font-bold text-primary/50">Text Primary 50%</div>
               <code class="block text-xs">text-primary/50</code>
             </div>
             <div class="space-y-2">
-              <div class="bg-muted rounded-lg p-4 font-bold text-orange-500/50">Text Orange 50%</div>
+              <div class="rounded-lg bg-muted p-4 font-bold text-orange-500/50">Text Orange 50%</div>
               <code class="block text-xs">text-orange-500/50</code>
             </div>
           </div>
         </div>
 
-        <div class="text-muted-foreground space-y-1 text-xs">
+        <div class="space-y-1 text-xs text-muted-foreground">
           <div>✅ All opacity modifiers use color-mix() internally</div>
           <div>✅ PostCSS converts to rgb(var(--color-xxx-rgb) / opacity) for Chrome 87+ compatibility</div>
           <div>✅ Dark mode switching works correctly with opacity modifiers</div>
@@ -480,7 +480,7 @@
             class="h-32 cursor-pointer rounded-lg bg-linear-to-br from-orange-400 to-pink-500 shadow-lg transition-all hover:scale-110 hover:-rotate-6 dark:from-orange-600 dark:to-pink-700"
           ></div>
         </div>
-        <div class="text-muted-foreground mt-4 text-xs">
+        <div class="mt-4 text-xs text-muted-foreground">
           Hover over cards to see transform + color mixing + gradients working together
         </div>
       </Card.Content>
@@ -493,13 +493,13 @@
       </Card.Header>
       <Card.Content>
         <div class="grid gap-2 font-mono text-sm">
-          <div class="bg-muted/50 flex justify-between rounded p-2">
+          <div class="flex justify-between rounded bg-muted/50 p-2">
             <span>User Agent:</span>
             <span class="ml-4 max-w-md truncate text-right text-xs" title={navigator.userAgent}>
               {navigator.userAgent}
             </span>
           </div>
-          <div class="bg-muted/50 flex justify-between rounded p-2">
+          <div class="flex justify-between rounded bg-muted/50 p-2">
             <span>Viewport:</span>
             <span>{window.innerWidth} × {window.innerHeight}</span>
           </div>

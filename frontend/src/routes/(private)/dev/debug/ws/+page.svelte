@@ -160,15 +160,14 @@
             <textarea
               id="args"
               bind:value={args}
-              class="border-input bg-background ring-offset-background focus-visible:ring-ring flex min-h-[80px] w-full rounded-md border px-3 py-2 font-mono text-sm focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none"
-              placeholder={t.WebsocketTest.RpcArgumentsPlaceholder()}
-            ></textarea>
+              class="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-sm ring-offset-background focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:outline-none"
+              placeholder={t.WebsocketTest.RpcArgumentsPlaceholder()}></textarea>
           </div>
         </Card.Content>
         <Card.Footer>
           <div class="grid w-full gap-2">
             {#if rpc.isPending}
-              <div class="text-muted-foreground flex items-center gap-2 text-sm">
+              <div class="flex items-center gap-2 text-sm text-muted-foreground">
                 <Loader2 class="h-4 w-4 animate-spin" />
                 <span>{t.WebsocketTest.Sending()}</span>
               </div>
@@ -190,7 +189,7 @@
       {#if sortedTopicsData.length === 0}
         <div class="rounded-lg border-2 border-dashed py-10 text-center">
           <p class="text-muted-foreground">{t.WebsocketTest.NoDataReceived()}</p>
-          <p class="text-muted-foreground text-sm">{t.WebsocketTest.SubscribeToSeeData()}</p>
+          <p class="text-sm text-muted-foreground">{t.WebsocketTest.SubscribeToSeeData()}</p>
         </div>
       {:else}
         <!-- This container arranges the cards -->
@@ -210,9 +209,9 @@
                     </Badge>
                   {/if}
                   {#if websocketClient.subscriptions[topicName]}
-                    <Badge variant="default"
-                      >{t.WebsocketTest.Count()}: {websocketClient.subscriptions[topicName]}</Badge
-                    >
+                    <Badge variant="default">
+                      {t.WebsocketTest.Count()}: {websocketClient.subscriptions[topicName]}
+                    </Badge>
                   {/if}
                 </div>
               </Card.Header>

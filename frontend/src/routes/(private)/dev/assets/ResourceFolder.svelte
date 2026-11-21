@@ -27,7 +27,7 @@
   {#snippet content()}
     <div class="absolute inset-0 flex flex-col items-center justify-center">
       <Folder
-        class={cn("text-muted-foreground group-hover:text-primary h-2/3 w-2/3 transition-colors")}
+        class={cn("h-2/3 w-2/3 text-muted-foreground transition-colors group-hover:text-primary")}
         strokeWidth={1.5}
       />
     </div>

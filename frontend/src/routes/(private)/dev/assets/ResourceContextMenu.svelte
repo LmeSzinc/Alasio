@@ -174,7 +174,7 @@
 
     <!-- Resource to Asset - only for resources -->
     <ContextMenuPrimitive.Item disabled={!hasResources || hasFolders} onclick={handleResourceToAsset}>
-      <FileSymlink class="text-primary mr-2 h-4 w-4" />
+      <FileSymlink class="mr-2 h-4 w-4 text-primary" />
       <span>Resource to Asset</span>
     </ContextMenuPrimitive.Item>
 
@@ -182,7 +182,7 @@
 
     <!-- Delete -->
     <ContextMenuPrimitive.Item disabled={!hasSelection} onclick={openDeleteDialog}>
-      <Trash2 class="text-destructive mr-2 h-4 w-4" />
+      <Trash2 class="mr-2 h-4 w-4 text-destructive" />
       <span>Delete</span>
     </ContextMenuPrimitive.Item>
   </ContextMenuPrimitive.Content>
@@ -205,7 +205,7 @@
             <div class="space-y-1">
               {#each selectedFolders as folder}
                 <div class="flex items-center gap-2 pl-2 text-sm">
-                  <Folder class="text-muted-foreground h-4 w-4" />
+                  <Folder class="h-4 w-4 text-muted-foreground" />
                   <span class="font-mono">{folder}</span>
                 </div>
               {/each}
@@ -218,7 +218,7 @@
             <div class="space-y-1">
               {#each selectedResources as resource}
                 <div class="flex items-center gap-2 pl-2 text-sm">
-                  <File class="text-muted-foreground h-4 w-4" />
+                  <File class="h-4 w-4 text-muted-foreground" />
                   <span class="font-mono">{resource}</span>
                 </div>
               {/each}

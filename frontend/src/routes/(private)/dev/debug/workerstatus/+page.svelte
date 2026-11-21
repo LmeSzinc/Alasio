@@ -107,7 +107,7 @@
             </div>
           </div>
         {:else}
-          <div class="text-muted-foreground flex h-32 items-center justify-center text-sm">No config selected</div>
+          <div class="flex h-32 items-center justify-center text-sm text-muted-foreground">No config selected</div>
         {/if}
       </Card.Content>
     </Card.Root>
@@ -126,7 +126,7 @@
         </div>
 
         {#if configNameInput.value && !selectedConfig}
-          <div class="text-destructive mt-2 text-sm">
+          <div class="mt-2 text-sm text-destructive">
             Config "{configNameInput.value}" not found. Make sure the config exists in ConfigScan topic.
           </div>
         {/if}

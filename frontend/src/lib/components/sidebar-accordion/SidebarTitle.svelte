@@ -22,7 +22,7 @@
   } = $props();
 </script>
 
-<h2 class={cn("flex items-center", sidebarRowClass, "text-muted-foreground py-2 text-xs font-medium", className)}>
+<h2 class={cn("flex items-center", sidebarRowClass, "py-2 text-xs font-medium text-muted-foreground", className)}>
   <SidebarRowIndicator />
   {@render children?.()}
 </h2>

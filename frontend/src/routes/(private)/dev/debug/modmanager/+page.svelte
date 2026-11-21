@@ -342,7 +342,7 @@
 <div class="container mx-auto flex flex-col gap-8 p-4 pb-20">
   <div class="space-y-2">
     <h1 class="text-3xl font-bold">Mod Manager Debug Page</h1>
-    <p class="text-muted-foreground text-sm">
+    <p class="text-sm text-muted-foreground">
       Every scenario of the ModManager card list with explicit mock data: the title row (the version pill of the pack,
       the pill of the update state, the check button), the message of a failure, the history of a mod (preview,
       expand-all, empty, error, long columns) and every state of the update flow (the single update entry). The buttons
@@ -353,7 +353,7 @@
   <section class="space-y-2">
     <div>
       <h2 class="text-lg font-semibold">Live</h2>
-      <p class="text-muted-foreground text-xs">
+      <p class="text-xs text-muted-foreground">
         Subscribes the real ModList / ModHistory / Update topics: the mod list of the running backend, whatever state it
         is in. The buttons really check / update / cancel on the backend behind this page.
       </p>
@@ -365,7 +365,7 @@
     <section class="space-y-2">
       <div>
         <h2 class="text-lg font-semibold">{scenario.label}</h2>
-        <p class="text-muted-foreground text-xs">{scenario.note}</p>
+        <p class="text-xs text-muted-foreground">{scenario.note}</p>
       </div>
       <ModManager mods={scenario.mods} history={scenario.history} update={scenario.update} />
     </section>

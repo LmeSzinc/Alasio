@@ -62,22 +62,22 @@
   into a different layout. A narrow window therefore shows a slice of the same
   workspace, which is all a phone needs from a desktop developer tool.
 -->
-<div class="bg-background flex h-full min-h-0 w-full min-w-[768px] flex-col">
+<div class="flex h-full min-h-0 w-full min-w-[768px] flex-col bg-background">
   <div class="grid min-h-0 flex-1 grid-cols-2 grid-rows-2">
     <!-- Top left: the folder tree and the files it holds -->
-    <div class="border-border flex min-h-0 min-w-0 flex-col overflow-hidden border-r border-b">
-      <PathBreadcrumb class="bg-card shrink-0" {mod_path_assets} {path} onNavigate={handleNavigate} />
+    <div class="flex min-h-0 min-w-0 flex-col overflow-hidden border-r border-b border-border">
+      <PathBreadcrumb class="shrink-0 bg-card" {mod_path_assets} {path} onNavigate={handleNavigate} />
       <ResourceManager class="min-h-0 flex-1 overflow-hidden" {mod_name} {path} {topicClient} />
-      <StatusBar data={topicClient.data} class="bg-card shrink-0" />
+      <StatusBar data={topicClient.data} class="shrink-0 bg-card" />
     </div>
 
     <!-- Top right: the selected template -->
-    <div class="border-border flex min-h-0 min-w-0 flex-col overflow-hidden border-b">
+    <div class="flex min-h-0 min-w-0 flex-col overflow-hidden border-b border-border">
       <ImageViewer src={viewedUrl} class="min-h-0 flex-1" />
     </div>
 
     <!-- Bottom left: assets of the folder, and the templates of the asset -->
-    <div class="border-border flex min-h-0 min-w-0 flex-col overflow-hidden border-r">
+    <div class="flex min-h-0 min-w-0 flex-col overflow-hidden border-r border-border">
       <AssetManager class="min-h-0 flex-1 border-t-0" {mod_name} {path} {topicClient} />
     </div>
 

@@ -103,7 +103,7 @@
 
     <!-- 1.2 Desktop Aside -->
     <div class="area-aside hidden h-full min-h-0 shrink-0 md:flex">
-      <div class={cn("aside-item bg-card border-border border-r", screen.isXL && "neushadow")}>
+      <div class={cn("aside-item border-r border-border bg-card", screen.isXL && "neushadow")}>
         <ConfigAside class="pt-1 xl:pt-0" />
       </div>
       {#if NavContext.snippet}
@@ -113,7 +113,7 @@
              block drops it together with the other card borders. The width (and
              whether the column exists at all) comes from navColumnClass, so a
              compact dev page hides it on md and shows it on xl. -->
-        <div class={cn("aside-item bg-card border-border border-r xl:pt-0", screen.isXL && "neushadow", navClass)}>
+        <div class={cn("aside-item border-r border-border bg-card xl:pt-0", screen.isXL && "neushadow", navClass)}>
           {@render NavContext.snippet("sidebar")}
         </div>
       {/if}
@@ -155,10 +155,10 @@
       <Sheet.Content
         side="left"
         closeClass="top-2.5 right-2.5 @max-[360px]/sheet:right-1"
-        class="aside-shadow bg-card @container/sheet max-w-sm border-none p-0"
+        class="aside-shadow @container/sheet max-w-sm border-none bg-card p-0"
       >
         <div class="flex h-full">
-          <ConfigAside class="border-border border-r" />
+          <ConfigAside class="border-r border-border" />
           <!-- min-w-0 keeps the column at the width the sheet gives it: a flex
                item in a row is at least as wide as its content, so one long
                line in the nav would push the sheet past the screen -->
@@ -175,8 +175,8 @@
   </div>
 {:else}
   <!-- 2. Error page -->
-  <div class="dotbg bg-background fixed inset-0 z-50 flex items-center justify-center">
-    <Card.Root class="neushadow animate-in fade-in-0 zoom-in-95 mx-4 w-full max-w-md border-none">
+  <div class="dotbg fixed inset-0 z-50 flex items-center justify-center bg-background">
+    <Card.Root class="neushadow mx-4 w-full max-w-md animate-in border-none fade-in-0 zoom-in-95">
       <Card.Header class="text-center">
         <Card.Title class="text-2xl font-semibold">Oops!</Card.Title>
         <Card.Description>Authorization failed</Card.Description>

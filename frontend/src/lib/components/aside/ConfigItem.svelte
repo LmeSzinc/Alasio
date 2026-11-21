@@ -49,8 +49,8 @@
 
 <button
   class={cn(
-    "hover:bg-accent relative flex w-16 cursor-pointer flex-col items-center rounded-md py-1.5 transition-colors",
-    active ? "text-primary" : "hover:text-primary text-foreground/85",
+    "relative flex w-16 cursor-pointer flex-col items-center rounded-md py-1.5 transition-colors hover:bg-accent",
+    active ? "text-primary" : "text-foreground/85 hover:text-primary",
     className,
   )}
   onclick={handleClick}
@@ -65,7 +65,7 @@
       the whole box, an indicator inside the box would overlap the text, and
       the box is too narrow to inset the name away from it.
     -->
-    <div class="bg-primary absolute top-2 bottom-2 -left-1 w-1 rounded-full"></div>
+    <div class="absolute top-2 bottom-2 -left-1 w-1 rounded-full bg-primary"></div>
   {/if}
   <div class="relative">
     <ModIcon mod={config.mod} afspin={spin} />
@@ -77,7 +77,7 @@
         than the state badge's (-right-1.5 against -right-1), so the two icons
         line up on their right edge instead of the halo shifting this one in.
       -->
-      <div data-slot="startup-update" class="bg-background absolute -top-1.5 -right-1.5 rounded-full p-0.5">
+      <div data-slot="startup-update" class="absolute -top-1.5 -right-1.5 rounded-full bg-background p-0.5">
         <ConfigState workerState="updating" {active} />
       </div>
     {/if}

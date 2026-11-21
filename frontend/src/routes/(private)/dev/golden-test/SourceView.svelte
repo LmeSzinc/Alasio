@@ -97,7 +97,7 @@
 
 <div class="flex h-full min-h-0 w-full flex-col">
   {#if errors.length > 0}
-    <div class="border-destructive/40 bg-destructive/10 text-destructive shrink-0 border-b px-3 py-2 text-xs">
+    <div class="shrink-0 border-b border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
       <div class="flex items-center gap-1.5 font-medium">
         <TriangleAlert class="size-3.5 shrink-0" />
         {t.GoldenTest.SyntaxError()}
@@ -110,7 +110,7 @@
 
   <div class="min-h-0 flex-1 overflow-auto" bind:this={scrollEl}>
     {#if segments.length === 0}
-      <div class="text-muted-foreground p-6 text-sm">
+      <div class="p-6 text-sm text-muted-foreground">
         {data.file ? t.GoldenTest.NoSource() : t.GoldenTest.NoFile()}
       </div>
     {:else}
@@ -130,17 +130,17 @@
           <!-- min-content keeps the column as wide as its longest line, it can
                never shrink over the screenshots. The two tracks are 2fr / 1fr:
                the code gets two thirds of the width, the screenshots one. -->
-          <div class="border-border/60 min-w-0 border-b py-1" data-start-line={segment.start}>
+          <div class="min-w-0 border-b border-border/60 py-1" data-start-line={segment.start}>
             {#each lineRange(segment) as no (no)}
               <div class="flex font-mono text-xs leading-5">
-                <span class="text-muted-foreground/70 w-11 shrink-0 pr-2 text-right tabular-nums select-none">
+                <span class="w-11 shrink-0 pr-2 text-right text-muted-foreground/70 tabular-nums select-none">
                   {no}
                 </span>
-                <span class="whitespace-pre"
-                  >{#each lines[no - 1] ?? [] as span, index (index)}<span class={SPAN_CLASS[span.cls] ?? ""}
-                      >{span.text}</span
-                    >{/each}</span
-                >
+                <span class="whitespace-pre">
+                  {#each lines[no - 1] ?? [] as span, index (index)}<span class={SPAN_CLASS[span.cls] ?? ""}>
+                      {span.text}
+                    </span>{/each}
+                </span>
               </div>
             {/each}
           </div>
@@ -150,11 +150,11 @@
                  (a long line), and the screenshot stays in view while the code
                  is read sideways. The solid background is what keeps the code
                  out of this column while it scrolls underneath -->
-            <div class="border-border/60 bg-background sticky right-0 z-10 min-w-0 border-b border-l p-2">
+            <div class="sticky right-0 z-10 min-w-0 border-b border-l border-border/60 bg-background p-2">
               {#if segment.image !== null}
                 {@const image = segment.image}
                 {#if image.image === ""}
-                  <div class="text-muted-foreground flex items-start gap-1.5 text-xs italic">
+                  <div class="flex items-start gap-1.5 text-xs text-muted-foreground italic">
                     <TriangleAlert class="mt-0.5 size-3.5 shrink-0" />
                     <span>{image.error || t.GoldenTest.NoImage()}</span>
                   </div>
@@ -178,14 +178,14 @@
                       loadingDelay={200}
                     >
                       {#snippet error()}
-                        <div class="text-muted-foreground flex items-start gap-1.5 text-xs italic">
+                        <div class="flex items-start gap-1.5 text-xs text-muted-foreground italic">
                           <TriangleAlert class="mt-0.5 size-3.5 shrink-0" />
                           <span>{t.GoldenTest.MissingImage()}</span>
                         </div>
                       {/snippet}
                     </Image>
                   </button>
-                  <div class="text-muted-foreground mt-1 truncate font-mono text-xs" title={image.image}>
+                  <div class="mt-1 truncate font-mono text-xs text-muted-foreground" title={image.image}>
                     {image.image}
                   </div>
                 {/if}
@@ -201,7 +201,7 @@
 <Dialog.Root bind:open={zoomOpen}>
   <Dialog.Content class="flex h-[90vh] w-[95vw] max-w-[95vw] flex-col gap-2 p-3 sm:max-w-[95vw]" aria-label={zoomName}>
     <div class="flex shrink-0 items-center justify-between gap-2 pr-8">
-      <span class="text-muted-foreground truncate font-mono text-xs" title={zoomName}>{zoomName}</span>
+      <span class="truncate font-mono text-xs text-muted-foreground" title={zoomName}>{zoomName}</span>
       <div class="flex shrink-0 items-center gap-1">
         <Button variant={actualSize ? "outline" : "secondary"} size="sm" onclick={() => (actualSize = false)}>
           {t.GoldenTest.Fit()}
@@ -211,7 +211,7 @@
         </Button>
       </div>
     </div>
-    <div class="bg-muted/40 flex min-h-0 flex-1 cursor-zoom-out overflow-auto rounded">
+    <div class="flex min-h-0 flex-1 cursor-zoom-out overflow-auto rounded bg-muted/40">
       <button
         type="button"
         class={cn("flex h-full w-full p-2", actualSize ? "items-start justify-start" : "items-center justify-center")}

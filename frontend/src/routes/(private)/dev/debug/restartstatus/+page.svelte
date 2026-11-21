@@ -136,7 +136,7 @@
   <section class="space-y-2">
     <div>
       <h2 class="text-lg font-semibold">Live</h2>
-      <p class="text-muted-foreground text-xs">
+      <p class="text-xs text-muted-foreground">
         Subscribes the real Restart and Worker topics: the banner stays hidden unless a graceful restart is in progress.
         The tool buttons call the real rpc.
       </p>
@@ -152,7 +152,7 @@
       <section class="space-y-2">
         <div>
           <h2 class="text-lg font-semibold">{testCase.label}</h2>
-          <p class="text-muted-foreground text-xs">{testCase.note}</p>
+          <p class="text-xs text-muted-foreground">{testCase.note}</p>
         </div>
         <ArgGroupCard title="System Tool" class={cardClass}>
           <!-- the phase override drives the tool row too: the cancel button of a
@@ -161,7 +161,7 @@
           <RestartStatus phase={testCase.phase} workers={testCase.workers} />
         </ArgGroupCard>
         <pre
-          class="text-muted-foreground text-xs break-all whitespace-pre-wrap">phase={testCase.phase} workers={JSON.stringify(
+          class="text-xs break-all whitespace-pre-wrap text-muted-foreground">phase={testCase.phase} workers={JSON.stringify(
             testCase.workers,
           )}</pre>
       </section>

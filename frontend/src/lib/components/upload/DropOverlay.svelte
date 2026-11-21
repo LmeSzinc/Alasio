@@ -16,13 +16,13 @@
   role="status"
   aria-live="polite"
   class={cn(
-    "bg-primary/10 border-primary pointer-events-none absolute inset-0 flex items-center justify-center border-2 border-dashed transition-all",
+    "pointer-events-none absolute inset-0 flex items-center justify-center border-2 border-dashed border-primary bg-primary/10 transition-all",
     className,
   )}
 >
-  <div class="bg-background rounded-lg p-6 shadow-lg">
-    <Upload class="text-primary mx-auto mb-2 h-12 w-12" />
-    <p class="text-primary text-lg font-medium">
+  <div class="rounded-lg bg-background p-6 shadow-lg">
+    <Upload class="mx-auto mb-2 h-12 w-12 text-primary" />
+    <p class="text-lg font-medium text-primary">
       {@render children?.()}
     </p>
   </div>

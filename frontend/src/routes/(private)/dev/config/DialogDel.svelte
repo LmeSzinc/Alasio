@@ -36,7 +36,7 @@
   <DialogContent class="sm:max-w-md">
     <DialogHeader>
       <DialogTitle class="flex items-center gap-2">
-        <AlertTriangle class="text-destructive h-4 w-4" />
+        <AlertTriangle class="h-4 w-4 text-destructive" />
         {t.ConfigScan.DeleteConfig()}
       </DialogTitle>
     </DialogHeader>
@@ -44,17 +44,17 @@
     <div class="space-y-4">
       <div class="text-sm">
         <p class="mb-2">{t.ConfigScan.DeleteConfirmation()}</p>
-        <div class="bg-card text-card-foreground flex h-12 items-center rounded-md border p-2 shadow-sm">
+        <div class="flex h-12 items-center rounded-md border bg-card p-2 text-card-foreground shadow-sm">
           <div class="ml-2 grow font-mono text-sm">
             {targetConfig?.name || t.ConfigScan.Unknown()}
           </div>
           {#if targetConfig?.mod}
-            <div class="bg-secondary text-secondary-foreground ml-4 rounded px-2 py-1 text-xs">
+            <div class="ml-4 rounded bg-secondary px-2 py-1 text-xs text-secondary-foreground">
               {targetConfig.mod}
             </div>
           {/if}
         </div>
-        <p class="text-destructive mt-2 text-xs">
+        <p class="mt-2 text-xs text-destructive">
           {t.ConfigScan.DeleteWarning()}
         </p>
       </div>

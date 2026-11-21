@@ -68,7 +68,7 @@
   <div class="p-4" bind:this={containerRef} onclick={handleBackgroundClick} role="presentation">
     {#if !asset}
       <!-- Empty state: shown when 0 or >1 assets are selected -->
-      <div class="text-muted-foreground flex h-full items-center justify-center pt-10 text-sm">
+      <div class="flex h-full items-center justify-center pt-10 text-sm text-muted-foreground">
         {#if assetSelection.count === 0}
           Select an asset to view its templates.
         {:else}
@@ -79,30 +79,30 @@
       <!-- Header: shown when exactly 1 asset is selected -->
       <div class="mb-4 border-b pb-2">
         <h2 class="text-xl font-bold tracking-tight">{asset.name}</h2>
-        <p class="text-muted-foreground text-sm">
+        <p class="text-sm text-muted-foreground">
           {asset.templates.length} template{asset.templates.length !== 1 ? "s" : ""} found.
         </p>
       </div>
 
       {#if asset.templates.length === 0}
-        <div class="text-muted-foreground flex h-full items-center justify-center pt-10 text-sm">
+        <div class="flex h-full items-center justify-center pt-10 text-sm text-muted-foreground">
           This asset has no templates.
         </div>
       {:else}
         {#each groupedTemplates as group (group.lang)}
           <div class="mb-6">
-            <h3 class="text-foreground mb-2 text-lg font-semibold tracking-tight">
+            <h3 class="mb-2 text-lg font-semibold tracking-tight text-foreground">
               {getLangDisplayName(group.lang)}
             </h3>
-            <div class="bg-muted/30 flex min-h-24 flex-wrap gap-2 rounded-md border p-3">
+            <div class="flex min-h-24 flex-wrap gap-2 rounded-md border bg-muted/30 p-3">
               {#if group.templates.length === 0}
-                <p class="text-muted-foreground self-center p-2 text-xs">No templates for this language.</p>
+                <p class="self-center p-2 text-xs text-muted-foreground">No templates for this language.</p>
               {:else}
                 {#each group.templates as template (template.file)}
                   {@const isSelected = templateSelection.isSelected({ type: "template", file: template.file })}
                   <button
                     class={cn(
-                      "ring-offset-background focus-visible:ring-ring rounded-sm ring-offset-2 outline-none focus-visible:ring-2",
+                      "rounded-sm ring-offset-2 ring-offset-background outline-none focus-visible:ring-2 focus-visible:ring-ring",
                       isSelected && "ring-2 ring-blue-500",
                     )}
                     onclick={(e) => handleTemplateSelect(template, e)}

@@ -250,7 +250,7 @@
   });
 </script>
 
-<div class={cn("bg-background flex flex-col border", className)}>
+<div class={cn("flex flex-col border bg-background", className)}>
   <!-- Main content area -->
   {#if mod_name}
     <FileZone bind:this={fileZone} accept="image/*" paste="global" onUpload={handleUpload}>
@@ -258,7 +258,7 @@
       <ResourceContextMenu {topicClient} {onUploadClick}>
         <ScrollArea class="h-full w-full flex-1">
           {#if folders.length === 0 && resourceList.length === 0}
-            <div class="text-muted-foreground flex h-full items-center justify-center">
+            <div class="flex h-full items-center justify-center text-muted-foreground">
               <p>This folder is empty</p>
             </div>
           {:else}

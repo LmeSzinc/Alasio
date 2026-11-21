@@ -42,7 +42,7 @@
   <!-- Second row: help -->
   {#if data.help && isHelpShown}
     <div class="flex flex-col justify-center gap-0.5">
-      <I18nText text={data.help} class="text-muted-foreground text-xs" />
+      <I18nText text={data.help} class="text-xs text-muted-foreground" />
     </div>
   {/if}
 

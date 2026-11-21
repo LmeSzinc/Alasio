@@ -127,11 +127,11 @@
   the three columns readable (224 tree + 420 source + 220 screenshots). Below
   it the page scrolls sideways and shows a slice of the same layout.
 -->
-<div class="bg-background flex h-full min-h-0 w-full min-w-[864px] flex-col">
+<div class="flex h-full min-h-0 w-full min-w-[864px] flex-col bg-background">
   <div class="flex min-h-0 flex-1">
-    <div class="border-border w-56 shrink-0 overflow-auto border-r">
+    <div class="w-56 shrink-0 overflow-auto border-r border-border">
       {#if modName === ""}
-        <div class="text-muted-foreground p-3 text-xs">
+        <div class="p-3 text-xs text-muted-foreground">
           {desktopOnly ? t.GoldenTest.DesktopOnly() : t.GoldenTest.NoMod()}
         </div>
       {:else}
@@ -154,9 +154,9 @@
            filter box of the tree (h-13 = 8 + 36 + 8), which puts the two
            headers on one line and leaves every pixel of height to the tree.
            The mod selector lives in the app header, next to the title. -->
-      <div class="border-border flex h-13 shrink-0 items-center gap-2 border-b px-2">
+      <div class="flex h-13 shrink-0 items-center gap-2 border-b border-border px-2">
         <span
-          class="text-muted-foreground min-w-0 flex-1 overflow-hidden font-mono text-xs whitespace-nowrap"
+          class="min-w-0 flex-1 overflow-hidden font-mono text-xs whitespace-nowrap text-muted-foreground"
           title={selected}
         >
           {selected || "—"}

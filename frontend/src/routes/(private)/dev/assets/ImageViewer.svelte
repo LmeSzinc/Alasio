@@ -378,13 +378,13 @@
   <!-- No Image Placeholder -->
   {#if !src}
     <div class="absolute inset-0 flex items-center justify-center">
-      <div class="text-muted-foreground text-lg">No Image</div>
+      <div class="text-lg text-muted-foreground">No Image</div>
     </div>
   {/if}
 
   <!-- Virtual object to show ring after canvas -->
   <div
-    class="group-focus-within:ring-ring pointer-events-none absolute inset-0 rounded-md group-focus-within:ring-1 group-focus-within:ring-inset"
+    class="pointer-events-none absolute inset-0 rounded-md group-focus-within:ring-1 group-focus-within:ring-ring group-focus-within:ring-inset"
   ></div>
 
   {#if image}

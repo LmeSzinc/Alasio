@@ -56,7 +56,7 @@
     <CircleDotDashed class={cn("h-3 w-3", !active && "text-primary", iconClass)} {strokeWidth} aria-label="Waiting" />
   {:else if workerState === "error"}
     <!-- Error: red X -->
-    <X class={cn("text-destructive h-3 w-3", iconClass)} {strokeWidth} aria-label="Error" />
+    <X class={cn("h-3 w-3 text-destructive", iconClass)} {strokeWidth} aria-label="Error" />
   {:else if workerState === "scheduler-stopping"}
     <!-- Scheduler stopping: pause in a square. No sway: the worker simply
          finishes its task, which is the ordinary end of a run and not a fault,

@@ -40,14 +40,14 @@
 </script>
 
 <div
-  class="bg-popover text-popover-foreground border-border w-[356px] max-w-[calc(100vw-2rem)] rounded-lg border p-4 shadow-lg"
+  class="w-[356px] max-w-[calc(100vw-2rem)] rounded-lg border border-border bg-popover p-4 text-popover-foreground shadow-lg"
 >
   <div class="flex items-center justify-between gap-2">
     <div class="text-sm font-medium">{t.Update.ToastTitle()}</div>
     <Button
       variant="ghost"
       size="icon-sm"
-      class="text-muted-foreground -m-1"
+      class="-m-1 text-muted-foreground"
       aria-label={t.Update.ToastClose()}
       onclick={() => closeToast?.()}
     >

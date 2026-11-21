@@ -223,7 +223,7 @@
                 {/each}
               </div>
             </SidebarAccordionTrigger>
-            <SidebarAccordionContent class="bg-accent border-y">
+            <SidebarAccordionContent class="border-y bg-accent">
               <div class="flex flex-col">
                 {#each nav.cards as card (card.key)}
                   {@const active = card.key === ui.card_indicate && nav.key === ui.nav_name}
@@ -254,7 +254,7 @@
     -->
     <div class={cn(sidebarRowClass, "flex items-center")}>
       <SidebarRowIndicator />
-      <span class="text-muted-foreground text-sm italic">{t.Overview.NavEmpty()}</span>
+      <span class="text-sm text-muted-foreground italic">{t.Overview.NavEmpty()}</span>
     </div>
   {/if}
 </nav>

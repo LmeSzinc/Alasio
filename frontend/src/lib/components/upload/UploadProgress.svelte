@@ -17,20 +17,20 @@
 </script>
 
 {#if uploadState.isVisible}
-  <div class={cn("bg-card border-border absolute right-4 bottom-4 w-80 rounded-lg border shadow-lg", className)}>
+  <div class={cn("absolute right-4 bottom-4 w-80 rounded-lg border border-border bg-card shadow-lg", className)}>
     <!-- Header -->
-    <div class="border-border flex items-center justify-between border-b px-4 py-3">
+    <div class="flex items-center justify-between border-b border-border px-4 py-3">
       <div class="flex items-center gap-2">
         {#if uploadState.allComplete}
           {#if uploadState.errorCount > 0}
-            <CircleAlert class="text-destructive h-4 w-4" />
+            <CircleAlert class="h-4 w-4 text-destructive" />
           {:else}
             <CircleCheck class="h-4 w-4 text-green-500" />
           {/if}
         {:else}
-          <LoaderCircle class="text-primary h-4 w-4 animate-spin" />
+          <LoaderCircle class="h-4 w-4 animate-spin text-primary" />
         {/if}
-        <h3 class="text-foreground text-sm font-semibold">
+        <h3 class="text-sm font-semibold text-foreground">
           {#if uploadState.allComplete}
             Upload Complete
           {:else}
@@ -42,7 +42,7 @@
       {#if uploadState.allComplete}
         <button
           onclick={() => uploadState.clearAll()}
-          class="text-muted-foreground hover:text-foreground transition-colors"
+          class="text-muted-foreground transition-colors hover:text-foreground"
           aria-label="Close"
         >
           <X class="h-4 w-4" />
@@ -51,8 +51,8 @@
     </div>
 
     <!-- Progress Summary -->
-    <div class="border-border border-b px-4 py-2">
-      <div class="text-muted-foreground flex items-center justify-between text-xs">
+    <div class="border-b border-border px-4 py-2">
+      <div class="flex items-center justify-between text-xs text-muted-foreground">
         <span>
           {uploadState.successCount + uploadState.errorCount} / {uploadState.queue.length} files
         </span>
@@ -60,7 +60,7 @@
           <Button onclick={() => uploadState.retryFailed()} size="sm" class="h-auto text-xs">Retry</Button>
         {/if}
       </div>
-      <div class="bg-secondary mt-2 h-1.5 w-full overflow-hidden rounded-full">
+      <div class="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-secondary">
         <div
           class={cn("h-full transition-all duration-300", uploadState.errorCount > 0 ? "bg-destructive" : "bg-primary")}
           style="width: {((uploadState.successCount + uploadState.errorCount) / uploadState.queue.length) * 100}%"
@@ -71,40 +71,40 @@
     <!-- File List -->
     <div class="max-h-60 overflow-y-auto">
       {#each uploadState.queue as upload}
-        <div class="border-border flex items-center gap-3 border-b px-4 py-2 last:border-b-0">
+        <div class="flex items-center gap-3 border-b border-border px-4 py-2 last:border-b-0">
           <!-- Status Icon -->
           <div class="flex-shrink-0">
             {#if upload.status === "success"}
               <CircleCheck class="h-4 w-4 text-green-500" />
             {:else if upload.status === "error"}
-              <CircleAlert class="text-destructive h-4 w-4" />
+              <CircleAlert class="h-4 w-4 text-destructive" />
             {:else if upload.status === "uploading"}
-              <LoaderCircle class="text-primary h-4 w-4 animate-spin" />
+              <LoaderCircle class="h-4 w-4 animate-spin text-primary" />
             {:else}
-              <div class="bg-muted h-4 w-4 rounded-full"></div>
+              <div class="h-4 w-4 rounded-full bg-muted"></div>
             {/if}
           </div>
 
           <!-- File Info -->
           <div class="min-w-0 flex-1">
-            <p class="text-foreground truncate text-xs font-medium">
+            <p class="truncate text-xs font-medium text-foreground">
               {upload.file.name}
             </p>
             {#if upload.status === "error" && upload.error}
-              <p class="text-destructive truncate text-xs">
+              <p class="truncate text-xs text-destructive">
                 {upload.error}
               </p>
             {:else if upload.status === "success"}
-              <p class="text-muted-foreground text-xs">Uploaded successfully</p>
+              <p class="text-xs text-muted-foreground">Uploaded successfully</p>
             {:else if upload.status === "uploading"}
-              <p class="text-muted-foreground text-xs">Uploading...</p>
+              <p class="text-xs text-muted-foreground">Uploading...</p>
             {:else}
-              <p class="text-muted-foreground text-xs">Waiting...</p>
+              <p class="text-xs text-muted-foreground">Waiting...</p>
             {/if}
           </div>
 
           <!-- File Size -->
-          <div class="text-muted-foreground flex-shrink-0 text-xs">
+          <div class="flex-shrink-0 text-xs text-muted-foreground">
             {(upload.file.size / 1024).toFixed(1)} KB
           </div>
         </div>

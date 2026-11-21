@@ -27,7 +27,7 @@
     type="button"
     class={cn(
       "h-6 w-full cursor-pointer rounded-full",
-      "bg-primary text-primary-foreground text-sm font-semibold",
+      "bg-primary text-sm font-semibold text-primary-foreground",
       disabled ? "cursor-not-allowed opacity-50" : "hover:opacity-80",
     )}
     {onclick}

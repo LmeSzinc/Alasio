@@ -165,7 +165,7 @@
 
 <div
   class={cn(
-    "neushadow bg-card group relative flex flex-col items-center justify-center overflow-hidden rounded-lg",
+    "neushadow group relative flex flex-col items-center justify-center overflow-hidden rounded-lg bg-card",
     className,
   )}
 >
@@ -178,28 +178,28 @@
 
   {#if !showImage}
     {#if displayState === "error"}
-      <div class="text-destructive flex h-full flex-col items-center justify-center gap-2 text-sm italic">
+      <div class="flex h-full flex-col items-center justify-center gap-2 text-sm text-destructive italic">
         <TriangleAlert class="h-5 w-5" />
         {t.Overview.PreviewError()}
       </div>
     {:else if displayState === "stopped"}
-      <div class="text-muted-foreground flex h-full flex-col items-center justify-center gap-2 text-sm italic">
+      <div class="flex h-full flex-col items-center justify-center gap-2 text-sm text-muted-foreground italic">
         <CircleDotDashed class="h-5 w-5" />
         {t.Overview.PreviewStopped()}
       </div>
     {:else if !isPreviewActive}
-      <div class="text-muted-foreground flex h-full flex-col items-center justify-center gap-2 text-sm italic">
+      <div class="flex h-full flex-col items-center justify-center gap-2 text-sm text-muted-foreground italic">
         <EyeOff class="h-5 w-5" />
         {t.Overview.PreviewDisabled()}
       </div>
     {:else if workerState === "idle" || workerState === "restarting" || workerState === "updating" || workerState === "resuming"}
       <!-- stopped for a graceful backend restart / queued for resume: not running -->
-      <div class="text-muted-foreground flex h-full flex-col items-center justify-center gap-2 text-sm italic">
+      <div class="flex h-full flex-col items-center justify-center gap-2 text-sm text-muted-foreground italic">
         <PlayOff class="h-5 w-5" />
         {t.Overview.PreviewNotRunning()}
       </div>
     {:else}
-      <div class="text-muted-foreground flex h-full flex-col items-center justify-center gap-2 text-sm italic">
+      <div class="flex h-full flex-col items-center justify-center gap-2 text-sm text-muted-foreground italic">
         <Clock class="h-5 w-5" />
         {t.Overview.PreviewWaiting()}
       </div>
@@ -211,10 +211,10 @@
     <Popover.Trigger
       class={cn(
         "absolute top-3 right-3 z-20 flex h-8 w-8 items-center justify-center rounded-full border backdrop-blur-sm",
-        "focus-visible:ring-ring ring-offset-background focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none",
+        "ring-offset-background focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:outline-none",
         "opacity-0 transition-opacity group-hover:opacity-100 group-focus:opacity-100",
         previewMode === "disable"
-          ? "text-muted-foreground border-muted-foreground"
+          ? "border-muted-foreground text-muted-foreground"
           : previewMode === "realtime"
             ? "border-yellow-500 text-yellow-500"
             : "border-blue-400 text-blue-400",
@@ -247,7 +247,7 @@
   <!-- Timestamp: Bottom Right -->
   {#if showTime && timeStr && isPreviewActive}
     <div
-      class="bg-background/40 text-foreground/85 absolute right-2 bottom-2 rounded px-1.5 py-0.5 font-mono text-xs backdrop-blur-md"
+      class="absolute right-2 bottom-2 rounded bg-background/40 px-1.5 py-0.5 font-mono text-xs text-foreground/85 backdrop-blur-md"
     >
       {timeStr}
     </div>

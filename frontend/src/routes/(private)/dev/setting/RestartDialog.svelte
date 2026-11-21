@@ -44,7 +44,7 @@
     </DialogHeader>
 
     <div class="space-y-4">
-      <p class="text-muted-foreground text-sm">
+      <p class="text-sm text-muted-foreground">
         {isGraceful ? t.DevTool.RestartBackendConfirmHelp() : t.DevTool.ForceRestartBackendConfirmHelp()}
       </p>
 

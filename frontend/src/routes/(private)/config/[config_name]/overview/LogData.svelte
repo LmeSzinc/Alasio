@@ -40,7 +40,7 @@
 
 <div
   class={cn(
-    "hover:bg-muted/50 hover:shadow-muted-foreground/15 hover:shadow-[inset_0_1px_0_0_currentColor,inset_0_-1px_0_0_currentColor]",
+    "hover:bg-muted/50 hover:shadow-[inset_0_1px_0_0_currentColor,inset_0_-1px_0_0_currentColor] hover:shadow-muted-foreground/15",
     // Breathing room around the text comes from the line height (`text-xs` is
     // 1rem, a row is 1.125rem here), not from vertical padding. Padding adds the
     // same 2px to an entry of any line count, which walks every entry off the

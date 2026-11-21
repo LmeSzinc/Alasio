@@ -95,7 +95,7 @@
           }}
         />
       </div>
-      <p class="text-muted-foreground mt-1 text-center text-xs">{c.label}</p>
+      <p class="mt-1 text-center text-xs text-muted-foreground">{c.label}</p>
     </div>
   {/each}
 </div>

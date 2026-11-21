@@ -28,7 +28,7 @@
     class={cn(
       "h-7 w-full cursor-pointer rounded-full",
       "flex items-center justify-center",
-      "text-primary border-primary/60 border-2 text-sm",
+      "border-2 border-primary/60 text-sm text-primary",
       disabled ? "cursor-not-allowed opacity-50" : "hover:border-primary",
     )}
     {onclick}

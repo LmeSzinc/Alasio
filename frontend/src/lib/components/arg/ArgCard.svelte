@@ -89,7 +89,7 @@
           {#snippet PlaceholderSnippet()}
             <div class="flex flex-col gap-y-0.5">
               {#if pairText}
-                <div class="text-muted-foreground truncate text-xs" title={pairText}>{pairText}</div>
+                <div class="truncate text-xs text-muted-foreground" title={pairText}>{pairText}</div>
               {/if}
               {#if groupData.Time}
                 <StaticDatetime data={groupData.Time} class="justify-start" />

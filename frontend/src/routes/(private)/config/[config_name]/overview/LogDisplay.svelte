@@ -135,7 +135,7 @@
 <div
   bind:this={logCard}
   data-slot="log-card"
-  class={cn("bg-card neushadow group @container relative h-full max-h-screen w-full rounded-lg px-2.5", className)}
+  class={cn("neushadow group @container relative h-full max-h-screen w-full rounded-lg bg-card px-2.5", className)}
 >
   <!--
     One row of the log typography, out of the flow and invisible: its height is
@@ -164,14 +164,14 @@
         {/each}
       {:else}
         <div class="flex w-full items-start justify-center">
-          <span class="text-muted-foreground text-sm italic">{t.Overview.LogEmpty()}</span>
+          <span class="text-sm text-muted-foreground italic">{t.Overview.LogEmpty()}</span>
         </div>
       {/if}
     </div>
   </ScrollArea>
   <Button
     onclick={scrollToBottom}
-    class="bg-card absolute top-4 right-4 z-10 opacity-0 transition-opacity group-hover:opacity-100"
+    class="absolute top-4 right-4 z-10 bg-card opacity-0 transition-opacity group-hover:opacity-100"
     size="icon-sm"
     variant="outline"
   >

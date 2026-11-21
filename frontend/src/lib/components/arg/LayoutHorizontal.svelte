@@ -44,7 +44,7 @@
     <div class={cn("flex flex-row gap-x-4", isCompact && "flex-col")}>
       <!-- Bottom-left: help (spans full width in compact mode) -->
       <div class={cn("flex min-w-0 flex-col justify-center gap-0.5", !isCompact && "flex-1")}>
-        <I18nText text={data.help} class="text-muted-foreground text-xs" />
+        <I18nText text={data.help} class="text-xs text-muted-foreground" />
       </div>
 
       <!-- Bottom-right: placeholder (hidden in compact mode) -->

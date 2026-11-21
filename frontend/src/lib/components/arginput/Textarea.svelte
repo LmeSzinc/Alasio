@@ -46,9 +46,9 @@
 <div class={cn("group relative flex w-full items-start focus-within:z-10", className)}>
   <Textarea
     class={cn(
-      "bg-accent peer font-sm min-h-[80px] resize-y font-mono shadow-none",
+      "peer font-sm min-h-[80px] resize-y bg-accent font-mono shadow-none",
       "focus-visible:shadow-none",
-      "focus-visible:ring-ring focus-visible:ring-offset-background focus-visible:ring-2 focus-visible:ring-offset-5",
+      "focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-5 focus-visible:ring-offset-background",
     )}
     bind:value={arg.value}
     bind:ref={textareaEl}

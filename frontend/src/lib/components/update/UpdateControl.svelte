@@ -89,7 +89,7 @@
       </Button>
     {/if}
   </span>
-  <span class="text-muted-foreground truncate text-sm">
+  <span class="truncate text-sm text-muted-foreground">
     {#if availableMods.length}
       {t.Update.AvailableCount({ count: String(availableMods.length) })}
     {:else if noSupervisor}

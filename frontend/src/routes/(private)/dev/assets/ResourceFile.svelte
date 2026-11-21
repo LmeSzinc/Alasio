@@ -56,7 +56,7 @@
       <Image src={imageUrl} alt={resourceItem.displayName} rootMargin="0px" />
     {:else}
       <div class="absolute inset-0 flex flex-col items-center justify-center">
-        <CloudOff class="text-muted-foreground h-1/3 w-1/3" />
+        <CloudOff class="h-1/3 w-1/3 text-muted-foreground" />
       </div>
     {/if}
   {/snippet}
@@ -66,7 +66,7 @@
       <Tooltip.Provider>
         <Tooltip.Root>
           <Tooltip.Trigger>
-            <div class="bg-card cursor-help rounded p-1 shadow-sm">
+            <div class="cursor-help rounded bg-card p-1 shadow-sm">
               <CloudOff class="h-3 w-3 text-yellow-500" />
             </div>
           </Tooltip.Trigger>
@@ -79,7 +79,7 @@
       <Tooltip.Provider>
         <Tooltip.Root>
           <Tooltip.Trigger>
-            <div class="bg-card cursor-help rounded p-1 shadow-sm">
+            <div class="cursor-help rounded bg-card p-1 shadow-sm">
               <Unlink class="h-3 w-3 text-orange-500" />
             </div>
           </Tooltip.Trigger>
@@ -92,7 +92,7 @@
       <Tooltip.Provider>
         <Tooltip.Root>
           <Tooltip.Trigger>
-            <div class="bg-card cursor-help rounded p-1 shadow-sm">
+            <div class="cursor-help rounded bg-card p-1 shadow-sm">
               <Link class="h-3 w-3 text-green-500" />
             </div>
           </Tooltip.Trigger>
@@ -105,7 +105,7 @@
       <Tooltip.Provider>
         <Tooltip.Root>
           <Tooltip.Trigger>
-            <div class="bg-card cursor-help rounded p-1 shadow-sm">
+            <div class="cursor-help rounded bg-card p-1 shadow-sm">
               <CircleHelp class="h-3 w-3 text-gray-500" />
             </div>
           </Tooltip.Trigger>

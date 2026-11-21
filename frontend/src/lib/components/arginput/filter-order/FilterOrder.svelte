@@ -92,14 +92,14 @@
        start with ">", a line never ends with one -->
   <span class="inline-flex items-center gap-x-1">
     {#if index > 0}
-      <span class="text-muted-foreground text-xs">&gt;</span>
+      <span class="text-xs text-muted-foreground">&gt;</span>
     {/if}
     <Badge variant="secondary" class="rounded-full">
       {#if isInvalid(item)}
         <!-- The settings page only marks the item, the tooltip of the invalid
              item lives in the editor (see FilterOrderItem.svelte) -->
         <span role="img" class="inline-flex" aria-label={t.Input.FilterOrderInvalid()}>
-          <TriangleAlert class="text-destructive size-3 shrink-0" />
+          <TriangleAlert class="size-3 shrink-0 text-destructive" />
         </span>
       {/if}
       {arg.getLabel(item)}
@@ -111,13 +111,13 @@
   <!-- The visible list: the pills up to the cut, then the marker -->
   <div data-slot="filter-order-pills" class={PILL_LINE}>
     {#if items.length === 0}
-      <span class="text-muted-foreground text-xs">{t.Input.FilterOrderEmpty()}</span>
+      <span class="text-xs text-muted-foreground">{t.Input.FilterOrderEmpty()}</span>
     {:else}
       {#each visible as item, index (item)}
         {@render pill(item, index)}
       {/each}
       {#if truncated}
-        <span class="text-muted-foreground text-xs">&gt; ...</span>
+        <span class="text-xs text-muted-foreground">&gt; ...</span>
       {/if}
     {/if}
   </div>
@@ -137,7 +137,7 @@
       {#each items as item, index (item)}
         {@render pill(item, index)}
       {/each}
-      <span class="text-muted-foreground text-xs">&gt; ...</span>
+      <span class="text-xs text-muted-foreground">&gt; ...</span>
     </div>
   {/if}
 </div>

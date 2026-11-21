@@ -159,12 +159,12 @@
           <!-- Selected: the user order, every row carries the up / down /
                remove buttons, dragging is an alternative to them -->
           <div data-slot="filter-order-column" data-column="selected" class="flex min-h-0 min-w-0 flex-col gap-y-1.5">
-            <div class="text-muted-foreground border-border border-b pb-1.5 text-xs font-medium">
+            <div class="border-b border-border pb-1.5 text-xs font-medium text-muted-foreground">
               {t.Input.FilterOrderSelected()}
             </div>
             <FilterOrderColumn column="selected">
               {#if draft.length === 0}
-                <div class="text-muted-foreground flex min-h-16 items-center justify-center px-2 text-center text-xs">
+                <div class="flex min-h-16 items-center justify-center px-2 text-center text-xs text-muted-foreground">
                   {t.Input.FilterOrderSelectedEmpty()}
                 </div>
               {:else}
@@ -189,12 +189,12 @@
           <!-- Unused: the rest of "option", its order is always the option
                order, a drop on it only removes the item from the order -->
           <div data-slot="filter-order-column" data-column="unused" class="flex min-h-0 min-w-0 flex-col gap-y-1.5">
-            <div class="text-muted-foreground border-border border-b pb-1.5 text-xs font-medium">
+            <div class="border-b border-border pb-1.5 text-xs font-medium text-muted-foreground">
               {t.Input.FilterOrderUnused()}
             </div>
             <FilterOrderColumn column="unused">
               {#if unused.length === 0}
-                <div class="text-muted-foreground flex min-h-16 items-center justify-center px-2 text-center text-xs">
+                <div class="flex min-h-16 items-center justify-center px-2 text-center text-xs text-muted-foreground">
                   {t.Input.FilterOrderUnusedEmpty()}
                 </div>
               {:else}
@@ -216,8 +216,8 @@
 
     {#snippet dragOverlay({ active })}
       {#if active}
-        <div class="bg-popover flex w-64 items-center gap-x-1.5 rounded-md border px-2 py-1.5 text-sm shadow-xl">
-          <GripVertical class="text-muted-foreground size-4" />
+        <div class="flex w-64 items-center gap-x-1.5 rounded-md border bg-popover px-2 py-1.5 text-sm shadow-xl">
+          <GripVertical class="size-4 text-muted-foreground" />
           <span class="truncate">{labelOf(String(active.id))}</span>
         </div>
       {/if}

@@ -188,17 +188,17 @@
       </span>
     </div>
     {#if info?.error}
-      <div class="text-destructive text-xs">{info.error}</div>
+      <div class="text-xs text-destructive">{info.error}</div>
     {/if}
   </Card.Header>
   <Card.Content class="grow">
     {#if history?.error}
-      <div class="text-destructive text-sm">{history.error}</div>
+      <div class="text-sm text-destructive">{history.error}</div>
     {:else if items.length === 0}
-      <div class="text-muted-foreground text-sm">{t.Mod.NoHistory()}</div>
+      <div class="text-sm text-muted-foreground">{t.Mod.NoHistory()}</div>
     {:else}
       <div
-        class="text-muted-foreground mb-1 grid grid-cols-[90px_110px_160px_minmax(0,1fr)_28px] items-center gap-x-2 border-b pb-1 text-xs"
+        class="mb-1 grid grid-cols-[90px_110px_160px_minmax(0,1fr)_28px] items-center gap-x-2 border-b pb-1 text-xs text-muted-foreground"
       >
         <span>{t.Mod.Version()}</span>
         <span>{t.Mod.Author()}</span>

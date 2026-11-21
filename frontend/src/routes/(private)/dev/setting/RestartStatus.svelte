@@ -140,17 +140,17 @@
 </script>
 
 {#if view}
-  <div class={cn("border-border bg-muted/40 flex flex-col gap-2 rounded-md border px-3 py-2.5", className)}>
+  <div class={cn("flex flex-col gap-2 rounded-md border border-border bg-muted/40 px-3 py-2.5", className)}>
     <!-- Phase -->
     <div class="flex items-center gap-x-2">
       {#if view.phase === "done"}
         <CircleCheck class="h-4 w-4 shrink-0" />
       {:else}
-        <Loader class="text-primary h-4 w-4 shrink-0 animate-spin" />
+        <Loader class="h-4 w-4 shrink-0 animate-spin text-primary" />
       {/if}
       <span class="text-sm font-medium">{phaseText}</span>
       {#if view.phase === "stopping" && progress.total > 0}
-        <span class="text-muted-foreground ml-auto shrink-0 text-xs">
+        <span class="ml-auto shrink-0 text-xs text-muted-foreground">
           {t.DevTool.RestartProgress(progress)}
         </span>
       {/if}
@@ -168,7 +168,7 @@
           <div class="flex items-center gap-x-1.5 text-xs">
             <ConfigState workerState={worker.state} displayIdle class="shrink-0" iconClass="h-3 w-3" />
             <span class="min-w-0 flex-1 truncate font-medium" title={worker.name}>{worker.name}</span>
-            <span class="text-muted-foreground shrink-0">{stateLabel(worker.state)}</span>
+            <span class="shrink-0 text-muted-foreground">{stateLabel(worker.state)}</span>
           </div>
         {/each}
       </div>

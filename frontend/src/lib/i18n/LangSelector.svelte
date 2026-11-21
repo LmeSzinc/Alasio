@@ -58,7 +58,7 @@
 <Popover.Root bind:open>
   <Popover.Trigger
     class={cn(
-      "focus-visible:ring-ring ring-offset-background hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none",
+      "ring-offset-background hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:outline-none",
       "inline-flex h-9 w-9 items-center justify-center rounded-md text-sm font-medium transition-colors",
       "disabled:pointer-events-none disabled:opacity-50",
       className,

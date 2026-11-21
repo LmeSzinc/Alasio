@@ -118,7 +118,7 @@
       aria-label="Asset list"
     >
       {#if assetList.length === 0}
-        <div class="text-muted-foreground flex h-full items-center justify-center p-4 text-sm">
+        <div class="flex h-full items-center justify-center p-4 text-sm text-muted-foreground">
           No assets in this folder.
         </div>
       {:else}

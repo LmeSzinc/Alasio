@@ -167,12 +167,12 @@
     <Input
       type="text"
       class={cn(
-        "bg-card dark:bg-card peer truncate border-0 p-1 px-2 shadow-none",
+        "peer truncate border-0 bg-card p-1 px-2 shadow-none dark:bg-card",
         isDatetime ? "pr-12 focus-visible:pr-12" : "focus-visible:pr-6",
-        isDesc ? "text-muted-foreground py-0" : "",
+        isDesc ? "py-0 text-muted-foreground" : "",
         "focus-visible:shadow-none",
-        "focus-visible:ring-ring focus-visible:ring-offset-background focus-visible:ring-2 focus-visible:ring-offset-5",
-        errorMessage && "ring-destructive ring-offset-background ring-2 ring-offset-5",
+        "focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-5 focus-visible:ring-offset-background",
+        errorMessage && "ring-2 ring-destructive ring-offset-5 ring-offset-background",
       )}
       bind:value={inputValue.val}
       bind:ref={inputEl}
@@ -184,15 +184,15 @@
     <!-- Draw bottom border with peer -->
     <div
       class={cn(
-        "peer-focus-visible:border-foreground/35 absolute right-0 bottom-0 left-0 border-b-2 transition-colors duration-200",
-        isDesc ? "group-hover:border-primary border-transparent" : "border-primary",
+        "absolute right-0 bottom-0 left-0 border-b-2 transition-colors duration-200 peer-focus-visible:border-foreground/35",
+        isDesc ? "border-transparent group-hover:border-primary" : "border-primary",
       )}
     ></div>
 
     <!-- Reset button is visible only on focus -->
     <div class="absolute right-1 flex items-center group-focus-within:right-0">
       {#if isDatetime}
-        <span class="text-muted-foreground pointer-events-none text-xs select-none">{tzOffset}</span>
+        <span class="pointer-events-none text-xs text-muted-foreground select-none">{tzOffset}</span>
       {/if}
       <div
         class={cn(

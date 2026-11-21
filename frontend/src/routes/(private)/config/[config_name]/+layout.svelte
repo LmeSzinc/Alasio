@@ -123,7 +123,7 @@
       {taskWaiting}
       {onOverviewClick}
     />
-    <div class="border-border mx-3 border-t"></div>
+    <div class="mx-3 border-t border-border"></div>
     <ScrollArea class="min-h-0 w-full flex-1" bind:viewportRef={navViewport}>
       <ConfigNav {onCardClick} {onOverviewClick} {onDeviceClick} viewport={navViewport} />
     </ScrollArea>

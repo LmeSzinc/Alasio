@@ -31,7 +31,7 @@
   type="button"
   class={cn(
     "group relative flex h-7 w-full cursor-pointer items-center border-none bg-transparent p-1 px-2 text-left shadow-none ring-0 outline-none",
-    "focus-visible:ring-ring focus-visible:ring-offset-background focus-visible:ring-2 focus-visible:ring-offset-5",
+    "focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-5 focus-visible:ring-offset-background",
     className,
   )}
   onclick={toggle}

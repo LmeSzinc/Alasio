@@ -70,8 +70,8 @@
       "flex w-full items-center text-left",
       sidebarRowClass,
       "gap-1 text-sm",
-      "hover:bg-accent dark:hover:bg-accent hover:text-primary hover:underline",
-      active ? "text-primary font-semibold" : "text-foreground font-medium",
+      "hover:bg-accent hover:text-primary hover:underline dark:hover:bg-accent",
+      active ? "font-semibold text-primary" : "font-medium text-foreground",
     )}
     style:padding-left="{depth * 12 + 4}px"
     title={entry.path}
@@ -81,13 +81,13 @@
     {#if entry.is_dir === true}
       <ChevronRight class={cn("size-3.5 shrink-0 transition-transform", open && "rotate-90")} />
       {#if open}
-        <FolderOpen class="text-muted-foreground size-3.5 shrink-0" />
+        <FolderOpen class="size-3.5 shrink-0 text-muted-foreground" />
       {:else}
-        <Folder class="text-muted-foreground size-3.5 shrink-0" />
+        <Folder class="size-3.5 shrink-0 text-muted-foreground" />
       {/if}
     {:else}
       <span class="size-3.5 shrink-0"></span>
-      <FileCode class="text-muted-foreground size-3.5 shrink-0" />
+      <FileCode class="size-3.5 shrink-0 text-muted-foreground" />
     {/if}
     <span class="ml-1 truncate">{entry.name}</span>
   </button>
@@ -98,10 +98,10 @@
   {/if}
 {/snippet}
 
-<div class="border-border bg-background sticky top-0 z-10 border-b p-2">
+<div class="sticky top-0 z-10 border-b border-border bg-background p-2">
   <input
     type="search"
-    class="border-input placeholder:text-muted-foreground h-9 w-full rounded border bg-transparent px-2 text-xs outline-none"
+    class="h-9 w-full rounded border border-input bg-transparent px-2 text-xs outline-none placeholder:text-muted-foreground"
     placeholder={t.GoldenTest.FilterTests()}
     aria-label={t.GoldenTest.FilterTests()}
     bind:value={query}
