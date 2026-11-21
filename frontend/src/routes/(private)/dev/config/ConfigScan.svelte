@@ -119,7 +119,7 @@
 
   {#if !topicClient.data}
     <div class="flex h-64 items-center justify-center rounded-lg border-2 border-dashed">
-      <Loader2 class="text-muted-foreground mr-2 h-8 w-8 animate-spin" />
+      <Loader2 class="mr-2 h-8 w-8 animate-spin text-muted-foreground" />
       <p class="text-muted-foreground">Waiting for configuration data...</p>
     </div>
   {:else}
