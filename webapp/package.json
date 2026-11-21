@@ -32,8 +32,8 @@
     "@electron/asar": "^4.3.2",
     "@internationalized/date": "^3.12.4",
     "@lucide/svelte": "^1.77.0",
-    "@sveltejs/adapter-static": "4.0.1",
-    "@sveltejs/kit": "3.3.1",
+    "@sveltejs/adapter-static": "^4.0.1",
+    "@sveltejs/kit": "^3.3.1",
     "@sveltejs/vite-plugin-svelte": "^7.3.1",
     "@tailwindcss/vite": "^4.3.5",
     "@trivago/prettier-plugin-sort-imports": "^6.0.2",
@@ -50,10 +50,10 @@
     "electron-builder": "^26.18.0",
     "fast-glob": "^3.3.3",
     "fs-extra": "^11.4.1",
-    "postcss": "8.5.33",
+    "postcss": "^8.5.33",
     "postcss-media-minmax": "^5.0.0",
     "postcss-nesting": "^14.0.3",
-    "postcss-value-parser": "4.2.0",
+    "postcss-value-parser": "^4.2.0",
     "prettier": "^3.10.1",
     "prettier-plugin-svelte": "^4.2.0",
     "prettier-plugin-tailwindcss": "0.8.1",
@@ -71,5 +71,8 @@
     "vite-plugin-electron-renderer": "^1.0.0",
     "vitest": "^5.1.1",
     "wait-on": "^9.5.1"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["electron", "electron-winstaller", "esbuild"]
   }
 }
