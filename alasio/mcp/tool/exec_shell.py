@@ -104,7 +104,10 @@ class ExecShell(ToolBase):
 
     def execute(self, params, request):
         """Run the shell command and return typed result."""
-        start = time.monotonic()
+        # perf_counter() measures a duration: time.monotonic() only ticks every
+        # 15.6ms on the Windows runtime of this project, so a report of a
+        # subprocess that took 32ms would come out as 30, 31, 46 or 47ms
+        start = time.perf_counter()
         try:
             cmd_parts = split_command(params.command)
             result = subprocess.run(
@@ -114,7 +117,7 @@ class ExecShell(ToolBase):
                 timeout=request.timeout,
                 cwd=params.cwd,
             )
-            elapsed = int((time.monotonic() - start) * 1000)
+            elapsed = int((time.perf_counter() - start) * 1000)
             raw_stdout = result.stdout
             raw_stderr = result.stderr
             stdout, stdout_omitted, stdout_truncated = truncate_output(raw_stdout)
@@ -134,7 +137,7 @@ class ExecShell(ToolBase):
                 stderr_truncated=stderr_truncated,
             )
         except subprocess.TimeoutExpired:
-            elapsed = int((time.monotonic() - start) * 1000)
+            elapsed = int((time.perf_counter() - start) * 1000)
             return ShellResult(
                 status="TimedOut",
                 stderr=f"Command timed out after {request.timeout}s",
@@ -142,7 +145,7 @@ class ExecShell(ToolBase):
                 stderr_len=len(f"Command timed out after {request.timeout}s"),
             )
         except Exception as e:
-            elapsed = int((time.monotonic() - start) * 1000)
+            elapsed = int((time.perf_counter() - start) * 1000)
             err_msg = str(e)
             return ShellResult(
                 status="Failed",

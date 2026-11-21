@@ -35,7 +35,10 @@ class ExecPython(ToolBase):
 
     def execute(self, params, request):
         """Run the Python code in a subprocess and return typed result."""
-        start = time.monotonic()
+        # perf_counter() measures a duration: time.monotonic() only ticks every
+        # 15.6ms on the Windows runtime of this project, so a report of a
+        # subprocess that took 32ms would come out as 30, 31, 46 or 47ms
+        start = time.perf_counter()
         try:
             # Pipe code through stdin to avoid command-line length limits
             result = subprocess.run(
@@ -46,7 +49,7 @@ class ExecPython(ToolBase):
                 timeout=request.timeout,
                 cwd=params.cwd,
             )
-            elapsed = int((time.monotonic() - start) * 1000)
+            elapsed = int((time.perf_counter() - start) * 1000)
             raw_stdout = result.stdout
             raw_stderr = result.stderr
             stdout, stdout_omitted, stdout_truncated = truncate_output(raw_stdout)
@@ -66,7 +69,7 @@ class ExecPython(ToolBase):
                 stderr_truncated=stderr_truncated,
             )
         except subprocess.TimeoutExpired:
-            elapsed = int((time.monotonic() - start) * 1000)
+            elapsed = int((time.perf_counter() - start) * 1000)
             return ShellResult(
                 status="TimedOut",
                 stderr=f"Python execution timed out after {request.timeout}s",
@@ -74,7 +77,7 @@ class ExecPython(ToolBase):
                 stderr_len=len(f"Python execution timed out after {request.timeout}s"),
             )
         except Exception as e:
-            elapsed = int((time.monotonic() - start) * 1000)
+            elapsed = int((time.perf_counter() - start) * 1000)
             err_msg = str(e)
             return ShellResult(
                 status="Failed",
