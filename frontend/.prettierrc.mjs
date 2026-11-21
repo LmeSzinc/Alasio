@@ -31,8 +31,7 @@ const svelteParserWithBothSorts = {
     // A lazy parser like the one of the tailwind plugin itself: prettier awaits
     // the factory, and the wrapper parser is built once the module is loaded.
     svelte: async () => {
-      const parser =
-        typeof tailwindSvelteParser === "function" ? await tailwindSvelteParser() : tailwindSvelteParser;
+      const parser = typeof tailwindSvelteParser === "function" ? await tailwindSvelteParser() : tailwindSvelteParser;
       return {
         ...parser,
         preprocess: async (text, options) => {

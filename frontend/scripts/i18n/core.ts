@@ -19,6 +19,15 @@ export class I18nGenerator {
   private config: I18nConfig;
   // Memory Cache: FilePath -> { ModuleName -> Set<Key> }
   private fileCache = new Map<string, Record<string, Set<string>>>();
+  // Hot updates arrive one file at a time, and each one rebuilds the JSON of
+  // its modules from the cache and writes it back. Two of them running at the
+  // same time interleave that read-modify-write, and the second write drops
+  // the keys the first had just added; the next update re-adds them with the
+  // default text, i.e. the translations are silently lost. A mass reformat
+  // (prettier --write over the whole tree) fires dozens of updates at once,
+  // which is how that loss shows up. Every entry point that writes is queued
+  // here so the rebuilds run one after another.
+  private writeQueue: Promise<void> = Promise.resolve();
   // Fingerprint to detect if module list changed (to avoid regenerating entry files)
   private lastModuleSignature = "";
 
@@ -147,13 +156,34 @@ export class I18nGenerator {
     await atomicWrite(file, content);
   }
 
+  /**
+   * Runs a write of the generator after the writes already queued.
+   *
+   * Args:
+   *     task (callable): The rebuild to run
+   *
+   * Returns:
+   *     Promise: Resolves when the task is done, rejects with its error
+   */
+  private enqueue(task: () => Promise<void>): Promise<void> {
+    const run = this.writeQueue.then(task, task);
+    // The queue itself never rejects: one failed task must not stop the next
+    this.writeQueue = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  }
+
   async handleSourceUpdate(filePath: string) {
-    console.log(`[i18n] Source update detected: ${filePath}`);
-    const affected = await this.scanFile(filePath);
-    if (affected && affected.size > 0) {
-      await this.updateModules(Array.from(affected));
-      await this.runPipeline();
-    }
+    return this.enqueue(async () => {
+      console.log(`[i18n] Source update detected: ${filePath}`);
+      const affected = await this.scanFile(filePath);
+      if (affected && affected.size > 0) {
+        await this.updateModules(Array.from(affected));
+        await this.runPipeline();
+      }
+    });
   }
 
   /**
@@ -161,9 +191,11 @@ export class I18nGenerator {
    * Only regenerates artifacts for the specific module.
    */
   async handleJsonUpdate(filePath: string) {
-    const modName = path.basename(filePath, ".json");
-    console.log(`[i18n] JSON update detected: ${modName}`);
-    await this.generateModuleArtifacts(modName);
+    return this.enqueue(async () => {
+      const modName = path.basename(filePath, ".json");
+      console.log(`[i18n] JSON update detected: ${modName}`);
+      await this.generateModuleArtifacts(modName);
+    });
   }
 
   private async runPipeline() {
