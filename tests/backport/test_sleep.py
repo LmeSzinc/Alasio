@@ -5,8 +5,8 @@ import time
 
 import pytest
 
-from alasio.base import sleep as sleep_module
-from alasio.base.sleep import get_resolution, sleep
+from alasio.backport import sleep as sleep_module
+from alasio.backport.sleep import get_resolution, sleep
 
 pytestmark = [
     pytest.mark.parallel,
@@ -94,7 +94,7 @@ class TestSleepDuration:
         Nothing has to be waited for, so the call does not even resolve the
         platform implementation.
         """
-        from alasio.base import sleep as sleep_module
+        from alasio.backport import sleep as sleep_module
 
         calls = []
         monkeypatch.setattr(sleep_module, '_impl', calls.append)
@@ -118,7 +118,7 @@ class TestSleepDuration:
         implementation that is not time.sleep() has to enforce the same
         contract itself instead of relying on the wrapper.
         """
-        from alasio.base import sleep as sleep_module
+        from alasio.backport import sleep as sleep_module
 
         sleep_module._resolve()
         with pytest.raises(error):
@@ -137,7 +137,7 @@ class TestSleepDelegation:
         validates its argument as well. Delegating keeps the Win32 binding of
         this module out of the call entirely.
         """
-        from alasio.base import sleep as sleep_module
+        from alasio.backport import sleep as sleep_module
 
         monkeypatch.setattr(sleep_module, '_TIMEMODULE_HIGH_RESOLUTION', True)
         monkeypatch.setattr(sleep_module, '_impl', None)
@@ -147,7 +147,7 @@ class TestSleepDelegation:
 
     def test_own_implementation_is_used_before_python_311(self, monkeypatch):
         """An older Python calls Sleep() and needs the implementation here"""
-        from alasio.base import sleep as sleep_module
+        from alasio.backport import sleep as sleep_module
 
         monkeypatch.setattr(sleep_module, '_TIMEMODULE_HIGH_RESOLUTION', False)
         monkeypatch.setattr(sleep_module, '_impl', None)

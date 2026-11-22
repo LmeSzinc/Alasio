@@ -339,7 +339,7 @@ class TestPreciseSleep:
 
     def test_sleep_advances_the_frozen_clock(self):
         """A sleep of the project advances the mocked time and is recorded"""
-        from alasio.base.sleep import sleep
+        from alasio.backport.sleep import sleep
 
         with PatchTime(100.0) as pt:
             sleep(0.25)
@@ -348,7 +348,7 @@ class TestPreciseSleep:
 
     def test_the_platform_implementation_is_restored(self):
         """The mock is removed on exit, the real implementation comes back"""
-        from alasio.base import sleep as sleep_module
+        from alasio.backport import sleep as sleep_module
 
         with PatchTime(100.0):
             assert sleep_module._impl.__name__ == 'mock_sleep'

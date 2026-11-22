@@ -1,6 +1,6 @@
 import time
 
-from alasio.base.sleep import sleep
+from alasio.backport.sleep import sleep
 
 
 class AssertTimeout:

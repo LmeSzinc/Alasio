@@ -5,7 +5,7 @@ from typing import Tuple, Union
 
 from typing_extensions import Self
 
-from alasio.base.sleep import sleep
+from alasio.backport.sleep import sleep
 
 
 def timer(function):

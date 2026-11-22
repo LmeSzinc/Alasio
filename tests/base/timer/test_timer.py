@@ -352,7 +352,8 @@ class TestTimerWait:
         for a whole coarse tick, and time.sleep() on Windows rounds the request
         up to a millisecond before it sleeps at all.
         """
-        from alasio.base import sleep as sleep_module, timer as timer_module
+        from alasio.backport import sleep as sleep_module
+        from alasio.base import timer as timer_module
 
         assert timer_module.sleep is sleep_module.sleep
 

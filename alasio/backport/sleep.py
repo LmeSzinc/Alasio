@@ -1,3 +1,16 @@
+"""
+Backport the precise `time.sleep()` of Python 3.11 on Windows
+
+CPython 3.11 replaced `Sleep()` with a high resolution waitable timer, so
+`time.sleep()` stops rounding a request up to a whole millisecond and stops
+quantizing the wake-up to the 15.6ms system tick. A game script times its
+screenshots and its polls in milliseconds, so it needs that precision on the
+Python 3.8 runtime as well; this module provides it and delegates to
+`time.sleep()` wherever the runtime already has it.
+
+POSIX needs no backport, `clock_nanosleep()` was always the timer there.
+"""
+
 import sys
 import time
 

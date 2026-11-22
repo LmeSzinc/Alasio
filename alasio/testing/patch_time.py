@@ -114,7 +114,7 @@ class PatchTime:
         # truthful, then point it at the mock below: a frozen clock must stay
         # frozen, a real sleep would not advance the mocked timestamp and a loop
         # that waits for the clock to pass a deadline would never end.
-        from alasio.base import sleep as precise_sleep
+        from alasio.backport import sleep as precise_sleep
 
         precise_sleep._resolve()
 
