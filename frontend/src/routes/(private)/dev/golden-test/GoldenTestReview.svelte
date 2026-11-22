@@ -4,6 +4,7 @@
   import { Button } from "$lib/components/ui/button/index.js";
   import { Toggle } from "$lib/components/ui/toggle/index.js";
   import { t } from "$lib/i18n";
+  import FilepathTitle from "./FilepathTitle.svelte";
   import SourceView from "./SourceView.svelte";
   import TestTree from "./TestTree.svelte";
   import type { GoldenTestEntry, GoldenTestFileData } from "./types";
@@ -85,12 +86,7 @@
            headers on one line and leaves every pixel of height to the tree.
            The mod selector lives in the app header, next to the title. -->
       <div class="flex h-13 shrink-0 items-center gap-2 border-b border-border px-2">
-        <span
-          class="min-w-0 flex-1 overflow-hidden font-mono text-xs whitespace-nowrap text-muted-foreground"
-          title={selected}
-        >
-          {selected || "—"}
-        </span>
+        <FilepathTitle path={selected} />
         <Toggle
           bind:pressed={showImages}
           variant="outline"

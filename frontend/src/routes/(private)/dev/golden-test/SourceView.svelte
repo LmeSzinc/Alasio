@@ -8,6 +8,7 @@
   import { t } from "$lib/i18n";
   import { cn } from "$lib/utils.js";
   import { dragRegionState } from "$lib/window/dragRegion.svelte";
+  import FilepathTitle from "./FilepathTitle.svelte";
   import { tokenizePython } from "./python";
   import { type SourceSegment, buildSegments, normalizeImages } from "./segments";
   import { type GoldenTestFileData, imageUrl } from "./types";
@@ -247,11 +248,9 @@
     style="top: {bandCentre}; max-height: {bandMaxHeight};"
   >
     <!-- One row for every control of the overlay: the title takes what is left,
-         the zoom buttons and the close button line up at the right end. The
-         title is inset a bit further than the content padding, so a long path
-         does not start flush against the edge of the image below it. -->
+         the zoom buttons and the close button line up at the right end. -->
     <div class="flex shrink-0 items-center gap-2">
-      <span class="min-w-0 flex-1 truncate pl-2 font-mono text-sm" title={zoomName}>{zoomName}</span>
+      <FilepathTitle path={zoomName} />
       <!-- The zoom mode is the Button variant of its state: the mode in use is
            the solid default button, the other one is outlined. The outlined
            button paints `bg-background`, a grey next to the white popover of
