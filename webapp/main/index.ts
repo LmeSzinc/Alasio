@@ -10,6 +10,7 @@ import {
   subscribeBackendLogs,
 } from "./backend";
 import { loadConfig } from "./config";
+import { setupEmbeddedRouteIPC } from "./embedded-route";
 import { registerAppProtocol } from "./protocol";
 import {
   initSharedState,
@@ -83,6 +84,11 @@ if (!gotTheLock) {
     // Inject X-Alasio-Token into local backend requests (http + ws).
     // Registered once; the callback reads the live authToken variable.
     registerTokenInjection();
+
+    // Route of the embedded web app, kept in main memory across a window
+    // reload. Registered before any window exists: the renderer reads it
+    // synchronously while its first page renders.
+    setupEmbeddedRouteIPC();
 
     // Handle config errors
     if (appState.configError) {

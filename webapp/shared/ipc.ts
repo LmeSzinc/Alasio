@@ -9,6 +9,9 @@ export const IPC_WINDOW_HIDE = "window:hide";
 export const IPC_SHARED_STATE_SET_LANGUAGE = "shared-state:set-language";
 export const IPC_SHARED_STATE_SET_THEME = "shared-state:set-theme";
 export const IPC_SHARED_STATE_SET_DPI_SCALING = "shared-state:set-dpi-scaling";
+// Route of the embedded web app, reported on every navigation so the main
+// process can reopen it when the window is reloaded (see shared/embeddedRoute).
+export const IPC_EMBEDDED_ROUTE_SET = "embedded-route:set";
 
 // Renderer -> Main, request/response (ipcRenderer.invoke / ipcMain.handle)
 export const IPC_WINDOW_CONFIRM_CLOSE = "window:confirm-close";
@@ -28,6 +31,10 @@ export const IPC_BACKEND_LOG_SUBSCRIBE = "backend:log-subscribe";
 // first paint already renders with the host's display theme (no light
 // flash before the async IPC round trip resolves).
 export const IPC_SHARED_STATE_GET_SYNC = "shared-state:get-sync";
+// Remembered route of the embedded web app, read once at renderer startup (the
+// iframe has to be mounted at it on the first paint). Null when the frontend
+// never reported one in this app run.
+export const IPC_EMBEDDED_ROUTE_GET_SYNC = "embedded-route:get-sync";
 
 // Main -> Renderer, events (webContents.send / ipcRenderer.on)
 // Maximize state change of the main window, pushed on every maximize /

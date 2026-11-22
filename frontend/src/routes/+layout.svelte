@@ -1,6 +1,7 @@
 <script lang="ts">
   import { ModeWatcher } from "mode-watcher";
   import { type Component, onMount } from "svelte";
+  import { page } from "$app/state";
   import { Toaster } from "$lib/components/ui/sonner";
   import "$lib/dpi/state.svelte";
   // Side-effect imports: register the alasio:* downlink listeners at app
@@ -12,7 +13,7 @@
   // forever (the dpi checkbox once kept its default checked state).
   import "$lib/i18n/state.svelte";
   import "$lib/theme/state.svelte";
-  import { isElectronSession } from "$lib/use/useElectronEnv.svelte";
+  import { isElectronSession, reportRoute } from "$lib/use/useElectronEnv.svelte";
   import { DragRegionContext, startDragRegionReporter } from "$lib/window/dragRegion.svelte";
   import "../app.css";
 
@@ -56,6 +57,18 @@
     if (isElectronSession) {
       window.parent.postMessage({ type: "alasio:ready" }, "*");
     }
+  });
+
+  // Report the route on every navigation: the host keeps the last one and
+  // reopens it when the window is reloaded (Ctrl+R), so a reload keeps the
+  // configuration and the page the user was on instead of landing on the app
+  // root, which opens the first configuration. The reporter is a no-op in a
+  // remote browser; in an embedded session the first report is repeated once
+  // a downlink proved the host is there (reportRoute reads that flag), so the
+  // report also arrives when the host spoke after this effect first ran.
+  $effect(() => {
+    const url = page.url;
+    reportRoute(url.pathname + url.search + url.hash);
   });
 </script>
 

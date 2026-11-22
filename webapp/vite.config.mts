@@ -17,11 +17,15 @@ const __dirname = fileURLToPath(new URL(".", import.meta.url));
  * Path aliases of the renderer tree. The type checker reads the same names from
  * `paths` in tsconfig.json; SvelteKit 3 removed `files.lib` and deprecated its
  * `alias` option, so `$lib` (which pointed at `files.lib`) is declared here.
+ * `$shared` is the one tree outside `renderer/`: the modules the main process,
+ * the preload and the renderer all use (the IPC channel names, the route the
+ * window reopens).
  */
 const rendererAliases: Record<string, string> = {
   $lib: join(__dirname, "renderer/lib"),
   $src: join(__dirname, "renderer"),
   $routes: join(__dirname, "renderer/routes"),
+  $shared: join(__dirname, "shared"),
 };
 
 /**

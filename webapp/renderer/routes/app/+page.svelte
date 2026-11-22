@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { embeddedUrl, isEmbeddedRoute } from "$shared/embeddedRoute";
   import { onMount } from "svelte";
   import { useSharedState } from "$lib/useSharedState.svelte";
   import { applyDragRegion, resetDragRegion, windowFrame } from "$lib/windowFrame.svelte";
@@ -12,25 +13,49 @@
   // the parent background stays dark behind it.
   let iframeVisible = $state(false);
 
-  // Initial iframe URL. The theme query is read by the frontend's
-  // pre-paint script in app.html, so the embedded app's very first paint
-  // already matches the host display theme (mode-watcher alone cannot
-  // know it: in this SPA build its FOUC script is absent from the served
-  // HTML, and its initial mode only comes from localStorage/system
-  // preference). The language pair mirrors the `alasio:lang` downlink
-  // (display value + config value) so the first paint already renders in
-  // the host's language instead of the language the frontend guesses from
-  // the browser until the downlink arrives. Deliberately captured once,
-  // not reactive: rewriting the src would reload the iframe. Changes
+  // Route the embedded page is mounted at: the one it was on before the
+  // window was reloaded, the app root of a fresh launch. The main process keeps
+  // it in memory (see shared/embeddedRoute), because a reload restarts this
+  // renderer but not the main process. Without it the reload would remount the
+  // iframe at the frontend root, and the root route opens the first
+  // configuration instead of the page the user was on.
+  function rememberedRoute(): string {
+    const route = window.electronAPI.getEmbeddedRouteSync();
+    return isEmbeddedRoute(route) ? route : "/";
+  }
+
+  // Hand the route the embedded page is on to the main process, which reopens
+  // it on the next mount of this window. A report that is not a path of the
+  // frontend is dropped, so a malformed message can never point the mount at
+  // another origin.
+  function rememberRoute(route: unknown) {
+    if (!isEmbeddedRoute(route)) return;
+    window.electronAPI.setEmbeddedRoute(route);
+  }
+
+  // Initial iframe URL. The route is the page the user was on, so a window
+  // reload stays there. The theme query is read by the frontend's pre-paint
+  // script in app.html, so the embedded app's very first paint already matches
+  // the host display theme (mode-watcher alone cannot know it: in this SPA
+  // build its FOUC script is absent from the served HTML, and its initial mode
+  // only comes from localStorage/system preference). The language pair mirrors
+  // the `alasio:lang` downlink (display value + config value) so the first
+  // paint already renders in the host's language instead of the language the
+  // frontend guesses from the browser until the downlink arrives. The window
+  // controls are overlaid on the frontend header; their reserve width is
+  // passed in the URL so the very first paint already keeps them clear
+  // (`alasio:frame` corrects it once they are measured). Deliberately captured
+  // once, not reactive: rewriting the src would reload the iframe. Changes
   // after load are propagated through the alasio:* downlinks instead.
   let iframeSrc = $state(
-    `http://127.0.0.1:${sharedState.backendPort}/?embedded=electron&theme=${sharedState.displayTheme}` +
-      `&themeConfig=${sharedState.configTheme}` +
-      `&lang=${sharedState.displayLang}&langConfig=${sharedState.configLang}` +
-      // The window controls are overlaid on the frontend header; their reserve
-      // width is passed in the URL so the very first paint already keeps them
-      // clear (`alasio:frame` corrects it once they are measured).
-      `&controlsWidth=${windowFrame.controlsWidth}`,
+    embeddedUrl(sharedState.backendPort, rememberedRoute(), {
+      embedded: "electron",
+      theme: sharedState.displayTheme,
+      themeConfig: sharedState.configTheme,
+      lang: sharedState.displayLang,
+      langConfig: sharedState.configLang,
+      controlsWidth: windowFrame.controlsWidth,
+    }),
   );
 
   // The embedded frontend origin. Downlink messages are only sent to this
@@ -131,6 +156,11 @@
         } else {
           applyDragRegion(data.region);
         }
+      } else if (data.type === "alasio:route") {
+        // The page the frontend is on. Kept for the next mount of this window:
+        // a reload remounts the iframe, and without the route the app root
+        // would open the first configuration instead of this page.
+        rememberRoute(data.route);
       } else if (data.type === "alasio:ready") {
         // Handshake from the embedded frontend: it finished starting and
         // registered its listeners. The load-event downlink may have been

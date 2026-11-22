@@ -13,6 +13,9 @@
 //   `alasio:*` postMessage traffic from the host. Remote browser sessions
 //   never receive such messages and stay in per-client mode.
 //
+// Uplinks to the host live here too: `reportRoute` tells it which page to
+// reopen after a window reload (see the webapp's embeddedRoute module).
+//
 // NOTE: useLocalStorage is not reused here because its $effect runes cannot
 // be created at module top level (svelte 5 throws effect_orphan outside
 // component initialization). Persistence is done manually instead.
@@ -78,3 +81,24 @@ export const electronEnv = {
     return embedded;
   },
 };
+
+/**
+ * Report the route the page is on to the host (the webapp window).
+ *
+ * The host reopens it after the window is reloaded: a reload remounts the
+ * iframe at its URL, and without the route the app root opens the first
+ * configuration instead of the page the user was on. The host rebuilds the
+ * rest of the mount URL (theme, language, window controls) itself, so only
+ * the path is sent.
+ *
+ * Args:
+ *     route (str): Path of the current page, query and hash included
+ */
+export function reportRoute(route: string) {
+  // A remote browser has no host: posting goes to its own window. The query
+  // covers the first frames (no downlink arrived yet), `isElectron` covers the
+  // rest of the session -- the report is then sent again whenever a downlink
+  // proves the host is there.
+  if (!isElectronSession && !isElectron.value) return;
+  window.parent.postMessage({ type: "alasio:route", route }, "*");
+}

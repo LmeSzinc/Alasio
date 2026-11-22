@@ -5,6 +5,8 @@ import {
   IPC_BACKEND_READY,
   IPC_BACKEND_START,
   IPC_CONFIRM_CLOSE,
+  IPC_EMBEDDED_ROUTE_GET_SYNC,
+  IPC_EMBEDDED_ROUTE_SET,
   IPC_SHARED_STATE_GET,
   IPC_SHARED_STATE_GET_SYNC,
   IPC_SHARED_STATE_SET_DPI_SCALING,
@@ -73,6 +75,13 @@ const api = {
   setLanguage: (lang: string) => ipcRenderer.send(IPC_SHARED_STATE_SET_LANGUAGE, lang),
   setTheme: (theme: string) => ipcRenderer.send(IPC_SHARED_STATE_SET_THEME, theme),
   setDpiScaling: (dpiScaling: boolean) => ipcRenderer.send(IPC_SHARED_STATE_SET_DPI_SCALING, dpiScaling),
+
+  // Route of the embedded web app. The main process keeps it in memory, so a
+  // window reload reopens the page the user was on instead of the app root.
+  setEmbeddedRoute: (route: string) => ipcRenderer.send(IPC_EMBEDDED_ROUTE_SET, route),
+  // Synchronous variant: the iframe has to be mounted at the remembered route
+  // on the first paint, before any async round trip could resolve.
+  getEmbeddedRouteSync: () => ipcRenderer.sendSync(IPC_EMBEDDED_ROUTE_GET_SYNC) as string | null,
 
   // Backend lifecycle
   startBackend: () => ipcRenderer.invoke(IPC_BACKEND_START),

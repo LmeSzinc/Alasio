@@ -9,7 +9,9 @@
       "$src": ["./renderer"],
       "$src/*": ["./renderer/*"],
       "$routes": ["./renderer/routes"],
-      "$routes/*": ["./renderer/routes/*"]
+      "$routes/*": ["./renderer/routes/*"],
+      "$shared": ["./shared"],
+      "$shared/*": ["./shared/*"]
     }
   },
   "include": [
