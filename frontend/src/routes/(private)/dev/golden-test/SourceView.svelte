@@ -7,6 +7,7 @@
   import Image from "$lib/components/ui/image/Image.svelte";
   import { t } from "$lib/i18n";
   import { cn } from "$lib/utils.js";
+  import { dragRegionState } from "$lib/window/dragRegion.svelte";
   import { tokenizePython } from "./python";
   import { type SourceSegment, buildSegments, normalizeImages } from "./segments";
   import { type GoldenTestFileData, imageUrl } from "./types";
@@ -47,6 +48,28 @@
   const segments = $derived(buildSegments(lines.length, images));
   const mod = $derived(data.mod_name ?? "");
   const errors = $derived(data.errors ?? []);
+
+  /**
+   * Height of the band the desktop client makes draggable over the window top.
+   *
+   * The band is declared by the layout and narrowed by the page, so it is read
+   * from the folded region instead of being assumed: a page that reserves more
+   * of the header moves the overlay further down with it. A plain browser has
+   * no host and therefore no band, which leaves the overlay centred in the
+   * window as before.
+   */
+  const bandHeight = $derived.by(() => {
+    const height = dragRegionState.current?.height;
+    if (height === undefined) return "0px";
+    return typeof height === "number" ? `${height}px` : height;
+  });
+  /**
+   * Centre of the area below the band: the overlay is centred there rather than
+   * in the window, so it never covers the band.
+   */
+  const bandCentre = $derived(`calc(50% + ${bandHeight} / 2)`);
+  /** The overlay clears the band and keeps 12px of the area on either side */
+  const bandMaxHeight = $derived(`calc(100% - ${bandHeight} - 24px)`);
 
   /** URL of the screenshot the overlay shows */
   let zoomSrc = $state("");
@@ -211,11 +234,17 @@
   <!-- The close button of the dialog content is the absolutely positioned one of
        the component, which sits on the corner of the dialog rather than on the
        row of the toolbar: the overlay draws its own close button at the end of
-       that row instead, and keeps the docked one off. -->
+       that row instead, and keeps the docked one off.
+
+       The overlay is centred in the area below the drag band of the desktop
+       client, not in the window: a band over the toolbar would swallow its
+       clicks, and the band is declared per page, so its height comes from
+       `dragRegionState` instead of a fixed header size. -->
   <Dialog.Content
     class="flex h-[90vh] w-[95vw] max-w-[95vw] flex-col gap-2 p-3 sm:max-w-[95vw]"
     aria-label={zoomName}
     showCloseButton={false}
+    style="top: {bandCentre}; max-height: {bandMaxHeight};"
   >
     <!-- One row for every control of the overlay: the title takes what is left,
          the zoom buttons and the close button line up at the right end. The
