@@ -1,6 +1,7 @@
 <script lang="ts">
   import { tick, untrack } from "svelte";
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
+  import X from "@lucide/svelte/icons/x";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import Image from "$lib/components/ui/image/Image.svelte";
@@ -207,17 +208,40 @@
 </div>
 
 <Dialog.Root bind:open={zoomOpen}>
-  <Dialog.Content class="flex h-[90vh] w-[95vw] max-w-[95vw] flex-col gap-2 p-3 sm:max-w-[95vw]" aria-label={zoomName}>
-    <div class="flex shrink-0 items-center justify-between gap-2 pr-8">
-      <span class="truncate font-mono text-xs text-muted-foreground" title={zoomName}>{zoomName}</span>
-      <div class="flex shrink-0 items-center gap-1">
-        <Button variant={actualSize ? "outline" : "secondary"} size="sm" onclick={() => (actualSize = false)}>
-          {t.GoldenTest.Fit()}
-        </Button>
-        <Button variant={actualSize ? "secondary" : "outline"} size="sm" onclick={() => (actualSize = true)}>
-          {t.GoldenTest.ActualSize()}
-        </Button>
-      </div>
+  <!-- The close button of the dialog content is the absolutely positioned one of
+       the component, which sits on the corner of the dialog rather than on the
+       row of the toolbar: the overlay draws its own close button at the end of
+       that row instead, and keeps the docked one off. -->
+  <Dialog.Content
+    class="flex h-[90vh] w-[95vw] max-w-[95vw] flex-col gap-2 p-3 sm:max-w-[95vw]"
+    aria-label={zoomName}
+    showCloseButton={false}
+  >
+    <!-- One row for every control of the overlay: the title takes what is left,
+         the zoom buttons and the close button line up at the right end. The
+         title is inset a bit further than the content padding, so a long path
+         does not start flush against the edge of the image below it. -->
+    <div class="flex shrink-0 items-center gap-2">
+      <span class="min-w-0 flex-1 truncate pl-2 font-mono text-sm" title={zoomName}>{zoomName}</span>
+      <Button variant={actualSize ? "outline" : "secondary"} size="sm" onclick={() => (actualSize = false)}>
+        {t.GoldenTest.Fit()}
+      </Button>
+      <Button variant={actualSize ? "secondary" : "outline"} size="sm" onclick={() => (actualSize = true)}>
+        {t.GoldenTest.ActualSize()}
+      </Button>
+      <Dialog.Close>
+        {#snippet child({ props })}
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label={t.GoldenTest.Close()}
+            title={t.GoldenTest.Close()}
+            {...props}
+          >
+            <X class="size-4" />
+          </Button>
+        {/snippet}
+      </Dialog.Close>
     </div>
     <div class="flex min-h-0 flex-1 cursor-zoom-out overflow-auto rounded bg-muted/40">
       <button
