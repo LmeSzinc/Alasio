@@ -1,7 +1,7 @@
 from alasio.config_dev.format.format_yaml import yaml_formatter
 from alasio.config_dev.gen.gen_config import ConfigGenerator
 from alasio.config_dev.parse.base import DefinitionError, read_yaml_mapping
-from alasio.ext.file.jsonfile import write_json_custom_indent
+from alasio.ext.file.jsonfile import NoIndent, write_json_custom_indent
 from alasio.ext.file.yamlfile import format_yaml
 from alasio.logger import logger
 
@@ -19,12 +19,37 @@ class ParseStore(ConfigGenerator):
             raise DefinitionError('Empty dashboard.args.yaml', file=self.file)
         return data
 
+    @staticmethod
+    def _names_only(data):
+        """
+        Keep the name of every row and drop the help
+
+        The store only declares the base groups that a dashboard inherits, an
+        arg is shown by the group of the nav that inherits it, so the help of
+        the store is never displayed and only makes the file verbose.
+
+        Args:
+            data (dict[str, dict[str, dict[str, dict[str, Any]]]]): i18n data,
+                key: {group}.{arg}.{lang}, value: name and help
+
+        Returns:
+            dict[str, dict[str, dict[str, dict[str, Any]]]]: The same data
+                without the help
+        """
+        return {
+            group: {
+                arg: {lang: NoIndent({'name': row.get('name', '')}) for lang, row in langs.items()}
+                for arg, langs in args.items()
+            }
+            for group, args in data.items()
+        }
+
     def generate(self, gitadd=None):
         # generate i18n only, dashboard_model.py is manual maintained
         # {nav}_i18n.json
         if self.i18n_data:
             file = self.i18n_file
-            op = write_json_custom_indent(file, self.i18n_data, skip_same=True)
+            op = write_json_custom_indent(file, self._names_only(self.i18n_data), skip_same=True)
             if op:
                 logger.info(f'Write file {file}')
                 if gitadd:

@@ -1,123 +1,123 @@
 {
   "DashboardBase": {
     "_info": {
-      "zh-CN": {"name": "DashboardBase", "help": ""},
-      "en-US": {"name": "DashboardBase", "help": ""},
-      "ja-JP": {"name": "DashboardBase", "help": ""},
-      "zh-TW": {"name": "DashboardBase", "help": ""},
-      "es-ES": {"name": "DashboardBase", "help": ""}
+      "zh-CN": {"name": "看板基础数据"},
+      "en-US": {"name": "Dashboard Base"},
+      "ja-JP": {"name": "ダッシュボードの基本データ"},
+      "zh-TW": {"name": "看板基礎資料"},
+      "es-ES": {"name": "Datos base del panel"}
     },
     "Time": {
-      "zh-CN": {"name": "DashboardBase.Time", "help": ""},
-      "en-US": {"name": "DashboardBase.Time", "help": ""},
-      "ja-JP": {"name": "DashboardBase.Time", "help": ""},
-      "zh-TW": {"name": "DashboardBase.Time", "help": ""},
-      "es-ES": {"name": "DashboardBase.Time", "help": ""}
+      "zh-CN": {"name": "记录时间"},
+      "en-US": {"name": "Record Time"},
+      "ja-JP": {"name": "記録時間"},
+      "zh-TW": {"name": "記錄時間"},
+      "es-ES": {"name": "Hora del registro"}
     }
   },
   "DashboardAmount": {
     "_info": {
-      "zh-CN": {"name": "DashboardAmount", "help": ""},
-      "en-US": {"name": "DashboardAmount", "help": ""},
-      "ja-JP": {"name": "DashboardAmount", "help": ""},
-      "zh-TW": {"name": "DashboardAmount", "help": ""},
-      "es-ES": {"name": "DashboardAmount", "help": ""}
+      "zh-CN": {"name": "看板数值"},
+      "en-US": {"name": "Dashboard Amount"},
+      "ja-JP": {"name": "ダッシュボードの数値"},
+      "zh-TW": {"name": "看板數值"},
+      "es-ES": {"name": "Cantidad del panel"}
     },
     "Value": {
-      "zh-CN": {"name": "DashboardAmount.Value", "help": ""},
-      "en-US": {"name": "DashboardAmount.Value", "help": ""},
-      "ja-JP": {"name": "DashboardAmount.Value", "help": ""},
-      "zh-TW": {"name": "DashboardAmount.Value", "help": ""},
-      "es-ES": {"name": "DashboardAmount.Value", "help": ""}
+      "zh-CN": {"name": "数量"},
+      "en-US": {"name": "Amount"},
+      "ja-JP": {"name": "数値"},
+      "zh-TW": {"name": "數量"},
+      "es-ES": {"name": "Cantidad"}
     }
   },
   "DashboardTotal": {
     "_info": {
-      "zh-CN": {"name": "DashboardTotal", "help": ""},
-      "en-US": {"name": "DashboardTotal", "help": ""},
-      "ja-JP": {"name": "DashboardTotal", "help": ""},
-      "zh-TW": {"name": "DashboardTotal", "help": ""},
-      "es-ES": {"name": "DashboardTotal", "help": ""}
+      "zh-CN": {"name": "看板进度（固定总量）"},
+      "en-US": {"name": "Dashboard Total"},
+      "ja-JP": {"name": "ダッシュボードの進捗（固定総量）"},
+      "zh-TW": {"name": "看板進度（固定總量）"},
+      "es-ES": {"name": "Progreso del panel (total fijo)"}
     }
   },
   "DashboardRemain": {
     "_info": {
-      "zh-CN": {"name": "DashboardRemain", "help": ""},
-      "en-US": {"name": "DashboardRemain", "help": ""},
-      "ja-JP": {"name": "DashboardRemain", "help": ""},
-      "zh-TW": {"name": "DashboardRemain", "help": ""},
-      "es-ES": {"name": "DashboardRemain", "help": ""}
+      "zh-CN": {"name": "看板剩余次数"},
+      "en-US": {"name": "Dashboard Remain"},
+      "ja-JP": {"name": "ダッシュボードの残り回数"},
+      "zh-TW": {"name": "看板剩餘次數"},
+      "es-ES": {"name": "Restante del panel"}
     }
   },
   "DashboardDynamicTotal": {
     "_info": {
-      "zh-CN": {"name": "DashboardDynamicTotal", "help": ""},
-      "en-US": {"name": "DashboardDynamicTotal", "help": ""},
-      "ja-JP": {"name": "DashboardDynamicTotal", "help": ""},
-      "zh-TW": {"name": "DashboardDynamicTotal", "help": ""},
-      "es-ES": {"name": "DashboardDynamicTotal", "help": ""}
+      "zh-CN": {"name": "看板进度（动态总量）"},
+      "en-US": {"name": "Dashboard Dynamic Total"},
+      "ja-JP": {"name": "ダッシュボードの進捗（動的総量）"},
+      "zh-TW": {"name": "看板進度（動態總量）"},
+      "es-ES": {"name": "Progreso del panel (total dinámico)"}
     },
     "Total": {
-      "zh-CN": {"name": "DashboardDynamicTotal.Total", "help": ""},
-      "en-US": {"name": "DashboardDynamicTotal.Total", "help": ""},
-      "ja-JP": {"name": "DashboardDynamicTotal.Total", "help": ""},
-      "zh-TW": {"name": "DashboardDynamicTotal.Total", "help": ""},
-      "es-ES": {"name": "DashboardDynamicTotal.Total", "help": ""}
+      "zh-CN": {"name": "动态总量"},
+      "en-US": {"name": "Dynamic Total"},
+      "ja-JP": {"name": "動的総量"},
+      "zh-TW": {"name": "動態總量"},
+      "es-ES": {"name": "Total dinámico"}
     }
   },
   "DashboardSoftTotal": {
     "_info": {
-      "zh-CN": {"name": "DashboardSoftTotal", "help": ""},
-      "en-US": {"name": "DashboardSoftTotal", "help": ""},
-      "ja-JP": {"name": "DashboardSoftTotal", "help": ""},
-      "zh-TW": {"name": "DashboardSoftTotal", "help": ""},
-      "es-ES": {"name": "DashboardSoftTotal", "help": ""}
+      "zh-CN": {"name": "看板进度（软上限）"},
+      "en-US": {"name": "Dashboard Soft Total"},
+      "ja-JP": {"name": "ダッシュボードの進捗（ソフト上限）"},
+      "zh-TW": {"name": "看板進度（軟上限）"},
+      "es-ES": {"name": "Progreso del panel (límite flexible)"}
     },
     "Total": {
-      "zh-CN": {"name": "DashboardSoftTotal.Total", "help": ""},
-      "en-US": {"name": "DashboardSoftTotal.Total", "help": ""},
-      "ja-JP": {"name": "DashboardSoftTotal.Total", "help": ""},
-      "zh-TW": {"name": "DashboardSoftTotal.Total", "help": ""},
-      "es-ES": {"name": "DashboardSoftTotal.Total", "help": ""}
+      "zh-CN": {"name": "软上限"},
+      "en-US": {"name": "Soft Total"},
+      "ja-JP": {"name": "ソフト上限"},
+      "zh-TW": {"name": "軟上限"},
+      "es-ES": {"name": "Límite flexible"}
     }
   },
   "DashboardProgress": {
     "_info": {
-      "zh-CN": {"name": "DashboardProgress", "help": ""},
-      "en-US": {"name": "DashboardProgress", "help": ""},
-      "ja-JP": {"name": "DashboardProgress", "help": ""},
-      "zh-TW": {"name": "DashboardProgress", "help": ""},
-      "es-ES": {"name": "DashboardProgress", "help": ""}
+      "zh-CN": {"name": "看板进度"},
+      "en-US": {"name": "Dashboard Progress"},
+      "ja-JP": {"name": "ダッシュボードの進捗"},
+      "zh-TW": {"name": "看板進度"},
+      "es-ES": {"name": "Progreso del panel"}
     },
     "Value": {
-      "zh-CN": {"name": "DashboardProgress.Value", "help": ""},
-      "en-US": {"name": "DashboardProgress.Value", "help": ""},
-      "ja-JP": {"name": "DashboardProgress.Value", "help": ""},
-      "zh-TW": {"name": "DashboardProgress.Value", "help": ""},
-      "es-ES": {"name": "DashboardProgress.Value", "help": ""}
+      "zh-CN": {"name": "进度"},
+      "en-US": {"name": "Progress"},
+      "ja-JP": {"name": "進捗"},
+      "zh-TW": {"name": "進度"},
+      "es-ES": {"name": "Progreso"}
     }
   },
   "DashboardPlanner": {
     "_info": {
-      "zh-CN": {"name": "DashboardPlanner", "help": ""},
-      "en-US": {"name": "DashboardPlanner", "help": ""},
-      "ja-JP": {"name": "DashboardPlanner", "help": ""},
-      "zh-TW": {"name": "DashboardPlanner", "help": ""},
-      "es-ES": {"name": "DashboardPlanner", "help": ""}
+      "zh-CN": {"name": "看板计划"},
+      "en-US": {"name": "Dashboard Planner"},
+      "ja-JP": {"name": "ダッシュボードの計画"},
+      "zh-TW": {"name": "看板計畫"},
+      "es-ES": {"name": "Planificador del panel"}
     },
     "Progress": {
-      "zh-CN": {"name": "DashboardPlanner.Progress", "help": ""},
-      "en-US": {"name": "DashboardPlanner.Progress", "help": ""},
-      "ja-JP": {"name": "DashboardPlanner.Progress", "help": ""},
-      "zh-TW": {"name": "DashboardPlanner.Progress", "help": ""},
-      "es-ES": {"name": "DashboardPlanner.Progress", "help": ""}
+      "zh-CN": {"name": "进度"},
+      "en-US": {"name": "Progress"},
+      "ja-JP": {"name": "進捗"},
+      "zh-TW": {"name": "進度"},
+      "es-ES": {"name": "Progreso"}
     },
     "Eta": {
-      "zh-CN": {"name": "DashboardPlanner.Eta", "help": ""},
-      "en-US": {"name": "DashboardPlanner.Eta", "help": ""},
-      "ja-JP": {"name": "DashboardPlanner.Eta", "help": ""},
-      "zh-TW": {"name": "DashboardPlanner.Eta", "help": ""},
-      "es-ES": {"name": "DashboardPlanner.Eta", "help": ""}
+      "zh-CN": {"name": "剩余时间"},
+      "en-US": {"name": "ETA"},
+      "ja-JP": {"name": "残り時間"},
+      "zh-TW": {"name": "剩餘時間"},
+      "es-ES": {"name": "Tiempo restante"}
     }
   }
 }
