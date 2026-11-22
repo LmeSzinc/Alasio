@@ -28,9 +28,17 @@
   type Props = {
     data: GoldenTestFileData;
     showImages: boolean;
+    /**
+     * Build the URL of a screenshot from the path `@image` wrote.
+     *
+     * The review page reads the collection of the browsed mod through the
+     * backend; a page with mock data (the demo of the dev tools) passes one
+     * bundled image instead. Defaults to the image route of the mod.
+     */
+    resolveImage?: (path: string) => string;
   };
 
-  let { data, showImages }: Props = $props();
+  let { data, showImages, resolveImage }: Props = $props();
 
   const source = $derived(data.source ?? "");
   const lines = $derived(tokenizePython(source));
@@ -159,7 +167,7 @@
                     <span>{image.error || t.GoldenTest.NoImage()}</span>
                   </div>
                 {:else}
-                  {@const src = imageUrl(mod, image.image)}
+                  {@const src = resolveImage ? resolveImage(image.image) : imageUrl(mod, image.image)}
                   <button
                     type="button"
                     class="block w-full cursor-zoom-in"

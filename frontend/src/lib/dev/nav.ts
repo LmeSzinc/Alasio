@@ -66,6 +66,7 @@ export function devNavGroups(): DevNavGroup[] {
       // svelte-drop-dev-page plugin, so they are only listed in development
       items: dev
         ? [
+            { path: "/dev/debug/goldentest", name: "Golden Test Demo" },
             { path: "/dev/debug/ws", name: t.WebsocketTest.Title() },
             { path: "/dev/debug/modmanager", name: "Mod Manager" },
             { path: "/dev/debug/updatetoast", name: "Update Toast" },

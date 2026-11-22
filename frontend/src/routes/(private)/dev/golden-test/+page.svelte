@@ -1,8 +1,4 @@
 <script lang="ts">
-  import Images from "@lucide/svelte/icons/images";
-  import RefreshCw from "@lucide/svelte/icons/refresh-cw";
-  import { Button } from "$lib/components/ui/button/index.js";
-  import { Toggle } from "$lib/components/ui/toggle/index.js";
   import { PAGE_LAYER } from "$lib/context/stack.svelte";
   import DevCompactHeader from "$lib/dev/DevCompactHeader.svelte";
   import { t } from "$lib/i18n";
@@ -12,14 +8,14 @@
   import { frame } from "$lib/window/frame.svelte";
   import { modSelectorRegion } from "$lib/window/regions";
   import { useTopic, websocketClient } from "$lib/ws";
-  import SourceView from "./SourceView.svelte";
-  import TestTree from "./TestTree.svelte";
+  import GoldenTestReview from "./GoldenTestReview.svelte";
   import type { GoldenTestFileData, GoldenTestTreeData, ModOption } from "./types";
 
   /**
    * The golden test review page: the tree of the `tests/` folder of a mod on the
    * left, the source of the selected test file with its screenshots in the
-   * middle.
+   * middle. The workspace itself is `GoldenTestReview`, which the demo page of
+   * the dev tools renders over mock data.
    *
    * Both views live in one source per topic in the backend process, so this page
    * only drives them: `set_mod` browses a mod, `sub_folder` / `unsub_folder`
@@ -119,67 +115,15 @@
   <DevCompactHeader title={t.GoldenTest.Title()} mod_name={chosen} handleEdit={handleModChange} />
 {/snippet}
 
-<!--
-  The tree keeps its own column at 224px: it only has to hold test file names,
-  and every pixel it gives up goes to the source and the screenshots.
-
-  The page runs without the navigation column, so the width floor is what keeps
-  the three columns readable (224 tree + 420 source + 220 screenshots). Below
-  it the page scrolls sideways and shows a slice of the same layout.
--->
-<div class="flex h-full min-h-0 w-full min-w-[864px] flex-col bg-background">
-  <div class="flex min-h-0 flex-1">
-    <div class="w-56 shrink-0 overflow-auto border-r border-border">
-      {#if modName === ""}
-        <div class="p-3 text-xs text-muted-foreground">
-          {desktopOnly ? t.GoldenTest.DesktopOnly() : t.GoldenTest.NoMod()}
-        </div>
-      {:else}
-        <!-- A new mod starts with no folder open -->
-        {#key modName}
-          <TestTree
-            {dirs}
-            {selected}
-            onSelect={handleSelect}
-            onSubFolder={handleSubFolder}
-            onUnsubFolder={handleUnsubFolder}
-          />
-        {/key}
-      {/if}
-    </div>
-
-    <div class="flex min-h-0 min-w-0 flex-1 flex-col">
-      <!-- The toolbar belongs to the file being reviewed, so it sits over the
-           source and the screenshots only: its first row is as tall as the
-           filter box of the tree (h-13 = 8 + 36 + 8), which puts the two
-           headers on one line and leaves every pixel of height to the tree.
-           The mod selector lives in the app header, next to the title. -->
-      <div class="flex h-13 shrink-0 items-center gap-2 border-b border-border px-2">
-        <span
-          class="min-w-0 flex-1 overflow-hidden font-mono text-xs whitespace-nowrap text-muted-foreground"
-          title={selected}
-        >
-          {selected || "—"}
-        </span>
-        <Toggle
-          bind:pressed={showImages}
-          variant="outline"
-          size="sm"
-          aria-label={t.GoldenTest.ShowImages()}
-          title={t.GoldenTest.ShowImages()}
-        >
-          <Images class="size-3.5" />
-          <span class="text-xs">{t.GoldenTest.ShowImages()}</span>
-        </Toggle>
-        <Button variant="outline" size="sm" disabled={selected === ""} onclick={handleRefresh}>
-          <RefreshCw class="size-3.5" />
-          <span class="text-xs">{t.GoldenTest.Refresh()}</span>
-        </Button>
-      </div>
-
-      <div class="flex min-h-0 flex-1 flex-col">
-        <SourceView data={ready ? fileData : {}} {showImages} />
-      </div>
-    </div>
-  </div>
-</div>
+<GoldenTestReview
+  {modName}
+  {dirs}
+  {selected}
+  data={ready ? fileData : {}}
+  bind:showImages
+  empty={modName === "" ? (desktopOnly ? t.GoldenTest.DesktopOnly() : t.GoldenTest.NoMod()) : ""}
+  onSelect={handleSelect}
+  onSubFolder={handleSubFolder}
+  onUnsubFolder={handleUnsubFolder}
+  onRefresh={handleRefresh}
+/>

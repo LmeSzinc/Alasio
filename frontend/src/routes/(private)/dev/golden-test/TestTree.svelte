@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import { SvelteSet } from "svelte/reactivity";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import FileCode from "@lucide/svelte/icons/file-code";
@@ -24,14 +25,18 @@
     dirs: Record<string, GoldenTestEntry[]>;
     /** Path of the selected file, relative to tests/ */
     selected: string;
+    /** Folders open on mount, a page with mock data opens a browsed tree */
+    initialExpanded?: string[];
     onSelect: (path: string) => void;
     onSubFolder: (path: string) => void;
     onUnsubFolder: (path: string) => void;
   };
 
-  let { dirs, selected, onSelect, onSubFolder, onUnsubFolder }: Props = $props();
+  let { dirs, selected, initialExpanded = [], onSelect, onSubFolder, onUnsubFolder }: Props = $props();
 
-  const expanded = new SvelteSet<string>();
+  // Only the folders of the mount are read from the prop: open and close then
+  // belong to the component, a page that keeps the tree does not reset them
+  const expanded = new SvelteSet<string>(untrack(() => initialExpanded));
 
   /** Filter typed in the box above the tree; it only sees the loaded levels */
   let query = $state("");
