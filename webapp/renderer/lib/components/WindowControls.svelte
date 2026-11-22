@@ -7,6 +7,7 @@
   import X from "@lucide/svelte/icons/x";
   import Button from "$lib/components/ui/button/button.svelte";
   import { t } from "$lib/i18n";
+  import { guardWindowControlsFocus } from "$lib/windowControlsFocus";
   import { CONTROLS_GAP, setControlsWidth } from "$lib/windowFrame.svelte";
   import CloseDialog from "./CloseDialog.svelte";
 
@@ -45,6 +46,15 @@
   function handleClose() {
     showCloseDialog = true;
   }
+
+  // Closing DevTools gives the page its focus back, and Chromium hands it to the
+  // first focusable element when nothing was focused before — here the hide to
+  // tray button, which would then paint its focus ring. See the module for the
+  // full behavior; the guard only drops that stray focus.
+  onMount(() => {
+    const element = root;
+    return element ? guardWindowControlsFocus(element) : undefined;
+  });
 
   // The frontend keeps its header clear of the window controls, so it needs
   // their reserve width: the group itself plus the same 6px gap on its left
