@@ -130,6 +130,47 @@ export function samePayload(a: DragRegion | null | undefined, b: DragRegion | nu
 /** Last payload computed here, read by the dev outline and the dev tools */
 export const dragRegionState = $state<{ current: DragRegion | null }>({ current: null });
 
+/**
+ * A CSS length of the reported band height, "0px" outside the desktop client
+ *
+ * The band is read from the folded region instead of being assumed, so a page
+ * that reserves more of the header moves the caller down with it.
+ */
+function reportedBandHeight(): string {
+  const height = dragRegionState.current?.height;
+  if (height === undefined) return "0px";
+  return typeof height === "number" ? `${height}px` : height;
+}
+
+/**
+ * Position of an overlay centred in the area below the drag band
+ *
+ * The band is drawn by the desktop host over the window top and swallows
+ * clicks on everything under it, so an overlay that is centred in the window
+ * would overlap the header there (and its top part could not be clicked or
+ * dragged). The returned `top` centres the overlay in the area below the band
+ * and `maxHeight` keeps it clear of the band with `padding` on either side.
+ * Both are plain CSS lengths for a `style` attribute, since the base classes of
+ * a dialog centre it in the viewport.
+ *
+ * Outside the desktop client there is no band, so the result is the plain
+ * viewport centring.
+ *
+ * Args:
+ *   padding: Pixels kept free above and below the overlay, defaults to 16 (the
+ *     2rem of the dialog max width)
+ *
+ * Returns:
+ *   dict: `top` and `maxHeight` CSS lengths
+ */
+export function belowDragBand(padding = 16) {
+  const height = reportedBandHeight();
+  return {
+    top: `calc(50% + ${height} / 2)`,
+    maxHeight: `calc(100% - ${height} - ${padding * 2}px)`,
+  };
+}
+
 const OUTLINE_KEY = "alasio-drag-region-outline";
 
 /** Dev-only: draw the reported band over the page (see DragRegionOutline.svelte) */

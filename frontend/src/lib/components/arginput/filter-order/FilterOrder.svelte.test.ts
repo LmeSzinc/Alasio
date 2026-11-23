@@ -24,6 +24,7 @@ import Arg from "$lib/components/arg/Arg.svelte";
 import type { ArgData } from "$lib/components/arg/utils.svelte";
 import { t } from "$lib/i18n";
 import { flushEffects } from "$lib/test-utils/flush-effects";
+import { dragRegionState } from "$lib/window/dragRegion.svelte";
 
 // The "edits discarded" toast is the only svelte-sonner usage of these
 // components, keep the real toast library out of the jsdom tests.
@@ -200,6 +201,7 @@ afterEach(() => {
   }
   mounted = [];
   document.body.innerHTML = "";
+  dragRegionState.current = null;
   vi.unstubAllGlobals();
 });
 
@@ -689,5 +691,29 @@ describe("TestFilterOrderSecondary", () => {
     );
 
     expect(pillText(target)).toEqual(["GearDesignPlanT3:OrdnanceTestingReportT3"]);
+  });
+
+  it("centres the dialog below the drag band of the desktop client", async () => {
+    // The band swallows clicks on the window top, so the dialog is centred in
+    // the area below it instead of in the whole viewport
+    dragRegionState.current = { height: 48, left: 0, right: 0 };
+    const { target } = await mountArg(makeArg());
+    await openDialog(target);
+
+    const style = dialog()!.getAttribute("style");
+    // jsdom serializes the calc expression simplified
+    expect(style).toContain("calc(50% + 24px)");
+    expect(style).toContain("calc(100% - 80px)");
+  });
+
+  it("centres the dialog in the viewport without a band", async () => {
+    // A plain browser has no host and therefore no band
+    dragRegionState.current = null;
+    const { target } = await mountArg(makeArg());
+    await openDialog(target);
+
+    const style = dialog()!.getAttribute("style");
+    expect(style).toContain("calc(50% + 0px)");
+    expect(style).toContain("calc(100% - 32px)");
   });
 });

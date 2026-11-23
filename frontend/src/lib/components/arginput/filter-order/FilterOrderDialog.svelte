@@ -6,6 +6,7 @@
   import { Button } from "$lib/components/ui/button";
   import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "$lib/components/ui/dialog";
   import { t } from "$lib/i18n";
+  import { belowDragBand } from "$lib/window/dragRegion.svelte";
   import FilterOrderColumn from "./FilterOrderColumn.svelte";
   import FilterOrderItem from "./FilterOrderItem.svelte";
   import {
@@ -209,6 +210,10 @@
   function onOpenChange(next: boolean) {
     if (!next) cancel();
   }
+
+  // The dialog is centred below the drag band of the desktop client, so its
+  // title row stays clickable instead of sitting under the window drag strip
+  const band = $derived(belowDragBand());
 </script>
 
 <Dialog bind:open {onOpenChange}>
@@ -218,7 +223,12 @@
        offsetting the overlay and the drop math by the dialog position -->
   <DndProvider orientation="vertical" {dndRules} {onDndEnd}>
     {#snippet children({ dropIndicator })}
-      <DialogContent class="flex h-[640px] max-h-[calc(100vh-2rem)] flex-col gap-6 sm:max-w-[720px]">
+      <!-- The base class centres the dialog in the viewport; `top` and
+           `max-height` move it below the drag band of the desktop client -->
+      <DialogContent
+        class="flex h-[640px] flex-col gap-6 sm:max-w-[720px]"
+        style="top: {band.top}; max-height: {band.maxHeight};"
+      >
         <DialogHeader>
           <DialogTitle>{displayName}</DialogTitle>
         </DialogHeader>
