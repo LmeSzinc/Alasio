@@ -15,17 +15,28 @@
   // Tailwind spacing unit: 1 = 0.25rem = 4px (the `--spacing` default)
   const SPACING = 4;
 
+  // Spacing follows the size of the page, not the orientation of the layout.
+  // The page turns landscape exactly when it gets shorter, so tying the roomy
+  // spacing to the orientation would grow the padding on a shrinking page.
+  // The roomy p-4 / gap-4 needs room in both directions: the page box is at
+  // least 640px on each axis (the `sm` breakpoint); below that on either one
+  // the page is compact (p-2.5 / gap-2.5) and the space goes to the cards.
+  const ROOMY_MIN_WIDTH = 640;
+  const ROOMY_MIN_HEIGHT = 640;
+  const isCompact = $derived(containerSize.width < ROOMY_MIN_WIDTH || containerSize.height < ROOMY_MIN_HEIGHT);
+
   // Height budget of the landscape column, in px. Every number is the step
   // count of the Tailwind class it mirrors, so the two cannot drift apart:
-  // - p-4 page padding (top + bottom): 8 steps
-  // - gap-4 between the preview block and the dashboard: 4 steps
+  // - page padding (top + bottom): 8 steps (p-4) or 5 steps (p-2.5)
+  // - gap between the preview block and the dashboard: 4 steps (gap-4) or
+  //   2.5 steps (gap-2.5)
   // - gap-2.5 between the preview and the progress bar: 2.5 steps
   // - Progress h-20: 20 steps
   // - Dashboard min-h-35: 35 steps
-  const LANDSCAPE_PADDING_Y = 8 * SPACING;
+  const PAGE_PADDING_Y = $derived((isCompact ? 5 : 8) * SPACING);
   const PREVIEW_PROGRESS_GAP = 2.5 * SPACING;
   const PROGRESS_HEIGHT = 20 * SPACING;
-  const COLUMN_GAP = 4 * SPACING;
+  const COLUMN_GAP = $derived((isCompact ? 2.5 : 4) * SPACING);
   const DASHBOARD_MIN_HEIGHT = 35 * SPACING;
 
   // The preview is the page's content, so it is the last thing to give height
@@ -35,7 +46,7 @@
   const PREVIEW_MIN_HEIGHT = DASHBOARD_MIN_HEIGHT;
 
   /** Height the landscape column has below the page padding */
-  const columnHeight = $derived(containerSize.height - LANDSCAPE_PADDING_Y);
+  const columnHeight = $derived(containerSize.height - PAGE_PADDING_Y);
 
   // Landscape only: the cards are dropped in order of importance once the
   // column cannot hold them at their minimum heights -- the progress bar (a
@@ -96,14 +107,23 @@
          -> fills remaining after Preview; when min-height is hit, left-col shrinks -> Preview squeezed
        - Dashboard: flex: 1 -- equal half top-row width
        - Log: flex: 1 -- bottom half
+
+       Spacing: the page padding and the gap between the blocks follow the size
+       of the page, not the arrangement, so a smaller page is never padded more
+       than a larger one: p-4 / gap-4 while the page box is at least 640px in
+       both directions, p-2.5 / gap-2.5 below that on either one.
   -->
-  <div class={cn("flex h-full w-full", isLandscape ? "flex-row gap-4 p-4" : "flex-col gap-2.5 p-2.5")}>
+  <div
+    class={cn("flex h-full w-full", isLandscape ? "flex-row" : "flex-col", isCompact ? "gap-2.5 p-2.5" : "gap-4 p-4")}
+  >
     <!--
       Wraps Preview+Progress (left-col) and Dashboard.
       Landscape: flex-col -> left-col above, Dashboard below (fills remaining).
       Portrait:  flex-row -> left-col left, Dashboard right (equal half width).
     -->
-    <div class={cn("flex min-h-0 min-w-0 flex-1", isLandscape ? "flex-col gap-4" : "flex-row gap-2.5")}>
+    <div
+      class={cn("flex min-h-0 min-w-0 flex-1", isLandscape ? "flex-col" : "flex-row", isCompact ? "gap-2.5" : "gap-4")}
+    >
       <!-- Preview + Progress column -->
       <div class={cn("flex min-h-0 min-w-0 flex-col gap-2.5", !isLandscape || hideDashboard ? "flex-1" : "")}>
         <!--

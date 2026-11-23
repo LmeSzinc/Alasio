@@ -11,6 +11,8 @@
  *   2. the dashboard, once the column cannot hold the preview and dashboard
  *      minimums.
  * The preview then takes the whole column and stretches the frame over it.
+ * The stage heights are short pages, so they use the compact spacing
+ * (p-2.5 / gap-2.5) of the height budget.
  *
  * jsdom has no layout, so the page box is reported through the ResizeObserver
  * of the `elementSize` action, the same way a browser resize reports it.
@@ -89,6 +91,11 @@ async function resizePage(target: HTMLElement, width: number, height: number) {
   await flushEffects();
 }
 
+/** The box the page padding and the gap of the page are declared on */
+function pageRow(target: HTMLElement): HTMLElement {
+  return (target.firstElementChild as HTMLElement).firstElementChild as HTMLElement;
+}
+
 /** The left column: the preview block stacked over the dashboard */
 function leftColumn(target: HTMLElement): HTMLElement {
   const pageBox = target.firstElementChild as HTMLElement;
@@ -160,9 +167,9 @@ describe("TestOverviewLandscapeStages", () => {
   });
 
   it("keeps the preview at its minimum height while the progress bar shows", async () => {
-    // 386 (preview 140 + gap 10 + progress 80 + gap 16 + dashboard 140) + 32 (p-4)
+    // 380 (preview 140 + gap 10 + progress 80 + gap 10 + dashboard 140) + 20 (p-2.5)
     const target = await mountPage();
-    await resizePage(target, 1600, 418);
+    await resizePage(target, 1600, 400);
 
     expect(hasProgress(target)).toBe(true);
     expect(hasDashboard(target)).toBe(true);
@@ -171,7 +178,7 @@ describe("TestOverviewLandscapeStages", () => {
 
   it("hides the progress bar one pixel below that, so the preview is not squeezed", async () => {
     const target = await mountPage();
-    await resizePage(target, 1600, 417);
+    await resizePage(target, 1600, 399);
 
     expect(hasProgress(target)).toBe(false);
     expect(hasDashboard(target)).toBe(true);
@@ -182,9 +189,9 @@ describe("TestOverviewLandscapeStages", () => {
   });
 
   it("keeps the dashboard while the preview and dashboard minimums still fit", async () => {
-    // 296 (preview 140 + gap 16 + dashboard 140) + 32 (p-4)
+    // 290 (preview 140 + gap 10 + dashboard 140) + 20 (p-2.5)
     const target = await mountPage();
-    await resizePage(target, 1600, 328);
+    await resizePage(target, 1600, 310);
 
     expect(hasProgress(target)).toBe(false);
     expect(hasDashboard(target)).toBe(true);
@@ -192,7 +199,7 @@ describe("TestOverviewLandscapeStages", () => {
 
   it("hides the dashboard below that and gives the whole column to the preview", async () => {
     const target = await mountPage();
-    await resizePage(target, 1600, 327);
+    await resizePage(target, 1600, 309);
 
     expect(hasProgress(target)).toBe(false);
     expect(hasDashboard(target)).toBe(false);
@@ -206,7 +213,7 @@ describe("TestOverviewLandscapeStages", () => {
     expect(frameCanvas(target).classList.contains("object-contain")).toBe(false);
   });
 
-  it("keeps the portrait layout unchanged", async () => {
+  it("keeps the portrait arrangement unchanged", async () => {
     const target = await mountPage();
     await resizePage(target, 800, 1000);
 
@@ -215,5 +222,41 @@ describe("TestOverviewLandscapeStages", () => {
     expect(previewBox(target).classList.contains("aspect-video")).toBe(true);
     expect(frameCanvas(target).classList.contains("object-contain")).toBe(true);
     expect(hasPreviewMinimum(target)).toBe(false);
+  });
+});
+
+describe("TestOverviewSpacing", () => {
+  it("uses the roomy spacing when the page has room in both directions", async () => {
+    const target = await mountPage();
+    await resizePage(target, 1600, 900);
+
+    expect(pageRow(target).classList.contains("p-4")).toBe(true);
+    expect(pageRow(target).classList.contains("gap-4")).toBe(true);
+  });
+
+  it("keeps the roomy spacing when the height shrinks across the landscape switch", async () => {
+    const target = await mountPage();
+    // 1000/900 = 1.11: portrait; 1000/800 = 1.25: landscape
+    await resizePage(target, 1000, 900);
+    expect(pageRow(target).classList.contains("p-4")).toBe(true);
+
+    await resizePage(target, 1000, 800);
+    expect(pageRow(target).classList.contains("p-4")).toBe(true);
+  });
+
+  it("uses the compact spacing when the page is short", async () => {
+    const target = await mountPage();
+    await resizePage(target, 1600, 600);
+
+    expect(pageRow(target).classList.contains("p-2.5")).toBe(true);
+    expect(pageRow(target).classList.contains("gap-2.5")).toBe(true);
+  });
+
+  it("uses the compact spacing when the page is narrow", async () => {
+    const target = await mountPage();
+    await resizePage(target, 600, 1000);
+
+    expect(pageRow(target).classList.contains("p-2.5")).toBe(true);
+    expect(pageRow(target).classList.contains("gap-2.5")).toBe(true);
   });
 });
