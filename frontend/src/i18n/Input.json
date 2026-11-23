@@ -188,6 +188,13 @@
     "zh-TW": "拖曳排序",
     "es-ES": "Arrastrar para reordenar"
   },
+  "FilterOrderSecondary": {
+    "en-US": "Secondary option",
+    "zh-CN": "次级选项",
+    "ja-JP": "サブオプション",
+    "zh-TW": "次級選項",
+    "es-ES": "Opción secundaria"
+  },
   "FilterOrderMoveUp": {
     "en-US": "Move up",
     "zh-CN": "上移",

@@ -8,7 +8,7 @@ from alasio.backport import to_literal
 from alasio.codegen.python import ReprWrapper
 from alasio.config_dev.parse.base import DefinitionError
 from alasio.config_dev.parse.parse_arg_utils import (
-    TYPE_ARG_LITERAL, validate_filter_order, validate_option, validate_range_default
+    TYPE_ARG_LITERAL, expand_filter_order_items, validate_filter_order, validate_option, validate_range_default
 )
 from alasio.config_dev.parse.parse_range import parse_range
 
@@ -243,19 +243,25 @@ def preprocess_arg(arg: dict) -> dict:
         else:
             raise DefinitionError('dt="secondary-select" must have "option" or "option_dict" defined')
     elif dt == 'filter-order':
-        arg.pop('option_dict', None)
         # filter-order: "option" is required (checked above with the other literal
         # datatypes), it is the universe of items the frontend editor can add,
         # the value is an ordered subset of it.
+        # "option_dict" is optional: {item: [secondary option, ...]}, an item of the
+        # value then carries one of its own secondary options as "item:option".
         # The value is defined as "option-A > option-B" in yaml, or as a list,
         # normalize it to a tuple before validating (filter keeps the old split
         # position, see below)
+        option_dict = arg.get('option_dict', None)
         if type(value) is str:
             value = tuple(s.strip() for s in value.split('>'))
         elif type(value) is list:
             value = tuple(value)
         arg['value'] = value
-        validate_filter_order(arg['option'], value)
+        validate_filter_order(arg['option'], value, option_dict=option_dict)
+        # an empty "option_dict" means no secondary options, drop it like the
+        # other datatypes do so the payload stays minimal
+        if not option_dict:
+            arg.pop('option_dict', None)
     else:
         arg.pop('option_dict', None)
         # check option
@@ -293,6 +299,8 @@ class ArgData(Struct, omit_defaults=True, forbid_unknown_fields=True):
     value: Any
     option: Union[list, UnsetType] = UNSET
     # {group: [option1, option2, ...]} in secondary-select
+    # {item: [secondary option, ...]} in filter-order, an item of the value then
+    # carries its secondary option as "item:option"
     option_dict: Union[Dict[str, list], UnsetType] = UNSET
 
     # Data topics events will have `option_i18n` for option translations
@@ -421,10 +429,16 @@ class ArgData(Struct, omit_defaults=True, forbid_unknown_fields=True):
         """
         Get the literal items of this arg, grouped like "option_dict"
 
+        A filter-order with secondary options is a flat group of composite
+        items, so the generated literal rejects a secondary option that does
+        not belong to its primary item.
+
         Returns:
             list[list]: Literal items of each group, e.g. [['a', 'b'], ['c']]
         """
         if self.option_dict:
+            if self.dt == 'filter-order':
+                return [expand_filter_order_items(self.option, self.option_dict)]
             return [options for options in self.option_dict.values()]
         return [self.option]
 

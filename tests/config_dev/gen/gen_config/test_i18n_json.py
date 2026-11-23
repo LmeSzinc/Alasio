@@ -318,6 +318,33 @@ Group:
             'enabled': 'enabled',
         }
 
+    def test_filter_order_primary_and_secondary_options(self, fs):
+        """A filter-order with secondary options translates both lists.
+
+        The primary items and the secondary options live in two fields, so the
+        generated file has to carry the labels of both.
+        """
+        gen = make_generator(fs, yaml="""\
+Group:
+  args:
+    Order:
+      dt: filter-order
+      value: PlateT4:gun > Chip
+      option: [PlateT4, Chip]
+      option_dict:
+        PlateT4: [gun, general]
+""", i18n={
+            'Group': {'Order': {'zh-CN': {'option_i18n': {
+                'PlateT4': 'Plate', 'gun': 'Gun',
+            }}}},
+        }, languages=('zh-CN',))
+        assert gen.i18n_data['Group']['Order']['zh-CN']['option_i18n'] == {
+            'PlateT4': 'Plate',
+            'Chip': 'Chip',
+            'gun': 'Gun',
+            'general': 'general',
+        }
+
     def test_help_breaks_the_inline_layout(self, fs):
         """An arg with help is written one line per field."""
         gen = make_generator(fs, yaml="""\

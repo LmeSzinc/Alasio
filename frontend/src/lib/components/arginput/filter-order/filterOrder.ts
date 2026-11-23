@@ -12,6 +12,88 @@
 /** An item of a filter-order value, a python literal item of "option". */
 export type FilterOrderItem = string;
 
+/** Separator between a primary item and its secondary option, e.g. "PlateT4:gun" */
+export const SECONDARY_SEPARATOR = ":";
+
+/**
+ * Split a filter-order item into its primary item and its secondary option.
+ *
+ * A primary item without a secondary option stays itself, e.g. "Chip". The
+ * item is split on the first separator, so the secondary option keeps any
+ * later one. Mirrors split_option() of the backend.
+ *
+ * @param item The item of the value
+ * @returns The primary item and the secondary option, null when the item has none
+ */
+export function splitOption(item: string): [string, string | null] {
+  const at = item.indexOf(SECONDARY_SEPARATOR);
+  if (at === -1) return [item, null];
+  return [item.slice(0, at), item.slice(at + 1)];
+}
+
+/**
+ * The primary item of an item, the part before the secondary separator.
+ *
+ * @param item The item of the value
+ * @returns The primary item
+ */
+export function primaryOf(item: string): string {
+  return splitOption(item)[0];
+}
+
+/**
+ * Build an item from a primary item and its secondary option.
+ *
+ * @param primary The primary item
+ * @param secondary The secondary option, null or empty for a primary without one
+ * @returns The item of the value
+ */
+export function composeOption(primary: string, secondary: string | null | undefined): string {
+  if (secondary === null || secondary === undefined || secondary === "") return primary;
+  return `${primary}${SECONDARY_SEPARATOR}${secondary}`;
+}
+
+/**
+ * The legal items of a filter-order value: every primary item of "option",
+ * expanded with its own secondary options when "option_dict" declares them.
+ * Mirrors expand_filter_order_items() of the backend, so a row the dialog
+ * creates is exactly what the generated literal accepts.
+ *
+ * @param option Primary items of the arg
+ * @param optionDict Secondary options of each primary item
+ * @returns The legal items
+ */
+export function validItems(
+  option: readonly any[] | null | undefined,
+  optionDict?: Record<string, any[]> | null,
+): Set<string> {
+  const out = new Set<string>();
+  for (const item of option ?? []) {
+    const primary = String(item);
+    const secondaries = optionDict?.[primary];
+    if (secondaries && secondaries.length > 0) {
+      for (const secondary of secondaries) out.add(composeOption(primary, String(secondary)));
+    } else {
+      out.add(primary);
+    }
+  }
+  return out;
+}
+
+/**
+ * The item added to the order when a primary item is picked from the unused
+ * column: its first secondary option, or the bare item when it has none.
+ *
+ * @param primary The primary item
+ * @param optionDict Secondary options of each primary item
+ * @returns The item to add
+ */
+export function defaultItem(primary: string, optionDict?: Record<string, any[]> | null): string {
+  const secondaries = optionDict?.[primary];
+  if (secondaries && secondaries.length > 0) return composeOption(primary, String(secondaries[0]));
+  return primary;
+}
+
 /**
  * Compare two item lists, the order is part of the value.
  *

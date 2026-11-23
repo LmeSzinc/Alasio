@@ -55,7 +55,8 @@
       "OneClickRetire": {"file": "general/general_model.py", "cls": "OneClickRetire", "task": "General"},
       "Enhance": {"file": "general/general_model.py", "cls": "Enhance", "task": "General"},
       "OldRetire": {"file": "general/general_model.py", "cls": "OldRetire", "task": "General"},
-      "DropRecord": {"file": "general/general_model.py", "cls": "DropRecord", "task": "General"}
+      "DropRecord": {"file": "general/general_model.py", "cls": "DropRecord", "task": "General"},
+      "ShopDemo": {"file": "general/general_model.py", "cls": "ShopDemo", "task": "General"}
     },
     "config": {"task": ["General"], "group": []}
   },
@@ -117,6 +118,7 @@
       "Enhance": {"file": "general/general_model.py", "cls": "Enhance", "task": "General"},
       "OldRetire": {"file": "general/general_model.py", "cls": "OldRetire", "task": "General"},
       "DropRecord": {"file": "general/general_model.py", "cls": "DropRecord", "task": "General"},
+      "ShopDemo": {"file": "general/general_model.py", "cls": "ShopDemo", "task": "General"},
       "Oil": {"file": "dashboard/dashboard_model.py", "cls": "Oil", "task": "Dashboard"},
       "Coin": {"file": "dashboard/dashboard_model.py", "cls": "Coin", "task": "Dashboard"},
       "Gems": {"file": "dashboard/dashboard_model.py", "cls": "Gems", "task": "Dashboard"},

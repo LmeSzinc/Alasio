@@ -402,8 +402,13 @@ class ConfigGenerator(ParseGroups, ParseTasks):
                 value: translation
         """
         old = deep_get(self._i18n_old, [group_name, arg_name], default={})
+        # A filter-order with secondary options has both lists, so the old
+        # translations of the primary and the secondary items are both readable
+        i18n_options = list(arg.option or [])
+        if arg.option_dict:
+            i18n_options.extend(o for options in arg.option_dict.values() for o in options)
         old = LoadAlasI18n().load_arg(
-            old, group_name, arg_name, languages=self.entry.gui_language, options=arg.option)
+            old, group_name, arg_name, languages=self.entry.gui_language, options=i18n_options)
         new = {}
         for lang in self.entry.gui_language:
             # name, name must not be empty, default to {group_name}.{arg_name}
@@ -418,19 +423,18 @@ class ConfigGenerator(ParseGroups, ParseTasks):
             value = deep_get(old, key, default='')
             value = format_i18n(value)
             deep_set(new, key, value)
-        # option
+        # option, the primary items and the secondary options may both be present
         if arg.option or arg.option_dict:
             for lang in self.entry.gui_language:
                 inline = True
+                for option in arg.option or []:
+                    inline &= self._load_arg_option_i18n(old, new, option, lang)
                 if arg.option_dict:
                     for group in arg.option_dict:
                         inline &= self._load_arg_option_i18n(old, new, group, lang)
                     for options in arg.option_dict.values():
                         for option in options:
                             inline &= self._load_arg_option_i18n(old, new, option, lang)
-                else:
-                    for option in arg.option:
-                        inline &= self._load_arg_option_i18n(old, new, option, lang)
                 # if options are all digit and option name is same as option, make it inline
                 if inline:
                     key = [lang, 'option_i18n']

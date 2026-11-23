@@ -135,6 +135,18 @@
           // The backend sets `layout: vert` for filter-order
           layout: "vert",
         }),
+        // dt=filter-order with secondary options: every primary item of the
+        // value carries one of its own options as "item:option"
+        Secondary: arg("FilterOrder", "Secondary", "filter-order", ["PlateT4:gun", "BookT3:red", "Chip"], {
+          name: "filter-order (secondary)",
+          help: "PlateT4 and BookT3 pick a type, Chip has none; the editor changes it in place",
+          option: ["PlateT4", "BookT3", "Chip", "PR"],
+          option_dict: {
+            PlateT4: ["gun", "general", "torpedo", "antiair", "plane"],
+            BookT3: ["red", "blue", "yellow"],
+          },
+          layout: "vert",
+        }),
         // A long option list, with items that are not in `option` anymore (an
         // option was removed from the yaml after the value was set): the pills
         // render them and the editor keeps them in the selected column, where
@@ -210,6 +222,97 @@
               "LoggerAbyssalT5",
               "LoggerObscure",
             ],
+            layout: "vert",
+          },
+        ),
+        // A long order with unknown items: a primary item that is not in
+        // `option` anymore (Unknown-1, RemovedItem), a secondary option that
+        // was removed from `option_dict` (BookT2:gold), and plain items that
+        // never had a secondary option (Chip, CatT3). The pills mark them, the
+        // editor keeps their rows so they can be fixed or removed
+        SecondaryLarge: arg(
+          "FilterOrder",
+          "SecondaryLarge",
+          "filter-order",
+          [
+            "PlateT4:gun",
+            "BookT3:red",
+            "Unknown-1:gun",
+            "BookT2:gold",
+            "PR:neptune",
+            "Chip",
+            "CatT3",
+            "RemovedItem",
+            "Retrofit:cl",
+            "FoodT6",
+            "FoodT5",
+            "CatT2",
+            "BoxT4",
+            "Legacy:alpha",
+            "Legacy:beta",
+            "Retrofit:dd",
+            "PR:monarch",
+            "BookT3:blue",
+            "PlateT4:antiair",
+            "BookT2:red",
+          ],
+          {
+            name: "filter-order (secondary, long, unknown items)",
+            help: "Unknown-1 and RemovedItem are not in option, BookT2:gold is not declared, Chip has no secondary option",
+            option: [
+              "PlateT4",
+              "BookT3",
+              "PR",
+              "CatT3",
+              "Chip",
+              "BookT2",
+              "Retrofit",
+              "FoodT6",
+              "FoodT5",
+              "CatT2",
+              "BoxT4",
+            ],
+            option_dict: {
+              PlateT4: ["gun", "general", "torpedo", "antiair", "plane"],
+              BookT3: ["red", "blue", "yellow"],
+              BookT2: ["red", "blue", "yellow"],
+              PR: ["neptune", "monarch", "seattle", "georgia"],
+              Retrofit: ["dd", "cl", "bb", "cv"],
+            },
+            layout: "vert",
+          },
+        ),
+        // Long names on both levels: a primary item and a secondary option that
+        // are wider than the pill and the dialog row, so the truncation of the
+        // pill, the row label and the secondary select are all visible at once
+        SecondaryLongNames: arg(
+          "FilterOrder",
+          "SecondaryLongNames",
+          "filter-order",
+          [
+            "GearDesignPlanT3:OrdnanceTestingReportT3",
+            "OrdnanceTestingReportT2:DevelopmentMaterialT2",
+            "Short:cl",
+            "PlateT4:gun",
+          ],
+          {
+            name: "filter-order (secondary, long names)",
+            help: "A long primary item and a long secondary option; Short:cl is the short case the selector keeps a min width for",
+            option: [
+              "GearDesignPlanT3",
+              "OrdnanceTestingReportT2",
+              "PlateT4",
+              "Short",
+              "Chip",
+              "DevelopmentMaterialT1",
+            ],
+            option_dict: {
+              GearDesignPlanT3: ["OrdnanceTestingReportT3", "DevelopmentMaterialT3", "cl"],
+              OrdnanceTestingReportT2: ["DevelopmentMaterialT2", "OrdnanceTestingReportT1", "dd"],
+              PlateT4: ["gun", "general", "torpedo"],
+              Short: ["cl", "dd", "bb", "cv"],
+              DevelopmentMaterialT1: ["GearDesignPlanT1", "GearDesignPlanT2", "PlateRandomT4"],
+            },
             layout: "vert",
           },
         ),

@@ -276,5 +276,57 @@
         }
       }
     }
+  },
+  "ShopDemo": {
+    "_info": {
+      "zh-CN": {"name": "ShopDemo", "help": ""},
+      "en-US": {"name": "ShopDemo", "help": ""}
+    },
+    "BuyOrder": {
+      "zh-CN": {
+        "name": "ShopDemo.BuyOrder",
+        "help": "",
+        "option_i18n": {
+          "PlateT4": "PlateT4",
+          "BookT3": "BookT3",
+          "PR": "PR",
+          "Chip": "Chip",
+          "gun": "gun",
+          "general": "general",
+          "torpedo": "torpedo",
+          "antiair": "antiair",
+          "plane": "plane",
+          "red": "red",
+          "blue": "blue",
+          "yellow": "yellow",
+          "neptune": "neptune",
+          "monarch": "monarch",
+          "seattle": "seattle",
+          "georgia": "georgia"
+        }
+      },
+      "en-US": {
+        "name": "ShopDemo.BuyOrder",
+        "help": "",
+        "option_i18n": {
+          "PlateT4": "PlateT4",
+          "BookT3": "BookT3",
+          "PR": "PR",
+          "Chip": "Chip",
+          "gun": "gun",
+          "general": "general",
+          "torpedo": "torpedo",
+          "antiair": "antiair",
+          "plane": "plane",
+          "red": "red",
+          "blue": "blue",
+          "yellow": "yellow",
+          "neptune": "neptune",
+          "monarch": "monarch",
+          "seattle": "seattle",
+          "georgia": "georgia"
+        }
+      }
+    }
   }
 }

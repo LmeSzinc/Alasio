@@ -551,3 +551,143 @@ describe("TestFilterOrderMultiInstance", () => {
     expect(dataA.value).toEqual(["Fleet-1"]);
   });
 });
+
+/** The arg with secondary options, as the backend sends it */
+function makeSecondaryArg(overrides: Partial<ArgData> = {}): ArgData {
+  return makeArg({
+    value: ["PlateT4:gun", "Chip"],
+    option: ["PlateT4", "BookT3", "Chip"],
+    option_dict: { PlateT4: ["gun", "general"], BookT3: ["red", "blue"] },
+    ...overrides,
+  });
+}
+
+/** The pill labels, the gap between a primary item and its option collapsed */
+function pillText(target: HTMLElement): string[] {
+  return pillLabels(target).map((label) => label.replace(/\s+/g, " ").trim());
+}
+/** Open the secondary select of the selected column (the first row that has one) */
+async function openSecondarySelect() {
+  const trigger = column("selected").querySelector<HTMLElement>('[data-slot="select-trigger"]');
+  expect(trigger).not.toBeNull();
+  trigger!.click();
+  await settle();
+}
+
+/** Pick an option of the opened select popup */
+function selectOption(label: string) {
+  const item = [...document.querySelectorAll<HTMLElement>('[data-slot="select-item"]')].find(
+    (el) => el.textContent?.trim() === label,
+  );
+  expect(item, `no option "${label}" in the popup`).toBeDefined();
+  // bits-ui commits an item on pointerup, a click alone does not select it
+  item!.dispatchEvent(new Event("pointerdown", { bubbles: true, cancelable: true }));
+  item!.dispatchEvent(new Event("pointerup", { bubbles: true }));
+}
+
+describe("TestFilterOrderSecondary", () => {
+  it("shows the item in the stored form, the option after a colon", async () => {
+    const { target } = await mountArg(makeSecondaryArg());
+
+    expect(pillText(target)).toEqual(["PlateT4:gun", "Chip"]);
+  });
+
+  it("edits the secondary option in place and saves it", async () => {
+    const { target, arg, handleEdit } = await mountArg(makeSecondaryArg());
+    await openDialog(target);
+    expect(columnLabels("selected")).toEqual(["PlateT4", "Chip"]);
+    expect(columnLabels("unused")).toEqual(["BookT3"]);
+
+    await openSecondarySelect();
+    selectOption("general");
+    await settle();
+
+    footerButton(t.Input.Save()).click();
+    await settle();
+
+    expect(arg.value).toEqual(["PlateT4:general", "Chip"]);
+    expect(handleEdit).toHaveBeenCalledTimes(1);
+  });
+
+  it("adds an unused primary with its first secondary option", async () => {
+    const { target, arg } = await mountArg(makeSecondaryArg({ value: ["Chip"] }));
+    await openDialog(target);
+    expect(columnLabels("unused")).toEqual(["PlateT4", "BookT3"]);
+
+    rowButton("unused", t.Input.FilterOrderAdd(), "BookT3").click();
+    await settle();
+    footerButton(t.Input.Save()).click();
+    await settle();
+
+    expect(arg.value).toEqual(["Chip", "BookT3:red"]);
+  });
+
+  it("disables saving a primary that must carry a secondary option", async () => {
+    // A value written before the secondary options were declared: the backend
+    // drops such an item on load, the demo shows the editor handling it
+    const { target } = await mountArg(makeSecondaryArg({ value: ["PlateT4", "Chip"] }));
+    await openDialog(target);
+
+    expect(footerButton(t.Input.Save()).disabled).toBe(true);
+  });
+
+  it("marks an item that is no legal item, in its stored form", async () => {
+    const { target } = await mountArg(makeSecondaryArg({ value: ["Unknown-1:gun", "Chip"] }));
+
+    expect(pillText(target)).toEqual(["Unknown-1:gun", "Chip"]);
+    expect(pills(target).querySelector(`[aria-label="${t.Input.FilterOrderInvalid()}"]`)).not.toBeNull();
+  });
+
+  it("marks a secondary option that is not declared and blocks saving", async () => {
+    // BookT2 declares red / blue / yellow, gold was removed from the yaml
+    const { target } = await mountArg(
+      makeSecondaryArg({
+        value: ["PlateT4:gun", "BookT2:gold"],
+        option: ["PlateT4", "BookT2", "Chip"],
+        option_dict: { PlateT4: ["gun", "general"], BookT2: ["red", "blue"] },
+      }),
+    );
+    await openDialog(target);
+
+    expect(columnLabels("selected")).toEqual(["PlateT4", "BookT2"]);
+    expect(footerButton(t.Input.Save()).disabled).toBe(true);
+  });
+
+  it("gives the secondary selector 2/5 of the name + option box", async () => {
+    // The share is of the box that holds the name and the option, not of the
+    // whole row: the index, the grip and the order buttons are outside it, so
+    // a short option like "cl" does not shrink its row
+    const { target } = await mountArg(
+      makeSecondaryArg({
+        value: ["PlateT4:gun", "Short:cl"],
+        option: ["PlateT4", "Short"],
+        option_dict: { PlateT4: ["gun", "general"], Short: ["cl", "dd"] },
+      }),
+    );
+    await openDialog(target);
+
+    const triggers = column("selected").querySelectorAll<HTMLElement>('[data-slot="select-trigger"]');
+    expect(triggers).toHaveLength(2);
+    for (const trigger of triggers) {
+      expect(trigger.classList.contains("w-2/5")).toBe(true);
+      // the trigger and the label of the row share the same box
+      const box = trigger.parentElement!;
+      expect(box.querySelector('[data-slot="filter-order-label"]')).not.toBeNull();
+    }
+    expect(triggers[1].textContent?.trim()).toBe("cl");
+  });
+
+  it("shows a long primary item and a long secondary option in full", async () => {
+    // jsdom lays nothing out, so the truncation is CSS only here: the label of
+    // the item keeps both long parts, the pill is capped to the line width
+    const { target } = await mountArg(
+      makeSecondaryArg({
+        value: ["GearDesignPlanT3:OrdnanceTestingReportT3"],
+        option: ["GearDesignPlanT3"],
+        option_dict: { GearDesignPlanT3: ["OrdnanceTestingReportT3", "DevelopmentMaterialT3"] },
+      }),
+    );
+
+    expect(pillText(target)).toEqual(["GearDesignPlanT3:OrdnanceTestingReportT3"]);
+  });
+});

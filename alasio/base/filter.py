@@ -67,3 +67,24 @@ def parse_filter(s):
     s = re.sub(r'[＞﹥›˃ᐳ❯]', '>', s)
     items = [i for i in s.split('>') if i]
     return items
+
+
+def split_option(item):
+    """
+    Split a filter item that carries a secondary option
+
+    A dt="filter-order" item is either a primary item (`Chip`) or a primary
+    item with one of its own secondary options (`PlateT4:gun`). The item is
+    split on the first separator, so the secondary option keeps any later one.
+
+    Args:
+        item (str): Item of a filter-order value
+
+    Returns:
+        tuple[str, str]: (primary, secondary), secondary is None when the item
+            carries no secondary option
+    """
+    primary, sep, secondary = str(item).partition(':')
+    if not sep:
+        return primary, None
+    return primary, secondary

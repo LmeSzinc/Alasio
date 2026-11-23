@@ -109,13 +109,13 @@ option: [Fleet-3, Fleet-1, Fleet-2]
 """)
         assert arg.option == ['Fleet-3', 'Fleet-1', 'Fleet-2']
 
-    def test_option_dict_is_dropped(self):
+    def test_option_dict_is_dropped_when_empty(self):
+        """An empty "option_dict" means no secondary options, it is not kept."""
         arg = parse_arg("""\
 dt: filter-order
 value: Fleet-1
 option: [Fleet-1]
-option_dict:
-  group: [Fleet-1]
+option_dict: {}
 """)
         assert 'option_dict' not in arg.to_dict()
 
@@ -126,6 +126,298 @@ value: Fleet-1
 option: [Fleet-1]
 """)
         assert arg.layout == 'vert'
+
+
+class TestFilterOrderSecondary:
+    """
+    dt="filter-order" with "option_dict": every item of the value carries one
+    of its own secondary options as "item:option".
+    """
+
+    def test_composite_items(self):
+        arg = parse_arg("""\
+dt: filter-order
+value: PlateT4:gun > BookT3:red > Chip
+option: [PlateT4, BookT3, Chip, PR]
+option_dict:
+  PlateT4: [gun, general]
+  BookT3: [red, blue]
+""")
+        assert arg.value == ('PlateT4:gun', 'BookT3:red', 'Chip')
+        assert arg.option_dict == {'PlateT4': ['gun', 'general'], 'BookT3': ['red', 'blue']}
+        assert arg.layout == 'vert'
+
+    def test_literal_is_the_expanded_items(self):
+        """The literal holds the pairs, a secondary option of another item is
+        not a legal item of the value."""
+        arg = parse_arg("""\
+dt: filter-order
+value: PlateT4:gun
+option: [PlateT4, BookT3, Chip]
+option_dict:
+  PlateT4: [gun, general]
+  BookT3: [red]
+""")
+        assert arg.get_literal_groups() == [[
+            'PlateT4:gun', 'PlateT4:general', 'BookT3:red', 'Chip',
+        ]]
+        assert arg.get_python_type() == (
+            "t.Tuple[t.Literal['PlateT4:gun', 'PlateT4:general', 'BookT3:red', 'Chip'], ...]")
+
+    def test_literal_ref(self):
+        arg = parse_arg("""\
+dt: filter-order
+value: PlateT4:gun
+option: [PlateT4]
+option_dict:
+  PlateT4: [gun]
+""")
+        assert arg.get_anno(literal_ref='LITERAL_G_A') == 't.Tuple[LITERAL_G_A, ...]'
+
+    def test_list_value(self):
+        arg = parse_arg("""\
+dt: filter-order
+value: [PlateT4:general, Chip]
+option: [PlateT4, Chip]
+option_dict:
+  PlateT4: [gun, general]
+""")
+        assert arg.value == ('PlateT4:general', 'Chip')
+
+    def test_empty_value(self):
+        arg = parse_arg("""\
+dt: filter-order
+value: []
+option: [PlateT4]
+option_dict:
+  PlateT4: [gun]
+""")
+        assert arg.value == ()
+
+    def test_primary_without_secondary(self):
+        """An item without an entry in "option_dict" is stored as itself."""
+        arg = parse_arg("""\
+dt: filter-order
+value: Chip
+option: [PlateT4, Chip]
+option_dict:
+  PlateT4: [gun]
+""")
+        assert arg.value == ('Chip',)
+
+    def test_primary_must_specify_secondary(self):
+        with pytest.raises(DefinitionError) as e:
+            parse_arg("""\
+dt: filter-order
+value: PlateT4
+option: [PlateT4]
+option_dict:
+  PlateT4: [gun]
+""")
+        assert e.value.msg == 'Default value "PlateT4" must specify its secondary option'
+
+    def test_secondary_must_belong_to_the_primary(self):
+        with pytest.raises(DefinitionError) as e:
+            parse_arg("""\
+dt: filter-order
+value: PlateT4:red
+option: [PlateT4, BookT3]
+option_dict:
+  PlateT4: [gun]
+  BookT3: [red]
+""")
+        assert e.value.msg == 'Default value "PlateT4:red" is not a valid item of "PlateT4"'
+
+    def test_primary_without_secondary_must_not_carry_one(self):
+        with pytest.raises(DefinitionError) as e:
+            parse_arg("""\
+dt: filter-order
+value: Chip:gun
+option: [Chip]
+option_dict:
+  Chip2: [gun]
+""")
+        # the option_dict key is reported first, it is not in "option"
+        assert '"option_dict" key "Chip2" is not in "option"' in str(e.value)
+
+    def test_primary_without_secondary_must_not_carry_one_with_valid_dict(self):
+        with pytest.raises(DefinitionError) as e:
+            parse_arg("""\
+dt: filter-order
+value: Chip:gun
+option: [PlateT4, Chip]
+option_dict:
+  PlateT4: [gun]
+""")
+        assert e.value.msg == 'Default value "Chip:gun" is not a valid item of "Chip"'
+
+    def test_primary_must_be_in_option(self):
+        with pytest.raises(DefinitionError) as e:
+            parse_arg("""\
+dt: filter-order
+value: PlateT5:gun
+option: [PlateT4]
+option_dict:
+  PlateT4: [gun]
+""")
+        assert e.value.msg == 'Default value "PlateT5:gun" is not in "option"'
+
+    def test_duplicate_primary(self):
+        """A primary item is used once, the editor shows one row per primary."""
+        with pytest.raises(DefinitionError) as e:
+            parse_arg("""\
+dt: filter-order
+value: PlateT4:gun > PlateT4:general
+option: [PlateT4]
+option_dict:
+  PlateT4: [gun, general]
+""")
+        assert e.value.msg == 'Default value has duplicate item "PlateT4"'
+
+    def test_empty_item(self):
+        with pytest.raises(DefinitionError) as e:
+            parse_arg("""\
+dt: filter-order
+value: PlateT4:gun > > Chip
+option: [PlateT4, Chip]
+option_dict:
+  PlateT4: [gun]
+""")
+        assert 'Default value "" is not a valid item' in str(e.value)
+
+    def test_empty_secondary(self):
+        with pytest.raises(DefinitionError) as e:
+            parse_arg("""\
+dt: filter-order
+value: 'PlateT4:'
+option: [PlateT4]
+option_dict:
+  PlateT4: [gun]
+""")
+        assert 'is not a valid item' in str(e.value)
+
+    def test_value_item_must_be_str(self):
+        with pytest.raises(DefinitionError) as e:
+            parse_arg("""\
+dt: filter-order
+value: [1]
+option: [PlateT4]
+option_dict:
+  PlateT4: [gun]
+""")
+        assert 'must be a str if "option_dict" is defined' in str(e.value)
+
+    def test_option_items_must_be_str(self):
+        with pytest.raises(DefinitionError) as e:
+            parse_arg("""\
+dt: filter-order
+value: ['1:gun']
+option: [1]
+option_dict:
+  '1': [gun]
+""")
+        assert '"option" item "1" must be a str if "option_dict" is defined' in str(e.value)
+
+    def test_option_dict_key_not_in_option(self):
+        with pytest.raises(DefinitionError) as e:
+            parse_arg("""\
+dt: filter-order
+value: PlateT4:gun
+option: [PlateT4]
+option_dict:
+  PlateT5: [gun]
+""")
+        assert e.value.msg == '"option_dict" key "PlateT5" is not in "option"'
+
+    @pytest.mark.parametrize('option_dict, message', [
+        ('[gun]', '"option_dict" must be a dict'),
+    ], ids=['list'])
+    def test_option_dict_must_be_a_dict(self, option_dict, message):
+        with pytest.raises(DefinitionError) as e:
+            parse_arg(f"""\
+dt: filter-order
+value: []
+option: [PlateT4]
+option_dict: {option_dict}
+""")
+        assert e.value.msg == message
+
+    def test_option_dict_value_must_be_a_list(self):
+        with pytest.raises(DefinitionError) as e:
+            parse_arg("""\
+dt: filter-order
+value: []
+option: [PlateT4]
+option_dict:
+  PlateT4: gun
+""")
+        assert e.value.msg == '"option_dict" value of "PlateT4" must be a list'
+
+    def test_option_dict_value_must_not_be_empty(self):
+        with pytest.raises(DefinitionError) as e:
+            parse_arg("""\
+dt: filter-order
+value: []
+option: [PlateT4]
+option_dict:
+  PlateT4: []
+""")
+        assert e.value.msg == '"option_dict" value of "PlateT4" is empty'
+
+    def test_option_dict_item_must_be_str(self):
+        with pytest.raises(DefinitionError) as e:
+            parse_arg("""\
+dt: filter-order
+value: []
+option: [PlateT4]
+option_dict:
+  PlateT4: [1]
+""")
+        assert e.value.msg == '"option_dict" item "1" must be a str'
+
+    def test_option_dict_duplicate_item(self):
+        with pytest.raises(DefinitionError) as e:
+            parse_arg("""\
+dt: filter-order
+value: []
+option: [PlateT4]
+option_dict:
+  PlateT4: [gun, gun]
+""")
+        assert e.value.msg == '"option_dict" value of "PlateT4" has duplicate item "gun"'
+
+    def test_separator_in_option(self):
+        with pytest.raises(DefinitionError) as e:
+            parse_arg("""\
+dt: filter-order
+value: []
+option: ['Plate:T4']
+option_dict:
+  'Plate:T4': [gun]
+""")
+        assert 'must not contain ":"' in str(e.value)
+
+    def test_separator_in_secondary(self):
+        with pytest.raises(DefinitionError) as e:
+            parse_arg("""\
+dt: filter-order
+value: []
+option: [PlateT4]
+option_dict:
+  PlateT4: ['gun:x']
+""")
+        assert 'must not contain ":"' in str(e.value)
+
+    def test_value_must_be_list(self):
+        with pytest.raises(DefinitionError) as e:
+            parse_arg("""\
+dt: filter-order
+value: 1
+option: [PlateT4]
+option_dict:
+  PlateT4: [gun]
+""")
+        assert 'Value of "filter-order" datatype must be a list' in str(e.value)
 
 
 class TestFilterOrderValidate:

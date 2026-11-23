@@ -37,6 +37,7 @@ class ConfigGenerated(AlasioConfigBase):
     Enhance: "general.Enhance"
     OldRetire: "general.OldRetire"
     DropRecord: "general.DropRecord"
+    ShopDemo: "general.ShopDemo"
 
     """
     ========== nav: main ==========

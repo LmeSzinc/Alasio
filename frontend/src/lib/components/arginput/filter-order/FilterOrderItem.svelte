@@ -8,6 +8,7 @@
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
   import { type DropIndicatorState, Indicator } from "$lib/components/dnd";
   import { Button } from "$lib/components/ui/button";
+  import * as Select from "$lib/components/ui/select";
   import * as Tooltip from "$lib/components/ui/tooltip";
   import { t } from "$lib/i18n";
   import { cn } from "$lib/utils";
@@ -31,8 +32,18 @@
     index?: number;
     /** Length of the selected column, for the down button of the last row */
     count?: number;
-    /** True for an item that is not in "option" anymore (an old value) */
+    /** True for an item that is not in the legal items anymore (an old value) */
     invalid?: boolean;
+    /** Secondary option of the row, null when its primary has none */
+    secondary?: string | null;
+    /** Secondary options the primary declares, empty to render no selector */
+    secondaries?: string[];
+    /** True when the secondary option of the row is not declared anymore */
+    secondaryInvalid?: boolean;
+    /** Label of a secondary option, translated through option_i18n by the caller */
+    secondaryLabel?: (value: string) => string;
+    /** Called with the new secondary option of the row */
+    onSecondaryChange?: (next: string) => void;
     dropIndicator?: DropIndicatorState | null;
     onMoveUp?: () => void;
     onMoveDown?: () => void;
@@ -46,6 +57,11 @@
     index = 0,
     count = 0,
     invalid = false,
+    secondary = null,
+    secondaries = [],
+    secondaryInvalid = false,
+    secondaryLabel = (value: string) => value,
+    onSecondaryChange,
     dropIndicator = null,
     onMoveUp,
     onMoveDown,
@@ -93,7 +109,50 @@
     >
       <GripVertical class="size-4" />
     </div>
-    <span data-slot="filter-order-label" class="min-w-0 flex-1 truncate">{label}</span>
+    <!-- The name and its secondary option share one box, the selector takes
+         2/5 of that box: the order buttons and the grip are not part of it, so
+         the columns line up row by row -->
+    <div class="flex min-w-0 flex-1 items-center gap-1">
+      <span data-slot="filter-order-label" class="min-w-0 flex-1 truncate">{label}</span>
+      {#if column === "selected" && secondaries.length > 0}
+        <!-- The secondary option of the row, edited in place: the item of the
+             value is "item:option" and the position never moves -->
+        {#if secondaries.length === 1 && !secondaryInvalid}
+          <span class="w-2/5 shrink-0 truncate text-xs text-muted-foreground">
+            {secondaryLabel(secondaries[0])}
+          </span>
+        {:else}
+          <Select.Root
+            type="single"
+            value={secondary ?? undefined}
+            onValueChange={(value) => value && onSecondaryChange?.(value)}
+          >
+            <Select.Trigger
+              size="sm"
+              class="h-6! w-2/5 shrink-0 gap-1 border-0 bg-accent px-1.5 py-0 text-xs shadow-none"
+              aria-label={`${t.Input.FilterOrderSecondary()} ${label}`}
+            >
+              <span class="min-w-0 flex-1 truncate text-left" class:text-destructive={secondaryInvalid}>
+                {secondary === null ? "" : secondaryLabel(secondary)}
+              </span>
+            </Select.Trigger>
+            <Select.Content>
+              <Select.Group>
+                {#if secondaryInvalid && secondary !== null}
+                  <Select.Item value={secondary} label={secondaryLabel(secondary)}>
+                    <span class="text-destructive">{secondaryLabel(secondary)}</span>
+                  </Select.Item>
+                {/if}
+                {#each secondaries as option (option)}
+                  {@const optionLabel = secondaryLabel(option)}
+                  <Select.Item value={option} label={optionLabel}>{optionLabel}</Select.Item>
+                {/each}
+              </Select.Group>
+            </Select.Content>
+          </Select.Root>
+        {/if}
+      {/if}
+    </div>
     {#if invalid}
       <Tooltip.Provider>
         <Tooltip.Root>

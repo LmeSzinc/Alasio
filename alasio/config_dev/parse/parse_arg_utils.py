@@ -27,6 +27,11 @@ TYPE_ARG_LITERAL = frozenset((
     'filter-order',
 ))
 
+# Separator of a dt="filter-order" item that carries a secondary option, e.g.
+# "PlateT4:gun". The item is split on the first separator, so an arg that
+# declares "option_dict" must not use it in the primary or secondary items.
+FILTER_ORDER_SEPARATOR = ':'
+
 # Msgspec range constraints of an arg, in the order they are reported
 # key: constraint key of ArgData, value: whether the boundary value itself is allowed
 RANGE_CONSTRAINT = (
@@ -109,9 +114,91 @@ def validate_option(option: list, value: Any) -> None:
             raise DefinitionError(f'"option" has duplicate value "{item}"')
 
 
-def validate_filter_order(option: list, value: Any) -> None:
+def expand_filter_order_items(option, option_dict=None):
     """
-    Validate "option" and the default value of dt="filter-order"
+    Expand "option" and "option_dict" into the legal items of dt="filter-order"
+
+    An item without a secondary option stays itself, an item with one becomes
+    every "{item}:{option}" combination. The expanded items are the literal of
+    the generated model, so msgspec checks that a stored value holds a primary
+    item with one of its own secondary options, not just two legal parts.
+
+    Args:
+        option (list): Primary items of the arg
+        option_dict (dict): Secondary options of each primary item, None or an
+            empty dict means no item has a secondary option
+
+    Returns:
+        list[str]: Legal items, in "option" order, the secondary options of an
+            item following it
+    """
+    option_dict = option_dict or {}
+    items = []
+    for item in option:
+        options = option_dict.get(item, None)
+        if options:
+            items.extend(f'{item}{FILTER_ORDER_SEPARATOR}{o}' for o in options)
+        else:
+            items.append(item)
+    return items
+
+
+def _validate_filter_order_option_dict(option, option_dict):
+    """
+    Validate "option_dict" of dt="filter-order"
+
+    "option_dict" maps a primary item to the secondary options it offers. A
+    primary item with an entry must be used with one of them, an item without
+    an entry has no secondary option at all. Both sides become part of a
+    composite item, so they must be str and must not contain the separator.
+
+    Args:
+        option (list): Primary items of the arg, already validated
+        option_dict (Any): The "option_dict" as written in the yaml
+
+    Raises:
+        DefinitionError:
+    """
+    if not isinstance(option_dict, dict):
+        raise DefinitionError('"option_dict" must be a dict')
+    primary_items = set()
+    for item in option:
+        if type(item) is not str:
+            raise DefinitionError(
+                f'"option" item "{item}" must be a str if "option_dict" is defined')
+        if FILTER_ORDER_SEPARATOR in item:
+            raise DefinitionError(
+                f'"option" item "{item}" must not contain "{FILTER_ORDER_SEPARATOR}", '
+                'it separates the secondary option')
+        primary_items.add(item)
+
+    for primary, options in option_dict.items():
+        if type(primary) is not str:
+            raise DefinitionError(f'"option_dict" key "{primary}" must be a str')
+        if primary not in primary_items:
+            raise DefinitionError(f'"option_dict" key "{primary}" is not in "option"')
+        if not isinstance(options, list):
+            raise DefinitionError(f'"option_dict" value of "{primary}" must be a list')
+        if not options:
+            raise DefinitionError(f'"option_dict" value of "{primary}" is empty')
+        counts = Counter()
+        for option_item in options:
+            if type(option_item) is not str:
+                raise DefinitionError(f'"option_dict" item "{option_item}" must be a str')
+            if FILTER_ORDER_SEPARATOR in option_item:
+                raise DefinitionError(
+                    f'"option_dict" item "{option_item}" must not contain '
+                    f'"{FILTER_ORDER_SEPARATOR}"')
+            counts[option_item] += 1
+        for option_item, count in counts.items():
+            if count > 1:
+                raise DefinitionError(
+                    f'"option_dict" value of "{primary}" has duplicate item "{option_item}"')
+
+
+def validate_filter_order(option: list, value: Any, option_dict: Any = None) -> None:
+    """
+    Validate "option", "option_dict" and the default value of dt="filter-order"
 
     "option" is the universe of items the frontend editor can add, the value
     is an ordered subset of it: every item of the value must be defined in
@@ -119,9 +206,16 @@ def validate_filter_order(option: list, value: Any) -> None:
     The items are python literal items, like the options of the other datatypes,
     the type is part of the identity: `True` is not the int option `1`.
 
+    When "option_dict" is given, every primary item declares its own secondary
+    options and an item of the value is a composite "{item}:{option}", see
+    expand_filter_order_items(). A primary item may then be used once, with one
+    of its own secondary options or without one when it declares none.
+
     Args:
         option (list): Option list of the arg
         value (Any): Default value of the arg, a tuple of items
+        option_dict (Any): Secondary options of each item, None for a
+            filter-order without secondary options
 
     Raises:
         DefinitionError:
@@ -143,15 +237,51 @@ def validate_filter_order(option: list, value: Any) -> None:
 
     if type(value) not in (list, tuple):
         raise DefinitionError(f'Value of "filter-order" datatype must be a list, got "{value}"')
-    value_counts = Counter()
+
+    if option_dict is None:
+        # flat items, no secondary options
+        value_counts = Counter()
+        for item in value:
+            validate_literal_item(item)
+            if _literal_key(item) not in option_keys:
+                raise DefinitionError(f'Default value "{item}" is not in "option"')
+            value_counts[item] += 1
+        for item, count in value_counts.items():
+            if count > 1:
+                raise DefinitionError(f'Default value has duplicate value "{item}"')
+        return
+
+    _validate_filter_order_option_dict(option, option_dict)
+    primary_items = set(option)
+    secondary_options = {item: options for item, options in option_dict.items()}
+    used = Counter()
     for item in value:
-        validate_literal_item(item)
-        if _literal_key(item) not in option_keys:
+        if type(item) is not str:
+            raise DefinitionError(
+                f'Value of "filter-order" datatype must be a str if "option_dict" is defined, '
+                f'got "{item}"')
+        primary, sep, secondary = item.partition(FILTER_ORDER_SEPARATOR)
+        if not primary or (sep and not secondary):
+            raise DefinitionError(
+                f'Default value "{item}" is not a valid item, expected "item" or '
+                f'"item{FILTER_ORDER_SEPARATOR}option"')
+        if primary not in primary_items:
             raise DefinitionError(f'Default value "{item}" is not in "option"')
-        value_counts[item] += 1
-    for item, count in value_counts.items():
+        options = secondary_options.get(primary, None)
+        if options:
+            if not sep:
+                raise DefinitionError(
+                    f'Default value "{primary}" must specify its secondary option')
+            if secondary not in options:
+                raise DefinitionError(
+                    f'Default value "{item}" is not a valid item of "{primary}"')
+        elif sep:
+            raise DefinitionError(
+                f'Default value "{item}" is not a valid item of "{primary}"')
+        used[primary] += 1
+    for primary, count in used.items():
         if count > 1:
-            raise DefinitionError(f'Default value has duplicate value "{item}"')
+            raise DefinitionError(f'Default value has duplicate item "{primary}"')
 
 
 def _iter_range_constraint(arg):

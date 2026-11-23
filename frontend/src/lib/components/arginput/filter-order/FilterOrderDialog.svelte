@@ -13,9 +13,14 @@
     type FilterOrderItem as FilterOrderItemValue,
     appendItem,
     applyDrop,
+    composeOption,
+    defaultItem,
     moveItem,
+    primaryOf,
     removeItem,
     sameList,
+    splitOption,
+    validItems,
   } from "./filterOrder";
 
   /**
@@ -55,14 +60,54 @@
   });
 
   // The unused column is the rest of "option", it always follows the option
-  // order, so a drag inside it has no visual effect
+  // order, so a drag inside it has no visual effect. With secondary options
+  // the column lists the primary items, a primary that is in the order (with
+  // any secondary option) is not offered again.
   const options = $derived(Array.isArray(data.option) ? data.option : []);
-  const unused = $derived(options.filter((item) => !draft.includes(item)));
+  const optionDict = $derived(data.option_dict ?? {});
+  const hasSecondary = $derived(Object.keys(optionDict).length > 0);
+  const valid = $derived(validItems(options, optionDict));
+  const usedPrimaries = $derived(new Set(draft.map((item) => primaryOf(String(item)))));
+  const unused = $derived(options.filter((item) => !usedPrimaries.has(String(item))));
 
-  /** True for an item that is in the order but not in "option" anymore */
+  /**
+   * True for an item that is in the order but not a legal item anymore: its
+   * primary item or its secondary option was removed from the yaml, or a
+   * primary that declares secondary options is stored bare.
+   */
   function isInvalid(item: FilterOrderItemValue): boolean {
+    if (hasSecondary) return !valid.has(String(item));
     return options.length > 0 && !options.includes(item);
   }
+
+  /**
+   * Label of a whole item, the translated secondary option after a ":" like
+   * the stored value ("PlateT4:gun"). A row itself shows its primary item and
+   * the selector next to it, the drag overlay has room for the whole item.
+   */
+  function fullLabelOf(item: FilterOrderItemValue): string {
+    const [primary, secondary] = splitOption(String(item));
+    if (secondary === null) return arg.getLabel(primary);
+    return `${arg.getLabel(primary)}:${arg.getLabel(secondary)}`;
+  }
+
+  /** The secondary options the primary item of a row declares */
+  function secondariesOf(item: FilterOrderItemValue): string[] {
+    return optionDict[primaryOf(String(item))] ?? [];
+  }
+
+  /** The secondary option the row carries, null when it carries none */
+  function secondaryOf(item: FilterOrderItemValue): string | null {
+    return splitOption(String(item))[1];
+  }
+
+  /** True when the row carries a secondary option that is not declared anymore */
+  function isSecondaryInvalid(item: FilterOrderItemValue): boolean {
+    const secondary = secondaryOf(item);
+    return hasSecondary && secondary !== null && !secondariesOf(item).includes(secondary);
+  }
+
+  const hasInvalid = $derived(draft.some((item) => isInvalid(item)));
 
   const isDirty = $derived(!sameList(draft, value));
 
@@ -75,7 +120,8 @@
   };
 
   function labelOf(item: FilterOrderItemValue): string {
-    return arg.getLabel(item);
+    // A row shows its primary item, the secondary option has its own selector
+    return arg.getLabel(hasSecondary ? primaryOf(String(item)) : item);
   }
 
   function onMoveUp(item: FilterOrderItemValue) {
@@ -90,13 +136,33 @@
     draft = removeItem(draft, item);
   }
 
+  /** A row added from the unused column starts at the first secondary option */
   function onAdd(item: FilterOrderItemValue) {
-    draft = appendItem(draft, item);
+    draft = appendItem(draft, defaultItem(String(item), optionDict));
+  }
+
+  /** Replace the secondary option of a row, the position of the row is kept */
+  function onSecondaryChange(item: FilterOrderItemValue, next: string) {
+    const index = draft.indexOf(item);
+    if (index === -1) return;
+    const nextItem = composeOption(primaryOf(String(item)), next);
+    if (nextItem === item) return;
+    draft = [...draft.slice(0, index), nextItem, ...draft.slice(index + 1)];
+  }
+
+  /**
+   * A drag starts with the id of the row: an unused row carries its primary
+   * item only, so it is completed with its first secondary option before the
+   * drop, the same as adding it with the plus button.
+   */
+  function normalizeDragged(id: string): string {
+    if (!hasSecondary || draft.includes(id)) return id;
+    return defaultItem(primaryOf(id), optionDict);
   }
 
   function onDndEnd({ active, over, position }: DndEndCallbackDetail) {
     if (!active || !over) return;
-    const item = String(active.id);
+    const item = normalizeDragged(String(active.id));
     const overData = over.data as { type?: string; container?: boolean } | undefined;
     const at = position === "top" ? "top" : "bottom";
 
@@ -115,6 +181,7 @@
   }
 
   function save() {
+    if (hasInvalid) return;
     if (isDirty) onSave([...draft]);
     open = false;
   }
@@ -177,6 +244,11 @@
                     {dropIndicator}
                     invalid={isInvalid(item)}
                     label={labelOf(item)}
+                    secondary={secondaryOf(item)}
+                    secondaries={secondariesOf(item)}
+                    secondaryInvalid={isSecondaryInvalid(item)}
+                    secondaryLabel={(value) => arg.getLabel(value)}
+                    onSecondaryChange={(next) => onSecondaryChange(item, next)}
                     onMoveUp={() => onMoveUp(item)}
                     onMoveDown={() => onMoveDown(item)}
                     onRemove={() => onRemove(item)}
@@ -209,7 +281,7 @@
         <DialogFooter>
           <Button variant="ghost" onclick={resetDefault}>{t.Input.FilterOrderResetDefault()}</Button>
           <Button variant="outline" onclick={cancel}>{t.Input.Cancel()}</Button>
-          <Button onclick={save}>{t.Input.Save()}</Button>
+          <Button onclick={save} disabled={hasInvalid}>{t.Input.Save()}</Button>
         </DialogFooter>
       </DialogContent>
     {/snippet}
@@ -218,7 +290,7 @@
       {#if active}
         <div class="flex w-64 items-center gap-x-1.5 rounded-md border bg-popover px-2 py-1.5 text-sm shadow-xl">
           <GripVertical class="size-4 text-muted-foreground" />
-          <span class="truncate">{labelOf(String(active.id))}</span>
+          <span class="truncate">{fullLabelOf(String(active.id))}</span>
         </div>
       {/if}
     {/snippet}

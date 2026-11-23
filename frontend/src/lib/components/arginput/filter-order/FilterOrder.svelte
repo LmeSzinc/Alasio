@@ -5,7 +5,7 @@
   import { t } from "$lib/i18n";
   import { elementSize } from "$lib/use/size.svelte";
   import { cn } from "$lib/utils";
-  import { type PillBox, cutPills } from "./filterOrder";
+  import { type PillBox, cutPills, splitOption, validItems } from "./filterOrder";
 
   /** Max lines of pills shown in the settings page, the rest becomes "> ..." */
   const MAX_PILL_LINES = 5;
@@ -22,14 +22,34 @@
   const arg = $derived(useArgValue<any[]>(data));
   const items = $derived(Array.isArray(data.value) ? data.value : []);
   const options = $derived(Array.isArray(data.option) ? data.option : []);
+  // A filter-order with secondary options writes every item of the value as
+  // "item:option", see filterOrder.ts
+  const optionDict = $derived(data.option_dict ?? {});
+  const hasSecondary = $derived(Object.keys(optionDict).length > 0);
+  const valid = $derived(validItems(options, optionDict));
 
   /**
-   * True for an item that is in the value but not in "option" anymore, e.g. an
-   * option that was removed from the yaml after the value was set (the backend
+   * True for an item that is in the value but not in the legal items anymore,
+   * e.g. an option that was removed from the yaml after the value was set, or
+   * a secondary option that was removed from "option_dict" (the backend
    * repairs such a value on load, the demo shows the editor handling it)
    */
   function isInvalid(item: any): boolean {
+    if (hasSecondary) return !valid.has(String(item));
     return options.length > 0 && !options.includes(item);
+  }
+
+  /**
+   * Label of an item: its translated name, and after a ":" the translated name
+   * of its secondary option, the same form the value is stored in
+   * ("PlateT4:gun"). The parts are joined into one text instead of a second
+   * element, so the pill reads as the stored item, not as two fields.
+   */
+  function labelOf(item: any): string {
+    if (!hasSecondary) return arg.getLabel(item);
+    const [primary, secondary] = splitOption(String(item));
+    if (secondary === null) return arg.getLabel(primary);
+    return `${arg.getLabel(primary)}:${arg.getLabel(secondary)}`;
   }
 
   // --- Cut of the pill lines ---
@@ -50,7 +70,7 @@
   const truncated = $derived(shown !== null && shown < items.length);
 
   /** Everything a pill renders from: a change re-measures (the labels set the widths) */
-  const layoutKey = $derived(JSON.stringify([items, options, data.option_i18n ?? {}]));
+  const layoutKey = $derived(JSON.stringify([items, options, optionDict, data.option_i18n ?? {}]));
 
   /**
    * Cut the order to the first MAX_PILL_LINES lines. Only reads the geometry of
@@ -94,15 +114,17 @@
     {#if index > 0}
       <span class="text-xs text-muted-foreground">&gt;</span>
     {/if}
-    <Badge variant="secondary" class="rounded-full">
+    <Badge variant="secondary" class="max-w-full rounded-full">
       {#if isInvalid(item)}
         <!-- The settings page only marks the item, the tooltip of the invalid
              item lives in the editor (see FilterOrderItem.svelte) -->
-        <span role="img" class="inline-flex" aria-label={t.Input.FilterOrderInvalid()}>
+        <span role="img" class="inline-flex shrink-0" aria-label={t.Input.FilterOrderInvalid()}>
           <TriangleAlert class="size-3 shrink-0 text-destructive" />
         </span>
       {/if}
-      {arg.getLabel(item)}
+      <!-- A long item truncates inside the pill instead of widening it past
+           the card, the pill itself is capped to the line width -->
+      <span class="min-w-0 truncate">{labelOf(item)}</span>
     </Badge>
   </span>
 {/snippet}

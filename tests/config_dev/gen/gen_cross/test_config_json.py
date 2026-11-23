@@ -137,6 +137,51 @@ Task:
   }
 }"""
 
+    def test_filter_order_secondary_payload(self, fs):
+        """A filter-order keeps its secondary options in the payload."""
+        gen = make_cross(fs, {
+            'main': """\
+Group:
+  args:
+    Order:
+      dt: filter-order
+      value: PlateT4:gun > Chip
+      option: [PlateT4, BookT3, Chip]
+      option_dict:
+        PlateT4: [gun, general]
+        BookT3: [red]
+""",
+        }, {
+            'main': """\
+Task:
+  groups:
+    Group:
+  displays:
+    - [{info: Group}, Group]
+""",
+        })
+        assert nav_config_json(gen, 'main') == """\
+{
+  "card-Task-Group": {
+    "_info": {"group": "Group", "arg": "_info", "card": "card-Task-Group"},
+    "Group": {
+      "Order": {
+        "task": "Task",
+        "group": "Group",
+        "arg": "Order",
+        "dt": "filter-order",
+        "value": ["PlateT4:gun", "Chip"],
+        "option": ["PlateT4", "BookT3", "Chip"],
+        "option_dict": {
+          "PlateT4": ["gun", "general"],
+          "BookT3": ["red"]
+        },
+        "layout": "vert"
+      }
+    }
+  }
+}"""
+
     def test_variant_with_own_i18n(self, fs):
         """A variant overriding i18n binds the class and keeps its own title."""
         gen = make_cross(fs, {

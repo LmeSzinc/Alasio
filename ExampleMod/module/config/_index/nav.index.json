@@ -39,15 +39,15 @@
     "card-RestartDeviceDisplay-RestartDevice": {
       "scheduler": true,
       "i18n": {
-        "zh-CN": "RestartDevice",
-        "en-US": "RestartDevice"
+        "zh-CN": "重启设备",
+        "en-US": "Restart Device"
       }
     },
     "card-RestartGameDisplay-RestartGame": {
       "scheduler": true,
       "i18n": {
-        "zh-CN": "RestartGame",
-        "en-US": "RestartGame"
+        "zh-CN": "重启游戏",
+        "en-US": "Restart Game"
       }
     }
   },
@@ -86,6 +86,12 @@
       "i18n": {
         "zh-CN": "DropRecord",
         "en-US": "DropRecord"
+      }
+    },
+    "card-General-ShopDemo": {
+      "i18n": {
+        "zh-CN": "ShopDemo",
+        "en-US": "ShopDemo"
       }
     }
   },

@@ -57,3 +57,13 @@ class OldRetire(a.GroupBase):
     SR: bool = False
     SSR: bool = False
     RetireAmount: LITERAL_OldRetire_RetireAmount = 'retire_all'
+
+
+LITERAL_ShopDemo_BuyOrder = t.Literal[
+    'PlateT4:gun', 'PlateT4:general', 'PlateT4:torpedo', 'PlateT4:antiair', 'PlateT4:plane', 'BookT3:red',
+    'BookT3:blue', 'BookT3:yellow', 'PR:neptune', 'PR:monarch', 'PR:seattle', 'PR:georgia', 'Chip',
+]
+
+
+class ShopDemo(a.GroupBase):
+    BuyOrder: t.Tuple[LITERAL_ShopDemo_BuyOrder, ...] = ('PlateT4:gun', 'BookT3:red', 'Chip')

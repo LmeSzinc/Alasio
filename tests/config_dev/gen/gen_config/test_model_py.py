@@ -1192,6 +1192,27 @@ class Group(a.GroupBase):
     Order: t.Tuple[LITERAL_Group_Order, ...] = ('B', 'A')
 """
 
+    def test_filter_order_secondary_annotation(self, fs):
+        """A filter-order with secondary options expands every pair into the literal."""
+        gen = make_generator(fs, yaml="""\
+Group:
+  args:
+    Order:
+      dt: filter-order
+      value: PlateT4:gun > Chip
+      option: [PlateT4, Chip, BookT3]
+      option_dict:
+        PlateT4: [gun, general]
+        BookT3: [red]
+""")
+        assert definitions(model_code(gen)) == """\
+LITERAL_Group_Order = t.Literal['PlateT4:gun', 'PlateT4:general', 'Chip', 'BookT3:red']
+
+
+class Group(a.GroupBase):
+    Order: t.Tuple[LITERAL_Group_Order, ...] = ('PlateT4:gun', 'Chip')
+"""
+
     def test_filter_order_expand(self, fs):
         """Both the literal and the tuple of a long filter-order are expanded."""
         items = [f'OPT{i}' + 'y' * 21 for i in range(8)]

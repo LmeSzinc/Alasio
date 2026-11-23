@@ -12,7 +12,20 @@
  * same component is "FilterOrder.svelte.test.ts".
  */
 import { describe, expect, it } from "vitest";
-import { type PillBox, appendItem, applyDrop, cutPills, moveItem, removeItem, sameList } from "./filterOrder";
+import {
+  type PillBox,
+  appendItem,
+  applyDrop,
+  composeOption,
+  cutPills,
+  defaultItem,
+  moveItem,
+  primaryOf,
+  removeItem,
+  sameList,
+  splitOption,
+  validItems,
+} from "./filterOrder";
 
 describe("TestSameList", () => {
   it("compares the items and the order", () => {
@@ -169,5 +182,76 @@ describe("TestCutPills", () => {
   it("never cuts away the last pill, the marker wraps below it instead", () => {
     // The marker fits next to no pill at all (100 + 4 + 40 > 120)
     expect(cutPills(boxes(6, 1), 40, 4, 120, 5)).toBe(1);
+  });
+});
+
+describe("TestSplitOption", () => {
+  it.each([
+    ["PlateT4:gun", ["PlateT4", "gun"]],
+    ["Chip", ["Chip", null]],
+    // split on the first separator only
+    ["PlateT4:gun:x", ["PlateT4", "gun:x"]],
+    ["Chip:", ["Chip", ""]],
+  ])("splits %s", (item, expected) => {
+    expect(splitOption(item)).toEqual(expected);
+  });
+
+  it("reads the primary item of both kinds of item", () => {
+    expect(primaryOf("PlateT4:gun")).toBe("PlateT4");
+    expect(primaryOf("Chip")).toBe("Chip");
+  });
+});
+
+describe("TestComposeOption", () => {
+  it("joins a primary item with its secondary option", () => {
+    expect(composeOption("PlateT4", "gun")).toBe("PlateT4:gun");
+  });
+
+  it.each([null, undefined, ""])("keeps the bare item for %s", (secondary) => {
+    expect(composeOption("Chip", secondary)).toBe("Chip");
+  });
+
+  it("round-trips an item", () => {
+    const [primary, secondary] = splitOption("PlateT4:gun");
+    expect(composeOption(primary, secondary)).toBe("PlateT4:gun");
+  });
+});
+
+describe("TestValidItems", () => {
+  it("lists the options themselves without secondary options", () => {
+    expect([...validItems(["Fleet-1", "Fleet-2"])]).toEqual(["Fleet-1", "Fleet-2"]);
+  });
+
+  it("expands a primary item into its own secondary options only", () => {
+    const valid = validItems(["PlateT4", "BookT3", "Chip"], {
+      PlateT4: ["gun", "general"],
+      BookT3: ["red"],
+    });
+
+    expect([...valid]).toEqual(["PlateT4:gun", "PlateT4:general", "BookT3:red", "Chip"]);
+    // a secondary option of another item is not a legal item of this one
+    expect(valid.has("PlateT4:red")).toBe(false);
+    expect(valid.has("Chip:gun")).toBe(false);
+  });
+
+  it("requires the secondary option of a primary that declares one", () => {
+    const valid = validItems(["PlateT4"], { PlateT4: ["gun"] });
+
+    expect(valid.has("PlateT4")).toBe(false);
+  });
+
+  it("accepts the items of the legacy filter-order as str", () => {
+    expect([...validItems([1, 2])]).toEqual(["1", "2"]);
+  });
+});
+
+describe("TestDefaultItem", () => {
+  it("starts an unused primary at its first secondary option", () => {
+    expect(defaultItem("PlateT4", { PlateT4: ["gun", "general"] })).toBe("PlateT4:gun");
+  });
+
+  it("adds a primary without secondary options as itself", () => {
+    expect(defaultItem("Chip", { PlateT4: ["gun"] })).toBe("Chip");
+    expect(defaultItem("Chip")).toBe("Chip");
   });
 });

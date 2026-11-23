@@ -74,6 +74,11 @@ export type ArgData = {
    * `{chapter1: [1-1, 1-2], chapter2: [2-1, 2-2]}`
    * The group is only a navigation aid of the frontend, the value stores the
    * option only
+   *
+   * Secondary options of an item if arg is `dt=filter-order`, might be
+   * `{PlateT4: [gun, general], BookT3: [red, blue]}`. An item of the value then
+   * carries one of its own secondary options as `item:option` (`PlateT4:gun`),
+   * an item without an entry here is stored as itself (`Chip`)
    */
   option_dict?: Record<string, any[]>;
   option_i18n?: Record<any, string>;

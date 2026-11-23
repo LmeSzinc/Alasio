@@ -1,6 +1,6 @@
 import pytest
 
-from alasio.base.filter import parse_filter, remove_hash_comment
+from alasio.base.filter import parse_filter, remove_hash_comment, split_option
 
 pytestmark = [
     pytest.mark.parallel,
@@ -137,3 +137,23 @@ def test_parse_filter_none():
     """Test behavior when None is passed (str(None) -> 'None')."""
     # This is an edge case of str(None)
     assert parse_filter(None) == ["None"]
+
+
+class TestSplitOption:
+    """split_option() handles the item of a filter-order with secondary options."""
+
+    @pytest.mark.parametrize('item, expected', [
+        ('PlateT4:gun', ('PlateT4', 'gun')),
+        ('Chip', ('Chip', None)),
+        # split on the first separator only
+        ('PlateT4:gun:x', ('PlateT4', 'gun:x')),
+        # a leading separator is kept as written, the item itself is validated
+        # by the arg definition, not here
+        (':gun', ('', 'gun')),
+    ])
+    def test_split(self, item, expected):
+        assert split_option(item) == expected
+
+    def test_non_str_item(self):
+        """A legacy filter-order item may be a number, str() keeps it usable."""
+        assert split_option(1) == ('1', None)

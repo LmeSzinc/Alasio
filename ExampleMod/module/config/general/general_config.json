@@ -167,5 +167,24 @@
         "option": ["do_not", "save", "upload", "save_and_upload"]
       }
     }
+  },
+  "card-General-ShopDemo": {
+    "_info": {"group": "ShopDemo", "arg": "_info", "card": "card-General-ShopDemo"},
+    "ShopDemo": {
+      "BuyOrder": {
+        "task": "General",
+        "group": "ShopDemo",
+        "arg": "BuyOrder",
+        "dt": "filter-order",
+        "value": ["PlateT4:gun", "BookT3:red", "Chip"],
+        "option": ["PlateT4", "BookT3", "PR", "Chip"],
+        "option_dict": {
+          "PlateT4": ["gun", "general", "torpedo", "antiair", "plane"],
+          "BookT3": ["red", "blue", "yellow"],
+          "PR": ["neptune", "monarch", "seattle", "georgia"]
+        },
+        "layout": "vert"
+      }
+    }
   }
 }
