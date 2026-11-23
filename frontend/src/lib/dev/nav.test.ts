@@ -3,9 +3,9 @@
  *
  * The module is the single source of truth for two things that must not drift
  * apart: the list the sidebar renders, and the layout policy that decides which
- * pages run without the navigation column. A page added to a compact section
- * has to change its layout without any extra flag, so the cases here check the
- * mapping from routes to sections rather than the translated labels.
+ * pages run without the navigation column. Only the pages that are a workspace
+ * of their own drop the column, so the cases here check the routes against that
+ * policy rather than the translated labels.
  */
 import { describe, expect, it } from "vitest";
 import { devNavGroups, devNavTitle, isCompactPath, isNavPath, navColumnClass } from "$lib/dev/nav";
@@ -25,25 +25,34 @@ describe("TestIsNavPath", () => {
 });
 
 describe("TestIsCompactPath", () => {
-  it.each(["/dev/assets", "/dev/golden-test", "/dev/compat"])("drops the nav column on %s", (pathname) => {
+  it.each(["/dev/assets", "/dev/golden-test"])("drops the nav column on %s", (pathname) => {
     expect(isCompactPath(pathname)).toBe(true);
   });
 
-  it.each(["/dev/config", "/dev/setting", "/dev/updater", "/config/example/overview", "/main"])(
-    "keeps the nav column on %s",
-    (pathname) => {
-      expect(isCompactPath(pathname)).toBe(false);
-    },
-  );
+  it.each([
+    "/dev/config",
+    "/dev/setting",
+    "/dev/updater",
+    // Only the two workspaces drop the column: the other dev pages are
+    // ordinary pages, and the navigation is what makes a series of them cheap
+    // to visit
+    "/dev/compat",
+    "/dev/debug/ws",
+    "/dev/debug/log",
+    "/config/example/overview",
+    "/main",
+  ])("keeps the nav column on %s", (pathname) => {
+    expect(isCompactPath(pathname)).toBe(false);
+  });
 
-  it("drops the nav column on every debug page that is listed", () => {
-    // The debug section is only listed in a development build; the routes it
-    // names are dropped from production together with the section.
-    const debug = devNavGroups().find((group) => group.id === "debug");
-    if (!debug) throw new Error("the debug group must exist");
+  it("keeps the nav column on every dev page that is not a workspace", () => {
+    const tools = devNavGroups()
+      .flatMap((group) => group.items)
+      .filter((item) => !["/dev/assets", "/dev/golden-test"].includes(item.path));
 
-    for (const item of debug.items) {
-      expect(isCompactPath(item.path)).toBe(true);
+    expect(tools.length).toBeGreaterThan(0);
+    for (const item of tools) {
+      expect(isCompactPath(item.path)).toBe(false);
     }
   });
 
@@ -98,22 +107,23 @@ describe("TestNavColumnClass", () => {
     expect(navColumnClass(pathname, isXL)).toBe(expected);
   });
 
-  it.each(["/dev/assets", "/dev/golden-test", "/dev/compat"])(
-    "hides the column on %s at the medium breakpoint",
+  it.each(["/dev/assets", "/dev/golden-test"])("hides the column on %s at the medium breakpoint", (pathname) => {
+    // `hidden` is the class that stops the column from being laid out at all.
+    expect(navColumnClass(pathname, false)).toBe("hidden");
+  });
+
+  it.each(["/dev/compat", "/dev/debug/ws", "/dev/config"])(
+    "keeps the column on %s at the medium breakpoint",
     (pathname) => {
-      // `hidden` is the class that stops the column from being laid out at all.
-      expect(navColumnClass(pathname, false)).toBe("hidden");
+      expect(navColumnClass(pathname, false)).toBe("w-50");
     },
   );
 
-  it.each(["/dev/assets", "/dev/golden-test", "/dev/compat"])(
-    "keeps the column on %s at the large breakpoint",
-    (pathname) => {
-      // A large window has room for both: hiding the navigation there would cost
-      // a click on every tool switch for no width gain.
-      expect(navColumnClass(pathname, true)).toBe("w-60");
-    },
-  );
+  it.each(["/dev/assets", "/dev/golden-test"])("keeps the column on %s at the large breakpoint", (pathname) => {
+    // A large window has room for both: hiding the navigation there would cost
+    // a click on every tool switch for no width gain.
+    expect(navColumnClass(pathname, true)).toBe("w-60");
+  });
 });
 
 describe("TestDevNavTitle", () => {

@@ -42,9 +42,9 @@
   const closeSheet = () => (isSheetOpen = false);
 
   // Width of the navigation column, as Tailwind classes. A compact dev page (the
-  // asset manager, the golden test review, the debug pages) hides it on medium
-  // screens: it is a workspace of its own and keeps only the config column
-  // beside it. Large screens show it for every page.
+  // asset manager, the golden test review) hides it on medium screens: it is a
+  // workspace of its own and keeps only the config column beside it. Large
+  // screens show it for every page.
   const navClass = $derived(navColumnClass(page.url.pathname, screen.isXL));
 
   // Declared by the layout, overridden by pages that put controls in the

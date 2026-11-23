@@ -11,10 +11,6 @@ export interface DevNavItem {
 
 /**
  * A titled section of the dev navigation.
- *
- * The section id is also a layout policy: sections listed in
- * `COMPACT_GROUPS` are developer pages that run without the navigation column,
- * so their content gets the whole width next to the config column.
  */
 export interface DevNavGroup {
   id: "alasio" | "dev" | "debug";
@@ -24,8 +20,19 @@ export interface DevNavGroup {
   lead: boolean;
 }
 
-/** Sections whose pages drop the navigation column */
-const COMPACT_GROUPS: ReadonlySet<DevNavGroup["id"]> = new Set<DevNavGroup["id"]>(["dev", "debug"]);
+/**
+ * Routes that drop the dev navigation column on a medium window.
+ *
+ * Only the pages that are a workspace of their own are listed: the asset
+ * manager lays out a file tree with source and screenshots, the golden test
+ * review a 2×2 grid, and both ship their own header (DevCompactHeader). Beside
+ * 200px of navigation their content would be too narrow on a medium window.
+ *
+ * Every other page keeps the column, so switching tools does not cost a trip
+ * through the sheet: the debug pages are ordinary pages with a title, and the
+ * navigation is what makes a series of them cheap to visit.
+ */
+const COMPACT_PATHS: readonly string[] = ["/dev/assets", "/dev/golden-test"];
 
 /**
  * Sections of the dev navigation, in display order.
@@ -104,19 +111,19 @@ export function isNavPath(pathname: string, base: string): boolean {
  * Whether the page runs without the dev navigation column.
  *
  * These pages are a full-window workspace of their own (a 2×2 grid, a file tree
- * with source and screenshots), so the navigation column is dropped and only
- * the config column stays.
+ * with source and screenshots), so the navigation column is dropped on a medium
+ * window and only the config column stays. The list is explicit rather than
+ * derived from a section: the sections hold ordinary pages as well, and those
+ * keep the navigation.
  *
  * Args:
  *   pathname: Current route
  *
  * Returns:
- *   bool: true for `/dev/assets`, `/dev/golden-test`, `/dev/compat` and `/dev/debug/*`
+ *   bool: true for `/dev/assets`, `/dev/golden-test` and the pages below them
  */
 export function isCompactPath(pathname: string): boolean {
-  return devNavGroups().some(
-    (group) => COMPACT_GROUPS.has(group.id) && group.items.some((item) => isNavPath(pathname, item.path)),
-  );
+  return COMPACT_PATHS.some((base) => isNavPath(pathname, base));
 }
 
 /**
@@ -141,10 +148,10 @@ export function devNavTitle(pathname: string): string {
  * Width classes of the navigation column of a private page.
  *
  * On medium screens a compact dev page (the asset manager, the golden test
- * review, the debug pages) hides the column entirely: it is a workspace of its
- * own and 200px of navigation would leave too little for the 2×2 grid. Large
- * screens keep it for every page, because there is room for the navigation and
- * the workspace side by side and hiding it would cost a click on every switch.
+ * review) hides the column entirely: it is a workspace of its own and 200px of
+ * navigation would leave too little for the 2×2 grid. Large screens keep it for
+ * every page, because there is room for the navigation and the workspace side
+ * by side and hiding it would cost a click on every switch.
  *
  * Returned as Tailwind classes rather than a pixel number so the shell can pass
  * them through `cn` with the rest of the column's classes.
