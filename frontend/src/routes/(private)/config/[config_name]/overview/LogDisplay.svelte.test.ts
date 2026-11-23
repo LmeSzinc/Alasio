@@ -14,6 +14,11 @@
  * offset is clamped the way the browser clamps it. They also count the box
  * measurements, because the point of the geometry is that following a new entry
  * costs nothing and only a resize is measured.
+ *
+ * An empty log shows its hint as an overlay of the card, so the hint carries no
+ * line boxes and stays out of the geometry the card fits: it holds still while
+ * the card resizes, and the fit is the same whether the log is empty or filled.
+ * Its tests are the second block below.
  */
 import { mount, unmount } from "svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -28,7 +33,7 @@ import type { LogDataProps } from "./types";
  */
 const PITCH = 18;
 /** Gap kept between the log and the card edges, the value the component uses */
-const EDGE_GAP = 12;
+const EDGE_GAP = 10;
 /** Height of the card's border box, not a whole number of lines */
 const CARD_HEIGHT = 600.6;
 
@@ -91,6 +96,14 @@ function card(target: HTMLElement): HTMLElement {
 function viewport(target: HTMLElement): HTMLElement {
   return target.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]')!;
 }
+
+/** The overlay that carries the empty hint */
+function emptyHint(target: HTMLElement): HTMLElement | null {
+  return target.querySelector<HTMLElement>('[data-slot="log-empty"]');
+}
+
+/** Top offset class of the hint: one spacing step down from the card edge */
+const HINT_TOP_CLASS = "top-4";
 
 /** A gap the component set on the card, in px */
 function edgeGap(target: HTMLElement, edge: "Top" | "Bottom"): number {
@@ -303,5 +316,68 @@ describe("TestLogFitToLines", () => {
 
     expect(few).toBeLessThanOrEqual(2);
     expect(measurements).toBe(few);
+  });
+});
+
+describe("TestLogEmptyState", () => {
+  it("shows the hint as an overlay, not as content of the log", async () => {
+    const { target } = await mountLog([]);
+    const hint = emptyHint(target);
+
+    expect(hint).not.toBeNull();
+    // Out of the scroll content: the hint is nobody's line box
+    expect(viewport(target).contains(hint)).toBe(false);
+    expect(target.querySelector('[data-slot="log-content"]')!.textContent).toBe("");
+    // An overlay at the top of the card, where the first entry would begin
+    expect(hint!.parentElement).toBe(card(target));
+    expect(hint!.classList.contains("absolute")).toBe(true);
+    expect(hint!.classList.contains(HINT_TOP_CLASS)).toBe(true);
+  });
+
+  it("keeps the hint in place while the card resizes", async () => {
+    const { target, layout } = await mountLog([]);
+    const hint = emptyHint(target)!;
+    const classes = hint.className;
+
+    for (const height of [520.5, 720.25, 900.1]) {
+      layout.height = height;
+      ResizeObserverStub.trigger();
+      await settle();
+
+      // The card's gaps follow the height for the log's line grid; the hint is
+      // anchored to the card, away from the pixels the fitted gaps move
+      expect(hint.className).toBe(classes);
+      expect(hint.parentElement).toBe(card(target));
+      expect(edgeGap(target, "Top")).toBeCloseTo(EDGE_GAP + ((height - 2 * EDGE_GAP) % PITCH) / 2, 6);
+    }
+  });
+
+  it("fits the card the same whether the log is empty or filled", async () => {
+    const { target: emptyTarget } = await mountLog([]);
+    ResizeObserverStub.trigger();
+    await settle();
+    const emptyGaps = [edgeGap(emptyTarget, "Top"), edgeGap(emptyTarget, "Bottom")];
+    unmountAll();
+
+    const { target: filledTarget } = await mountLog([1, 1]);
+    ResizeObserverStub.trigger();
+    await settle();
+
+    // The hint left the geometry: the same card gets the same gaps either way
+    expect([edgeGap(filledTarget, "Top"), edgeGap(filledTarget, "Bottom")]).toEqual(emptyGaps);
+  });
+
+  it("drops the hint once entries arrive and brings it back when the log empties", async () => {
+    const { target, data, layout } = await mountLog([]);
+    expect(emptyHint(target)).not.toBeNull();
+
+    layout.lines = 4;
+    data.push(...makeLogs([2, 2]));
+    await settle();
+    expect(emptyHint(target)).toBeNull();
+
+    data.splice(0);
+    await settle();
+    expect(emptyHint(target)).not.toBeNull();
   });
 });

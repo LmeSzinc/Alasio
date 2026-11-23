@@ -23,6 +23,9 @@
   /** Whether the card was fitted to whole lines at least once */
   let fitted = false;
 
+  /** Whether the log holds no entries, so the card shows the hint */
+  const isEmpty = $derived(!logData || logData.length === 0);
+
   /**
    * Scroll to the end of the log.
    *
@@ -51,6 +54,10 @@
    * line is split between the two edge gaps. The gaps stay even at any card
    * height, and the leftover pixels are part of the gap rather than content, so
    * the newest entry stays the last thing the log can reach.
+   *
+   * The empty hint is not part of the scrolling area (see the markup), so it
+   * never enters this geometry: with no entries to align there is nothing to
+   * fit, and the gaps it leaves are blank space.
    *
    * Called on a card resize and on a change of the line height, not on a new
    * entry: a new entry changes the content, never the geometry.
@@ -158,17 +165,24 @@
       tall for the log to land on the line grid (see fitLines).
     -->
     <div data-slot="log-content" class={cn("flex flex-col", isInitial && logData && logData.length > 0 && "invisible")}>
-      {#if logData && logData.length > 0}
-        {#each logData as log (log)}
-          <LogData {...log} />
-        {/each}
-      {:else}
-        <div class="flex w-full items-start justify-center">
-          <span class="text-sm text-muted-foreground italic">{t.Overview.LogEmpty()}</span>
-        </div>
-      {/if}
+      {#each logData ?? [] as log (log)}
+        <LogData {...log} />
+      {/each}
     </div>
   </ScrollArea>
+  <!--
+    The empty hint is an overlay of the card, not a row of the log: it carries
+    no line boxes, so it stays out of the geometry fitLines aligns and out of
+    the scroll content. One spacing step below the card's top edge (top-4, the
+    offset the scroll-to-bottom button sits on) puts it where the first entry's
+    text would begin, a little under the edge gap the fitted log uses, so it
+    does not hug the card edge while the card resizes around it.
+  -->
+  {#if isEmpty}
+    <div data-slot="log-empty" class="pointer-events-none absolute inset-x-0 top-4 flex justify-center">
+      <span class="text-sm text-muted-foreground italic">{t.Overview.LogEmpty()}</span>
+    </div>
+  {/if}
   <Button
     onclick={scrollToBottom}
     class="absolute top-4 right-4 z-10 bg-card opacity-0 transition-opacity group-hover:opacity-100"
