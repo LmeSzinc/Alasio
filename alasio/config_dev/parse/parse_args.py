@@ -43,6 +43,9 @@ TYPE_DT_TO_PYTHON = {
     # 'static-hide' is an alias of dt='static' and hide=True
     # text input
     'input': 'str',
+    # input-line is a single line text box: it is drawn like a textarea but it is
+    # edited by an <input>, so a newline can not be typed and never breaks the line
+    'input-line': 'str',
     'input-int': 'int',
     'input-float': 'float',
     'textarea': 'str',
@@ -268,9 +271,9 @@ def preprocess_arg(arg: dict) -> dict:
     # Split filters
     if dt in TYPE_ARG_TUPLE and vtype is str:
         arg['value'] = value = tuple(s.strip() for s in value.split('>'))
-    # textarea is default to vert layout
+    # textarea-like inputs take the whole width, they are default to vert layout
     if 'layout' not in arg:
-        if dt in ['textarea', 'filter', 'filter-order']:
+        if dt in ['input-line', 'textarea', 'filter', 'filter-order']:
             arg['layout'] = 'vert'
 
     return arg

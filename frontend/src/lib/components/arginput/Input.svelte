@@ -18,6 +18,12 @@
   // --- Datetime handling ---
   const isDatetime = $derived(data.dt === "datetime");
 
+  // --- Box style ---
+  // dt="input-line" takes the box of a textarea but is edited by an <input>,
+  // so the value is one line and a newline is stripped by the input itself.
+  // The desc layout shows plain text, it drops the box like it drops the line.
+  const isBox = $derived(data.dt === "input-line" && !isDesc);
+
   // Local display value for datetime
   let displayValue = $state("");
   // Pending reset flag: set on mousedown (fires before blur), checked in onBlur to prevent
@@ -162,12 +168,16 @@
 
 <div class={cn("group w-full", className)}>
   <div class="relative flex w-full items-center focus-within:z-10">
-    <!-- Primary color bottom border -->
-    <!-- On focus, gray bottom border and primary color rounded ring -->
+    <!-- dt="input": primary color bottom border, on focus a gray bottom
+         border and a primary color rounded ring. dt="input-line" draws the whole
+         box, like the textarea of dt="textarea". -->
     <Input
       type="text"
       class={cn(
-        "peer truncate border-0 bg-card p-1 px-2 shadow-none dark:bg-card",
+        // dt="input" is a flat row with a bottom accent line instead of a border,
+        // dt="input-line" keeps the border and takes the textarea box colors
+        "peer truncate shadow-none",
+        isBox ? "bg-accent font-mono" : "border-0 bg-card p-1 px-2 dark:bg-card",
         isDatetime ? "pr-12 focus-visible:pr-12" : "focus-visible:pr-6",
         isDesc ? "py-0 text-muted-foreground" : "",
         "focus-visible:shadow-none",
@@ -181,13 +191,15 @@
       onblur={onBlur}
     />
 
-    <!-- Draw bottom border with peer -->
-    <div
-      class={cn(
-        "absolute right-0 bottom-0 left-0 border-b-2 transition-colors duration-200 peer-focus-visible:border-foreground/35",
-        isDesc ? "border-transparent group-hover:border-primary" : "border-primary",
-      )}
-    ></div>
+    <!-- Draw bottom border with peer, the box of dt="input-line" has all 4 sides -->
+    {#if !isBox}
+      <div
+        class={cn(
+          "absolute right-0 bottom-0 left-0 border-b-2 transition-colors duration-200 peer-focus-visible:border-foreground/35",
+          isDesc ? "border-transparent group-hover:border-primary" : "border-primary",
+        )}
+      ></div>
+    {/if}
 
     <!-- Reset button is visible only on focus -->
     <div class="absolute right-1 flex items-center group-focus-within:right-0">

@@ -101,6 +101,42 @@ Task:
   }
 }"""
 
+    def test_input_line_gets_the_vert_layout(self, fs):
+        """dt=input-line takes the whole width, the payload carries its vert layout."""
+        gen = make_cross(fs, {
+            'main': """\
+Group:
+  args:
+    Name:
+      dt: input-line
+      value: some text
+""",
+        }, {
+            'main': """\
+Task:
+  groups:
+    Group:
+  displays:
+    - [{info: Group}, Group]
+""",
+        })
+        assert nav_config_json(gen, 'main') == """\
+{
+  "card-Task-Group": {
+    "_info": {"group": "Group", "arg": "_info", "card": "card-Task-Group"},
+    "Group": {
+      "Name": {
+        "task": "Task",
+        "group": "Group",
+        "arg": "Name",
+        "dt": "input-line",
+        "value": "some text",
+        "layout": "vert"
+      }
+    }
+  }
+}"""
+
     def test_variant_with_own_i18n(self, fs):
         """A variant overriding i18n binds the class and keeps its own title."""
         gen = make_cross(fs, {

@@ -1250,6 +1250,20 @@ class G(a.GroupBase):
     Enable: bool = False
 """
 
+    def test_input_line(self, fs):
+        """dt=input-line is a str like dt=textarea, the layout is not in the model."""
+        gen = make_generator(fs, yaml="""\
+G:
+  args:
+    Name:
+      dt: input-line
+      value: some text
+""")
+        assert definitions(model_code(gen)) == """\
+class G(a.GroupBase):
+    Name: str = 'some text'
+"""
+
     def test_meta_range(self, fs):
         """A numeric range becomes msgspec.Meta."""
         gen = make_generator(fs, yaml="""\

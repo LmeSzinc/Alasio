@@ -48,10 +48,17 @@
 
   // --- Mock data: one card per arginput component ---
   const mockData: Record<string, CardData> = {
-    // dt=input / input-int / input-float / datetime all render as Input.svelte
-    Input: makeCard(info("Input", "Input", "dt=input · input-int · input-float · datetime"), {
+    // dt=input / input-line / input-int / input-float / datetime all render as Input.svelte
+    Input: makeCard(info("Input", "Input", "dt=input · input-line · input-int · input-float · datetime"), {
       Input: {
         Text: arg("Input", "Text", "input", "text value", { name: "input" }),
+        // The box of dt=textarea on a single line: the value is edited by an
+        // <input>, a newline can not be typed and never breaks the line
+        Line: arg("Input", "Line", "input-line", "single line value", {
+          name: "input-line",
+          help: "Textarea-like box, one line: the backend gives it the vertical layout",
+          layout: "vert",
+        }),
         // range makes the validation error state reachable without editing data
         Integer: arg("Input", "Integer", "input-int", 128, { name: "input-int", ge: 0, le: 1000 }),
         Float: arg("Input", "Float", "input-float", 0.85, { name: "input-float" }),

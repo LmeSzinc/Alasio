@@ -20,6 +20,7 @@
   // --- MAPPING LOGIC ---
   const componentMap: Record<string, Component<InputProps>> = {
     input: Input,
+    "input-line": Input,
     checkbox: Checkbox,
     select: Select,
     "secondary-select": SecondarySelect,

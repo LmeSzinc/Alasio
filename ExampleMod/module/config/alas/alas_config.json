@@ -84,15 +84,14 @@
         "task": "Device",
         "group": "EmulatorInfo",
         "arg": "Name",
-        "dt": "textarea",
-        "value": "",
-        "layout": "vert"
+        "dt": "input",
+        "value": ""
       },
       "Path": {
         "task": "Device",
         "group": "EmulatorInfo",
         "arg": "Path",
-        "dt": "textarea",
+        "dt": "input-line",
         "value": "",
         "layout": "vert"
       }

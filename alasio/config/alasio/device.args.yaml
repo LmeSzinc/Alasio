@@ -49,10 +49,10 @@ EmulatorInfo:
       ]
     Name:
       value: ""
-      dt: textarea
+      dt: input
     Path:
       value: ""
-      dt: textarea
+      dt: input-line
 
 Error:
   args:
