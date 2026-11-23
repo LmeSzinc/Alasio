@@ -14,8 +14,10 @@
  * The stage heights are short pages, so they use the compact spacing
  * (p-2.5 / gap-2.5) of the height budget.
  *
- * jsdom has no layout, so the page box is reported through the ResizeObserver
- * of the `elementSize` action, the same way a browser resize reports it.
+ * jsdom has no layout, so both boxes the page measures are reported through the
+ * ResizeObserver of the `elementSize` actions, the same way a browser resize
+ * reports them: the page box (orientation, spacing) and the stack inside it
+ * (the height the stage budget is drawn from).
  */
 import { mount, unmount } from "svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -65,7 +67,7 @@ class ResizeObserverStub {
   /** The observer that watches the given element */
   static observing(target: Element): ResizeObserverStub {
     const observer = ResizeObserverStub.instances.find((instance) => instance.targets.includes(target));
-    if (!observer) throw new Error("no ResizeObserver watches the page box");
+    if (!observer) throw new Error("no ResizeObserver watches the element");
     return observer;
   }
 }
@@ -84,23 +86,40 @@ async function mountPage(): Promise<HTMLElement> {
   return target;
 }
 
-/** Reports the page box size, as a browser resize reports it */
+/** The stack the cards live in: the padded flex box inside the page box */
+function pageStack(target: HTMLElement): HTMLElement {
+  return (target.firstElementChild as HTMLElement).firstElementChild as HTMLElement;
+}
+
+/** The page padding in px, as a browser applies it from the page's padding class */
+function pagePadding(stack: HTMLElement): number {
+  return stack.classList.contains("p-4") ? 16 : 10;
+}
+
+/**
+ * Reports a page box size, as a browser resize reports it.
+ *
+ * The page measures two boxes: the page box itself (orientation and spacing;
+ * it carries no padding, so the measurement cannot feed back into the padding
+ * it chooses) and, inside it, the stack the cards live in, whose content box
+ * is the height the stage budget is drawn from. jsdom has no layout, so the
+ * test takes the browser's part: it hands the stack the content box that the
+ * page padding leaves, read from the class the page applies for the new size.
+ */
 async function resizePage(target: HTMLElement, width: number, height: number) {
   const pageBox = target.firstElementChild as HTMLElement;
   ResizeObserverStub.observing(pageBox).resize(width, height);
+  // The page chooses its padding for the new box before the stack is laid out
   await flushEffects();
-}
-
-/** The box the page padding and the gap of the page are declared on */
-function pageRow(target: HTMLElement): HTMLElement {
-  return (target.firstElementChild as HTMLElement).firstElementChild as HTMLElement;
+  const stack = pageStack(target);
+  const padding = pagePadding(stack);
+  ResizeObserverStub.observing(stack).resize(width - padding * 2, height - padding * 2);
+  await flushEffects();
 }
 
 /** The left column: the preview block stacked over the dashboard */
 function leftColumn(target: HTMLElement): HTMLElement {
-  const pageBox = target.firstElementChild as HTMLElement;
-  const row = pageBox.firstElementChild as HTMLElement;
-  return row.firstElementChild as HTMLElement;
+  return pageStack(target).firstElementChild as HTMLElement;
 }
 
 /** The preview column: the preview stacked over the progress bar */
@@ -167,7 +186,8 @@ describe("TestOverviewLandscapeStages", () => {
   });
 
   it("keeps the preview at its minimum height while the progress bar shows", async () => {
-    // 380 (preview 140 + gap 10 + progress 80 + gap 10 + dashboard 140) + 20 (p-2.5)
+    // 380 of stack (preview 140 + gap 10 + progress 80 + gap 10 + dashboard 140)
+    // inside a 400 page box, whose p-2.5 leaves 20 for the padding
     const target = await mountPage();
     await resizePage(target, 1600, 400);
 
@@ -189,7 +209,7 @@ describe("TestOverviewLandscapeStages", () => {
   });
 
   it("keeps the dashboard while the preview and dashboard minimums still fit", async () => {
-    // 290 (preview 140 + gap 10 + dashboard 140) + 20 (p-2.5)
+    // 290 of stack (preview 140 + gap 10 + dashboard 140) inside a 310 page box
     const target = await mountPage();
     await resizePage(target, 1600, 310);
 
@@ -230,33 +250,33 @@ describe("TestOverviewSpacing", () => {
     const target = await mountPage();
     await resizePage(target, 1600, 900);
 
-    expect(pageRow(target).classList.contains("p-4")).toBe(true);
-    expect(pageRow(target).classList.contains("gap-4")).toBe(true);
+    expect(pageStack(target).classList.contains("p-4")).toBe(true);
+    expect(pageStack(target).classList.contains("gap-4")).toBe(true);
   });
 
   it("keeps the roomy spacing when the height shrinks across the landscape switch", async () => {
     const target = await mountPage();
     // 1000/900 = 1.11: portrait; 1000/800 = 1.25: landscape
     await resizePage(target, 1000, 900);
-    expect(pageRow(target).classList.contains("p-4")).toBe(true);
+    expect(pageStack(target).classList.contains("p-4")).toBe(true);
 
     await resizePage(target, 1000, 800);
-    expect(pageRow(target).classList.contains("p-4")).toBe(true);
+    expect(pageStack(target).classList.contains("p-4")).toBe(true);
   });
 
   it("uses the compact spacing when the page is short", async () => {
     const target = await mountPage();
     await resizePage(target, 1600, 600);
 
-    expect(pageRow(target).classList.contains("p-2.5")).toBe(true);
-    expect(pageRow(target).classList.contains("gap-2.5")).toBe(true);
+    expect(pageStack(target).classList.contains("p-2.5")).toBe(true);
+    expect(pageStack(target).classList.contains("gap-2.5")).toBe(true);
   });
 
   it("uses the compact spacing when the page is narrow", async () => {
     const target = await mountPage();
     await resizePage(target, 600, 1000);
 
-    expect(pageRow(target).classList.contains("p-2.5")).toBe(true);
-    expect(pageRow(target).classList.contains("gap-2.5")).toBe(true);
+    expect(pageStack(target).classList.contains("p-2.5")).toBe(true);
+    expect(pageStack(target).classList.contains("gap-2.5")).toBe(true);
   });
 });

@@ -12,6 +12,12 @@
   const containerSize = $state({ width: 0, height: 0 });
   const isLandscape = $derived(containerSize.width / containerSize.height >= 1.2);
 
+  // The box the cards are stacked in, measured on the stack itself. Its content
+  // box is the height the cards actually have: the browser already took the
+  // page padding off, so the padding never appears in the numbers below, and
+  // chrome added around the page follows the budget without an edit here.
+  const stackSize = $state({ width: 0, height: 0 });
+
   // Tailwind spacing unit: 1 = 0.25rem = 4px (the `--spacing` default)
   const SPACING = 4;
 
@@ -25,40 +31,35 @@
   const ROOMY_MIN_HEIGHT = 640;
   const isCompact = $derived(containerSize.width < ROOMY_MIN_WIDTH || containerSize.height < ROOMY_MIN_HEIGHT);
 
-  // Height budget of the landscape column, in px. Every number is the step
-  // count of the Tailwind class it mirrors, so the two cannot drift apart:
-  // - page padding (top + bottom): 8 steps (p-4) or 5 steps (p-2.5)
-  // - gap between the preview block and the dashboard: 4 steps (gap-4) or
-  //   2.5 steps (gap-2.5)
-  // - gap-2.5 between the preview and the progress bar: 2.5 steps
-  // - Progress h-20: 20 steps
-  // - Dashboard min-h-35: 35 steps
-  const PAGE_PADDING_Y = $derived((isCompact ? 5 : 8) * SPACING);
-  const PREVIEW_PROGRESS_GAP = 2.5 * SPACING;
+  // Sizes inside the landscape column, in the step counts of the Tailwind
+  // classes the markup applies. These are the only numbers the height budget
+  // needs, so each one names the class it mirrors:
+  // - min-h-35: the preview and the dashboard each keep this minimum. The
+  //   preview is the page's content, so it is the last thing to give height
+  //   up, and the floor is enough to show a frame rather than a strip
+  // - h-20: the progress bar
+  // - gap-2.5: between the preview and the progress bar
+  // - gap-4 (gap-2.5 on a compact page): between the blocks of the column
+  const CARD_MIN_HEIGHT = 35 * SPACING;
   const PROGRESS_HEIGHT = 20 * SPACING;
-  const COLUMN_GAP = $derived((isCompact ? 2.5 : 4) * SPACING);
-  const DASHBOARD_MIN_HEIGHT = 35 * SPACING;
+  const PREVIEW_PROGRESS_GAP = 2.5 * SPACING;
+  const BLOCK_GAP = $derived((isCompact ? 2.5 : 4) * SPACING);
 
-  // The preview is the page's content, so it is the last thing to give height
-  // up: at least as tall as the dashboard minimum, which is enough to show a
-  // frame rather than a strip. Only when it stands alone does it take whatever
-  // the column has.
-  const PREVIEW_MIN_HEIGHT = DASHBOARD_MIN_HEIGHT;
-
-  /** Height the landscape column has below the page padding */
-  const columnHeight = $derived(containerSize.height - PAGE_PADDING_Y);
+  /** Height the landscape column has, as the stack reports it */
+  const columnHeight = $derived(stackSize.height);
 
   // Landscape only: the cards are dropped in order of importance once the
   // column cannot hold them at their minimum heights -- the progress bar (a
   // placeholder, its height is worth more to the cards below) first, then the
   // dashboard. A hidden card leaves the layout and hands its height to the
-  // cards that remain, so the preview grows through both stages.
+  // cards that remain, so the preview grows through both stages. The decision
+  // reads the measured height only: it must not follow the cards it hides, or
+  // hiding one would make room, show it again, and the page would oscillate.
   const hideProgress = $derived(
-    isLandscape &&
-      columnHeight < PREVIEW_MIN_HEIGHT + PREVIEW_PROGRESS_GAP + PROGRESS_HEIGHT + COLUMN_GAP + DASHBOARD_MIN_HEIGHT,
+    isLandscape && columnHeight < CARD_MIN_HEIGHT * 2 + PREVIEW_PROGRESS_GAP + PROGRESS_HEIGHT + BLOCK_GAP,
   );
   // The preview keeps the whole column once the dashboard no longer fits
-  const hideDashboard = $derived(isLandscape && columnHeight < PREVIEW_MIN_HEIGHT + COLUMN_GAP + DASHBOARD_MIN_HEIGHT);
+  const hideDashboard = $derived(isLandscape && columnHeight < CARD_MIN_HEIGHT * 2 + BLOCK_GAP);
 </script>
 
 <!-- A wrapper div to listen container size that does not affect by dynamic padding -->
@@ -112,9 +113,14 @@
        of the page, not the arrangement, so a smaller page is never padded more
        than a larger one: p-4 / gap-4 while the page box is at least 640px in
        both directions, p-2.5 / gap-2.5 below that on either one.
+
+       Height budget: the cards are dropped by the height of the stack below,
+       measured on the stack itself, so the page padding never enters the
+       numbers (the browser already took it off the content box).
   -->
   <div
     class={cn("flex h-full w-full", isLandscape ? "flex-row" : "flex-col", isCompact ? "gap-2.5 p-2.5" : "gap-4 p-4")}
+    use:elementSize={stackSize}
   >
     <!--
       Wraps Preview+Progress (left-col) and Dashboard.
@@ -129,8 +135,8 @@
         <!--
           Preview: aspect-video down to its minimum height while a card is
           stacked under it in landscape; fills the column when the dashboard is
-          hidden. min-h-35 is the same step count as the dashboard minimum in
-          the height budget above.
+          hidden. min-h-35 is the CARD_MIN_HEIGHT step count of the height
+          budget above.
         -->
         <div
           class={cn(
