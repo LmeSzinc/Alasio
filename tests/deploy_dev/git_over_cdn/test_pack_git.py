@@ -357,6 +357,29 @@ class TestPackObjectsWhenRange:
         assert_pack_is_the_range(history, pack, merge, parent)
 
 
+@pytest.fixture(scope='module')
+def pair(history):
+    """
+    The pinned range of `TestSparseWalk`, checked against this checkout
+
+    Defined at module level: the pair does not read the test instance, and no
+    in-class form serves the whole matrix -- a class-scoped instance method is
+    deprecated (pytest 9), and a staticmethod is either not readable by pytest
+    8.3 (the floor of the minimum job) or not discovered by pytest 9.
+
+    Args:
+        history (History): The checkout, whose checks run before this one
+
+    Returns:
+        tuple[str, str]: The commits `want` and `have` of the pinned range
+    """
+    missing = [sha for sha in (SPARSE_WANT, SPARSE_HAVE) if not commit_exists(sha)]
+    require(not missing,
+            f'commits {", ".join(missing)} are not in this checkout, so the move '
+            f'that the sparse walk test packs has left the history')
+    return SPARSE_WANT, SPARSE_HAVE
+
+
 class TestSparseWalk:
     """
     The pair where a sparse edge walk packs an object the client already has.
@@ -366,21 +389,6 @@ class TestSparseWalk:
     `--no-sparse` for that reason, and these tests keep the case reachable: the
     pair is written as a sha1, so it outlives the commits that come after it.
     """
-
-    @pytest.fixture(scope='class')
-    def pair(self, history):
-        """
-        Args:
-            history (History): The checkout
-
-        Returns:
-            tuple[str, str]: The commits `want` and `have` of the pinned range
-        """
-        missing = [sha for sha in (SPARSE_WANT, SPARSE_HAVE) if not commit_exists(sha)]
-        require(not missing,
-                f'commits {", ".join(missing)} are not in this checkout, so the move '
-                f'that this class packs has left the history')
-        return SPARSE_WANT, SPARSE_HAVE
 
     def test_the_pair_holds_a_blob_at_two_paths(self, history, pair):
         """
