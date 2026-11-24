@@ -1,7 +1,5 @@
 <script lang="ts">
   import { useDraggable, useDroppable } from "@dnd-kit-svelte/core";
-  import ArrowDown from "@lucide/svelte/icons/arrow-down";
-  import ArrowUp from "@lucide/svelte/icons/arrow-up";
   import GripVertical from "@lucide/svelte/icons/grip-vertical";
   import Plus from "@lucide/svelte/icons/plus";
   import Trash2 from "@lucide/svelte/icons/trash-2";
@@ -170,24 +168,37 @@
     {#if column === "selected"}
       <!-- No gap between the row buttons, the row stays compact -->
       <div class="flex items-center">
-        <Button
-          variant="ghost"
-          size="icon-xs"
-          disabled={index === 0}
-          aria-label={`${t.Input.FilterOrderMoveUp()} ${label}`}
-          onclick={onMoveUp}
-        >
-          <ArrowUp />
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon-xs"
-          disabled={index === count - 1}
-          aria-label={`${t.Input.FilterOrderMoveDown()} ${label}`}
-          onclick={onMoveDown}
-        >
-          <ArrowDown />
-        </Button>
+        <!-- Up / down are the two halves of one diamond: two triangles that
+             share their waist, so the control reads as a single rotated square
+             while each half stays its own button (each one highlights and
+             disables on its own). The shape is the SVG fill, the icon keeps the
+             size and the gap of the outlined variant -->
+        <div class="flex shrink-0 flex-col gap-px">
+          <button
+            type="button"
+            class="flex h-2 w-4 items-center justify-center text-muted-foreground transition-colors outline-none hover:text-foreground focus-visible:text-foreground disabled:pointer-events-none disabled:text-muted-foreground/25"
+            disabled={index === 0}
+            aria-label={`${t.Input.FilterOrderMoveUp()} ${label}`}
+            onclick={onMoveUp}
+          >
+            <!-- Filled triangle: the path is closed and painted with the
+                 current text color, so hover / disabled follow the row -->
+            <svg viewBox="0 0 12 6" class="h-1.5 w-3" aria-hidden="true">
+              <path d="M6 1 11 5H1z" fill="currentColor" stroke="none" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            class="flex h-2 w-4 items-center justify-center text-muted-foreground transition-colors outline-none hover:text-foreground focus-visible:text-foreground disabled:pointer-events-none disabled:text-muted-foreground/25"
+            disabled={index === count - 1}
+            aria-label={`${t.Input.FilterOrderMoveDown()} ${label}`}
+            onclick={onMoveDown}
+          >
+            <svg viewBox="0 0 12 6" class="h-1.5 w-3" aria-hidden="true">
+              <path d="M1 1h10L6 5z" fill="currentColor" stroke="none" />
+            </svg>
+          </button>
+        </div>
         <Button
           variant="ghost"
           size="icon-xs"

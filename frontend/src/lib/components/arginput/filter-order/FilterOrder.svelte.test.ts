@@ -376,6 +376,33 @@ describe("TestFilterOrderDialog", () => {
     expect(columnLabels("selected")).toEqual(["Fleet-2", "Submarine", "Fleet-1"]);
   });
 
+  it("draws the up / down buttons as two filled triangles", async () => {
+    const { target } = await mountArg(makeArg());
+    await openDialog(target);
+
+    const up = rowButton("selected", t.Input.FilterOrderMoveUp(), "Fleet-2");
+    const down = rowButton("selected", t.Input.FilterOrderMoveDown(), "Fleet-2");
+
+    // The halves sit in one column, the waist is the only gap between them
+    expect(up.parentElement).toBe(down.parentElement);
+    expect(up.parentElement!.classList.contains("flex-col")).toBe(true);
+    for (const [half, tip] of [
+      [up, "M6 1 11 5H1z"],
+      [down, "M1 1h10L6 5z"],
+    ] as const) {
+      expect(half.classList.contains("h-2")).toBe(true);
+      expect(half.classList.contains("w-4")).toBe(true);
+      // The shape is filled with the current color, it is not an outline
+      const svg = half.querySelector("svg")!;
+      expect(svg.getAttribute("class")).toContain("h-1.5");
+      expect(svg.getAttribute("class")).toContain("w-3");
+      const path = svg.querySelector("path")!;
+      expect(path.getAttribute("d")).toBe(tip);
+      expect(path.getAttribute("fill")).toBe("currentColor");
+      expect(path.getAttribute("stroke")).toBe("none");
+    }
+  });
+
   it("shows the empty states of both columns", async () => {
     const { target } = await mountArg(makeArg({ value: [] }));
     await openDialog(target);
