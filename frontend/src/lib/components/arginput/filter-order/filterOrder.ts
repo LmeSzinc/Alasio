@@ -37,7 +37,7 @@ export function isGrouped(dt: string | undefined): boolean {
   return dt === "filter-order-pair";
 }
 
-/** True when the value may hold tokens, entries that carry no item at all */
+/** True when the value may hold optionCommand, entries that carry no item at all */
 export function hasTokens(dt: string | undefined): boolean {
   return dt === "filter-order-pair";
 }
@@ -94,21 +94,21 @@ export function composeOption(primary: string, secondary: string | null | undefi
  * The legal items of a filter-order value: every primary item of "option",
  * expanded with its own secondary options when the datatype is two level.
  * Mirrors expand_filter_order_items() of the backend, so a row the dialog
- * creates is exactly what the generated literal accepts. The tokens of a
+ * creates is exactly what the generated literal accepts. The optionCommand of a
  * filter-order-pair are legal items too: they are stored as themselves, so a
  * value holding "shortest" is not an invalid item.
  *
  * @param option Primary items of the arg
  * @param optionDict Secondary options of each primary item
  * @param dt Datatype of the arg
- * @param tokens Tokens of the arg, entries that carry no item at all
+ * @param optionCommand Tokens of the arg, entries that carry no item at all
  * @returns The legal items
  */
 export function validItems(
   option: readonly any[] | null | undefined,
   optionDict: Record<string, any[]> | null | undefined,
   dt: string | undefined,
-  tokens: readonly any[] | null | undefined,
+  optionCommand: readonly any[] | null | undefined,
 ): Set<string> {
   const twoLevel = isTwoLevel(dt);
   const out = new Set<string>();
@@ -122,7 +122,7 @@ export function validItems(
     }
   }
   if (hasTokens(dt)) {
-    for (const token of tokens ?? []) out.add(String(token));
+    for (const command of optionCommand ?? []) out.add(String(command));
   }
   return out;
 }

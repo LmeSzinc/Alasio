@@ -132,7 +132,7 @@
     "zh-TW": "編輯",
     "es-ES": "Editar"
   },
-  "FilterOrderTokens": {
+  "FilterOrderCommands": {
     "en-US": "Commands",
     "zh-CN": "指令",
     "ja-JP": "コマンド",

@@ -310,20 +310,20 @@ describe("TestValidItems", () => {
     expect([...valid]).toEqual(["BookT3-red", "BookT3-blue"]);
   });
 
-  it("includes the tokens of a filter-order-pair", () => {
-    // A token is stored as itself, so a value holding it is not invalid
+  it("includes the optionCommand of a filter-order-pair", () => {
+    // A command is stored as itself, so a value holding it is not invalid
     const valid = validItems(["Major"], null, "filter-order-pair", ["shortest"]);
 
     expect([...valid]).toEqual(["Major", "shortest"]);
   });
 
-  it("leaves an undeclared token out", () => {
+  it("leaves an undeclared command out", () => {
     const valid = validItems(["Major"], null, "filter-order-pair", []);
 
     expect(valid.has("shortest")).toBe(false);
   });
 
-  it("ignores tokens of a datatype that has none", () => {
+  it("ignores optionCommand of a datatype that has none", () => {
     const valid = validItems(["Fleet-1"], null, "filter-order", ["shortest"]);
 
     expect([...valid]).toEqual(["Fleet-1"]);

@@ -269,9 +269,9 @@ def preprocess_arg(arg: dict) -> dict:
                 raise DefinitionError(
                     'datatype "filter-order" must not have "option_dict" defined, '
                     'use "filter-order-item" or "filter-order-pair"')
-            if 'tokens' in arg:
+            if 'option_command' in arg:
                 raise DefinitionError(
-                    'datatype "filter-order" must not have "tokens" defined, '
+                    'datatype "filter-order" must not have "option_command" defined, '
                     'use "filter-order-pair"')
             validate_filter_order(arg['option'], value)
         elif dt == 'filter-order-item':
@@ -280,24 +280,24 @@ def preprocess_arg(arg: dict) -> dict:
             option_dict = arg.get('option_dict', None)
             if not option_dict:
                 raise DefinitionError('datatype "filter-order-item" must have "option_dict" defined')
-            if 'tokens' in arg:
+            if 'option_command' in arg:
                 raise DefinitionError(
-                    'datatype "filter-order-item" must not have "tokens" defined, '
+                    'datatype "filter-order-item" must not have "option_command" defined, '
                     'use "filter-order-pair"')
             validate_filter_order_item(arg['option'], value, option_dict)
         else:
-            # two levels, the whole "item-option" is the identity, and "tokens"
+            # two levels, the whole "item-option" is the identity, and "option_command"
             # are entries that carry no item at all ("shortest")
             option_dict = arg.get('option_dict', None)
             if not option_dict:
                 raise DefinitionError('datatype "filter-order-pair" must have "option_dict" defined')
-            tokens = arg.get('tokens', None)
-            validate_filter_order_pair(arg['option'], value, option_dict, tokens=tokens)
-            if not tokens:
-                arg.pop('tokens', None)
+            option_command = arg.get('option_command', None)
+            validate_filter_order_pair(arg['option'], value, option_dict, option_command=option_command)
+            if not option_command:
+                arg.pop('option_command', None)
     else:
         arg.pop('option_dict', None)
-        arg.pop('tokens', None)
+        arg.pop('option_command', None)
         # check option
         if dt != 'enable':
             if 'option' in arg:
@@ -340,7 +340,7 @@ class ArgData(Struct, omit_defaults=True, forbid_unknown_fields=True):
     option_dict: Union[Dict[str, list], UnsetType] = UNSET
     # Items of a filter-order-pair value that carry no "item-option" pair, e.g.
     # the "shortest" of a commission filter
-    tokens: Union[List[str], UnsetType] = UNSET
+    option_command: Union[List[str], UnsetType] = UNSET
 
     # Data topics events will have `option_i18n` for option translations
     # key is option, value is translation
@@ -470,7 +470,7 @@ class ArgData(Struct, omit_defaults=True, forbid_unknown_fields=True):
 
         A two level filter-order is a flat group of composite items, so the
         generated literal rejects a secondary option that does not belong to its
-        primary item. The "tokens" of a filter-order-pair are entries of their
+        primary item. The "option_command" of a filter-order-pair are entries of their
         own, they are part of the literal too.
 
         Returns:
@@ -479,8 +479,8 @@ class ArgData(Struct, omit_defaults=True, forbid_unknown_fields=True):
         if self.option_dict:
             if self.dt in ('filter-order-item', 'filter-order-pair'):
                 items = expand_filter_order_items(self.option, self.option_dict)
-                if self.dt == 'filter-order-pair' and self.tokens:
-                    items.extend(self.tokens)
+                if self.dt == 'filter-order-pair' and self.option_command:
+                    items.extend(self.option_command)
                 return [items]
             return [options for options in self.option_dict.values()]
         return [self.option]

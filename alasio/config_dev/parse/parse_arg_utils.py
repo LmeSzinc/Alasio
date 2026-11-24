@@ -289,50 +289,50 @@ def _normalize_filter_order_value(value, dt='filter-order'):
     return tuple(value)
 
 
-def _validate_filter_order_tokens(tokens, option):
+def _validate_filter_order_option_command(option_command, option):
     """
-    Validate "tokens" of a filter-order datatype
+    Validate "option_command" of a filter-order datatype
 
-    A token is an entry of the value that carries no item at all, like the
+    A command is an entry of the value that carries no item at all, like the
     "shortest" of a commission filter. It is written as itself, so it can not
     hold a separator, and it must not be an item of "option" either, otherwise
     a stored value would be ambiguous.
 
     Args:
-        tokens (Any): The "tokens" as written in the yaml, None for no tokens
+        option_command (Any): The "option_command" as written in the yaml, None for none
         option (list): Primary items of the arg, already validated
 
     Returns:
-        tuple[str]: The validated tokens
+        tuple[str]: The validated commands
 
     Raises:
         DefinitionError:
     """
-    if tokens is None:
+    if option_command is None:
         return ()
-    if not isinstance(tokens, list):
-        raise DefinitionError('"tokens" must be a list')
+    if not isinstance(option_command, list):
+        raise DefinitionError('"option_command" must be a list')
     option_items = set(option)
     counts = Counter()
-    for token in tokens:
-        if type(token) is not str:
-            raise DefinitionError(f'"tokens" item "{token}" must be a str')
-        if not token:
-            raise DefinitionError('"tokens" item must not be empty')
-        if FILTER_ORDER_SEPARATOR in token or FILTER_ORDER_LIST_SEPARATOR in token:
+    for command in option_command:
+        if type(command) is not str:
+            raise DefinitionError(f'"option_command" item "{command}" must be a str')
+        if not command:
+            raise DefinitionError('"option_command" item must not be empty')
+        if FILTER_ORDER_SEPARATOR in command or FILTER_ORDER_LIST_SEPARATOR in command:
             raise DefinitionError(
-                f'"tokens" item "{token}" must not contain "{FILTER_ORDER_SEPARATOR}" '
+                f'"option_command" item "{command}" must not contain "{FILTER_ORDER_SEPARATOR}" '
                 f'or "{FILTER_ORDER_LIST_SEPARATOR}"')
-        if token in option_items:
-            raise DefinitionError(f'"tokens" item "{token}" is in "option"')
-        counts[token] += 1
-    for token, count in counts.items():
+        if command in option_items:
+            raise DefinitionError(f'"option_command" item "{command}" is in "option"')
+        counts[command] += 1
+    for command, count in counts.items():
         if count > 1:
-            raise DefinitionError(f'"tokens" has duplicate item "{token}"')
-    return tuple(tokens)
+            raise DefinitionError(f'"option_command" has duplicate item "{command}"')
+    return tuple(option_command)
 
 
-def _validate_filter_order_levels(value, option, option_dict, dt, unique, tokens=()):
+def _validate_filter_order_levels(value, option, option_dict, dt, unique, option_command=()):
     """
     Validate the default value of a two level filter-order datatype
 
@@ -344,14 +344,14 @@ def _validate_filter_order_levels(value, option, option_dict, dt, unique, tokens
         dt (str): Datatype, for the error message
         unique (str): "item" when a primary item may be used once, "pair" when
             the whole "{item}-{option}" is the identity
-        tokens (tuple): Entries that carry no item, see
-            _validate_filter_order_tokens()
+        option_command (tuple): Entries that carry no item, see
+            _validate_filter_order_option_command()
 
     Raises:
         DefinitionError:
     """
     value = _normalize_filter_order_value(value, dt)
-    token_items = set(tokens)
+    command_items = set(option_command)
     primary_items = set(option)
     used = Counter()
     for item in value:
@@ -359,7 +359,7 @@ def _validate_filter_order_levels(value, option, option_dict, dt, unique, tokens
             raise DefinitionError(
                 f'Value of "{dt}" datatype must be a str if "option_dict" is defined, '
                 f'got "{item}"')
-        if item in token_items:
+        if item in command_items:
             used[item] += 1
             continue
         primary, sep, secondary = item.partition(FILTER_ORDER_SEPARATOR)
@@ -442,29 +442,29 @@ def validate_filter_order_item(option: list, value: Any, option_dict: Any) -> No
         value, option, option_dict, dt='filter-order-item', unique='item')
 
 
-def validate_filter_order_pair(option: list, value: Any, option_dict: Any, tokens: Any = None) -> None:
+def validate_filter_order_pair(option: list, value: Any, option_dict: Any, option_command: Any = None) -> None:
     """
     Validate dt="filter-order-pair", a two level filter-order
 
     The whole "{item}-{option}" is the identity: several options of one primary
     item may coexist ("UrgentCube-1:30" and "UrgentCube-3" of the same shop
-    family), each one appears once. Entries of "tokens" are written as
+    family), each one appears once. Entries of "option_command" are written as
     themselves and take part in the uniqueness check.
 
     Args:
         option (list): Primary items of the arg
         value (Any): Default value of the arg
         option_dict (Any): Secondary options of each primary item
-        tokens (Any): Entries that carry no item, None for none
+        option_command (Any): Entries that carry no item, None for none
 
     Raises:
         DefinitionError:
     """
     _validate_filter_order_option(option, secondary=True)
     _validate_filter_order_option_dict(option, option_dict)
-    tokens = _validate_filter_order_tokens(tokens, option)
+    option_command = _validate_filter_order_option_command(option_command, option)
     _validate_filter_order_levels(
-        value, option, option_dict, dt='filter-order-pair', unique='pair', tokens=tokens)
+        value, option, option_dict, dt='filter-order-pair', unique='pair', option_command=option_command)
 
 
 def _iter_range_constraint(arg):

@@ -35,9 +35,9 @@
   // A two level filter-order writes every item of the value as "item-option",
   // see filterOrder.ts
   const optionDict = $derived(data.option_dict ?? {});
-  const tokens = $derived(Array.isArray(data.tokens) ? data.tokens : []);
+  const optionCommand = $derived(Array.isArray(data.option_command) ? data.option_command : []);
   const twoLevel = $derived(isTwoLevel(dt));
-  const valid = $derived(validItems(options, optionDict, dt, tokens));
+  const valid = $derived(validItems(options, optionDict, dt, optionCommand));
   // A stored value may repeat an item: only the later occurrences are marked,
   // the first one is where the item belongs
   const duplicated = $derived(duplicateIndexes(items.map(String)));
@@ -60,8 +60,8 @@
    * element, so the pill reads as the stored item, not as two fields.
    */
   function labelOf(item: any): string {
-    // A token carries no level, and it is shown as it is stored
-    if (tokens.includes(item)) return String(item);
+    // A command carries no level, and it is shown as it is stored
+    if (optionCommand.includes(item)) return String(item);
     if (!twoLevel) return arg.getLabel(item);
     const [primary, secondary] = splitOption(String(item));
     if (secondary === null) return arg.getLabel(primary);

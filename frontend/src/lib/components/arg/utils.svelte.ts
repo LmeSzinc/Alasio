@@ -83,10 +83,11 @@ export type ArgData = {
    */
   option_dict?: Record<string, any[]>;
   /**
-   * Entries of a `dt=filter-order-pair` value that carry no item at all, like
-   * the `shortest` of a commission filter
+   * Built-in commands of a `dt=filter-order-pair` value: entries that carry no
+   * item at all and turn into a concrete behaviour at runtime, like the
+   * `shortest` of a commission filter
    */
-  tokens?: any[];
+  option_command?: any[];
   option_i18n?: Record<any, string>;
   // Msgspec constraints
   // https://jcristharif.com/msgspec/constraints.html

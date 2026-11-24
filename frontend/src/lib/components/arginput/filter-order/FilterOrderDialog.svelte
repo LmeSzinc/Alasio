@@ -76,8 +76,8 @@
   const twoLevel = $derived(dt === "filter-order-item" || dt === "filter-order-pair");
   const hasSecondary = $derived(dt === "filter-order-item");
   const grouped = $derived(dt === "filter-order-pair");
-  const tokens = $derived(Array.isArray(data.tokens) ? data.tokens.map(String) : []);
-  const valid = $derived(validItems(options, optionDict, dt, tokens));
+  const optionCommand = $derived(Array.isArray(data.option_command) ? data.option_command.map(String) : []);
+  const valid = $derived(validItems(options, optionDict, dt, optionCommand));
 
   /**
    * The primary item of a row: the item itself when the arg declares no
@@ -113,7 +113,7 @@
   /**
    * The unused column of a filter-order-pair, in the option order: an item
    * without secondary options is a bare row, an item with them is a group.
-   * The tokens are the last group, they are entries of their own.
+   * The commands are the last group, they are entries of their own.
    *
    * Every row shows the whole entry ("RetrofitT1-dd"), not just its secondary
    * option: the row is the identity of the value, so it has to read the same as
@@ -148,16 +148,18 @@
         blocks.push({ kind: "item", key: primary, value: primary, label: arg.getLabel(primary) });
       }
     }
-    // The token group is only shown when the arg declares tokens, and it keeps
+    // The command group is only shown when the arg declares option_command, and it keeps
     // its header when all of them are used
-    if (tokens.length > 0) {
-      const rows = tokens.filter((token) => !used.has(token)).map((token) => ({ value: token, label: token }));
+    if (optionCommand.length > 0) {
+      const rows = optionCommand
+        .filter((command) => !used.has(command))
+        .map((command) => ({ value: command, label: command }));
       blocks.push({
         kind: "group",
-        key: "\u0000tokens",
-        label: t.Input.FilterOrderTokens(),
+        key: "\u0000command",
+        label: t.Input.FilterOrderCommands(),
         remaining: rows.length,
-        total: tokens.length,
+        total: optionCommand.length,
         rows,
       });
     }
@@ -261,7 +263,7 @@
     return defaultItem(primaryOf(id), optionDict);
   }
 
-  /** A row added from the unused column, tokens are added as they are */
+  /** A row added from the unused column, commands are added as they are */
   function onAdd(item: FilterOrderItemValue) {
     draft = appendItem(draft, completeItem(String(item)));
   }

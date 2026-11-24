@@ -124,16 +124,16 @@ option_dict:
             'datatype "filter-order" must not have "option_dict" defined, '
             'use "filter-order-item" or "filter-order-pair"')
 
-    def test_tokens_is_rejected(self):
+    def test_option_command_is_rejected(self):
         with pytest.raises(DefinitionError) as e:
             parse_arg("""\
 dt: filter-order
 value: []
 option: [Fleet-1]
-tokens: [shortest]
+option_command: [shortest]
 """)
         assert e.value.msg == (
-            'datatype "filter-order" must not have "tokens" defined, use "filter-order-pair"')
+            'datatype "filter-order" must not have "option_command" defined, use "filter-order-pair"')
 
     def test_level_separator_is_legal_without_secondary_options(self):
         """An arg without secondary options never splits an item, its names may
@@ -615,7 +615,7 @@ option: [PlateT4]
 """)
         assert e.value.msg == 'datatype "filter-order-item" must have "option_dict" defined'
 
-    def test_tokens_is_rejected(self):
+    def test_option_command_is_rejected(self):
         with pytest.raises(DefinitionError) as e:
             parse_arg("""\
 dt: filter-order-item
@@ -623,10 +623,10 @@ value: []
 option: [PlateT4]
 option_dict:
   PlateT4: [gun]
-tokens: [shortest]
+option_command: [shortest]
 """)
         assert e.value.msg == (
-            'datatype "filter-order-item" must not have "tokens" defined, '
+            'datatype "filter-order-item" must not have "option_command" defined, '
             'use "filter-order-pair"')
 
 
@@ -693,31 +693,31 @@ option_dict:
 """)
         assert arg.value == ('Major', 'DailyChip')
 
-    def test_tokens(self):
+    def test_option_command(self):
         arg = parse_arg("""\
 dt: filter-order-pair
 value: UrgentCube-1:30 > shortest
 option: [UrgentCube]
 option_dict:
   UrgentCube: ['1:30']
-tokens: [shortest]
+option_command: [shortest]
 """)
         assert arg.value == ('UrgentCube-1:30', 'shortest')
-        assert arg.tokens == ['shortest']
+        assert arg.option_command == ['shortest']
 
-    def test_empty_tokens_is_dropped(self):
+    def test_empty_option_command_is_dropped(self):
         arg = parse_arg("""\
 dt: filter-order-pair
 value: []
 option: [UrgentCube]
 option_dict:
   UrgentCube: ['1:30']
-tokens: []
+option_command: []
 """)
-        assert 'tokens' not in arg.to_dict()
+        assert 'option_command' not in arg.to_dict()
 
-    def test_unknown_token(self):
-        """An entry that is neither a pair nor a declared token is rejected."""
+    def test_unknown_command(self):
+        """An entry that is neither a pair nor a declared command is rejected."""
         with pytest.raises(DefinitionError) as e:
             parse_arg("""\
 dt: filter-order-pair
@@ -725,11 +725,11 @@ value: shortest
 option: [UrgentCube]
 option_dict:
   UrgentCube: ['1:30']
-tokens: [reset]
+option_command: [reset]
 """)
         assert e.value.msg == 'Default value "shortest" is not in "option"'
 
-    def test_duplicate_token(self):
+    def test_duplicate_command(self):
         with pytest.raises(DefinitionError) as e:
             parse_arg("""\
 dt: filter-order-pair
@@ -737,23 +737,23 @@ value: shortest > shortest
 option: [UrgentCube]
 option_dict:
   UrgentCube: ['1:30']
-tokens: [shortest]
+option_command: [shortest]
 """)
         assert e.value.msg == 'Default value has duplicate value "shortest"'
 
-    @pytest.mark.parametrize('tokens, message', [
-        ('shortest', '"tokens" must be a list'),
-        ('[1]', '"tokens" item "1" must be a str'),
+    @pytest.mark.parametrize('option_command, message', [
+        ('shortest', '"option_command" must be a list'),
+        ('[1]', '"option_command" item "1" must be a str'),
         ('[]', None),
     ], ids=['not-list', 'not-str', 'empty'])
-    def test_tokens_shape(self, tokens, message):
+    def test_option_command_shape(self, option_command, message):
         yaml = f"""\
 dt: filter-order-pair
 value: []
 option: [UrgentCube]
 option_dict:
   UrgentCube: ['1:30']
-tokens: {tokens}
+option_command: {option_command}
 """
         if message is None:
             assert parse_arg(yaml).value == ()
@@ -762,7 +762,7 @@ tokens: {tokens}
                 parse_arg(yaml)
             assert e.value.msg == message
 
-    def test_token_can_not_be_an_option(self):
+    def test_command_can_not_be_an_option(self):
         with pytest.raises(DefinitionError) as e:
             parse_arg("""\
 dt: filter-order-pair
@@ -770,11 +770,11 @@ value: []
 option: [Major, UrgentCube]
 option_dict:
   UrgentCube: ['1:30']
-tokens: [Major]
+option_command: [Major]
 """)
-        assert e.value.msg == '"tokens" item "Major" is in "option"'
+        assert e.value.msg == '"option_command" item "Major" is in "option"'
 
-    def test_token_can_not_hold_a_separator(self):
+    def test_command_can_not_hold_a_separator(self):
         with pytest.raises(DefinitionError) as e:
             parse_arg("""\
 dt: filter-order-pair
@@ -782,9 +782,9 @@ value: []
 option: [UrgentCube]
 option_dict:
   UrgentCube: ['1:30']
-tokens: ['some-token']
+option_command: ['some-token']
 """)
-        assert '"tokens" item "some-token" must not contain' in str(e.value)
+        assert '"option_command" item "some-token" must not contain' in str(e.value)
 
     def test_option_dict_required(self):
         with pytest.raises(DefinitionError) as e:

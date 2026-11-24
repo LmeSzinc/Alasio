@@ -301,7 +301,7 @@
         FilterOrderPair: {
           // dt=filter-order-pair: the whole "item-option" is the identity, so
           // several types of one item may be selected at once. The unused column
-          // groups the unselected pairs under their item, the tokens are its last
+          // groups the unselected pairs under their item, the optionCommand are its last
           // group. ExtraDrill is fully selected, so its header stays at 0/3 with
           // no row under it
           Pair: arg(
@@ -329,12 +329,12 @@
                 ExtraDrill: ["1", "2", "2:40"],
                 BookT3: ["red", "yellow", "blue"],
               },
-              tokens: ["shortest"],
+              option_command: ["shortest"],
               layout: "vert",
             },
           ),
           // The pair UrgentCube-1:30 repeated, Gone-1:30 outside the definition,
-          // an undeclared token (reset) and long names on both levels; shortest
+          // an undeclared command (reset) and long names on both levels; shortest
           // is declared, so it stays a legal entry next to them
           PairEdge: arg(
             "FilterOrder",
@@ -355,7 +355,7 @@
             ],
             {
               name: "filter-order-pair (edge)",
-              help: "UrgentCube-1:30 and ExtraCube-1:30 repeat, Gone-1:30 is not in option, reset is not a declared token, the last names are long",
+              help: "UrgentCube-1:30 and ExtraCube-1:30 repeat, Gone-1:30 is not in option, reset is not a declared command, the last names are long",
               option: ["UrgentCube", "ExtraCube", "BookT3", "Major", "GearDesignPlanT3", "DailyChip"],
               option_dict: {
                 UrgentCube: ["1:30", "1:45", "3"],
@@ -363,7 +363,7 @@
                 BookT3: ["red", "yellow", "blue"],
                 GearDesignPlanT3: ["OrdnanceTestingReportT3", "DevelopmentMaterialT3", "cl"],
               },
-              tokens: ["shortest"],
+              option_command: ["shortest"],
               layout: "vert",
             },
           ),

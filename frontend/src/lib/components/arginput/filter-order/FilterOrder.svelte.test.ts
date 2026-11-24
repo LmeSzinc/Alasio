@@ -629,9 +629,9 @@ describe("TestFilterOrderPair", () => {
 
     // The count is what is left to pick, not what is already picked: the column
     // lists the unused entries
-    expect(groupHeaders()).toEqual(["UrgentCube 2/3", "ExtraCube 1/2", `${t.Input.FilterOrderTokens()} 1/1`]);
+    expect(groupHeaders()).toEqual(["UrgentCube 2/3", "ExtraCube 1/2", `${t.Input.FilterOrderCommands()} 1/1`]);
     // The selected pair is not offered again, the bare item comes before the
-    // tokens; a row of a group reads as the whole entry, the same as the row it
+    // optionCommand; a row of a group reads as the whole entry, the same as the row it
     // becomes in the selected column
     expect(columnLabels("unused")).toEqual(["UrgentCube-1:45", "UrgentCube-3", "ExtraCube-0:30", "Major", "shortest"]);
   });
@@ -644,7 +644,7 @@ describe("TestFilterOrderPair", () => {
         value: [],
         option: ["RetrofitT1"],
         option_dict: { RetrofitT1: ["dd", "cl"] },
-        tokens: [],
+        option_command: [],
         option_i18n: { RetrofitT1: "T1 retrofit blueprint", dd: "Destroyer", cl: "Light cruiser" },
       }),
     );
@@ -661,7 +661,7 @@ describe("TestFilterOrderPair", () => {
         value: ["UrgentCube-1:30"],
         option: ["UrgentCube"],
         option_dict: { UrgentCube: ["1:30", "1:45"] },
-        tokens: [],
+        option_command: [],
         option_i18n: undefined,
       }),
     );
@@ -726,15 +726,15 @@ describe("TestFilterOrderPair", () => {
 
     // The count reads 0/3 and the group offers no row any more, but the header
     // stays so the item does not vanish from the column
-    expect(groupHeaders()).toEqual(["UrgentCube 0/3", "ExtraCube 2/2", `${t.Input.FilterOrderTokens()} 1/1`]);
+    expect(groupHeaders()).toEqual(["UrgentCube 0/3", "ExtraCube 2/2", `${t.Input.FilterOrderCommands()} 1/1`]);
     expect(columnLabels("unused")).toEqual(["ExtraCube-0:30", "ExtraCube-1:30", "Major", "shortest"]);
   });
 
-  it("keeps the header of a token group whose tokens are all selected", async () => {
+  it("keeps the header of a command group whose commands are all selected", async () => {
     const { target } = await mountArg(makePairArg({ value: ["shortest"] }));
     await openDialog(target);
 
-    expect(groupHeaders()).toEqual(["UrgentCube 3/3", "ExtraCube 2/2", `${t.Input.FilterOrderTokens()} 0/1`]);
+    expect(groupHeaders()).toEqual(["UrgentCube 3/3", "ExtraCube 2/2", `${t.Input.FilterOrderCommands()} 0/1`]);
     expect(columnLabels("unused")).toEqual([
       "UrgentCube-1:30",
       "UrgentCube-1:45",
@@ -757,7 +757,7 @@ describe("TestFilterOrderPair", () => {
     expect(arg.value).toEqual(["UrgentCube-1:45"]);
   });
 
-  it("adds a token as it is", async () => {
+  it("adds a command as it is", async () => {
     const { target, arg } = await mountArg(makePairArg({ value: [] }));
     await openDialog(target);
 
@@ -777,18 +777,18 @@ describe("TestFilterOrderPair", () => {
     expect(footerButton(t.Input.Save()).disabled).toBe(true);
   });
 
-  it("accepts the tokens of the arg as legal items", async () => {
+  it("accepts the optionCommand of the arg as legal items", async () => {
     const { target } = await mountArg(makePairArg({ value: ["shortest"] }));
     await openDialog(target);
 
-    // A token is a legal entry, only the unknown pair blocks saving
+    // A command is a legal entry, only the unknown pair blocks saving
     expect(footerButton(t.Input.Save()).disabled).toBe(false);
   });
 
   it("marks an entry outside the definition in both views", async () => {
-    // "shortest" is not declared as a token of this arg, so it is not an item of
+    // "shortest" is not declared as a command of this arg, so it is not an item of
     // the value at all: the pill line and the editor have to agree on it
-    const { target } = await mountArg(makePairArg({ value: ["UrgentCube-1:30", "shortest"], tokens: [] }));
+    const { target } = await mountArg(makePairArg({ value: ["UrgentCube-1:30", "shortest"], option_command: [] }));
 
     expect(pills(target).querySelector(`[aria-label="${t.Input.FilterOrderInvalid()}"]`)).not.toBeNull();
 
@@ -798,7 +798,7 @@ describe("TestFilterOrderPair", () => {
     expect(footerButton(t.Input.Save()).disabled).toBe(true);
   });
 
-  it("marks no token on the settings page", async () => {
+  it("marks no command on the settings page", async () => {
     // The pill line and the dialog must agree on what is legal, otherwise a
     // stored token looks broken before the editor is opened
     const { target } = await mountArg(makePairArg({ value: ["shortest"] }));
@@ -832,7 +832,7 @@ function makePairArg(overrides: Partial<ArgData> = {}): ArgData {
     value: ["UrgentCube-1:30", "UrgentCube-3", "Major", "shortest"],
     option: ["UrgentCube", "ExtraCube", "Major"],
     option_dict: { UrgentCube: ["1:30", "1:45", "3"], ExtraCube: ["0:30", "1:30"] },
-    tokens: ["shortest"],
+    option_command: ["shortest"],
     ...overrides,
   });
 }
