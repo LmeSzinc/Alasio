@@ -1,11 +1,20 @@
 <script lang="ts">
+  import Copy from "@lucide/svelte/icons/copy";
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
   import { type InputProps, useArgValue } from "$lib/components/arg/utils.svelte";
   import { Badge } from "$lib/components/ui/badge";
   import { t } from "$lib/i18n";
   import { elementSize } from "$lib/use/size.svelte";
   import { cn } from "$lib/utils";
-  import { type PillBox, SECONDARY_SEPARATOR, cutPills, isTwoLevel, splitOption, validItems } from "./filterOrder";
+  import {
+    type PillBox,
+    SECONDARY_SEPARATOR,
+    cutPills,
+    duplicateIndexes,
+    isTwoLevel,
+    splitOption,
+    validItems,
+  } from "./filterOrder";
 
   /** Max lines of pills shown in the settings page, the rest becomes "> ..." */
   const MAX_PILL_LINES = 5;
@@ -29,6 +38,9 @@
   const tokens = $derived(Array.isArray(data.tokens) ? data.tokens : []);
   const twoLevel = $derived(isTwoLevel(dt));
   const valid = $derived(validItems(options, optionDict, dt, tokens));
+  // A stored value may repeat an item: only the later occurrences are marked,
+  // the first one is where the item belongs
+  const duplicated = $derived(duplicateIndexes(items.map(String)));
 
   /**
    * True for an item that is in the value but not in the legal items anymore,
@@ -126,6 +138,13 @@
           <TriangleAlert class="size-3 shrink-0 text-destructive" />
         </span>
       {/if}
+      {#if duplicated.has(index)}
+        <!-- A different shape from the invalid mark: the item itself is legal,
+             it is its position that can not be read -->
+        <span role="img" class="inline-flex shrink-0" aria-label={t.Input.FilterOrderDuplicate()}>
+          <Copy class="size-3 shrink-0 text-amber-600 dark:text-amber-400" />
+        </span>
+      {/if}
       <!-- A long item truncates inside the pill instead of widening it past
            the card, the pill itself is capped to the line width -->
       <span class="min-w-0 truncate">{labelOf(item)}</span>
@@ -139,7 +158,10 @@
     {#if items.length === 0}
       <span class="text-xs text-muted-foreground">{t.Input.FilterOrderEmpty()}</span>
     {:else}
-      {#each visible as item, index (item)}
+      <!-- The key carries the index: a stored value may repeat an item, and the
+           item alone would then be a duplicate key (the pill line would not
+           render at all, hiding the very value the mark is about) -->
+      {#each visible as item, index (`${index}\u0000${item}`)}
         {@render pill(item, index)}
       {/each}
       {#if truncated}
@@ -160,7 +182,7 @@
       inert
       class={cn(PILL_LINE, "pointer-events-none invisible absolute inset-x-0 top-0")}
     >
-      {#each items as item, index (item)}
+      {#each items as item, index (`${index}\u0000${item}`)}
         {@render pill(item, index)}
       {/each}
       <span class="text-xs text-muted-foreground">&gt; ...</span>

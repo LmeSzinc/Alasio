@@ -18,9 +18,10 @@
     applyDrop,
     composeOption,
     defaultItem,
+    duplicateIndexes,
     moveItem,
     primaryOf,
-    removeItem,
+    removeAt,
     sameList,
     splitOption,
     validItems,
@@ -204,6 +205,17 @@
 
   const hasInvalid = $derived(draft.some((item) => isInvalid(item)));
 
+  /**
+   * A stored value may repeat an item. Only the later occurrences are marked:
+   * the first one is where the item belongs, so blaming it would point at the
+   * row the user most likely wants to keep. The repeat is not a bad item, it is
+   * an unreadable position, and the backend rejects the value on save, so the
+   * editor blocks saving as it does for an invalid item.
+   */
+  const duplicated = $derived(duplicateIndexes(draft.map(String)));
+  const hasDuplicate = $derived(duplicated.size > 0);
+  const blocked = $derived(hasInvalid || hasDuplicate);
+
   const isDirty = $derived(!sameList(draft, value));
 
   const dndRules = { selected: ["item"], unused: ["item"] };
@@ -221,16 +233,21 @@
     return arg.getLabel(hasSecondary ? primaryOf(String(item)) : item);
   }
 
-  function onMoveUp(item: FilterOrderItemValue) {
-    draft = moveItem(draft, draft.indexOf(item), -1);
+  /**
+   * Row operations are index based, never value based: a stored value may
+   * repeat an item, and removing / moving "the item" would then hit the first
+   * occurrence and leave the row the user clicked untouched.
+   */
+  function onMoveUp(index: number) {
+    draft = moveItem(draft, index, -1);
   }
 
-  function onMoveDown(item: FilterOrderItemValue) {
-    draft = moveItem(draft, draft.indexOf(item), 1);
+  function onMoveDown(index: number) {
+    draft = moveItem(draft, index, 1);
   }
 
-  function onRemove(item: FilterOrderItemValue) {
-    draft = removeItem(draft, item);
+  function onRemove(index: number) {
+    draft = removeAt(draft, index);
   }
 
   /**
@@ -249,9 +266,9 @@
   }
 
   /** Replace the secondary option of a row, the position of the row is kept */
-  function onSecondaryChange(item: FilterOrderItemValue, next: string) {
-    const index = draft.indexOf(item);
-    if (index === -1) return;
+  function onSecondaryChange(index: number, next: string) {
+    const item = draft[index];
+    if (item === undefined) return;
     const nextItem = composeOption(primaryOfRow(item), next);
     if (nextItem === item) return;
     draft = [...draft.slice(0, index), nextItem, ...draft.slice(index + 1)];
@@ -283,7 +300,7 @@
   }
 
   function save() {
-    if (hasInvalid) return;
+    if (blocked) return;
     if (isDirty) onSave([...draft]);
     open = false;
   }
@@ -346,7 +363,10 @@
                   {t.Input.FilterOrderSelectedEmpty()}
                 </div>
               {:else}
-                {#each draft as item, index (item)}
+                <!-- The key carries the index: a repeated item is a legal row to
+                     show (the value is blocked until one of its rows is
+                     dropped), but two equal items can not share a key -->
+                {#each draft as item, index (`${index}\u0000${item}`)}
                   <FilterOrderItem
                     {item}
                     column="selected"
@@ -354,15 +374,16 @@
                     count={draft.length}
                     {dropIndicator}
                     invalid={isInvalid(item)}
+                    duplicate={duplicated.has(index)}
                     label={labelOf(item)}
                     secondary={secondaryOf(item)}
                     secondaries={secondariesOf(item)}
                     secondaryInvalid={isSecondaryInvalid(item)}
                     secondaryLabel={(value) => arg.getLabel(value)}
-                    onSecondaryChange={(next) => onSecondaryChange(item, next)}
-                    onMoveUp={() => onMoveUp(item)}
-                    onMoveDown={() => onMoveDown(item)}
-                    onRemove={() => onRemove(item)}
+                    onSecondaryChange={(next) => onSecondaryChange(index, next)}
+                    onMoveUp={() => onMoveUp(index)}
+                    onMoveDown={() => onMoveDown(index)}
+                    onRemove={() => onRemove(index)}
                   />
                 {/each}
               {/if}
@@ -422,7 +443,7 @@
         <DialogFooter>
           <Button variant="ghost" onclick={resetDefault}>{t.Input.FilterOrderResetDefault()}</Button>
           <Button variant="outline" onclick={cancel}>{t.Input.Cancel()}</Button>
-          <Button onclick={save} disabled={hasInvalid}>{t.Input.Save()}</Button>
+          <Button onclick={save} disabled={blocked}>{t.Input.Save()}</Button>
         </DialogFooter>
       </DialogContent>
     {/snippet}

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { useDraggable, useDroppable } from "@dnd-kit-svelte/core";
+  import Copy from "@lucide/svelte/icons/copy";
   import GripVertical from "@lucide/svelte/icons/grip-vertical";
   import Plus from "@lucide/svelte/icons/plus";
   import Trash2 from "@lucide/svelte/icons/trash-2";
@@ -32,6 +33,8 @@
     count?: number;
     /** True for an item that is not in the legal items anymore (an old value) */
     invalid?: boolean;
+    /** True for the item of this row repeated from an earlier row */
+    duplicate?: boolean;
     /** Secondary option of the row, null when its primary has none */
     secondary?: string | null;
     /** Secondary options the primary declares, empty to render no selector */
@@ -55,6 +58,7 @@
     index = 0,
     count = 0,
     invalid = false,
+    duplicate = false,
     secondary = null,
     secondaries = [],
     secondaryInvalid = false,
@@ -151,6 +155,20 @@
         {/if}
       {/if}
     </div>
+    {#if duplicate}
+      <Tooltip.Provider>
+        <Tooltip.Root>
+          <Tooltip.Trigger>
+            <span role="img" class="inline-flex" aria-label={t.Input.FilterOrderDuplicate()}>
+              <Copy class="size-3 shrink-0 text-amber-600 dark:text-amber-400" />
+            </span>
+          </Tooltip.Trigger>
+          <Tooltip.Content>
+            <p>{t.Input.FilterOrderDuplicate()}</p>
+          </Tooltip.Content>
+        </Tooltip.Root>
+      </Tooltip.Provider>
+    {/if}
     {#if invalid}
       <Tooltip.Provider>
         <Tooltip.Root>

@@ -116,6 +116,26 @@ function pills(target: HTMLElement): HTMLElement {
   return target.querySelector<HTMLElement>('[data-slot="filter-order-pills"]')!;
 }
 
+/**
+ * Which pills carry the given mark, in the order of the pill line. jsdom keeps
+ * the DOM order, so the flag of a pill is the flag of its index in the value.
+ */
+function pillMarks(target: HTMLElement, mark: string): boolean[] {
+  return [...pills(target).children].map((child) => child.querySelector(mark) !== null);
+}
+
+/** The rows of the selected column, in the order of the value */
+function selectedRows(): HTMLElement[] {
+  return [...column("selected").querySelectorAll<HTMLElement>('[data-slot="filter-order-item"]')];
+}
+
+/** The remove button of one specific row, the label alone is not unique */
+function deleteOf(row: HTMLElement, label: string): HTMLButtonElement {
+  const button = row.querySelector<HTMLButtonElement>(`[aria-label="${t.Input.FilterOrderRemove()} ${label}"]`);
+  expect(button, `no remove button for "${label}" in the row`).not.toBeNull();
+  return button!;
+}
+
 /** The hidden probe of the whole order, the measuring source of the cut */
 function probe(target: HTMLElement): HTMLElement {
   return target.querySelector<HTMLElement>('[data-slot="filter-order-probe"]')!;
@@ -648,6 +668,56 @@ describe("TestFilterOrderPair", () => {
     await openDialog(target);
 
     expect(columnLabels("unused")).toEqual(["UrgentCube-1:45"]);
+  });
+
+  it("marks only the later occurrence of a repeated item on the settings page", async () => {
+    // The first occurrence is where the item belongs, so only the row that
+    // claims the position again is marked
+    const { target } = await mountArg(makeArg({ value: ["Fleet-1", "Fleet-2", "Fleet-1"] }));
+
+    const mark = `[aria-label="${t.Input.FilterOrderDuplicate()}"]`;
+    expect(pillMarks(target, mark)).toEqual([false, false, true]);
+  });
+
+  it("marks only the later occurrence of a repeated row in the editor and blocks saving", async () => {
+    const { target, arg } = await mountArg(makeArg({ value: ["Fleet-1", "Fleet-2", "Fleet-1"] }));
+    await openDialog(target);
+
+    expect(columnLabels("selected")).toEqual(["Fleet-1", "Fleet-2", "Fleet-1"]);
+    const mark = `[aria-label="${t.Input.FilterOrderDuplicate()}"]`;
+    const rows = selectedRows();
+    expect(rows.map((row) => row.querySelector(mark) !== null)).toEqual([false, false, true]);
+    expect(footerButton(t.Input.Save()).disabled).toBe(true);
+
+    // Delete the FIRST row on purpose: the later occurrence takes its place as
+    // the only one, so it becomes a legal row and the mark disappears
+    deleteOf(rows[0], "Fleet-1").click();
+    await settle();
+
+    expect(columnLabels("selected")).toEqual(["Fleet-2", "Fleet-1"]);
+    expect(column("selected").querySelector(mark)).toBeNull();
+    expect(footerButton(t.Input.Save()).disabled).toBe(false);
+
+    // The surviving row is the one that used to be the repeat, and it is saved
+    // as the only occurrence of the item
+    footerButton(t.Input.Save()).click();
+    await settle();
+    expect(arg.value).toEqual(["Fleet-2", "Fleet-1"]);
+  });
+
+  it("removes only the marked row, not the valid first occurrence", async () => {
+    const { target, arg, handleEdit } = await mountArg(makeArg({ value: ["Fleet-1", "Fleet-2", "Fleet-1"] }));
+    await openDialog(target);
+
+    // Delete the third row (the repeat), the first one has to stay
+    deleteOf(selectedRows()[2], "Fleet-1").click();
+    await settle();
+
+    expect(columnLabels("selected")).toEqual(["Fleet-1", "Fleet-2"]);
+    footerButton(t.Input.Save()).click();
+    await settle();
+    expect(arg.value).toEqual(["Fleet-1", "Fleet-2"]);
+    expect(handleEdit).toHaveBeenCalledTimes(1);
   });
 
   it("keeps the header of a group whose pairs are all selected", async () => {

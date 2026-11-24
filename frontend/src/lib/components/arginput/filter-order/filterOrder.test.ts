@@ -19,8 +19,10 @@ import {
   composeOption,
   cutPills,
   defaultItem,
+  duplicateIndexes,
   moveItem,
   primaryOf,
+  removeAt,
   removeItem,
   sameList,
   splitOption,
@@ -35,6 +37,37 @@ describe("TestSameList", () => {
     expect(sameList(["a"], ["a", "b"])).toBe(false);
     // The order is part of the value
     expect(sameList(["a", "b"], ["b", "a"])).toBe(false);
+  });
+});
+
+describe("TestDuplicateIndexes", () => {
+  it("marks the later occurrences of an item, not the first one", () => {
+    // The first occurrence is where the item belongs, every later one is the
+    // leftover that has to be dropped
+    expect([...duplicateIndexes(["a", "b", "a", "c", "b"])]).toEqual([2, 4]);
+  });
+
+  it("clears the mark of an item whose first occurrence is removed", () => {
+    // Deleting the first row must leave the later one legal, not keep it marked
+    const rest = removeAt(["a", "b", "a"], 0);
+
+    expect(rest).toEqual(["b", "a"]);
+    expect(duplicateIndexes(rest).size).toBe(0);
+  });
+
+  it.each([{ list: [] as string[] }, { list: ["a"] }, { list: ["a", "b", "c"] }])(
+    "finds no duplicate in $list",
+    ({ list }) => {
+      expect(duplicateIndexes(list).size).toBe(0);
+    },
+  );
+
+  it("marks every occurrence after the first", () => {
+    expect([...duplicateIndexes(["a", "a", "a"])]).toEqual([1, 2]);
+  });
+
+  it("marks a later occurrence that is not adjacent to the first one", () => {
+    expect([...duplicateIndexes(["a", "b", "c", "a"])]).toEqual([3]);
   });
 });
 
@@ -70,6 +103,18 @@ describe("TestAppendItem", () => {
 
   it("never adds an item twice", () => {
     expect(appendItem(["a"], "a")).toEqual(["a"]);
+  });
+});
+
+describe("TestRemoveAt", () => {
+  it("removes the row at the index, not every row of that value", () => {
+    // A repeated item has one valid occurrence, a delete must keep it
+    expect(removeAt(["a", "b", "a"], 2)).toEqual(["a", "b"]);
+    expect(removeAt(["a", "b", "a"], 0)).toEqual(["b", "a"]);
+  });
+
+  it.each([{ index: -1 }, { index: 3 }])("is a no-op for the out of range index $index", ({ index }) => {
+    expect(removeAt(["a", "b"], index)).toEqual(["a", "b"]);
   });
 });
 
@@ -117,6 +162,12 @@ describe("TestApplyDrop", () => {
     expect(applyDrop(["a", "b"], "a", { kind: "unused" })).toEqual(["b"]);
     // An item that is not in the order stays out of it
     expect(applyDrop(["a"], "b", { kind: "unused" })).toEqual(["a"]);
+  });
+
+  it("takes out only one occurrence of a repeated item", () => {
+    // The drag started on one row, so only that row leaves the order; deleting
+    // both would drop the occurrence the user kept
+    expect(applyDrop(["a", "b", "a"], "a", { kind: "unused" })).toEqual(["b", "a"]);
   });
 
   it("drops an item on its own row without moving it", () => {

@@ -154,6 +154,28 @@ export function sameList(a: readonly FilterOrderItem[], b: readonly FilterOrderI
 }
 
 /**
+ * The positions of the repeated occurrences in the list.
+ *
+ * A stored value may repeat an item when it was written before the datatype was
+ * enforced, or by hand. The backend rejects such a value, so the editor marks
+ * the rows that claim a position already taken: the first occurrence is where
+ * the item belongs, every later one is the leftover. Marking all of them would
+ * blame the row the user most likely wants to keep.
+ *
+ * @param list The list to inspect
+ * @returns The indexes that are their item's second (or later) occurrence
+ */
+export function duplicateIndexes(list: readonly FilterOrderItem[]): Set<number> {
+  const seen = new Set<string>();
+  const out = new Set<number>();
+  list.forEach((item, index) => {
+    if (seen.has(item)) out.add(index);
+    else seen.add(item);
+  });
+  return out;
+}
+
+/**
  * Move the item at `index` by `delta` positions in a copy of the list.
  * A move that would leave the list is a no-op, so the caller can wire the
  * up / down buttons without checking the ends itself.
@@ -187,7 +209,28 @@ export function appendItem(list: readonly FilterOrderItem[], item: FilterOrderIt
 }
 
 /**
+ * Remove the item at `index` from the list.
+ *
+ * Index based, not value based: a stored value may repeat an item, and every
+ * row operation has to touch the row the user picked, not its first occurrence.
+ *
+ * @param list The list to remove from
+ * @param index Index of the item to remove
+ * @returns A new list without that one item
+ */
+export function removeAt(list: readonly FilterOrderItem[], index: number): FilterOrderItem[] {
+  const next = [...list];
+  if (index < 0 || index >= next.length) return next;
+  next.splice(index, 1);
+  return next;
+}
+
+/**
  * Remove every occurrence of an item from the list.
+ *
+ * Only for a caller that really means "this value may not appear at all"; a
+ * row operation must use removeAt(), otherwise a repeated item loses the valid
+ * occurrence together with the one being deleted.
  *
  * @param list The list to remove from
  * @param item The item to remove
@@ -220,9 +263,11 @@ export function applyDrop(
   item: FilterOrderItem,
   target: DropTarget,
 ): FilterOrderItem[] {
-  // A move is always a removal first: the item may come from either column
+  // A move is always a removal first: the item may come from either column.
+  // Only one occurrence is taken out: the value may repeat, and the row being
+  // dragged is a single row
   const from = draft.indexOf(item);
-  const next = draft.filter((value) => value !== item);
+  const next = from === -1 ? [...draft] : removeAt(draft, from);
 
   if (target.kind === "unused") return next;
 

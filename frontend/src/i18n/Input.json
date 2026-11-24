@@ -111,6 +111,13 @@
     "zh-TW": "無效項目，不在可選項列表中",
     "es-ES": "Elemento no válido, no está en la lista de opciones"
   },
+  "FilterOrderDuplicate": {
+    "en-US": "Duplicate item, it appears more than once in the order",
+    "zh-CN": "重复项，在顺序中出现了不止一次",
+    "ja-JP": "重複した項目です（順序内に複数回あります）",
+    "zh-TW": "重複項目，在順序中出現了不止一次",
+    "es-ES": "Elemento duplicado, aparece más de una vez en el orden"
+  },
   "FilterOrderEmpty": {
     "en-US": "Not set",
     "zh-CN": "未设置",
