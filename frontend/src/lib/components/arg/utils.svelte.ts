@@ -77,7 +77,7 @@ export type ArgData = {
    *
    * Secondary options of an item if arg is `dt=filter-order`, might be
    * `{PlateT4: [gun, general], BookT3: [red, blue]}`. An item of the value then
-   * carries one of its own secondary options as `item:option` (`PlateT4:gun`),
+   * carries one of its own secondary options as `item-option` (`PlateT4-gun`),
    * an item without an entry here is stored as itself (`Chip`)
    */
   option_dict?: Record<string, any[]>;

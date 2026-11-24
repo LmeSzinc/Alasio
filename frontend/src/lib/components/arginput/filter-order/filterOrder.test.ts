@@ -187,24 +187,24 @@ describe("TestCutPills", () => {
 
 describe("TestSplitOption", () => {
   it.each([
-    ["PlateT4:gun", ["PlateT4", "gun"]],
+    ["PlateT4-gun", ["PlateT4", "gun"]],
     ["Chip", ["Chip", null]],
     // split on the first separator only
-    ["PlateT4:gun:x", ["PlateT4", "gun:x"]],
-    ["Chip:", ["Chip", ""]],
+    ["PlateT4-gun-x", ["PlateT4", "gun-x"]],
+    ["Chip-", ["Chip", ""]],
   ])("splits %s", (item, expected) => {
     expect(splitOption(item)).toEqual(expected);
   });
 
   it("reads the primary item of both kinds of item", () => {
-    expect(primaryOf("PlateT4:gun")).toBe("PlateT4");
+    expect(primaryOf("PlateT4-gun")).toBe("PlateT4");
     expect(primaryOf("Chip")).toBe("Chip");
   });
 });
 
 describe("TestComposeOption", () => {
   it("joins a primary item with its secondary option", () => {
-    expect(composeOption("PlateT4", "gun")).toBe("PlateT4:gun");
+    expect(composeOption("PlateT4", "gun")).toBe("PlateT4-gun");
   });
 
   it.each([null, undefined, ""])("keeps the bare item for %s", (secondary) => {
@@ -212,8 +212,8 @@ describe("TestComposeOption", () => {
   });
 
   it("round-trips an item", () => {
-    const [primary, secondary] = splitOption("PlateT4:gun");
-    expect(composeOption(primary, secondary)).toBe("PlateT4:gun");
+    const [primary, secondary] = splitOption("PlateT4-gun");
+    expect(composeOption(primary, secondary)).toBe("PlateT4-gun");
   });
 });
 
@@ -228,10 +228,10 @@ describe("TestValidItems", () => {
       BookT3: ["red"],
     });
 
-    expect([...valid]).toEqual(["PlateT4:gun", "PlateT4:general", "BookT3:red", "Chip"]);
+    expect([...valid]).toEqual(["PlateT4-gun", "PlateT4-general", "BookT3-red", "Chip"]);
     // a secondary option of another item is not a legal item of this one
-    expect(valid.has("PlateT4:red")).toBe(false);
-    expect(valid.has("Chip:gun")).toBe(false);
+    expect(valid.has("PlateT4-red")).toBe(false);
+    expect(valid.has("Chip-gun")).toBe(false);
   });
 
   it("requires the secondary option of a primary that declares one", () => {
@@ -247,7 +247,7 @@ describe("TestValidItems", () => {
 
 describe("TestDefaultItem", () => {
   it("starts an unused primary at its first secondary option", () => {
-    expect(defaultItem("PlateT4", { PlateT4: ["gun", "general"] })).toBe("PlateT4:gun");
+    expect(defaultItem("PlateT4", { PlateT4: ["gun", "general"] })).toBe("PlateT4-gun");
   });
 
   it("adds a primary without secondary options as itself", () => {

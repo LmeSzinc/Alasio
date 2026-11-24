@@ -12,6 +12,7 @@
   import {
     type DropTarget,
     type FilterOrderItem as FilterOrderItemValue,
+    SECONDARY_SEPARATOR,
     appendItem,
     applyDrop,
     composeOption,
@@ -68,7 +69,18 @@
   const optionDict = $derived(data.option_dict ?? {});
   const hasSecondary = $derived(Object.keys(optionDict).length > 0);
   const valid = $derived(validItems(options, optionDict));
-  const usedPrimaries = $derived(new Set(draft.map((item) => primaryOf(String(item)))));
+
+  /**
+   * The primary item of a row: the item itself when the arg declares no
+   * secondary options, because such an item is never split. A plain item may
+   * hold the level separator ("Fleet-1"), so splitting it would read the wrong
+   * primary and offer used items again.
+   */
+  function primaryOfRow(item: FilterOrderItemValue): string {
+    return hasSecondary ? primaryOf(String(item)) : String(item);
+  }
+
+  const usedPrimaries = $derived(new Set(draft.map(primaryOfRow)));
   const unused = $derived(options.filter((item) => !usedPrimaries.has(String(item))));
 
   /**
@@ -82,24 +94,26 @@
   }
 
   /**
-   * Label of a whole item, the translated secondary option after a ":" like
-   * the stored value ("PlateT4:gun"). A row itself shows its primary item and
-   * the selector next to it, the drag overlay has room for the whole item.
+   * Label of a whole item, the translated secondary option after the level
+   * separator like the stored value ("PlateT4-gun"). A row itself shows its
+   * primary item and the selector next to it, the drag overlay has room for
+   * the whole item.
    */
   function fullLabelOf(item: FilterOrderItemValue): string {
+    if (!hasSecondary) return arg.getLabel(item);
     const [primary, secondary] = splitOption(String(item));
     if (secondary === null) return arg.getLabel(primary);
-    return `${arg.getLabel(primary)}:${arg.getLabel(secondary)}`;
+    return `${arg.getLabel(primary)}${SECONDARY_SEPARATOR}${arg.getLabel(secondary)}`;
   }
 
   /** The secondary options the primary item of a row declares */
   function secondariesOf(item: FilterOrderItemValue): string[] {
-    return optionDict[primaryOf(String(item))] ?? [];
+    return optionDict[primaryOfRow(item)] ?? [];
   }
 
   /** The secondary option the row carries, null when it carries none */
   function secondaryOf(item: FilterOrderItemValue): string | null {
-    return splitOption(String(item))[1];
+    return hasSecondary ? splitOption(String(item))[1] : null;
   }
 
   /** True when the row carries a secondary option that is not declared anymore */
@@ -146,7 +160,7 @@
   function onSecondaryChange(item: FilterOrderItemValue, next: string) {
     const index = draft.indexOf(item);
     if (index === -1) return;
-    const nextItem = composeOption(primaryOf(String(item)), next);
+    const nextItem = composeOption(primaryOfRow(item), next);
     if (nextItem === item) return;
     draft = [...draft.slice(0, index), nextItem, ...draft.slice(index + 1)];
   }

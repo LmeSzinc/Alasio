@@ -136,8 +136,8 @@
           layout: "vert",
         }),
         // dt=filter-order with secondary options: every primary item of the
-        // value carries one of its own options as "item:option"
-        Secondary: arg("FilterOrder", "Secondary", "filter-order", ["PlateT4:gun", "BookT3:red", "Chip"], {
+        // value carries one of its own options as "item-option"
+        Secondary: arg("FilterOrder", "Secondary", "filter-order", ["PlateT4-gun", "BookT3-red", "Chip"], {
           name: "filter-order (secondary)",
           help: "PlateT4 and BookT3 pick a type, Chip has none; the editor changes it in place",
           option: ["PlateT4", "BookT3", "Chip", "PR"],
@@ -226,8 +226,8 @@
           },
         ),
         // A long order with unknown items: a primary item that is not in
-        // `option` anymore (Unknown-1, RemovedItem), a secondary option that
-        // was removed from `option_dict` (BookT2:gold), and plain items that
+        // `option` anymore (Gone, RemovedItem), a secondary option that
+        // was removed from `option_dict` (BookT2-gold), and plain items that
         // never had a secondary option (Chip, CatT3). The pills mark them, the
         // editor keeps their rows so they can be fixed or removed
         SecondaryLarge: arg(
@@ -235,30 +235,30 @@
           "SecondaryLarge",
           "filter-order",
           [
-            "PlateT4:gun",
-            "BookT3:red",
-            "Unknown-1:gun",
-            "BookT2:gold",
-            "PR:neptune",
+            "PlateT4-gun",
+            "BookT3-red",
+            "Gone-gun",
+            "BookT2-gold",
+            "PR-neptune",
             "Chip",
             "CatT3",
             "RemovedItem",
-            "Retrofit:cl",
+            "Retrofit-cl",
             "FoodT6",
             "FoodT5",
             "CatT2",
             "BoxT4",
-            "Legacy:alpha",
-            "Legacy:beta",
-            "Retrofit:dd",
-            "PR:monarch",
-            "BookT3:blue",
-            "PlateT4:antiair",
-            "BookT2:red",
+            "Legacy-alpha",
+            "Legacy-beta",
+            "Retrofit-dd",
+            "PR-monarch",
+            "BookT3-blue",
+            "PlateT4-antiair",
+            "BookT2-red",
           ],
           {
             name: "filter-order (secondary, long, unknown items)",
-            help: "Unknown-1 and RemovedItem are not in option, BookT2:gold is not declared, Chip has no secondary option",
+            help: "Gone and RemovedItem are not in option, BookT2-gold is not declared, Chip has no secondary option",
             option: [
               "PlateT4",
               "BookT3",
@@ -290,14 +290,14 @@
           "SecondaryLongNames",
           "filter-order",
           [
-            "GearDesignPlanT3:OrdnanceTestingReportT3",
-            "OrdnanceTestingReportT2:DevelopmentMaterialT2",
-            "Short:cl",
-            "PlateT4:gun",
+            "GearDesignPlanT3-OrdnanceTestingReportT3",
+            "OrdnanceTestingReportT2-DevelopmentMaterialT2",
+            "Short-cl",
+            "PlateT4-gun",
           ],
           {
             name: "filter-order (secondary, long names)",
-            help: "A long primary item and a long secondary option; Short:cl is the short case the selector keeps a min width for",
+            help: "A long primary item and a long secondary option; Short-cl is the short case the selector keeps a min width for",
             option: [
               "GearDesignPlanT3",
               "OrdnanceTestingReportT2",

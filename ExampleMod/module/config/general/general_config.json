@@ -176,7 +176,7 @@
         "group": "ShopDemo",
         "arg": "BuyOrder",
         "dt": "filter-order",
-        "value": ["PlateT4:gun", "BookT3:red", "Chip"],
+        "value": ["PlateT4-gun", "BookT3-red", "Chip"],
         "option": ["PlateT4", "BookT3", "PR", "Chip"],
         "option_dict": {
           "PlateT4": ["gun", "general", "torpedo", "antiair", "plane"],

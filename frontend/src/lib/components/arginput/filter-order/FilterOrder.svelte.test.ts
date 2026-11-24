@@ -584,7 +584,7 @@ describe("TestFilterOrderMultiInstance", () => {
 /** The arg with secondary options, as the backend sends it */
 function makeSecondaryArg(overrides: Partial<ArgData> = {}): ArgData {
   return makeArg({
-    value: ["PlateT4:gun", "Chip"],
+    value: ["PlateT4-gun", "Chip"],
     option: ["PlateT4", "BookT3", "Chip"],
     option_dict: { PlateT4: ["gun", "general"], BookT3: ["red", "blue"] },
     ...overrides,
@@ -615,10 +615,10 @@ function selectOption(label: string) {
 }
 
 describe("TestFilterOrderSecondary", () => {
-  it("shows the item in the stored form, the option after a colon", async () => {
+  it("shows the item in the stored form, the option after the level separator", async () => {
     const { target } = await mountArg(makeSecondaryArg());
 
-    expect(pillText(target)).toEqual(["PlateT4:gun", "Chip"]);
+    expect(pillText(target)).toEqual(["PlateT4-gun", "Chip"]);
   });
 
   it("edits the secondary option in place and saves it", async () => {
@@ -634,7 +634,7 @@ describe("TestFilterOrderSecondary", () => {
     footerButton(t.Input.Save()).click();
     await settle();
 
-    expect(arg.value).toEqual(["PlateT4:general", "Chip"]);
+    expect(arg.value).toEqual(["PlateT4-general", "Chip"]);
     expect(handleEdit).toHaveBeenCalledTimes(1);
   });
 
@@ -648,7 +648,7 @@ describe("TestFilterOrderSecondary", () => {
     footerButton(t.Input.Save()).click();
     await settle();
 
-    expect(arg.value).toEqual(["Chip", "BookT3:red"]);
+    expect(arg.value).toEqual(["Chip", "BookT3-red"]);
   });
 
   it("disables saving a primary that must carry a secondary option", async () => {
@@ -661,9 +661,9 @@ describe("TestFilterOrderSecondary", () => {
   });
 
   it("marks an item that is no legal item, in its stored form", async () => {
-    const { target } = await mountArg(makeSecondaryArg({ value: ["Unknown-1:gun", "Chip"] }));
+    const { target } = await mountArg(makeSecondaryArg({ value: ["Gone-gun", "Chip"] }));
 
-    expect(pillText(target)).toEqual(["Unknown-1:gun", "Chip"]);
+    expect(pillText(target)).toEqual(["Gone-gun", "Chip"]);
     expect(pills(target).querySelector(`[aria-label="${t.Input.FilterOrderInvalid()}"]`)).not.toBeNull();
   });
 
@@ -671,7 +671,7 @@ describe("TestFilterOrderSecondary", () => {
     // BookT2 declares red / blue / yellow, gold was removed from the yaml
     const { target } = await mountArg(
       makeSecondaryArg({
-        value: ["PlateT4:gun", "BookT2:gold"],
+        value: ["PlateT4-gun", "BookT2-gold"],
         option: ["PlateT4", "BookT2", "Chip"],
         option_dict: { PlateT4: ["gun", "general"], BookT2: ["red", "blue"] },
       }),
@@ -688,7 +688,7 @@ describe("TestFilterOrderSecondary", () => {
     // a short option like "cl" does not shrink its row
     const { target } = await mountArg(
       makeSecondaryArg({
-        value: ["PlateT4:gun", "Short:cl"],
+        value: ["PlateT4-gun", "Short-cl"],
         option: ["PlateT4", "Short"],
         option_dict: { PlateT4: ["gun", "general"], Short: ["cl", "dd"] },
       }),
@@ -711,13 +711,13 @@ describe("TestFilterOrderSecondary", () => {
     // the item keeps both long parts, the pill is capped to the line width
     const { target } = await mountArg(
       makeSecondaryArg({
-        value: ["GearDesignPlanT3:OrdnanceTestingReportT3"],
+        value: ["GearDesignPlanT3-OrdnanceTestingReportT3"],
         option: ["GearDesignPlanT3"],
         option_dict: { GearDesignPlanT3: ["OrdnanceTestingReportT3", "DevelopmentMaterialT3"] },
       }),
     );
 
-    expect(pillText(target)).toEqual(["GearDesignPlanT3:OrdnanceTestingReportT3"]);
+    expect(pillText(target)).toEqual(["GearDesignPlanT3-OrdnanceTestingReportT3"]);
   });
 
   it("centres the dialog below the drag band of the desktop client", async () => {

@@ -56,13 +56,13 @@ OldRetire:
 
 # A shop purchase plan: the order of the shelves, and for a shelf that opens a
 # selection dialog, which item to pick from it (dt=filter-order with
-# "option_dict"). The value is written "item:option", an item without a
+# "option_dict"). The value is written "item-option", an item without a
 # secondary option (Chip) is written as itself.
 ShopDemo:
   args:
     BuyOrder:
       dt: filter-order
-      value: PlateT4:gun > BookT3:red > Chip
+      value: PlateT4-gun > BookT3-red > Chip
       option: [ PlateT4, BookT3, PR, Chip ]
       option_dict:
         PlateT4: [ gun, general, torpedo, antiair, plane ]

@@ -145,7 +145,7 @@ Group:
   args:
     Order:
       dt: filter-order
-      value: PlateT4:gun > Chip
+      value: PlateT4-gun > Chip
       option: [PlateT4, BookT3, Chip]
       option_dict:
         PlateT4: [gun, general]
@@ -170,7 +170,7 @@ Task:
         "group": "Group",
         "arg": "Order",
         "dt": "filter-order",
-        "value": ["PlateT4:gun", "Chip"],
+        "value": ["PlateT4-gun", "Chip"],
         "option": ["PlateT4", "BookT3", "Chip"],
         "option_dict": {
           "PlateT4": ["gun", "general"],

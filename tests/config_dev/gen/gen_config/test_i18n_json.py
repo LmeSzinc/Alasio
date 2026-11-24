@@ -329,7 +329,7 @@ Group:
   args:
     Order:
       dt: filter-order
-      value: PlateT4:gun > Chip
+      value: PlateT4-gun > Chip
       option: [PlateT4, Chip]
       option_dict:
         PlateT4: [gun, general]

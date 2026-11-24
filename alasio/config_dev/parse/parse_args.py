@@ -247,7 +247,7 @@ def preprocess_arg(arg: dict) -> dict:
         # datatypes), it is the universe of items the frontend editor can add,
         # the value is an ordered subset of it.
         # "option_dict" is optional: {item: [secondary option, ...]}, an item of the
-        # value then carries one of its own secondary options as "item:option".
+        # value then carries one of its own secondary options as "item-option".
         # The value is defined as "option-A > option-B" in yaml, or as a list,
         # normalize it to a tuple before validating (filter keeps the old split
         # position, see below)
@@ -300,7 +300,7 @@ class ArgData(Struct, omit_defaults=True, forbid_unknown_fields=True):
     option: Union[list, UnsetType] = UNSET
     # {group: [option1, option2, ...]} in secondary-select
     # {item: [secondary option, ...]} in filter-order, an item of the value then
-    # carries its secondary option as "item:option"
+    # carries its secondary option as "item-option"
     option_dict: Union[Dict[str, list], UnsetType] = UNSET
 
     # Data topics events will have `option_i18n` for option translations

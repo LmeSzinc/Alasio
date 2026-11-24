@@ -119,6 +119,17 @@ option_dict: {}
 """)
         assert 'option_dict' not in arg.to_dict()
 
+    def test_level_separator_is_legal_without_secondary_options(self):
+        """An arg without secondary options never splits an item, its names may
+        hold the level separator: "Fleet-1" is a legal item here."""
+        arg = parse_arg("""\
+dt: filter-order
+value: Fleet-1 > Fleet-2
+option: [Fleet-1, Fleet-2]
+""")
+        assert arg.value == ('Fleet-1', 'Fleet-2')
+        assert arg.get_literal_groups() == [['Fleet-1', 'Fleet-2']]
+
     def test_vert_layout_by_default(self):
         arg = parse_arg("""\
 dt: filter-order
@@ -137,13 +148,13 @@ class TestFilterOrderSecondary:
     def test_composite_items(self):
         arg = parse_arg("""\
 dt: filter-order
-value: PlateT4:gun > BookT3:red > Chip
+value: PlateT4-gun > BookT3-red > Chip
 option: [PlateT4, BookT3, Chip, PR]
 option_dict:
   PlateT4: [gun, general]
   BookT3: [red, blue]
 """)
-        assert arg.value == ('PlateT4:gun', 'BookT3:red', 'Chip')
+        assert arg.value == ('PlateT4-gun', 'BookT3-red', 'Chip')
         assert arg.option_dict == {'PlateT4': ['gun', 'general'], 'BookT3': ['red', 'blue']}
         assert arg.layout == 'vert'
 
@@ -152,22 +163,22 @@ option_dict:
         not a legal item of the value."""
         arg = parse_arg("""\
 dt: filter-order
-value: PlateT4:gun
+value: PlateT4-gun
 option: [PlateT4, BookT3, Chip]
 option_dict:
   PlateT4: [gun, general]
   BookT3: [red]
 """)
         assert arg.get_literal_groups() == [[
-            'PlateT4:gun', 'PlateT4:general', 'BookT3:red', 'Chip',
+            'PlateT4-gun', 'PlateT4-general', 'BookT3-red', 'Chip',
         ]]
         assert arg.get_python_type() == (
-            "t.Tuple[t.Literal['PlateT4:gun', 'PlateT4:general', 'BookT3:red', 'Chip'], ...]")
+            "t.Tuple[t.Literal['PlateT4-gun', 'PlateT4-general', 'BookT3-red', 'Chip'], ...]")
 
     def test_literal_ref(self):
         arg = parse_arg("""\
 dt: filter-order
-value: PlateT4:gun
+value: PlateT4-gun
 option: [PlateT4]
 option_dict:
   PlateT4: [gun]
@@ -177,12 +188,12 @@ option_dict:
     def test_list_value(self):
         arg = parse_arg("""\
 dt: filter-order
-value: [PlateT4:general, Chip]
+value: [PlateT4-general, Chip]
 option: [PlateT4, Chip]
 option_dict:
   PlateT4: [gun, general]
 """)
-        assert arg.value == ('PlateT4:general', 'Chip')
+        assert arg.value == ('PlateT4-general', 'Chip')
 
     def test_empty_value(self):
         arg = parse_arg("""\
@@ -220,19 +231,19 @@ option_dict:
         with pytest.raises(DefinitionError) as e:
             parse_arg("""\
 dt: filter-order
-value: PlateT4:red
+value: PlateT4-red
 option: [PlateT4, BookT3]
 option_dict:
   PlateT4: [gun]
   BookT3: [red]
 """)
-        assert e.value.msg == 'Default value "PlateT4:red" is not a valid item of "PlateT4"'
+        assert e.value.msg == 'Default value "PlateT4-red" is not a valid item of "PlateT4"'
 
     def test_primary_without_secondary_must_not_carry_one(self):
         with pytest.raises(DefinitionError) as e:
             parse_arg("""\
 dt: filter-order
-value: Chip:gun
+value: Chip-gun
 option: [Chip]
 option_dict:
   Chip2: [gun]
@@ -244,30 +255,30 @@ option_dict:
         with pytest.raises(DefinitionError) as e:
             parse_arg("""\
 dt: filter-order
-value: Chip:gun
+value: Chip-gun
 option: [PlateT4, Chip]
 option_dict:
   PlateT4: [gun]
 """)
-        assert e.value.msg == 'Default value "Chip:gun" is not a valid item of "Chip"'
+        assert e.value.msg == 'Default value "Chip-gun" is not a valid item of "Chip"'
 
     def test_primary_must_be_in_option(self):
         with pytest.raises(DefinitionError) as e:
             parse_arg("""\
 dt: filter-order
-value: PlateT5:gun
+value: PlateT5-gun
 option: [PlateT4]
 option_dict:
   PlateT4: [gun]
 """)
-        assert e.value.msg == 'Default value "PlateT5:gun" is not in "option"'
+        assert e.value.msg == 'Default value "PlateT5-gun" is not in "option"'
 
     def test_duplicate_primary(self):
         """A primary item is used once, the editor shows one row per primary."""
         with pytest.raises(DefinitionError) as e:
             parse_arg("""\
 dt: filter-order
-value: PlateT4:gun > PlateT4:general
+value: PlateT4-gun > PlateT4-general
 option: [PlateT4]
 option_dict:
   PlateT4: [gun, general]
@@ -278,7 +289,7 @@ option_dict:
         with pytest.raises(DefinitionError) as e:
             parse_arg("""\
 dt: filter-order
-value: PlateT4:gun > > Chip
+value: PlateT4-gun > > Chip
 option: [PlateT4, Chip]
 option_dict:
   PlateT4: [gun]
@@ -289,7 +300,7 @@ option_dict:
         with pytest.raises(DefinitionError) as e:
             parse_arg("""\
 dt: filter-order
-value: 'PlateT4:'
+value: 'PlateT4-'
 option: [PlateT4]
 option_dict:
   PlateT4: [gun]
@@ -311,7 +322,7 @@ option_dict:
         with pytest.raises(DefinitionError) as e:
             parse_arg("""\
 dt: filter-order
-value: ['1:gun']
+value: ['1-gun']
 option: [1]
 option_dict:
   '1': [gun]
@@ -392,23 +403,23 @@ option_dict:
             parse_arg("""\
 dt: filter-order
 value: []
-option: ['Plate:T4']
+option: ['Plate-T4']
 option_dict:
-  'Plate:T4': [gun]
+  'Plate-T4': [gun]
 """)
-        assert e.value.msg == '"option" item "Plate:T4" must not contain ":", it separates the secondary option'
+        assert e.value.msg == '"option" item "Plate-T4" must not contain "-", it separates the secondary option'
 
     def test_separator_in_secondary(self):
         """A secondary option may hold the separator, the split takes the first one."""
         arg = parse_arg("""\
 dt: filter-order
-value: PlateT4:gun:x
+value: PlateT4-gun-x
 option: [PlateT4]
 option_dict:
-  PlateT4: ['gun:x']
+  PlateT4: ['gun-x']
 """)
-        assert arg.value == ('PlateT4:gun:x',)
-        assert arg.get_literal_groups() == [['PlateT4:gun:x']]
+        assert arg.value == ('PlateT4-gun-x',)
+        assert arg.get_literal_groups() == [['PlateT4-gun-x']]
 
     def test_list_separator_in_option(self):
         """>" separates the items of a value, so a primary item can not hold one."""
@@ -449,7 +460,7 @@ option: ['PlateT4>x']
         with pytest.raises(DefinitionError) as e:
             parse_arg("""\
 dt: filter-order
-value: ['PlateT4:gun>x']
+value: ['PlateT4-gun>x']
 option: [PlateT4]
 option_dict:
   PlateT4: [gun]

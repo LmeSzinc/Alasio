@@ -143,13 +143,13 @@ class TestSplitOption:
     """split_option() handles the item of a filter-order with secondary options."""
 
     @pytest.mark.parametrize('item, expected', [
-        ('PlateT4:gun', ('PlateT4', 'gun')),
+        ('PlateT4-gun', ('PlateT4', 'gun')),
         ('Chip', ('Chip', None)),
         # split on the first separator only
-        ('PlateT4:gun:x', ('PlateT4', 'gun:x')),
+        ('PlateT4-gun-x', ('PlateT4', 'gun-x')),
         # a leading separator is kept as written, the item itself is validated
         # by the arg definition, not here
-        (':gun', ('', 'gun')),
+        ('-gun', ('', 'gun')),
     ])
     def test_split(self, item, expected):
         assert split_option(item) == expected

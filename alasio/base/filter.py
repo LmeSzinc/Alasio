@@ -1,6 +1,15 @@
 import re
 from collections import deque
 
+# Separator between the levels of one item of a dt="filter-order" value: the
+# item "PlateT4-gun" is the item "PlateT4" with the option "gun".
+# It is fixed for every arg, not configurable: the value is parsed by the regex
+# of the mod, which reads one capture group per level, so a custom separator
+# would have to be mirrored there. A separator the regex does not expect does
+# not fail either, it only widens the predicate, because re.search() does not
+# have to match the whole string ("urgentcube:3" is read as "urgentcube").
+FILTER_ORDER_SEPARATOR = '-'
+
 
 def remove_hash_comment(s):
     """
@@ -74,8 +83,10 @@ def split_option(item):
     Split a filter item that carries a secondary option
 
     A dt="filter-order" item is either a primary item (`Chip`) or a primary
-    item with one of its own secondary options (`PlateT4:gun`). The item is
+    item with one of its own secondary options (`PlateT4-gun`). The item is
     split on the first separator, so the secondary option keeps any later one.
+    Only call this for the value of an arg that declares secondary options: an
+    arg without them is never split, and its items may hold the separator.
 
     Args:
         item (str): Item of a filter-order value
@@ -84,7 +95,7 @@ def split_option(item):
         tuple[str, str]: (primary, secondary), secondary is None when the item
             carries no secondary option
     """
-    primary, sep, secondary = str(item).partition(':')
+    primary, sep, secondary = str(item).partition(FILTER_ORDER_SEPARATOR)
     if not sep:
         return primary, None
     return primary, secondary

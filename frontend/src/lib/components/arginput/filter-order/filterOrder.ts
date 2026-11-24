@@ -12,8 +12,15 @@
 /** An item of a filter-order value, a python literal item of "option". */
 export type FilterOrderItem = string;
 
-/** Separator between a primary item and its secondary option, e.g. "PlateT4:gun" */
-export const SECONDARY_SEPARATOR = ":";
+/**
+ * Separator between the levels of an item, e.g. "PlateT4-gun".
+ *
+ * Fixed for every arg, mirroring FILTER_ORDER_SEPARATOR of the backend: the
+ * value is parsed by the regex of the mod, one capture group per level, so the
+ * separator cannot be chosen by the arg. An item of an arg without secondary
+ * options is never split, so it may contain it.
+ */
+export const SECONDARY_SEPARATOR = "-";
 
 /**
  * Split a filter-order item into its primary item and its secondary option.

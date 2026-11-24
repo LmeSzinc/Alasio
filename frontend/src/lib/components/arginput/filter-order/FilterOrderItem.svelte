@@ -114,7 +114,7 @@
       <span data-slot="filter-order-label" class="min-w-0 flex-1 truncate">{label}</span>
       {#if column === "selected" && secondaries.length > 0}
         <!-- The secondary option of the row, edited in place: the item of the
-             value is "item:option" and the position never moves -->
+             value is "item-option" and the position never moves -->
         {#if secondaries.length === 1 && !secondaryInvalid}
           <span class="w-2/5 shrink-0 truncate text-xs text-muted-foreground">
             {secondaryLabel(secondaries[0])}
