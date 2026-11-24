@@ -683,13 +683,27 @@ class CrossNavGenerator:
 
                         row.update(arg.to_dict())
                         args[arg_name] = row
-                        # arg data post-process
+                        # arg data post-process: the value and the option list stay
+                        # one line each
                         for key in ['value', 'option']:
                             if key in row:
                                 row[key] = NoIndent(row[key])
                         option_dict = row.get('option_dict')
                         if option_dict:
                             row['option_dict'] = {k: NoIndent(v) for k, v in option_dict.items()}
+                        levels = row.get('levels')
+                        if levels:
+                            # A level table holds a table entry per line (NoIndent,
+                            # its key and its candidates stay together): the table
+                            # of a research filter has a hundred of them, one
+                            # object per entry on four lines is unreadable
+                            row['levels'] = [
+                                {
+                                    'name': level['name'],
+                                    'option': [NoIndent(entry) for entry in level['option']],
+                                }
+                                for level in levels
+                            ]
                     # add args
                     for arg_name, row in args.items():
                         deep_set(out, keys=[card_name, group_name, arg_name], value=row)

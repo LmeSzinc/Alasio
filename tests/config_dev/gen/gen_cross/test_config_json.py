@@ -182,6 +182,83 @@ Task:
   }
 }"""
 
+    def test_filter_regex_levels_payload(self, fs):
+        """Every option of a level table sits on a line of its own, the level keeps
+        its keys: a table of a hundred entries stays readable in a diff."""
+        gen = make_cross(fs, {
+            'main': """\
+Group:
+  args:
+    Filter:
+      dt: filter-regex
+      value: S9-DR-0.5 > reset
+      pattern: '(?P<series>S[1-9])?-?(?P<family>DR)?-?(?P<detail>\\d\\.\\d)?'
+      option_command: [reset]
+      levels:
+        - name: series
+          option: [S8, S9]
+        - name: family
+          option:
+            '': [DR]
+            S9: [DR]
+        - name: detail
+          match: family
+          option:
+            '': ['0.5']
+            S9-DR: {match: [series, family], option: ['0.5', '2.5']}
+""",
+        }, {
+            'main': """\
+Task:
+  groups:
+    Group:
+  displays:
+    - [{info: Group}, Group]
+""",
+        })
+        assert nav_config_json(gen, 'main') == """\
+{
+  "card-Task-Group": {
+    "_info": {"group": "Group", "arg": "_info", "card": "card-Task-Group"},
+    "Group": {
+      "Filter": {
+        "task": "Task",
+        "group": "Group",
+        "arg": "Filter",
+        "dt": "filter-regex",
+        "value": ["S9-DR-0.5", "reset"],
+        "option_command": [
+          "reset"
+        ],
+        "levels": [
+          {
+            "name": "series",
+            "option": [
+              {"key": {}, "option": ["S8", "S9"]}
+            ]
+          },
+          {
+            "name": "family",
+            "option": [
+              {"key": {}, "option": ["DR"]},
+              {"key": {"series": "S9"}, "option": ["DR"]}
+            ]
+          },
+          {
+            "name": "detail",
+            "option": [
+              {"key": {}, "option": ["0.5"]},
+              {"key": {"series": "S9", "family": "DR"}, "option": ["0.5", "2.5"]}
+            ]
+          }
+        ],
+        "layout": "vert",
+        "pattern": "(?<series>S[1-9])?-?(?<family>DR)?-?(?<detail>\\\\d\\\\.\\\\d)?"
+      }
+    }
+  }
+}"""
+
     def test_variant_with_own_i18n(self, fs):
         """A variant overriding i18n binds the class and keeps its own title."""
         gen = make_cross(fs, {

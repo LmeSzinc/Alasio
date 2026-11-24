@@ -9,6 +9,7 @@ from alasio.config_dev.parse.base import DefinitionError
 from alasio.config_dev.parse.cache_alasio import CacheAlasio
 from alasio.config_dev.parse.load_alas_i18n import LoadAlasI18n
 from alasio.config_dev.parse.parse_args import TYPE_ARG_LITERAL, TYPE_ARG_TUPLE, ArgData
+from alasio.config_dev.parse.parse_filter_utils import TYPE_ARG_FILTER_REGEX
 from alasio.config_dev.parse.parse_groups import ParseGroups
 from alasio.config_dev.parse.parse_tasks import ParseTasks
 from alasio.ext.cache import cached_property
@@ -20,6 +21,51 @@ from alasio.logger import logger
 
 if TYPE_CHECKING:
     from alasio.config_dev.gen.gen_cross import CrossNavGenerator
+
+# Width of a generated line, the same as the codegen wraps at
+LINE_WIDTH = 120
+
+
+def render_pattern_variable(name, pattern):
+    """
+    Render the module level variable that holds an item pattern
+
+    The variable is a plain str: the generated model passes it to
+    m.Meta(pattern=...) and the pattern is long (a research filter lists every
+    ship of the game), so it is wrapped as implicit string concatenation.
+
+    Args:
+        name (str): Variable name
+        pattern (str): The pattern
+
+    Returns:
+        str: Python source of the assignment
+
+    Examples:
+        PATTERN_Group_Arg = (
+            '^(?:(?P<series>S[1-9])?'
+            '|reset)$'
+        )
+    """
+    indent = '    '
+    inline = f'{name} = {repr(pattern)}'
+    if len(inline) <= LINE_WIDTH:
+        return inline
+
+    # A chunk is as long as its repr fits the line, repr escapes keep the
+    # chunks correct on their own (implicit concatenation joins them back)
+    chunks = []
+    chunk = ''
+    for char in pattern:
+        if chunk and len(indent) + len(repr(chunk + char)) > LINE_WIDTH:
+            chunks.append(repr(chunk))
+            chunk = char
+        else:
+            chunk += char
+    chunks.append(repr(chunk))
+
+    body = '\n'.join(f'{indent}{chunk}' for chunk in chunks)
+    return f'{name} = (\n{body}\n)'
 
 
 def remove_stale_file(file, gitadd=None):
@@ -285,6 +331,8 @@ class ConfigGenerator(ParseGroups, ParseTasks):
 
         # Literal variable name of each literal content of this file
         literal_names: "dict[tuple, str]" = {}
+        # Pattern variable name of each item pattern of this file
+        pattern_names: "dict[str, str]" = {}
 
         for group_name, group in groups:
             # Args emitted in the class body. A SoftTotal group gets its Total
@@ -326,6 +374,38 @@ class ConfigGenerator(ParseGroups, ParseTasks):
                                 gen.Linebreak()
                 refs[arg_name] = ref
 
+            # Get the item pattern of each dt="filter-regex" arg of this group,
+            # the new ones are emitted before the class. The pattern is the
+            # decoder of the arg, so it also documents what an item may say
+            pattern_refs = {}
+            emitted_pattern = False
+            for arg_name, arg in emit_args.items():
+                if arg.dt not in TYPE_ARG_FILTER_REGEX:
+                    continue
+                pattern = arg.get_item_pattern()
+                ref = pattern_names.get(pattern)
+                if ref is None:
+                    name = f'PATTERN_{group_name}_{arg_name}'
+                    if name in used_names:
+                        raise DefinitionError(
+                            f'Pattern variable name conflict: "{name}"',
+                            file=self.file, keys=[group_name, arg_name], value=name)
+                    ref = name
+                    pattern_names[pattern] = ref
+                    used_names.add(ref)
+                    # One blank line away from the variables before it
+                    gen.Empty(1)
+                    gen.Comment(
+                        f'Pattern of {group_name}.{arg_name}: every item is a value decoded by one of '
+                        'its levels, or one of its commands')
+                    gen.Raw(render_pattern_variable(ref, pattern))
+                    emitted_pattern = True
+                pattern_refs[arg_name] = ref
+            if emitted_pattern:
+                # A Raw item right before a Class reads as the header of that
+                # class, so the 2 blank lines of a top level definition are set
+                gen.Empty(2)
+
             # Define model class
             cls = gen.Class(group_name)
             if group.parent:
@@ -339,7 +419,9 @@ class ConfigGenerator(ParseGroups, ParseTasks):
                     literal_ref = refs.get(arg_name, '')
                     # Expand tuple
                     if arg.dt in TYPE_ARG_TUPLE:
-                        with gen.Tuple(arg_name).Anno(arg.get_anno(literal_ref=literal_ref)).wrap():
+                        with gen.Tuple(arg_name).Anno(
+                                arg.get_anno(literal_ref=literal_ref, pattern_ref=pattern_refs.get(arg_name, ''))
+                        ).wrap():
                             for item in arg.value:
                                 gen.Item(item)
                         continue
@@ -402,11 +484,20 @@ class ConfigGenerator(ParseGroups, ParseTasks):
                 value: translation
         """
         old = deep_get(self._i18n_old, [group_name, arg_name], default={})
-        # A filter-order with secondary options has both lists, so the old
-        # translations of the primary and the secondary items are both readable
+        # Every option of the arg, in the order the editor shows them: the plain
+        # options, then the groups and the values of "option_dict" (a secondary
+        # select and a two level filter-order both hold their candidates there),
+        # then the candidates of a filter-regex level.
         i18n_options = list(arg.option or [])
         if arg.option_dict:
+            i18n_options.extend(arg.option_dict.keys())
             i18n_options.extend(o for options in arg.option_dict.values() for o in options)
+        # A filter-regex has no "option": its candidates live in the level
+        # tables, they are translated the same way as the plain options
+        for level in arg.levels or []:
+            i18n_options.extend(o for entry in level['option'] for o in entry['option'])
+        # A value is translated once, several levels may offer it
+        i18n_options = list(dict.fromkeys(i18n_options))
         old = LoadAlasI18n().load_arg(
             old, group_name, arg_name, languages=self.entry.gui_language, options=i18n_options)
         new = {}
@@ -424,17 +515,11 @@ class ConfigGenerator(ParseGroups, ParseTasks):
             value = format_i18n(value)
             deep_set(new, key, value)
         # option, the primary items and the secondary options may both be present
-        if arg.option or arg.option_dict:
+        if i18n_options:
             for lang in self.entry.gui_language:
                 inline = True
-                for option in arg.option or []:
+                for option in i18n_options:
                     inline &= self._load_arg_option_i18n(old, new, option, lang)
-                if arg.option_dict:
-                    for group in arg.option_dict:
-                        inline &= self._load_arg_option_i18n(old, new, group, lang)
-                    for options in arg.option_dict.values():
-                        for option in options:
-                            inline &= self._load_arg_option_i18n(old, new, option, lang)
                 # if options are all digit and option name is same as option, make it inline
                 if inline:
                     key = [lang, 'option_i18n']

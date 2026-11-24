@@ -1242,6 +1242,91 @@ class G(a.GroupBase):
 """
 
 
+class TestFilterRegexArg:
+    """dt="filter-regex" emits its pattern as a module variable and constrains
+    every item of the value with it."""
+
+    YAML = """\
+Group:
+  args:
+    Filter:
+      dt: filter-regex
+      value: S9-DR-0.5 > reset
+      pattern: '(?P<series>S[1-9])?-?(?P<family>DR|[BC])?-?(?P<detail>0\\.5|2\\.5)?'
+      option_command: [reset]
+      levels:
+        - name: series
+          option: [S8, S9]
+        - name: family
+          option: [B, C, DR]
+        - name: detail
+          option: ['0.5', '2.5']
+"""
+
+    ITEM_PATTERN = (
+        '^(?:(?:(?P<series>S[1-9])?-?(?P<family>DR|[BC])?-?(?P<detail>0\\.5|2\\.5)?)|(?:reset))$'
+    )
+
+    def test_pattern_variable_and_annotation(self, fs):
+        """The pattern is a module variable, the value is a tuple of items it
+        constrains, the commands are part of the pattern."""
+        gen = make_generator(fs, yaml=self.YAML)
+        assert definitions(model_code(gen)) == f"""\
+# Pattern of Group.Filter: every item is a value decoded by one of its levels, or one of its commands
+PATTERN_Group_Filter = {self.ITEM_PATTERN!r}
+
+
+class Group(a.GroupBase):
+    Filter: t.Tuple[e.Annotated[str, m.Meta(pattern=PATTERN_Group_Filter)], ...] = ('S9-DR-0.5', 'reset')
+"""
+
+    def test_pattern_is_a_msgspec_constraint(self, fs):
+        """The generated model rejects an item the pattern can not read, and
+        accepts the commands of the arg."""
+        gen = make_generator(fs, yaml=self.YAML)
+        namespace = {}
+        exec(compile(model_code(gen), 'testnav_model.py', 'exec'), namespace)
+        group = namespace['Group']
+
+        assert msgspec.convert({'Filter': ['S9-DR-0.5', 'reset']}, group).Filter == (
+            'S9-DR-0.5', 'reset'
+        )
+        # The pattern of the arg allows an item that sets no level, so the empty
+        # string is a legal item here; anything else the pattern can not read is
+        # rejected, and a command is only legal as written
+        for bad in (['S9-XX-1'], ['S9-DR-0.5x'], ['RESET'], ['resetx']):
+            with pytest.raises(msgspec.ValidationError):
+                msgspec.convert({'Filter': bad}, group)
+
+    def test_long_pattern_is_wrapped(self, fs):
+        """A pattern longer than the line width is wrapped as implicit string
+        concatenation, and still reads back as the same pattern."""
+        ships = '|'.join(f'ship{index:02d}' for index in range(12))
+        pattern = f'(?P<series>S[1-9])?-?(?P<family>{ships})?-?(?P<detail>\\d{{3}})?'
+        gen = make_generator(fs, yaml=f"""\
+Group:
+  args:
+    Filter:
+      dt: filter-regex
+      value: S9-ship01-315
+      pattern: '{pattern}'
+      levels:
+        - name: series
+          option: [S8, S9]
+        - name: family
+          option: [{', '.join(f'ship{index:02d}' for index in range(12))}]
+        - name: detail
+          option: ['315']
+""")
+        code = model_code(gen)
+        assert 'PATTERN_Group_Filter = (\n' in code
+        assert all(len(line) <= 120 for line in code.splitlines())
+
+        namespace = {}
+        exec(compile(code, 'testnav_model.py', 'exec'), namespace)
+        assert namespace['PATTERN_Group_Filter'] == f'^(?:{pattern})$'
+
+
 class TestInlineArg:
     def test_scalar_types(self, fs):
         """An arg without literal keeps its field inline."""

@@ -7,9 +7,10 @@ from msgspec import UNSET, Struct, UnsetType
 from alasio.backport import to_literal
 from alasio.codegen.python import ReprWrapper
 from alasio.config_dev.parse.base import DefinitionError
-from alasio.config_dev.parse.parse_arg_utils import (
-    TYPE_ARG_FILTER_ORDER, TYPE_ARG_LITERAL, expand_filter_order_items, validate_filter_order,
-    validate_filter_order_item, validate_filter_order_pair, validate_option, validate_range_default
+from alasio.config_dev.parse.parse_arg_utils import TYPE_ARG_LITERAL, validate_option, validate_range_default
+from alasio.config_dev.parse.parse_filter_utils import (
+    TYPE_ARG_FILTER_ORDER, TYPE_ARG_FILTER_REGEX, expand_filter_order_items, filter_item_pattern, validate_filter_order,
+    validate_filter_order_item, validate_filter_order_pair, validate_filter_regex
 )
 from alasio.config_dev.parse.parse_range import parse_range
 
@@ -79,6 +80,10 @@ TYPE_DT_TO_PYTHON = {
     # filter-order-pair is a two level filter-order: the whole "item-option" is
     # the identity, several options of one item may coexist
     'filter-order-pair': 't.Tuple[str, ...]',
+    # filter-regex is a multi level filter: "levels" declares one candidate
+    # table per level, "pattern" decodes a stored item back into one value per
+    # level (see parse_arg_utils.validate_filter_regex)
+    'filter-regex': 't.Tuple[str, ...]',
 }
 # Define which "dt" holds a number, see RANGE_CONSTRAINT in parse_arg_utils.py
 TYPE_ARG_NUMERIC = frozenset(
@@ -295,6 +300,35 @@ def preprocess_arg(arg: dict) -> dict:
             validate_filter_order_pair(arg['option'], value, option_dict, option_command=option_command)
             if not option_command:
                 arg.pop('option_command', None)
+    elif dt == 'filter-regex':
+        # A multi level filter decoded by a regex: there is no "option" list,
+        # the candidates live in the tables of "levels". The value is a list of
+        # predicates, each one written as the layers it sets ("S9-E-315").
+        if 'option' in arg:
+            raise DefinitionError(
+                'datatype "filter-regex" must not have "option" defined, '
+                'declare the candidates in "levels"')
+        if 'option_dict' in arg:
+            raise DefinitionError(
+                'datatype "filter-regex" must not have "option_dict" defined, '
+                'declare the candidates in "levels"')
+        if 'levels' not in arg:
+            raise DefinitionError('datatype "filter-regex" must have "levels" defined')
+        if 'pattern' not in arg:
+            raise DefinitionError('datatype "filter-regex" must have "pattern" defined')
+        if type(value) is str:
+            value = tuple(s.strip() for s in value.split('>'))
+        elif type(value) is list:
+            value = tuple(value)
+        arg['value'] = value
+        levels, pattern = validate_filter_regex(
+            arg['levels'], arg['pattern'], arg.get('option_command', None), value)
+        arg['levels'] = levels
+        # The stored pattern is the javascript one: the frontend decodes the
+        # rows with it, see validate_filter_regex()
+        arg['pattern'] = pattern
+        if not arg.get('option_command'):
+            arg.pop('option_command', None)
     else:
         arg.pop('option_dict', None)
         arg.pop('option_command', None)
@@ -314,7 +348,7 @@ def preprocess_arg(arg: dict) -> dict:
     # textarea-like inputs take the whole width, they are default to vert layout
     if 'layout' not in arg:
         if dt in ['input-line', 'textarea', 'filter', 'filter-order',
-                  'filter-order-item', 'filter-order-pair']:
+                  'filter-order-item', 'filter-order-pair', 'filter-regex']:
             arg['layout'] = 'vert'
 
     return arg
@@ -341,6 +375,11 @@ class ArgData(Struct, omit_defaults=True, forbid_unknown_fields=True):
     # Items of a filter-order-pair value that carry no "item-option" pair, e.g.
     # the "shortest" of a commission filter
     option_command: Union[List[str], UnsetType] = UNSET
+    # Candidate tables of a dt="filter-regex", one entry per level, normalized
+    # by preprocess_arg to {"name": str, "option": [{"key": {level: value},
+    # "option": [str]}]}: the key is already decoded, so the frontend looks a
+    # table up by comparing level values instead of parsing a prefix
+    levels: Union[list, UnsetType] = UNSET
 
     # Data topics events will have `option_i18n` for option translations
     # key is option, value is translation
@@ -390,6 +429,9 @@ class ArgData(Struct, omit_defaults=True, forbid_unknown_fields=True):
     # The annotated value must be a multiple of multiple_of.
     multiple_of: Union[int, float, UnsetType] = UNSET
     # A regex pattern that the annotated value must match against.
+    # On a dt="filter-regex" it is the decoder of the stored items instead (one
+    # named group per level); the generated model then constrains every item with
+    # filter_item_pattern(), and the value itself carries no Meta pattern
     pattern: Union[str, UnsetType] = UNSET
     # The annotated value must have a length greater than or equal to min_length.
     min_length: Union[int, UnsetType] = UNSET
@@ -453,6 +495,10 @@ class ArgData(Struct, omit_defaults=True, forbid_unknown_fields=True):
         # Filter out unset constraints and format each as key=value
         params = []
         for key in MSGSPEC_CONSTRAINT:
+            if key == 'pattern' and self.dt == 'filter-regex':
+                # The "pattern" of a filter-regex decodes a stored item into its
+                # level values, it is not a msgspec constraint of the value
+                continue
             value = getattr(self, key, UNSET)
             if value is not UNSET:
                 # Use repr() for all values to ensure proper string formatting
@@ -502,19 +548,37 @@ class ArgData(Struct, omit_defaults=True, forbid_unknown_fields=True):
         option = ', '.join([repr(o) for o in items])
         return f't.Literal[{option}]'
 
-    def get_python_type(self, literal_ref=''):
+    def get_item_pattern(self):
+        """
+        The regex every item of a dt="filter-regex" value has to match
+
+        The generated model constrains every item of the value with it, so a
+        stored item the pattern can not read (or that is not one of the
+        commands) is reported when a config is loaded.
+
+        Returns:
+            str: Anchored python regex, empty for the other datatypes
+        """
+        if self.dt not in TYPE_ARG_FILTER_REGEX or not self.pattern:
+            return ''
+        return filter_item_pattern(self.pattern, self.option_command or ())
+
+    def get_python_type(self, literal_ref='', pattern_ref=''):
         """
         Generate python typehint in string from ArgData
 
         Args:
             literal_ref (str): Name of the module level literal variable,
                 empty to build the inline literal
+            pattern_ref (str): Name of the module level pattern variable of a
+                dt="filter-regex", empty to build the inline pattern
 
         Examples:
             int
             t.Tuple[str, ...]
             t.Tuple[LITERAL_Group_Arg, ...]
             t.Literal['zh', 'en', 'ja', 'kr']
+            t.Tuple[e.Annotated[str, m.Meta(pattern=PATTERN_Group_Arg)], ...]
         """
         # Convert options to literal
         if self.dt in TYPE_ARG_LITERAL:
@@ -523,22 +587,29 @@ class ArgData(Struct, omit_defaults=True, forbid_unknown_fields=True):
             if self.dt in TYPE_ARG_TUPLE:
                 return f't.Tuple[{literal}, ...]'
             return literal
+        # A filter-regex decodes every item with its pattern, msgspec can only
+        # constrain the item type, a pattern on the tuple itself is a TypeError
+        if self.dt in TYPE_ARG_FILTER_REGEX:
+            pattern = pattern_ref or repr(self.get_item_pattern())
+            return f't.Tuple[e.Annotated[str, m.Meta(pattern={pattern})], ...]'
         # Find in pre-defined dict
         return TYPE_DT_TO_PYTHON.get(self.dt, 'Any')
 
-    def get_anno(self, literal_ref=''):
+    def get_anno(self, literal_ref='', pattern_ref=''):
         """
         Generate annotation string from ArgData
 
         Args:
             literal_ref (str): Name of the module level literal variable,
                 empty to build the inline literal
+            pattern_ref (str): Name of the module level pattern variable of a
+                dt="filter-regex", empty to build the inline pattern
 
         Examples:
             Annotated[int, Meta(ge=256, le=8192)]
             t.Tuple[LITERAL_Group_Arg, ...]
         """
-        python_type = self.get_python_type(literal_ref)
+        python_type = self.get_python_type(literal_ref, pattern_ref)
         meta = self.get_meta()
         if meta:
             anno = f"e.Annotated[{python_type}, {meta}]"
