@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import * as AlertDialog from "$lib/components/ui/alert-dialog";
   import { buttonVariants } from "$lib/components/ui/button/button.svelte";
+  import * as Dialog from "$lib/components/ui/dialog";
   import { t } from "$lib/i18n";
 
   interface Props {
@@ -37,18 +37,25 @@
     shutdownStage = "waiting";
     await window.electronAPI.confirmClose();
   }
+
+  // Dismissing a plain dialog (outside click, escape, close button) closes it
+  // without asking: allowed while the confirmation is still up, refused once
+  // the shutdown started, because the dialog then only reports its progress.
+  function keepOpenWhileClosing(event: Event) {
+    if (isClosing) event.preventDefault();
+  }
 </script>
 
-<AlertDialog.Root bind:open={show}>
-  <AlertDialog.Content
-    onEscapeKeydown={(e) => {
-      if (isClosing) e.preventDefault();
-    }}
+<Dialog.Root bind:open={show}>
+  <Dialog.Content
+    showCloseButton={!isClosing}
+    onEscapeKeydown={keepOpenWhileClosing}
+    onInteractOutside={keepOpenWhileClosing}
   >
-    <AlertDialog.Header>
-      <AlertDialog.Title>{t.CloseDialog.Title()}</AlertDialog.Title>
-      <AlertDialog.Description>{t.CloseDialog.Message()}</AlertDialog.Description>
-    </AlertDialog.Header>
+    <Dialog.Header>
+      <Dialog.Title>{t.CloseDialog.Title()}</Dialog.Title>
+      <Dialog.Description>{t.CloseDialog.Message()}</Dialog.Description>
+    </Dialog.Header>
 
     {#if isClosing}
       <div class="flex flex-col items-center gap-4 py-4">
@@ -58,12 +65,14 @@
         </p>
       </div>
     {:else}
-      <AlertDialog.Footer>
-        <AlertDialog.Cancel onclick={handleCancel}>{t.CloseDialog.Cancel()}</AlertDialog.Cancel>
+      <Dialog.Footer>
+        <button onclick={handleCancel} class={buttonVariants({ variant: "outline" })}>
+          {t.CloseDialog.Cancel()}
+        </button>
         <button onclick={handleConfirm} class={buttonVariants({ variant: "destructive" })}>
           {t.CloseDialog.Confirm()}
         </button>
-      </AlertDialog.Footer>
+      </Dialog.Footer>
     {/if}
-  </AlertDialog.Content>
-</AlertDialog.Root>
+  </Dialog.Content>
+</Dialog.Root>
