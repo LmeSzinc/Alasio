@@ -15,11 +15,12 @@
     type FilterOrderItem as FilterOrderItemValue,
     SECONDARY_SEPARATOR,
     appendItem,
-    applyDrop,
     composeOption,
     defaultItem,
     duplicateIndexes,
+    insertRow,
     moveItem,
+    moveRow,
     primaryOf,
     removeAt,
     sameList,
@@ -275,28 +276,39 @@
   }
 
   /**
-   * A drag starts with the id of the row: an unused row of a filter-order-item
-   * carries its primary item only, so it is completed with its first secondary
-   * option before the drop, the same as adding it with the plus button.
+   * A drop addresses rows by index, never by value: a stored value may repeat
+   * an item, and dragging one of two equal rows has to move only that row.
+   *
+   * A row of the unused column of a filter-order-item carries its primary item
+   * only, so it is completed with its first secondary option before the drop,
+   * the same as adding it with the plus button.
    */
   function onDndEnd({ active, over, position }: DndEndCallbackDetail) {
     if (!active || !over) return;
-    const item = completeItem(String(active.id));
-    const overData = over.data as { type?: string; container?: boolean } | undefined;
+    const activeData = active.data as { item?: string; index?: number } | undefined;
+    const source = activeData?.index;
+    const overData = over.data as { type?: string; container?: boolean; index?: number } | undefined;
     const at = position === "top" ? "top" : "bottom";
 
     let target: DropTarget;
     if (overData?.type === "unused") {
-      // Anywhere in the unused column removes the item from the order
+      // Anywhere in the unused column removes the row from the order
       target = { kind: "unused" };
     } else if (overData?.type === "selected") {
       target = overData.container
         ? { kind: "selected", position: at }
-        : { kind: "selected", itemId: String(over.id), position: at };
+        : { kind: "selected", index: overData.index, position: at };
     } else {
       return;
     }
-    draft = applyDrop(draft, item, target);
+
+    if (source !== undefined) {
+      draft = moveRow(draft, source, target);
+      return;
+    }
+    const item = completeItem(String(activeData?.item ?? ""));
+    if (!item) return;
+    draft = insertRow(draft, item, target);
   }
 
   function save() {
@@ -368,6 +380,7 @@
                      dropped), but two equal items can not share a key -->
                 {#each draft as item, index (`${index}\u0000${item}`)}
                   <FilterOrderItem
+                    rowId={String(index)}
                     {item}
                     column="selected"
                     {index}
@@ -411,6 +424,7 @@
                       <FilterOrderGroupHeader label={block.label} remaining={block.remaining} total={block.total} />
                       {#each block.rows as row (row.value)}
                         <FilterOrderItem
+                          rowId={`unused-${row.value}`}
                           item={row.value}
                           column="unused"
                           label={row.label}
@@ -419,6 +433,7 @@
                       {/each}
                     {:else}
                       <FilterOrderItem
+                        rowId={`unused-${block.value}`}
                         item={block.value}
                         column="unused"
                         label={block.label}
@@ -433,7 +448,13 @@
                 </div>
               {:else}
                 {#each unused as item (item)}
-                  <FilterOrderItem {item} column="unused" label={labelOf(item)} onAdd={() => onAdd(item)} />
+                  <FilterOrderItem
+                    rowId={`unused-${item}`}
+                    {item}
+                    column="unused"
+                    label={labelOf(item)}
+                    onAdd={() => onAdd(item)}
+                  />
                 {/each}
               {/if}
             </FilterOrderColumn>
@@ -452,7 +473,9 @@
       {#if active}
         <div class="flex w-64 items-center gap-x-1.5 rounded-md border bg-popover px-2 py-1.5 text-sm shadow-xl">
           <GripVertical class="size-4 text-muted-foreground" />
-          <span class="truncate">{fullLabelOf(String(active.id))}</span>
+          <span class="truncate">
+            {fullLabelOf(String((active.data as { item?: string } | undefined)?.item ?? ""))}
+          </span>
         </div>
       {/if}
     {/snippet}

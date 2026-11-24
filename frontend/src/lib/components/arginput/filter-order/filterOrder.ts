@@ -242,54 +242,66 @@ export function removeItem(list: readonly FilterOrderItem[], item: FilterOrderIt
 
 /**
  * The normalized drop target of a drag, built from the dnd callback:
- * - a row of the selected column: `itemId` is the row, insert before / after it
- * - the selected column container: no `itemId`, the top area inserts first,
- *   the rest appends last
- * - the unused column: the item leaves the order, the position is meaningless
+ * - a row of the selected column: `index` is the row, insert before / after it
+ * - the selected column container: no `index`, the top area inserts first, the
+ *   rest appends last
+ * - the unused column: the row leaves the order, the position is meaningless
+ *
+ * Rows are addressed by index, never by value: a stored value may repeat an
+ * item, and two rows with the same value would otherwise move together.
  */
-export type DropTarget =
-  { kind: "selected"; itemId?: FilterOrderItem; position: "top" | "bottom" } | { kind: "unused" };
+export type DropTarget = { kind: "selected"; index?: number; position: "top" | "bottom" } | { kind: "unused" };
 
 /**
- * Apply a drop: move `item` to `target` in a copy of the draft.
+ * Where a drop inserts, as an index of the list after the dragged row is out.
+ *
+ * @param count Length of the list without the dragged row
+ * @param target The normalized drop target
+ * @param from Index the dragged row had, -1 when it comes from the unused column
+ * @returns The index to insert at
+ */
+function insertIndex(count: number, target: { index?: number; position: "top" | "bottom" }, from: number): number {
+  if (target.index === undefined) return target.position === "top" ? 0 : count;
+  let to = target.index;
+  if (from !== -1 && from < to) to -= 1;
+  if (target.position === "bottom") to += 1;
+  return Math.min(Math.max(to, 0), count);
+}
+
+/**
+ * Move the row at `from` to `target` in a copy of the draft.
  *
  * @param draft The current selected order
- * @param item The item being dragged, it may come from either column
+ * @param from Index of the row being dragged
  * @param target The normalized drop target
  * @returns The new selected order
  */
-export function applyDrop(
+export function moveRow(draft: readonly FilterOrderItem[], from: number, target: DropTarget): FilterOrderItem[] {
+  if (from < 0 || from >= draft.length) return [...draft];
+  if (target.kind === "unused") return removeAt(draft, from);
+  // Dropping the row onto itself must not move it
+  if (target.index === from) return [...draft];
+  const next = removeAt(draft, from);
+  next.splice(insertIndex(next.length, target, from), 0, draft[from]);
+  return next;
+}
+
+/**
+ * Insert an item of the unused column into the draft at the drop target.
+ *
+ * @param draft The current selected order
+ * @param item The item being added, already completed by the caller
+ * @param target The normalized drop target
+ * @returns The new selected order
+ */
+export function insertRow(
   draft: readonly FilterOrderItem[],
   item: FilterOrderItem,
   target: DropTarget,
 ): FilterOrderItem[] {
-  // A move is always a removal first: the item may come from either column.
-  // Only one occurrence is taken out: the value may repeat, and the row being
-  // dragged is a single row
-  const from = draft.indexOf(item);
-  const next = from === -1 ? [...draft] : removeAt(draft, from);
-
+  const next = [...draft];
   if (target.kind === "unused") return next;
-
-  // Dropping the row onto itself must not move it
-  if (target.itemId === item) return [...draft];
-
-  let to: number;
-  if (target.itemId === undefined) {
-    // The whole column is the target: the top area inserts first, the rest appends
-    to = target.position === "top" ? 0 : next.length;
-  } else {
-    // A row is the target: insert before / after it
-    to = draft.indexOf(target.itemId);
-    if (to === -1) {
-      // The row vanished (should not happen while dragging): append, never drop the item
-      to = next.length;
-    } else {
-      if (from !== -1 && from < to) to -= 1;
-      if (target.position === "bottom") to += 1;
-    }
-  }
-  next.splice(Math.min(Math.max(to, 0), next.length), 0, item);
+  next.splice(insertIndex(next.length, target, -1), 0, item);
   return next;
 }
 

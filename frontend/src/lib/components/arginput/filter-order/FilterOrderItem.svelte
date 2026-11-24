@@ -21,6 +21,8 @@
    * row body itself stays inert.
    */
   type Props = {
+    /** The dnd identity of the row: rows are addressed by index, a value may repeat */
+    rowId: string;
     /** The item value, unique over both columns together */
     item: string;
     /** Which column the row lives in */
@@ -52,6 +54,7 @@
     onAdd?: () => void;
   };
   let {
+    rowId,
     item,
     column,
     label,
@@ -72,16 +75,27 @@
   }: Props = $props();
 
   // The droppable data type is the column, the dndRules of the provider map it
-  // to the accepted active type ("item")
-  const dndData = $derived({ id: item, data: { type: "item" } });
+  // to the accepted active type ("item"). The id is the row, not the value: a
+  // stored value may repeat an item, and two rows sharing an id would be dragged
+  // and highlighted together. The data carries the index so the drop math can
+  // address the row.
+  const dndData = $derived({
+    id: rowId,
+    data: { type: "item", item, index: column === "selected" ? index : undefined },
+  });
   // svelte-ignore state_referenced_locally
   const { attributes, listeners, isDragging, setNodeRef: setDraggableNode } = useDraggable(dndData);
   // svelte-ignore state_referenced_locally
-  const { isOver, setNodeRef: setDroppableNode } = useDroppable({ id: item, data: { type: column } });
+  const { isOver, setNodeRef: setDroppableNode } = useDroppable({
+    id: rowId,
+    data: { type: column, index: column === "selected" ? index : undefined },
+  });
 
   // The drop line is only meaningful in the selected column: a drop on an
   // unused row just removes the item from the order
-  const indicator = $derived(column === "selected" && dropIndicator?.targetId === item ? dropIndicator.position : null);
+  const indicator = $derived(
+    column === "selected" && dropIndicator?.targetId === rowId ? dropIndicator.position : null,
+  );
 </script>
 
 <div

@@ -15,12 +15,13 @@ import { describe, expect, it } from "vitest";
 import {
   type PillBox,
   appendItem,
-  applyDrop,
   composeOption,
   cutPills,
   defaultItem,
   duplicateIndexes,
+  insertRow,
   moveItem,
+  moveRow,
   primaryOf,
   removeAt,
   removeItem,
@@ -129,54 +130,62 @@ describe("TestRemoveItem", () => {
   });
 });
 
-describe("TestApplyDrop", () => {
-  it("inserts an unused item before / after a selected row", () => {
-    expect(applyDrop(["a", "b"], "c", { kind: "selected", itemId: "a", position: "top" })).toEqual(["c", "a", "b"]);
-    expect(applyDrop(["a", "b"], "c", { kind: "selected", itemId: "a", position: "bottom" })).toEqual(["a", "c", "b"]);
-    expect(applyDrop(["a", "b"], "c", { kind: "selected", itemId: "b", position: "bottom" })).toEqual(["a", "b", "c"]);
-  });
-
-  it("reorders a selected item around another row", () => {
-    // Moving down over a later row inserts after it
-    expect(applyDrop(["a", "b", "c"], "a", { kind: "selected", itemId: "c", position: "bottom" })).toEqual([
-      "b",
-      "c",
-      "a",
-    ]);
-    // Moving up over an earlier row inserts before it
-    expect(applyDrop(["a", "b", "c"], "c", { kind: "selected", itemId: "a", position: "top" })).toEqual([
-      "c",
-      "a",
-      "b",
-    ]);
+describe("TestInsertRow", () => {
+  it("inserts an item before / after a selected row", () => {
+    expect(insertRow(["a", "b"], "c", { kind: "selected", index: 0, position: "top" })).toEqual(["c", "a", "b"]);
+    expect(insertRow(["a", "b"], "c", { kind: "selected", index: 0, position: "bottom" })).toEqual(["a", "c", "b"]);
+    expect(insertRow(["a", "b"], "c", { kind: "selected", index: 1, position: "bottom" })).toEqual(["a", "b", "c"]);
   });
 
   it("drops on the column: the top area inserts first, the rest appends last", () => {
-    expect(applyDrop(["a", "b"], "c", { kind: "selected", position: "top" })).toEqual(["c", "a", "b"]);
-    expect(applyDrop(["a", "b"], "c", { kind: "selected", position: "bottom" })).toEqual(["a", "b", "c"]);
-    // Dropping a selected item on the column bottom moves it to the end
-    expect(applyDrop(["a", "b", "c"], "a", { kind: "selected", position: "bottom" })).toEqual(["b", "c", "a"]);
+    expect(insertRow(["a", "b"], "c", { kind: "selected", position: "top" })).toEqual(["c", "a", "b"]);
+    expect(insertRow(["a", "b"], "c", { kind: "selected", position: "bottom" })).toEqual(["a", "b", "c"]);
+    expect(insertRow([], "c", { kind: "selected", position: "bottom" })).toEqual(["c"]);
   });
 
-  it("drops on the unused column: the item only leaves the order", () => {
-    expect(applyDrop(["a", "b"], "a", { kind: "unused" })).toEqual(["b"]);
-    // An item that is not in the order stays out of it
-    expect(applyDrop(["a"], "b", { kind: "unused" })).toEqual(["a"]);
+  it("leaves the order alone when the row is dropped on the unused column", () => {
+    expect(insertRow(["a"], "c", { kind: "unused" })).toEqual(["a"]);
   });
 
-  it("takes out only one occurrence of a repeated item", () => {
-    // The drag started on one row, so only that row leaves the order; deleting
-    // both would drop the occurrence the user kept
-    expect(applyDrop(["a", "b", "a"], "a", { kind: "unused" })).toEqual(["b", "a"]);
+  it("clamps an index outside the list", () => {
+    expect(insertRow(["a"], "c", { kind: "selected", index: 9, position: "bottom" })).toEqual(["a", "c"]);
+    expect(insertRow(["a"], "c", { kind: "selected", index: -3, position: "top" })).toEqual(["c", "a"]);
+  });
+});
+
+describe("TestMoveRow", () => {
+  it("reorders a row around another row", () => {
+    // Moving down over a later row inserts after it
+    expect(moveRow(["a", "b", "c"], 0, { kind: "selected", index: 2, position: "bottom" })).toEqual(["b", "c", "a"]);
+    // Moving up over an earlier row inserts before it
+    expect(moveRow(["a", "b", "c"], 2, { kind: "selected", index: 0, position: "top" })).toEqual(["c", "a", "b"]);
   });
 
-  it("drops an item on its own row without moving it", () => {
-    expect(applyDrop(["a", "b"], "a", { kind: "selected", itemId: "a", position: "top" })).toEqual(["a", "b"]);
-    expect(applyDrop(["a", "b"], "a", { kind: "selected", itemId: "a", position: "bottom" })).toEqual(["a", "b"]);
+  it("drops on the column: the top area inserts first, the rest appends last", () => {
+    expect(moveRow(["a", "b", "c"], 0, { kind: "selected", position: "bottom" })).toEqual(["b", "c", "a"]);
+    expect(moveRow(["a", "b", "c"], 2, { kind: "selected", position: "top" })).toEqual(["c", "a", "b"]);
   });
 
-  it("appends when the target row is not in the order", () => {
-    expect(applyDrop(["a"], "b", { kind: "selected", itemId: "gone", position: "top" })).toEqual(["a", "b"]);
+  it("drops on the unused column: the row only leaves the order", () => {
+    expect(moveRow(["a", "b"], 0, { kind: "unused" })).toEqual(["b"]);
+  });
+
+  it("drops a row on its own position without moving it", () => {
+    expect(moveRow(["a", "b"], 0, { kind: "selected", index: 0, position: "top" })).toEqual(["a", "b"]);
+    expect(moveRow(["a", "b"], 0, { kind: "selected", index: 0, position: "bottom" })).toEqual(["a", "b"]);
+  });
+
+  it("is a no-op for an index outside the list", () => {
+    expect(moveRow(["a"], 3, { kind: "selected", position: "top" })).toEqual(["a"]);
+    expect(moveRow(["a"], -1, { kind: "unused" })).toEqual(["a"]);
+  });
+
+  it("moves only the dragged row of a repeated value", () => {
+    // Two rows hold "a"; dragging the second one to the front must not take the
+    // first one along, they are different rows of the same value
+    expect(moveRow(["a", "b", "a"], 2, { kind: "selected", index: 0, position: "top" })).toEqual(["a", "a", "b"]);
+    // ... and dragging the first one to the end keeps the other one in place
+    expect(moveRow(["a", "b", "a"], 0, { kind: "selected", index: 2, position: "bottom" })).toEqual(["b", "a", "a"]);
   });
 });
 
