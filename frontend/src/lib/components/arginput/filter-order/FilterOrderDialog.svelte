@@ -8,6 +8,7 @@
   import { t } from "$lib/i18n";
   import { belowDragBand } from "$lib/window/dragRegion.svelte";
   import FilterOrderColumn from "./FilterOrderColumn.svelte";
+  import FilterOrderGroupHeader from "./FilterOrderGroupHeader.svelte";
   import FilterOrderItem from "./FilterOrderItem.svelte";
   import {
     type DropTarget,
@@ -67,8 +68,14 @@
   // any secondary option) is not offered again.
   const options = $derived(Array.isArray(data.option) ? data.option : []);
   const optionDict = $derived(data.option_dict ?? {});
-  const hasSecondary = $derived(Object.keys(optionDict).length > 0);
-  const valid = $derived(validItems(options, optionDict));
+  // The dt alone tells the editor what an item is, the shape of the option
+  // fields is not a hint any more
+  const dt = $derived(data.dt);
+  const twoLevel = $derived(dt === "filter-order-item" || dt === "filter-order-pair");
+  const hasSecondary = $derived(dt === "filter-order-item");
+  const grouped = $derived(dt === "filter-order-pair");
+  const tokens = $derived(Array.isArray(data.tokens) ? data.tokens.map(String) : []);
+  const valid = $derived(validItems(options, optionDict, dt, tokens));
 
   /**
    * The primary item of a row: the item itself when the arg declares no
@@ -77,11 +84,83 @@
    * primary and offer used items again.
    */
   function primaryOfRow(item: FilterOrderItemValue): string {
-    return hasSecondary ? primaryOf(String(item)) : String(item);
+    return twoLevel ? primaryOf(String(item)) : String(item);
   }
 
   const usedPrimaries = $derived(new Set(draft.map(primaryOfRow)));
   const unused = $derived(options.filter((item) => !usedPrimaries.has(String(item))));
+
+  /**
+   * One block of the unused column of a filter-order-pair: a bare item, or a
+   * group of the pairs of one primary item. The group header carries how many
+   * of its pairs are already selected, and stays when all of them are (the
+   * count reads "3/3") so the column never loses an item it once showed.
+   */
+  type UnusedBlock =
+    | { kind: "item"; key: string; value: string; label: string }
+    | {
+        kind: "group";
+        key: string;
+        label: string;
+        /** Pairs still unused, the rows below the header */
+        remaining: number;
+        total: number;
+        rows: { value: string; label: string }[];
+      };
+
+  /**
+   * The unused column of a filter-order-pair, in the option order: an item
+   * without secondary options is a bare row, an item with them is a group.
+   * The tokens are the last group, they are entries of their own.
+   *
+   * Every row shows the whole entry ("RetrofitT1-dd"), not just its secondary
+   * option: the row is the identity of the value, so it has to read the same as
+   * the row of the selected column it becomes after a drag.
+   *
+   * A fully used group keeps its header and drops its rows, so the count is
+   * still visible; only a group without any pair is left out.
+   *
+   * The count is "remaining/total": the column lists what is left to pick, so a
+   * fully used group reads "0/3" rather than "3/3".
+   */
+  const unusedBlocks = $derived.by<UnusedBlock[]>(() => {
+    const used = new Set(draft.map(String));
+    const blocks: UnusedBlock[] = [];
+    for (const item of options) {
+      const primary = String(item);
+      const secondaries = optionDict[primary];
+      if (secondaries && secondaries.length > 0) {
+        const rows = secondaries
+          .map((secondary) => composeOption(primary, String(secondary)))
+          .filter((value) => !used.has(value))
+          .map((value) => ({ value, label: fullLabelOf(value) }));
+        blocks.push({
+          kind: "group",
+          key: primary,
+          label: arg.getLabel(primary),
+          remaining: rows.length,
+          total: secondaries.length,
+          rows,
+        });
+      } else if (!used.has(primary)) {
+        blocks.push({ kind: "item", key: primary, value: primary, label: arg.getLabel(primary) });
+      }
+    }
+    // The token group is only shown when the arg declares tokens, and it keeps
+    // its header when all of them are used
+    if (tokens.length > 0) {
+      const rows = tokens.filter((token) => !used.has(token)).map((token) => ({ value: token, label: token }));
+      blocks.push({
+        kind: "group",
+        key: "\u0000tokens",
+        label: t.Input.FilterOrderTokens(),
+        remaining: rows.length,
+        total: tokens.length,
+        rows,
+      });
+    }
+    return blocks;
+  });
 
   /**
    * True for an item that is in the order but not a legal item anymore: its
@@ -89,7 +168,7 @@
    * primary that declares secondary options is stored bare.
    */
   function isInvalid(item: FilterOrderItemValue): boolean {
-    if (hasSecondary) return !valid.has(String(item));
+    if (twoLevel) return !valid.has(String(item));
     return options.length > 0 && !options.includes(item);
   }
 
@@ -100,15 +179,16 @@
    * the whole item.
    */
   function fullLabelOf(item: FilterOrderItemValue): string {
-    if (!hasSecondary) return arg.getLabel(item);
+    if (!twoLevel) return arg.getLabel(item);
     const [primary, secondary] = splitOption(String(item));
     if (secondary === null) return arg.getLabel(primary);
     return `${arg.getLabel(primary)}${SECONDARY_SEPARATOR}${arg.getLabel(secondary)}`;
   }
 
-  /** The secondary options the primary item of a row declares */
+  /** The secondary options the primary item of a row declares, empty when the
+   * datatype has no editable secondary option */
   function secondariesOf(item: FilterOrderItemValue): string[] {
-    return optionDict[primaryOfRow(item)] ?? [];
+    return hasSecondary ? (optionDict[primaryOfRow(item)] ?? []) : [];
   }
 
   /** The secondary option the row carries, null when it carries none */
@@ -135,7 +215,9 @@
   };
 
   function labelOf(item: FilterOrderItemValue): string {
-    // A row shows its primary item, the secondary option has its own selector
+    // A row of a filter-order-item shows its primary item, the secondary option
+    // has its own selector. A row of a filter-order-pair shows the whole entry.
+    if (grouped) return fullLabelOf(item);
     return arg.getLabel(hasSecondary ? primaryOf(String(item)) : item);
   }
 
@@ -151,9 +233,19 @@
     draft = removeItem(draft, item);
   }
 
-  /** A row added from the unused column starts at the first secondary option */
+  /**
+   * The value a row of the unused column adds: a filter-order-item completes its
+   * primary item with the first secondary option, the other datatypes add the
+   * row as it is.
+   */
+  function completeItem(id: string): string {
+    if (!hasSecondary || draft.includes(id)) return id;
+    return defaultItem(primaryOf(id), optionDict);
+  }
+
+  /** A row added from the unused column, tokens are added as they are */
   function onAdd(item: FilterOrderItemValue) {
-    draft = appendItem(draft, defaultItem(String(item), optionDict));
+    draft = appendItem(draft, completeItem(String(item)));
   }
 
   /** Replace the secondary option of a row, the position of the row is kept */
@@ -166,18 +258,13 @@
   }
 
   /**
-   * A drag starts with the id of the row: an unused row carries its primary
-   * item only, so it is completed with its first secondary option before the
-   * drop, the same as adding it with the plus button.
+   * A drag starts with the id of the row: an unused row of a filter-order-item
+   * carries its primary item only, so it is completed with its first secondary
+   * option before the drop, the same as adding it with the plus button.
    */
-  function normalizeDragged(id: string): string {
-    if (!hasSecondary || draft.includes(id)) return id;
-    return defaultItem(primaryOf(id), optionDict);
-  }
-
   function onDndEnd({ active, over, position }: DndEndCallbackDetail) {
     if (!active || !over) return;
-    const item = normalizeDragged(String(active.id));
+    const item = completeItem(String(active.id));
     const overData = over.data as { type?: string; container?: boolean } | undefined;
     const at = position === "top" ? "top" : "bottom";
 
@@ -289,7 +376,37 @@
               {t.Input.FilterOrderUnused()}
             </div>
             <FilterOrderColumn column="unused">
-              {#if unused.length === 0}
+              {#if grouped}
+                {#if unusedBlocks.length === 0}
+                  <div class="flex min-h-16 items-center justify-center px-2 text-center text-xs text-muted-foreground">
+                    {t.Input.FilterOrderUnusedEmpty()}
+                  </div>
+                {:else}
+                  <!-- Every block is one primary item of "option", in the option
+                       order: a bare row when it declares no secondary options, a
+                       non-draggable header plus its unused pairs when it does -->
+                  {#each unusedBlocks as block (block.key)}
+                    {#if block.kind === "group"}
+                      <FilterOrderGroupHeader label={block.label} remaining={block.remaining} total={block.total} />
+                      {#each block.rows as row (row.value)}
+                        <FilterOrderItem
+                          item={row.value}
+                          column="unused"
+                          label={row.label}
+                          onAdd={() => onAdd(row.value)}
+                        />
+                      {/each}
+                    {:else}
+                      <FilterOrderItem
+                        item={block.value}
+                        column="unused"
+                        label={block.label}
+                        onAdd={() => onAdd(block.value)}
+                      />
+                    {/if}
+                  {/each}
+                {/if}
+              {:else if unused.length === 0}
                 <div class="flex min-h-16 items-center justify-center px-2 text-center text-xs text-muted-foreground">
                   {t.Input.FilterOrderUnusedEmpty()}
                 </div>

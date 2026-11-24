@@ -1,0 +1,290 @@
+{
+  "GeneralShop": {
+    "_info": {
+      "zh-CN": {"name": "通用商店", "help": ""},
+      "en-US": {"name": "General Shop", "help": ""}
+    },
+    "UseGems": {
+      "zh-CN": {
+        "name": "使用钻石",
+        "help": "允许用钻石购买库存不足的条目"
+      },
+      "en-US": {
+        "name": "Use gems",
+        "help": "Allow buying out of stock entries with gems"
+      }
+    },
+    "Refresh": {
+      "zh-CN": {"name": "刷新商店", "help": ""},
+      "en-US": {"name": "Refresh shop", "help": ""}
+    },
+    "BuySkinBox": {
+      "zh-CN": {"name": "购买皮肤箱", "help": ""},
+      "en-US": {"name": "Buy skin box", "help": ""}
+    },
+    "ConsumeCoins": {
+      "zh-CN": {"name": "消耗金币", "help": ""},
+      "en-US": {"name": "Spend coins", "help": ""}
+    },
+    "BuyOrder": {
+      "zh-CN": {
+        "name": "购买顺序",
+        "help": "从高到低的购买优先级，每个条目只会购买一次",
+        "option_i18n": {
+          "BookRedT3": "T3 红色教材",
+          "BookYellowT3": "T3 黄色教材",
+          "BookBlueT3": "T3 蓝色教材",
+          "BookRedT2": "T2 红色教材",
+          "Cube": "心智魔方",
+          "FoodT6": "T6 食物",
+          "FoodT5": "T5 食物"
+        }
+      },
+      "en-US": {
+        "name": "Purchase order",
+        "help": "Priority from high to low, every entry is bought once",
+        "option_i18n": {
+          "BookRedT3": "T3 red book",
+          "BookYellowT3": "T3 yellow book",
+          "BookBlueT3": "T3 blue book",
+          "BookRedT2": "T2 red book",
+          "Cube": "Cognitive cube",
+          "FoodT6": "T6 food",
+          "FoodT5": "T5 food"
+        }
+      }
+    }
+  },
+  "GuildShop": {
+    "_info": {
+      "zh-CN": {"name": "大舰队商店", "help": ""},
+      "en-US": {"name": "Guild Shop", "help": ""}
+    },
+    "Refresh": {
+      "zh-CN": {"name": "刷新商店", "help": ""},
+      "en-US": {"name": "Refresh shop", "help": ""}
+    },
+    "BuyOrder": {
+      "zh-CN": {
+        "name": "购买顺序",
+        "help": "货架从高到低的优先级，每个货架只买一次，并指定货架上买哪种",
+        "option_i18n": {
+          "PlateT4": "T4 部件",
+          "PlateT3": "T3 部件",
+          "PlateT2": "T2 部件",
+          "BookT3": "T3 教材",
+          "BookT2": "T2 教材",
+          "PR": "决战方案",
+          "CatT3": "T3 猫箱",
+          "CatT2": "T2 猫箱",
+          "Chip": "芯片",
+          "Retrofit": "改造图纸",
+          "FoodT6": "T6 食物",
+          "FoodT5": "T5 食物",
+          "BoxT4": "T4 装备箱",
+          "BoxT3": "T3 装备箱",
+          "general": "通用",
+          "gun": "主炮",
+          "torpedo": "鱼雷",
+          "antiair": "防空炮",
+          "plane": "舰载机",
+          "red": "红色",
+          "blue": "蓝色",
+          "yellow": "黄色",
+          "neptune": "海王星",
+          "monarch": "君主",
+          "ibuki": "伊吹",
+          "izumo": "出云",
+          "roon": "罗恩",
+          "saintlouis": "圣路易",
+          "seattle": "西雅图",
+          "georgia": "佐治亚",
+          "kitakaze": "北风",
+          "gascogne": "加斯科涅",
+          "cheshire": "柴郡",
+          "mainz": "美因茨",
+          "odin": "奥丁",
+          "champagne": "香槟",
+          "dd": "驱逐",
+          "cl": "轻巡",
+          "bb": "战列",
+          "cv": "航母",
+          "eagle": "白鹰",
+          "royal": "皇家",
+          "sakura": "重樱",
+          "ironblood": "铁血"
+        }
+      },
+      "en-US": {
+        "name": "Purchase order",
+        "help": "Shelf priority from high to low, every shelf is bought once, with the type to pick on it",
+        "option_i18n": {
+          "PlateT4": "T4 plate",
+          "PlateT3": "T3 plate",
+          "PlateT2": "T2 plate",
+          "BookT3": "T3 book",
+          "BookT2": "T2 book",
+          "PR": "PR ship",
+          "CatT3": "T3 cat box",
+          "CatT2": "T2 cat box",
+          "Chip": "Chip",
+          "Retrofit": "Retrofit blueprint",
+          "FoodT6": "T6 food",
+          "FoodT5": "T5 food",
+          "BoxT4": "T4 equipment box",
+          "BoxT3": "T3 equipment box",
+          "general": "General",
+          "gun": "Gun",
+          "torpedo": "Torpedo",
+          "antiair": "AA gun",
+          "plane": "Plane",
+          "red": "Red",
+          "blue": "Blue",
+          "yellow": "Yellow",
+          "neptune": "Neptune",
+          "monarch": "Monarch",
+          "ibuki": "Ibuki",
+          "izumo": "Izumo",
+          "roon": "Roon",
+          "saintlouis": "Saint Louis",
+          "seattle": "Seattle",
+          "georgia": "Georgia",
+          "kitakaze": "Kitakaze",
+          "gascogne": "Gascogne",
+          "cheshire": "Cheshire",
+          "mainz": "Mainz",
+          "odin": "Odin",
+          "champagne": "Champagne",
+          "dd": "DD",
+          "cl": "CL",
+          "bb": "BB",
+          "cv": "CV",
+          "eagle": "Eagle Union",
+          "royal": "Royal Navy",
+          "sakura": "Sakura Empire",
+          "ironblood": "Iron Blood"
+        }
+      }
+    }
+  },
+  "MedalShop": {
+    "_info": {
+      "zh-CN": {"name": "勋章商店", "help": ""},
+      "en-US": {"name": "Medal Shop", "help": ""}
+    },
+    "BuyOrder": {
+      "zh-CN": {
+        "name": "购买顺序",
+        "help": "同一条目的多个类型可以同时购买，例如三本不同颜色的教材",
+        "option_i18n": {
+          "DR": "决战方案 DR",
+          "PR": "决战方案 PR",
+          "BookT3": "T3 教材",
+          "BookT2": "T2 教材",
+          "RetrofitT1": "T1 改造图纸",
+          "RetrofitT2": "T2 改造图纸",
+          "RetrofitT3": "T3 改造图纸",
+          "FoodT6": "T6 食物",
+          "FoodT5": "T5 食物",
+          "PlateT1": "T1 部件",
+          "PlateT2": "T2 部件",
+          "PlateT3": "T3 部件",
+          "red": "红色",
+          "yellow": "黄色",
+          "blue": "蓝色",
+          "dd": "驱逐",
+          "cl": "轻巡",
+          "bb": "战列",
+          "cv": "航母",
+          "general": "通用",
+          "gun": "主炮",
+          "torpedo": "鱼雷",
+          "antiair": "防空炮",
+          "plane": "舰载机"
+        }
+      },
+      "en-US": {
+        "name": "Purchase order",
+        "help": "Several types of one item may be bought, e.g. three books of different colors",
+        "option_i18n": {
+          "DR": "DR ship",
+          "PR": "PR ship",
+          "BookT3": "T3 book",
+          "BookT2": "T2 book",
+          "RetrofitT1": "T1 retrofit blueprint",
+          "RetrofitT2": "T2 retrofit blueprint",
+          "RetrofitT3": "T3 retrofit blueprint",
+          "FoodT6": "T6 food",
+          "FoodT5": "T5 food",
+          "PlateT1": "T1 plate",
+          "PlateT2": "T2 plate",
+          "PlateT3": "T3 plate",
+          "red": "Red",
+          "yellow": "Yellow",
+          "blue": "Blue",
+          "dd": "DD",
+          "cl": "CL",
+          "bb": "BB",
+          "cv": "CV",
+          "general": "General",
+          "gun": "Gun",
+          "torpedo": "Torpedo",
+          "antiair": "AA gun",
+          "plane": "Plane"
+        }
+      }
+    }
+  },
+  "MeritShop": {
+    "_info": {
+      "zh-CN": {"name": "功勋商店", "help": ""},
+      "en-US": {"name": "Merit Shop", "help": ""}
+    },
+    "Refresh": {
+      "zh-CN": {"name": "刷新商店", "help": ""},
+      "en-US": {"name": "Refresh shop", "help": ""}
+    },
+    "BuyUnobtainedShip": {
+      "zh-CN": {"name": "购买未获得舰船", "help": ""},
+      "en-US": {"name": "Buy unobtained ships", "help": ""}
+    },
+    "BuyOrder": {
+      "zh-CN": {
+        "name": "购买顺序",
+        "help": "从高到低的购买优先级",
+        "option_i18n": {
+          "Cube": "心智魔方"
+        }
+      },
+      "en-US": {
+        "name": "Purchase order",
+        "help": "Priority from high to low",
+        "option_i18n": {
+          "Cube": "Cognitive cube"
+        }
+      }
+    }
+  },
+  "CoreShop": {
+    "_info": {
+      "zh-CN": {"name": "核心商店", "help": ""},
+      "en-US": {"name": "Core Shop", "help": ""}
+    },
+    "BuyOrder": {
+      "zh-CN": {
+        "name": "购买顺序",
+        "help": "从高到低的购买优先级",
+        "option_i18n": {
+          "Array": "阵列"
+        }
+      },
+      "en-US": {
+        "name": "Purchase order",
+        "help": "Priority from high to low",
+        "option_i18n": {
+          "Array": "Array"
+        }
+      }
+    }
+  }
+}

@@ -1193,12 +1193,12 @@ class Group(a.GroupBase):
 """
 
     def test_filter_order_secondary_annotation(self, fs):
-        """A filter-order with secondary options expands every pair into the literal."""
+        """A filter-order-item expands every pair into the literal."""
         gen = make_generator(fs, yaml="""\
 Group:
   args:
     Order:
-      dt: filter-order
+      dt: filter-order-item
       value: PlateT4-gun > Chip
       option: [PlateT4, Chip, BookT3]
       option_dict:

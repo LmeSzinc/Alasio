@@ -135,9 +135,9 @@
           // The backend sets `layout: vert` for filter-order
           layout: "vert",
         }),
-        // dt=filter-order with secondary options: every primary item of the
-        // value carries one of its own options as "item-option"
-        Secondary: arg("FilterOrder", "Secondary", "filter-order", ["PlateT4-gun", "BookT3-red", "Chip"], {
+        // dt=filter-order-item with secondary options: every primary item of
+        // the value carries one of its own options as "item-option"
+        Secondary: arg("FilterOrder", "Secondary", "filter-order-item", ["PlateT4-gun", "BookT3-red", "Chip"], {
           name: "filter-order (secondary)",
           help: "PlateT4 and BookT3 pick a type, Chip has none; the editor changes it in place",
           option: ["PlateT4", "BookT3", "Chip", "PR"],
@@ -233,7 +233,7 @@
         SecondaryLarge: arg(
           "FilterOrder",
           "SecondaryLarge",
-          "filter-order",
+          "filter-order-item",
           [
             "PlateT4-gun",
             "BookT3-red",
@@ -288,7 +288,7 @@
         SecondaryLongNames: arg(
           "FilterOrder",
           "SecondaryLongNames",
-          "filter-order",
+          "filter-order-item",
           [
             "GearDesignPlanT3-OrdnanceTestingReportT3",
             "OrdnanceTestingReportT2-DevelopmentMaterialT2",
@@ -312,6 +312,59 @@
               PlateT4: ["gun", "general", "torpedo"],
               Short: ["cl", "dd", "bb", "cv"],
               DevelopmentMaterialT1: ["GearDesignPlanT1", "GearDesignPlanT2", "PlateRandomT4"],
+            },
+            layout: "vert",
+          },
+        ),
+        // dt=filter-order-pair: the whole "item-option" is the identity, so
+        // several types of one item may be selected at once. The unused column
+        // groups the unselected pairs under their item, the tokens are its last
+        // group. ExtraDrill is fully selected, so its header stays at 3/3 with
+        // no row under it
+        Pair: arg(
+          "FilterOrder",
+          "Pair",
+          "filter-order-pair",
+          [
+            "UrgentCube-1:30",
+            "UrgentCube-3",
+            "ExtraCube-0:30",
+            "ExtraDrill-1",
+            "ExtraDrill-2",
+            "ExtraDrill-2:40",
+            "BookT3-red",
+            "Major",
+            "shortest",
+          ],
+          {
+            name: "filter-order (pair)",
+            help: "Several types of one item coexist; ExtraDrill is fully selected and keeps its 3/3 header",
+            option: ["UrgentCube", "ExtraCube", "ExtraDrill", "BookT3", "Major", "DailyChip"],
+            option_dict: {
+              UrgentCube: ["1:30", "1:45", "3", "6"],
+              ExtraCube: ["0:30", "1:30", "3"],
+              ExtraDrill: ["1", "2", "2:40"],
+              BookT3: ["red", "yellow", "blue"],
+            },
+            tokens: ["shortest"],
+            layout: "vert",
+          },
+        ),
+        // dt=filter-order-pair with entries outside the definition: "shortest"
+        // is not declared as a token here and Gone is not in option, so both the
+        // pill line and the editor mark them
+        PairUnknown: arg(
+          "FilterOrder",
+          "PairUnknown",
+          "filter-order-pair",
+          ["UrgentCube-1:30", "shortest", "Gone-1:30", "Major"],
+          {
+            name: "filter-order (pair, unknown items)",
+            help: "shortest is not a declared token and Gone is not in option; both views mark them and saving is blocked",
+            option: ["UrgentCube", "ExtraCube", "Major"],
+            option_dict: {
+              UrgentCube: ["1:30", "1:45", "3"],
+              ExtraCube: ["0:30", "1:30"],
             },
             layout: "vert",
           },

@@ -6,5 +6,6 @@
     "main/main_model.py": ["Campaign", "StopCondition", "Submarine", "EmotionRecord"]
   },
   "general/general_model.py": {},
-  "opsi/opsi_model.py": {}
+  "opsi/opsi_model.py": {},
+  "shop/shop_model.py": {}
 }

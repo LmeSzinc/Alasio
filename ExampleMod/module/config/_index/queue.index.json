@@ -26,5 +26,25 @@
   "OpsiAshAssist": {
     "zh-CN": "META支援",
     "en-US": "META Assist"
+  },
+  "GeneralShop": {
+    "zh-CN": "GeneralShop",
+    "en-US": "GeneralShop"
+  },
+  "GuildShop": {
+    "zh-CN": "GuildShop",
+    "en-US": "GuildShop"
+  },
+  "MedalShop": {
+    "zh-CN": "MedalShop",
+    "en-US": "MedalShop"
+  },
+  "MeritShop": {
+    "zh-CN": "MeritShop",
+    "en-US": "MeritShop"
+  },
+  "CoreShop": {
+    "zh-CN": "CoreShop",
+    "en-US": "CoreShop"
   }
 }

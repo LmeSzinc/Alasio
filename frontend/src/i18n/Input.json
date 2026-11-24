@@ -125,6 +125,13 @@
     "zh-TW": "編輯",
     "es-ES": "Editar"
   },
+  "FilterOrderTokens": {
+    "en-US": "Commands",
+    "zh-CN": "指令",
+    "ja-JP": "コマンド",
+    "zh-TW": "指令",
+    "es-ES": "Comandos"
+  },
   "FilterOrderReverted": {
     "en-US": "Edits discarded",
     "zh-CN": "编辑已撤销",

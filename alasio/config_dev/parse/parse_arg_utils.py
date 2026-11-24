@@ -25,7 +25,12 @@ from alasio.config_dev.parse.base import DefinitionError
 TYPE_ARG_LITERAL = frozenset((
     'static',
     'select', 'radio', 'secondary-select',
-    'filter-order',
+    'filter-order', 'filter-order-item', 'filter-order-pair',
+))
+
+# Define which "dt" is an ordered list of items, see validate_filter_order()
+TYPE_ARG_FILTER_ORDER = frozenset((
+    'filter-order', 'filter-order-item', 'filter-order-pair',
 ))
 
 # Separators of a dt="filter-order" value. An item is written
@@ -150,7 +155,8 @@ def _validate_filter_order_item_chars(item, where, check_separator=True):
 
 def expand_filter_order_items(option, option_dict=None):
     """
-    Expand "option" and "option_dict" into the legal items of dt="filter-order"
+    Expand "option" and "option_dict" into the legal items of a two level
+    dt="filter-order-item" or dt="filter-order-pair"
 
     An item without a secondary option stays itself, an item with one becomes
     every "{item}-{option}" combination. The expanded items are the literal of
@@ -179,13 +185,13 @@ def expand_filter_order_items(option, option_dict=None):
 
 def _validate_filter_order_option_dict(option, option_dict):
     """
-    Validate "option_dict" of dt="filter-order"
+    Validate "option_dict" of the two level filter-order datatypes
 
     "option_dict" maps a primary item to the secondary options it offers. A
     primary item with an entry must be used with one of them, an item without
     an entry has no secondary option at all. Both sides become part of a
-    composite item, so they must be str; the character rules are checked by
-    validate_filter_order() for the items and here for the options.
+    composite item, so they must be str; the character rules are checked here
+    for the options and by _validate_filter_order_option() for the items.
 
     Args:
         option (list): Primary items of the arg, already validated
@@ -225,26 +231,22 @@ def _validate_filter_order_option_dict(option, option_dict):
                     f'"option_dict" value of "{primary}" has duplicate item "{option_item}"')
 
 
-def validate_filter_order(option: list, value: Any, option_dict: Any = None) -> None:
+def _validate_filter_order_option(option, secondary):
     """
-    Validate "option", "option_dict" and the default value of dt="filter-order"
+    Validate the "option" list of a filter-order datatype
 
-    "option" is the universe of items the frontend editor can add, the value
-    is an ordered subset of it: every item of the value must be defined in
-    "option", and neither "option" nor the value may repeat an item.
-    The items are python literal items, like the options of the other datatypes,
-    the type is part of the identity: `True` is not the int option `1`.
-
-    When "option_dict" is given, every primary item declares its own secondary
-    options and an item of the value is a composite "{item}-{option}", see
-    expand_filter_order_items(). A primary item may then be used once, with one
-    of its own secondary options or without one when it declares none.
+    The list separator is rejected for every filter-order: the value is split on
+    it either way and a stray one would be read as a separator at runtime. The
+    level separator is only a problem when the arg declares secondary options:
+    an arg without them never splits an item, and "Fleet-1" is a legal item
+    name there.
 
     Args:
         option (list): Option list of the arg
-        value (Any): Default value of the arg, a tuple of items
-        option_dict (Any): Secondary options of each item, None or an empty
-            dict for a filter-order without secondary options
+        secondary (bool): True when the arg declares "option_dict"
+
+    Returns:
+        set: Type aware keys of the items, see _literal_key()
 
     Raises:
         DefinitionError:
@@ -258,45 +260,108 @@ def validate_filter_order(option: list, value: Any, option_dict: Any = None) -> 
     option_keys = set()
     for item in option:
         validate_literal_item(item)
-        # The list separator is rejected for every filter-order, the value is
-        # split on it either way and a stray one would be read as a separator at
-        # runtime. The level separator is only a problem when the arg declares
-        # secondary options: an arg without them never splits an item, and
-        # "Fleet-1" is a legal item name there
         if type(item) is str:
-            _validate_filter_order_item_chars(
-                item, '"option" item', check_separator=bool(option_dict))
+            _validate_filter_order_item_chars(item, '"option" item', check_separator=secondary)
         counts[item] += 1
         option_keys.add(_literal_key(item))
     for item, count in counts.items():
         if count > 1:
             raise DefinitionError(f'"option" has duplicate value "{item}"')
+    return option_keys
 
+
+def _normalize_filter_order_value(value, dt='filter-order'):
+    """
+    Check the type of a filter-order default value
+
+    Args:
+        value (Any): Default value of the arg
+        dt (str): Datatype, for the error message
+
+    Returns:
+        tuple: The value as a tuple
+
+    Raises:
+        DefinitionError:
+    """
     if type(value) not in (list, tuple):
-        raise DefinitionError(f'Value of "filter-order" datatype must be a list, got "{value}"')
+        raise DefinitionError(f'Value of "{dt}" datatype must be a list, got "{value}"')
+    return tuple(value)
 
-    if not option_dict:
-        # flat items, no secondary options
-        value_counts = Counter()
-        for item in value:
-            validate_literal_item(item)
-            if _literal_key(item) not in option_keys:
-                raise DefinitionError(f'Default value "{item}" is not in "option"')
-            value_counts[item] += 1
-        for item, count in value_counts.items():
-            if count > 1:
-                raise DefinitionError(f'Default value has duplicate value "{item}"')
-        return
 
-    _validate_filter_order_option_dict(option, option_dict)
+def _validate_filter_order_tokens(tokens, option):
+    """
+    Validate "tokens" of a filter-order datatype
+
+    A token is an entry of the value that carries no item at all, like the
+    "shortest" of a commission filter. It is written as itself, so it can not
+    hold a separator, and it must not be an item of "option" either, otherwise
+    a stored value would be ambiguous.
+
+    Args:
+        tokens (Any): The "tokens" as written in the yaml, None for no tokens
+        option (list): Primary items of the arg, already validated
+
+    Returns:
+        tuple[str]: The validated tokens
+
+    Raises:
+        DefinitionError:
+    """
+    if tokens is None:
+        return ()
+    if not isinstance(tokens, list):
+        raise DefinitionError('"tokens" must be a list')
+    option_items = set(option)
+    counts = Counter()
+    for token in tokens:
+        if type(token) is not str:
+            raise DefinitionError(f'"tokens" item "{token}" must be a str')
+        if not token:
+            raise DefinitionError('"tokens" item must not be empty')
+        if FILTER_ORDER_SEPARATOR in token or FILTER_ORDER_LIST_SEPARATOR in token:
+            raise DefinitionError(
+                f'"tokens" item "{token}" must not contain "{FILTER_ORDER_SEPARATOR}" '
+                f'or "{FILTER_ORDER_LIST_SEPARATOR}"')
+        if token in option_items:
+            raise DefinitionError(f'"tokens" item "{token}" is in "option"')
+        counts[token] += 1
+    for token, count in counts.items():
+        if count > 1:
+            raise DefinitionError(f'"tokens" has duplicate item "{token}"')
+    return tuple(tokens)
+
+
+def _validate_filter_order_levels(value, option, option_dict, dt, unique, tokens=()):
+    """
+    Validate the default value of a two level filter-order datatype
+
+    Args:
+        value (Any): Default value of the arg
+        option (list): Primary items of the arg, already validated
+        option_dict (dict): Secondary options of each primary item, already
+            validated
+        dt (str): Datatype, for the error message
+        unique (str): "item" when a primary item may be used once, "pair" when
+            the whole "{item}-{option}" is the identity
+        tokens (tuple): Entries that carry no item, see
+            _validate_filter_order_tokens()
+
+    Raises:
+        DefinitionError:
+    """
+    value = _normalize_filter_order_value(value, dt)
+    token_items = set(tokens)
     primary_items = set(option)
-    secondary_options = {item: options for item, options in option_dict.items()}
     used = Counter()
     for item in value:
         if type(item) is not str:
             raise DefinitionError(
-                f'Value of "filter-order" datatype must be a str if "option_dict" is defined, '
+                f'Value of "{dt}" datatype must be a str if "option_dict" is defined, '
                 f'got "{item}"')
+        if item in token_items:
+            used[item] += 1
+            continue
         primary, sep, secondary = item.partition(FILTER_ORDER_SEPARATOR)
         if not primary or (sep and not secondary):
             raise DefinitionError(
@@ -304,7 +369,7 @@ def validate_filter_order(option: list, value: Any, option_dict: Any = None) -> 
                 f'"item{FILTER_ORDER_SEPARATOR}option"')
         if primary not in primary_items:
             raise DefinitionError(f'Default value "{item}" is not in "option"')
-        options = secondary_options.get(primary, None)
+        options = option_dict.get(primary, None)
         if options:
             if not sep:
                 raise DefinitionError(
@@ -315,10 +380,91 @@ def validate_filter_order(option: list, value: Any, option_dict: Any = None) -> 
         elif sep:
             raise DefinitionError(
                 f'Default value "{item}" is not a valid item of "{primary}"')
-        used[primary] += 1
-    for primary, count in used.items():
+        used[primary if unique == 'item' else item] += 1
+    for key, count in used.items():
         if count > 1:
-            raise DefinitionError(f'Default value has duplicate item "{primary}"')
+            if unique == 'item':
+                raise DefinitionError(f'Default value has duplicate item "{key}"')
+            raise DefinitionError(f'Default value has duplicate value "{key}"')
+
+
+def validate_filter_order(option: list, value: Any) -> None:
+    """
+    Validate "option" and the default value of dt="filter-order"
+
+    "option" is the universe of items the frontend editor can add, the value
+    is an ordered subset of it: every item of the value must be defined in
+    "option", and neither "option" nor the value may repeat an item.
+    The items are python literal items, like the options of the other datatypes,
+    the type is part of the identity: `True` is not the int option `1`.
+
+    Args:
+        option (list): Option list of the arg
+        value (Any): Default value of the arg, a tuple of items
+
+    Raises:
+        DefinitionError:
+    """
+    option_keys = _validate_filter_order_option(option, secondary=False)
+    value = _normalize_filter_order_value(value)
+
+    value_counts = Counter()
+    for item in value:
+        validate_literal_item(item)
+        if _literal_key(item) not in option_keys:
+            raise DefinitionError(f'Default value "{item}" is not in "option"')
+        value_counts[item] += 1
+    for item, count in value_counts.items():
+        if count > 1:
+            raise DefinitionError(f'Default value has duplicate value "{item}"')
+
+
+def validate_filter_order_item(option: list, value: Any, option_dict: Any) -> None:
+    """
+    Validate dt="filter-order-item", a two level filter-order
+
+    The primary item is the identity: it is used once, carrying one of its own
+    secondary options as "{item}-{option}", or without one when it declares
+    none. Two rows can not hold the same primary item, see
+    validate_filter_order_pair() for the datatype that allows it.
+
+    Args:
+        option (list): Primary items of the arg
+        value (Any): Default value of the arg
+        option_dict (Any): Secondary options of each primary item
+
+    Raises:
+        DefinitionError:
+    """
+    _validate_filter_order_option(option, secondary=True)
+    _validate_filter_order_option_dict(option, option_dict)
+    _validate_filter_order_levels(
+        value, option, option_dict, dt='filter-order-item', unique='item')
+
+
+def validate_filter_order_pair(option: list, value: Any, option_dict: Any, tokens: Any = None) -> None:
+    """
+    Validate dt="filter-order-pair", a two level filter-order
+
+    The whole "{item}-{option}" is the identity: several options of one primary
+    item may coexist ("UrgentCube-1:30" and "UrgentCube-3" of the same shop
+    family), each one appears once. Entries of "tokens" are written as
+    themselves and take part in the uniqueness check.
+
+    Args:
+        option (list): Primary items of the arg
+        value (Any): Default value of the arg
+        option_dict (Any): Secondary options of each primary item
+        tokens (Any): Entries that carry no item, None for none
+
+    Raises:
+        DefinitionError:
+    """
+    _validate_filter_order_option(option, secondary=True)
+    _validate_filter_order_option_dict(option, option_dict)
+    tokens = _validate_filter_order_tokens(tokens, option)
+    _validate_filter_order_levels(
+        value, option, option_dict, dt='filter-order-pair', unique='pair', tokens=tokens)
 
 
 def _iter_range_constraint(arg):

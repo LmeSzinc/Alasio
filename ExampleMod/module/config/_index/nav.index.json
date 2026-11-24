@@ -231,5 +231,48 @@
         "en-US": "GemsEmotionRecord"
       }
     }
+  },
+  "shop": {
+    "_info": {
+      "i18n": {
+        "zh-CN": "商店",
+        "en-US": "Shop"
+      }
+    },
+    "card-GeneralShop-GeneralShop": {
+      "scheduler": true,
+      "i18n": {
+        "zh-CN": "通用商店",
+        "en-US": "General Shop"
+      }
+    },
+    "card-GuildShop-GuildShop": {
+      "scheduler": true,
+      "i18n": {
+        "zh-CN": "大舰队商店",
+        "en-US": "Guild Shop"
+      }
+    },
+    "card-MedalShop-MedalShop": {
+      "scheduler": true,
+      "i18n": {
+        "zh-CN": "勋章商店",
+        "en-US": "Medal Shop"
+      }
+    },
+    "card-MeritShop-MeritShop": {
+      "scheduler": true,
+      "i18n": {
+        "zh-CN": "功勋商店",
+        "en-US": "Merit Shop"
+      }
+    },
+    "card-CoreShop-CoreShop": {
+      "scheduler": true,
+      "i18n": {
+        "zh-CN": "核心商店",
+        "en-US": "Core Shop"
+      }
+    }
   }
 }

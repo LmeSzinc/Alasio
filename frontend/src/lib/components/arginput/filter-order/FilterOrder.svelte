@@ -5,7 +5,7 @@
   import { t } from "$lib/i18n";
   import { elementSize } from "$lib/use/size.svelte";
   import { cn } from "$lib/utils";
-  import { type PillBox, SECONDARY_SEPARATOR, cutPills, splitOption, validItems } from "./filterOrder";
+  import { type PillBox, SECONDARY_SEPARATOR, cutPills, isTwoLevel, splitOption, validItems } from "./filterOrder";
 
   /** Max lines of pills shown in the settings page, the rest becomes "> ..." */
   const MAX_PILL_LINES = 5;
@@ -20,13 +20,15 @@
   // `useArgValue` is used for the option_i18n label lookup only, the same as
   // dt=static does.
   const arg = $derived(useArgValue<any[]>(data));
+  const dt = $derived(data.dt);
   const items = $derived(Array.isArray(data.value) ? data.value : []);
   const options = $derived(Array.isArray(data.option) ? data.option : []);
-  // A filter-order with secondary options writes every item of the value as
-  // "item-option", see filterOrder.ts
+  // A two level filter-order writes every item of the value as "item-option",
+  // see filterOrder.ts
   const optionDict = $derived(data.option_dict ?? {});
-  const hasSecondary = $derived(Object.keys(optionDict).length > 0);
-  const valid = $derived(validItems(options, optionDict));
+  const tokens = $derived(Array.isArray(data.tokens) ? data.tokens : []);
+  const twoLevel = $derived(isTwoLevel(dt));
+  const valid = $derived(validItems(options, optionDict, dt, tokens));
 
   /**
    * True for an item that is in the value but not in the legal items anymore,
@@ -35,7 +37,7 @@
    * repairs such a value on load, the demo shows the editor handling it)
    */
   function isInvalid(item: any): boolean {
-    if (hasSecondary) return !valid.has(String(item));
+    if (twoLevel) return !valid.has(String(item));
     return options.length > 0 && !options.includes(item);
   }
 
@@ -46,7 +48,9 @@
    * element, so the pill reads as the stored item, not as two fields.
    */
   function labelOf(item: any): string {
-    if (!hasSecondary) return arg.getLabel(item);
+    // A token carries no level, and it is shown as it is stored
+    if (tokens.includes(item)) return String(item);
+    if (!twoLevel) return arg.getLabel(item);
     const [primary, secondary] = splitOption(String(item));
     if (secondary === null) return arg.getLabel(primary);
     return `${arg.getLabel(primary)}${SECONDARY_SEPARATOR}${arg.getLabel(secondary)}`;

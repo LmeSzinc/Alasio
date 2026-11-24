@@ -1,0 +1,97 @@
+# The shops of the game, ported from the Alas2026 shop nav. The allowed types
+# and the default values follow that config, the datatype is the new one:
+#
+# - filter-order:      a plain order, every entry is bought once
+# - filter-order-item: an order of shelves, the shelf is bought once and the
+#                      entry carries the type the selection dialog offers
+# - filter-order-pair: an order of (item, type) pairs, several types of one item
+#                      may be bought
+#
+# Alas2026 keeps the order in "Filter" (an unconstrained filter) and the type of
+# every shelf in a separate arg (BoxT4, PlateT4, PR1..3, ...). The one and two
+# level order datatypes merge the two into one value, so the order and the types
+# can no longer disagree.
+
+GeneralShop:
+  args:
+    UseGems: false
+    Refresh: false
+    BuySkinBox: false
+    ConsumeCoins: false
+    BuyOrder:
+      dt: filter-order
+      value: BookRedT3 > BookYellowT3 > BookBlueT3 > BookRedT2 > Cube > FoodT6 > FoodT5
+      option: [ BookRedT3, BookYellowT3, BookBlueT3, BookRedT2, Cube, FoodT6, FoodT5 ]
+
+SchedulerGeneralShop:
+  parent: Scheduler
+  args:
+    ServerUpdate:
+      dt: static-hide
+      value: "00:00, 12:00, 18:00"
+
+GuildShop:
+  args:
+    Refresh: true
+    # The shelf is bought once, so the order holds one entry per shelf and the
+    # entry carries the type. Alas2026 spreads PlateT2/T3/T4 and RetrofitT2/T3
+    # over one arg each, so the tiers are merged into one shelf here: the type
+    # list is the union of them and the default is the one of the top tier.
+    BuyOrder:
+      dt: filter-order-item
+      value: >-
+        PlateT4-gun > BookT3-red > PR-neptune > CatT3 > Chip > BookT2-red
+        > Retrofit-cl > FoodT6 > FoodT5 > CatT2 > BoxT4-ironblood
+      option: [ PlateT4, PlateT3, PlateT2, BookT3, BookT2, PR, CatT3, CatT2, Chip, Retrofit, FoodT6, FoodT5, BoxT4, BoxT3 ]
+      option_dict:
+        PlateT4: [ general, gun, torpedo, antiair, plane ]
+        PlateT3: [ general, gun, torpedo, antiair, plane ]
+        PlateT2: [ general, gun, torpedo, antiair, plane ]
+        BookT3: [ red, blue, yellow ]
+        BookT2: [ red, blue, yellow ]
+        PR: [ neptune, monarch, ibuki, izumo, roon, saintlouis, seattle, georgia, kitakaze, gascogne, cheshire, mainz, odin, champagne ]
+        Retrofit: [ dd, cl, bb, cv ]
+        BoxT4: [ eagle, royal, sakura, ironblood ]
+        BoxT3: [ eagle, royal, sakura, ironblood ]
+
+MedalShop:
+  args:
+    # Several colors of one book tier may be bought, so the whole entry is the
+    # identity and a book tier shows up once per color. The book of a tier is
+    # one group in the editor, so its colors are the options of "BookT3" /
+    # "BookT2" instead of three separate items.
+    BuyOrder:
+      dt: filter-order-pair
+      value: >-
+        DR > PR > BookT3-red > BookT3-yellow > BookT3-blue > BookT2-red
+        > BookT2-yellow > BookT2-blue > RetrofitT3-cl > FoodT6 > FoodT5 > PlateT3-general
+      option: [ DR, PR, BookT3, BookT2, RetrofitT1, RetrofitT2, RetrofitT3, FoodT6, FoodT5, PlateT1, PlateT2, PlateT3 ]
+      option_dict:
+        BookT3: [ red, yellow, blue ]
+        BookT2: [ red, yellow, blue ]
+        RetrofitT1: [ dd, cl, bb, cv ]
+        RetrofitT2: [ dd, cl, bb, cv ]
+        RetrofitT3: [ dd, cl, bb, cv ]
+        PlateT1: [ general, gun, torpedo, antiair, plane ]
+        PlateT2: [ general, gun, torpedo, antiair, plane ]
+        PlateT3: [ general, gun, torpedo, antiair, plane ]
+
+MeritShop:
+  args:
+    Refresh: false
+    BuyUnobtainedShip: false
+    # The merit shop documents a single entry, so the editor offers exactly that
+    # one. A shop with a bigger catalogue extends "option", a shop whose items
+    # can not be enumerated at all is dt="filter" instead.
+    BuyOrder:
+      dt: filter-order
+      value: Cube
+      option: [ Cube ]
+
+CoreShop:
+  args:
+    # Same as the merit shop: the only documented entry is the array
+    BuyOrder:
+      dt: filter-order
+      value: Array
+      option: [ Array ]

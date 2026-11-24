@@ -13,6 +13,36 @@
 export type FilterOrderItem = string;
 
 /**
+ * The datatypes that share the ordered transfer editor, they differ in what an
+ * item is:
+ *
+ * - filter-order:      one level, an item is bought once
+ * - filter-order-item: two levels, the primary item is the identity
+ * - filter-order-pair: two levels, the whole "item-option" is the identity
+ */
+export type FilterOrderDt = "filter-order" | "filter-order-item" | "filter-order-pair";
+
+/** True when the value is written as two levels, "item-option" */
+export function isTwoLevel(dt: string | undefined): boolean {
+  return dt === "filter-order-item" || dt === "filter-order-pair";
+}
+
+/** True when a row carries an editable secondary option, so the identity is its primary item */
+export function hasSecondary(dt: string | undefined): boolean {
+  return dt === "filter-order-item";
+}
+
+/** True when the unused column is grouped by the primary item, the identity is the whole pair */
+export function isGrouped(dt: string | undefined): boolean {
+  return dt === "filter-order-pair";
+}
+
+/** True when the value may hold tokens, entries that carry no item at all */
+export function hasTokens(dt: string | undefined): boolean {
+  return dt === "filter-order-pair";
+}
+
+/**
  * Separator between the levels of an item, e.g. "PlateT4-gun".
  *
  * Fixed for every arg, mirroring FILTER_ORDER_SEPARATOR of the backend: the
@@ -62,27 +92,37 @@ export function composeOption(primary: string, secondary: string | null | undefi
 
 /**
  * The legal items of a filter-order value: every primary item of "option",
- * expanded with its own secondary options when "option_dict" declares them.
+ * expanded with its own secondary options when the datatype is two level.
  * Mirrors expand_filter_order_items() of the backend, so a row the dialog
- * creates is exactly what the generated literal accepts.
+ * creates is exactly what the generated literal accepts. The tokens of a
+ * filter-order-pair are legal items too: they are stored as themselves, so a
+ * value holding "shortest" is not an invalid item.
  *
  * @param option Primary items of the arg
  * @param optionDict Secondary options of each primary item
+ * @param dt Datatype of the arg
+ * @param tokens Tokens of the arg, entries that carry no item at all
  * @returns The legal items
  */
 export function validItems(
   option: readonly any[] | null | undefined,
-  optionDict?: Record<string, any[]> | null,
+  optionDict: Record<string, any[]> | null | undefined,
+  dt: string | undefined,
+  tokens: readonly any[] | null | undefined,
 ): Set<string> {
+  const twoLevel = isTwoLevel(dt);
   const out = new Set<string>();
   for (const item of option ?? []) {
     const primary = String(item);
-    const secondaries = optionDict?.[primary];
+    const secondaries = twoLevel ? optionDict?.[primary] : null;
     if (secondaries && secondaries.length > 0) {
       for (const secondary of secondaries) out.add(composeOption(primary, String(secondary)));
     } else {
       out.add(primary);
     }
+  }
+  if (hasTokens(dt)) {
+    for (const token of tokens ?? []) out.add(String(token));
   }
   return out;
 }

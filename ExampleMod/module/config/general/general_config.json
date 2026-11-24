@@ -175,7 +175,7 @@
         "task": "General",
         "group": "ShopDemo",
         "arg": "BuyOrder",
-        "dt": "filter-order",
+        "dt": "filter-order-item",
         "value": ["PlateT4-gun", "BookT3-red", "Chip"],
         "option": ["PlateT4", "BookT3", "PR", "Chip"],
         "option_dict": {

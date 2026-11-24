@@ -219,14 +219,24 @@ describe("TestComposeOption", () => {
 
 describe("TestValidItems", () => {
   it("lists the options themselves without secondary options", () => {
-    expect([...validItems(["Fleet-1", "Fleet-2"])]).toEqual(["Fleet-1", "Fleet-2"]);
+    expect([...validItems(["Fleet-1", "Fleet-2"], null, "filter-order", null)]).toEqual(["Fleet-1", "Fleet-2"]);
+  });
+
+  it("ignores the option dictionary of a one level datatype", () => {
+    // The dt alone decides the shape, a leftover option_dict changes nothing
+    expect([...validItems(["Fleet-1"], { "Fleet-1": ["a"] }, "filter-order", null)]).toEqual(["Fleet-1"]);
   });
 
   it("expands a primary item into its own secondary options only", () => {
-    const valid = validItems(["PlateT4", "BookT3", "Chip"], {
-      PlateT4: ["gun", "general"],
-      BookT3: ["red"],
-    });
+    const valid = validItems(
+      ["PlateT4", "BookT3", "Chip"],
+      {
+        PlateT4: ["gun", "general"],
+        BookT3: ["red"],
+      },
+      "filter-order-item",
+      null,
+    );
 
     expect([...valid]).toEqual(["PlateT4-gun", "PlateT4-general", "BookT3-red", "Chip"]);
     // a secondary option of another item is not a legal item of this one
@@ -234,14 +244,39 @@ describe("TestValidItems", () => {
     expect(valid.has("Chip-gun")).toBe(false);
   });
 
+  it("expands the pairs of a filter-order-pair the same way", () => {
+    const valid = validItems(["BookT3"], { BookT3: ["red", "blue"] }, "filter-order-pair", null);
+
+    expect([...valid]).toEqual(["BookT3-red", "BookT3-blue"]);
+  });
+
+  it("includes the tokens of a filter-order-pair", () => {
+    // A token is stored as itself, so a value holding it is not invalid
+    const valid = validItems(["Major"], null, "filter-order-pair", ["shortest"]);
+
+    expect([...valid]).toEqual(["Major", "shortest"]);
+  });
+
+  it("leaves an undeclared token out", () => {
+    const valid = validItems(["Major"], null, "filter-order-pair", []);
+
+    expect(valid.has("shortest")).toBe(false);
+  });
+
+  it("ignores tokens of a datatype that has none", () => {
+    const valid = validItems(["Fleet-1"], null, "filter-order", ["shortest"]);
+
+    expect([...valid]).toEqual(["Fleet-1"]);
+  });
+
   it("requires the secondary option of a primary that declares one", () => {
-    const valid = validItems(["PlateT4"], { PlateT4: ["gun"] });
+    const valid = validItems(["PlateT4"], { PlateT4: ["gun"] }, "filter-order-item", null);
 
     expect(valid.has("PlateT4")).toBe(false);
   });
 
   it("accepts the items of the legacy filter-order as str", () => {
-    expect([...validItems([1, 2])]).toEqual(["1", "2"]);
+    expect([...validItems([1, 2], null, "filter-order", null)]).toEqual(["1", "2"]);
   });
 });
 

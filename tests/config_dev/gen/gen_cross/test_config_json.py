@@ -138,13 +138,13 @@ Task:
 }"""
 
     def test_filter_order_secondary_payload(self, fs):
-        """A filter-order keeps its secondary options in the payload."""
+        """A two level filter-order keeps its secondary options in the payload."""
         gen = make_cross(fs, {
             'main': """\
 Group:
   args:
     Order:
-      dt: filter-order
+      dt: filter-order-item
       value: PlateT4-gun > Chip
       option: [PlateT4, BookT3, Chip]
       option_dict:
@@ -169,7 +169,7 @@ Task:
         "task": "Task",
         "group": "Group",
         "arg": "Order",
-        "dt": "filter-order",
+        "dt": "filter-order-item",
         "value": ["PlateT4-gun", "Chip"],
         "option": ["PlateT4", "BookT3", "Chip"],
         "option_dict": {

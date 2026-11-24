@@ -1,0 +1,237 @@
+{
+  "card-GeneralShop-GeneralShop": {
+    "_info": {"group": "GeneralShop", "arg": "_info", "card": "card-GeneralShop-GeneralShop"},
+    "Scheduler": {
+      "Enable": {
+        "task": "GeneralShop",
+        "group": "Scheduler",
+        "arg": "Enable",
+        "cls": "SchedulerGeneralShop",
+        "dt": "enable",
+        "value": false,
+        "option": ["true", "false"]
+      },
+      "NextRun": {
+        "task": "GeneralShop",
+        "group": "Scheduler",
+        "arg": "NextRun",
+        "cls": "SchedulerGeneralShop",
+        "dt": "datetime",
+        "value": "2020-01-01T00:00:00Z"
+      }
+    },
+    "GeneralShop": {
+      "UseGems": {
+        "task": "GeneralShop",
+        "group": "GeneralShop",
+        "arg": "UseGems",
+        "dt": "checkbox",
+        "value": false
+      },
+      "Refresh": {
+        "task": "GeneralShop",
+        "group": "GeneralShop",
+        "arg": "Refresh",
+        "dt": "checkbox",
+        "value": false
+      },
+      "BuySkinBox": {
+        "task": "GeneralShop",
+        "group": "GeneralShop",
+        "arg": "BuySkinBox",
+        "dt": "checkbox",
+        "value": false
+      },
+      "ConsumeCoins": {
+        "task": "GeneralShop",
+        "group": "GeneralShop",
+        "arg": "ConsumeCoins",
+        "dt": "checkbox",
+        "value": false
+      },
+      "BuyOrder": {
+        "task": "GeneralShop",
+        "group": "GeneralShop",
+        "arg": "BuyOrder",
+        "dt": "filter-order",
+        "value": ["BookRedT3", "BookYellowT3", "BookBlueT3", "BookRedT2", "Cube", "FoodT6", "FoodT5"],
+        "option": ["BookRedT3", "BookYellowT3", "BookBlueT3", "BookRedT2", "Cube", "FoodT6", "FoodT5"],
+        "layout": "vert"
+      }
+    }
+  },
+  "card-GuildShop-GuildShop": {
+    "_info": {"group": "GuildShop", "arg": "_info", "card": "card-GuildShop-GuildShop"},
+    "Scheduler": {
+      "Enable": {
+        "task": "GuildShop",
+        "group": "Scheduler",
+        "arg": "Enable",
+        "cls": "SchedulerU00",
+        "dt": "enable",
+        "value": false,
+        "option": ["true", "false"]
+      },
+      "NextRun": {
+        "task": "GuildShop",
+        "group": "Scheduler",
+        "arg": "NextRun",
+        "cls": "SchedulerU00",
+        "dt": "datetime",
+        "value": "2020-01-01T00:00:00Z"
+      }
+    },
+    "GuildShop": {
+      "Refresh": {
+        "task": "GuildShop",
+        "group": "GuildShop",
+        "arg": "Refresh",
+        "dt": "checkbox",
+        "value": true
+      },
+      "BuyOrder": {
+        "task": "GuildShop",
+        "group": "GuildShop",
+        "arg": "BuyOrder",
+        "dt": "filter-order-item",
+        "value": ["PlateT4-gun", "BookT3-red", "PR-neptune", "CatT3", "Chip", "BookT2-red", "Retrofit-cl", "FoodT6", "FoodT5", "CatT2", "BoxT4-ironblood"],
+        "option": ["PlateT4", "PlateT3", "PlateT2", "BookT3", "BookT2", "PR", "CatT3", "CatT2", "Chip", "Retrofit", "FoodT6", "FoodT5", "BoxT4", "BoxT3"],
+        "option_dict": {
+          "PlateT4": ["general", "gun", "torpedo", "antiair", "plane"],
+          "PlateT3": ["general", "gun", "torpedo", "antiair", "plane"],
+          "PlateT2": ["general", "gun", "torpedo", "antiair", "plane"],
+          "BookT3": ["red", "blue", "yellow"],
+          "BookT2": ["red", "blue", "yellow"],
+          "PR": ["neptune", "monarch", "ibuki", "izumo", "roon", "saintlouis", "seattle", "georgia", "kitakaze", "gascogne", "cheshire", "mainz", "odin", "champagne"],
+          "Retrofit": ["dd", "cl", "bb", "cv"],
+          "BoxT4": ["eagle", "royal", "sakura", "ironblood"],
+          "BoxT3": ["eagle", "royal", "sakura", "ironblood"]
+        },
+        "layout": "vert"
+      }
+    }
+  },
+  "card-MedalShop-MedalShop": {
+    "_info": {"group": "MedalShop", "arg": "_info", "card": "card-MedalShop-MedalShop"},
+    "Scheduler": {
+      "Enable": {
+        "task": "MedalShop",
+        "group": "Scheduler",
+        "arg": "Enable",
+        "cls": "SchedulerU00",
+        "dt": "enable",
+        "value": false,
+        "option": ["true", "false"]
+      },
+      "NextRun": {
+        "task": "MedalShop",
+        "group": "Scheduler",
+        "arg": "NextRun",
+        "cls": "SchedulerU00",
+        "dt": "datetime",
+        "value": "2020-01-01T00:00:00Z"
+      }
+    },
+    "MedalShop": {
+      "BuyOrder": {
+        "task": "MedalShop",
+        "group": "MedalShop",
+        "arg": "BuyOrder",
+        "dt": "filter-order-pair",
+        "value": ["DR", "PR", "BookT3-red", "BookT3-yellow", "BookT3-blue", "BookT2-red", "BookT2-yellow", "BookT2-blue", "RetrofitT3-cl", "FoodT6", "FoodT5", "PlateT3-general"],
+        "option": ["DR", "PR", "BookT3", "BookT2", "RetrofitT1", "RetrofitT2", "RetrofitT3", "FoodT6", "FoodT5", "PlateT1", "PlateT2", "PlateT3"],
+        "option_dict": {
+          "BookT3": ["red", "yellow", "blue"],
+          "BookT2": ["red", "yellow", "blue"],
+          "RetrofitT1": ["dd", "cl", "bb", "cv"],
+          "RetrofitT2": ["dd", "cl", "bb", "cv"],
+          "RetrofitT3": ["dd", "cl", "bb", "cv"],
+          "PlateT1": ["general", "gun", "torpedo", "antiair", "plane"],
+          "PlateT2": ["general", "gun", "torpedo", "antiair", "plane"],
+          "PlateT3": ["general", "gun", "torpedo", "antiair", "plane"]
+        },
+        "layout": "vert"
+      }
+    }
+  },
+  "card-MeritShop-MeritShop": {
+    "_info": {"group": "MeritShop", "arg": "_info", "card": "card-MeritShop-MeritShop"},
+    "Scheduler": {
+      "Enable": {
+        "task": "MeritShop",
+        "group": "Scheduler",
+        "arg": "Enable",
+        "cls": "SchedulerU00",
+        "dt": "enable",
+        "value": false,
+        "option": ["true", "false"]
+      },
+      "NextRun": {
+        "task": "MeritShop",
+        "group": "Scheduler",
+        "arg": "NextRun",
+        "cls": "SchedulerU00",
+        "dt": "datetime",
+        "value": "2020-01-01T00:00:00Z"
+      }
+    },
+    "MeritShop": {
+      "Refresh": {
+        "task": "MeritShop",
+        "group": "MeritShop",
+        "arg": "Refresh",
+        "dt": "checkbox",
+        "value": false
+      },
+      "BuyUnobtainedShip": {
+        "task": "MeritShop",
+        "group": "MeritShop",
+        "arg": "BuyUnobtainedShip",
+        "dt": "checkbox",
+        "value": false
+      },
+      "BuyOrder": {
+        "task": "MeritShop",
+        "group": "MeritShop",
+        "arg": "BuyOrder",
+        "dt": "filter-order",
+        "value": ["Cube"],
+        "option": ["Cube"],
+        "layout": "vert"
+      }
+    }
+  },
+  "card-CoreShop-CoreShop": {
+    "_info": {"group": "CoreShop", "arg": "_info", "card": "card-CoreShop-CoreShop"},
+    "Scheduler": {
+      "Enable": {
+        "task": "CoreShop",
+        "group": "Scheduler",
+        "arg": "Enable",
+        "cls": "SchedulerU00",
+        "dt": "enable",
+        "value": false,
+        "option": ["true", "false"]
+      },
+      "NextRun": {
+        "task": "CoreShop",
+        "group": "Scheduler",
+        "arg": "NextRun",
+        "cls": "SchedulerU00",
+        "dt": "datetime",
+        "value": "2020-01-01T00:00:00Z"
+      }
+    },
+    "CoreShop": {
+      "BuyOrder": {
+        "task": "CoreShop",
+        "group": "CoreShop",
+        "arg": "BuyOrder",
+        "dt": "filter-order",
+        "value": ["Array"],
+        "option": ["Array"],
+        "layout": "vert"
+      }
+    }
+  }
+}

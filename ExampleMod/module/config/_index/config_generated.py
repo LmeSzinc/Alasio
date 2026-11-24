@@ -11,6 +11,7 @@ if t.TYPE_CHECKING:
     from ..general import general_model as general
     from ..main import main_model as main
     from ..opsi import opsi_model as opsi
+    from ..shop import shop_model as shop
 
 
 # This file was auto-generated, do not modify it manually. To generate:
@@ -88,6 +89,29 @@ class ConfigGenerated(AlasioConfigBase):
     # Submarine: "gems.GemsSubmarine"
     # Emotion1: "gems.GemsEmotionRecord"
     EquipmentCode: "gems.EquipmentCode"
+
+    """
+    ========== nav: shop ==========
+    """
+    # ----- GeneralShop -----
+    # Scheduler: "shop.SchedulerGeneralShop"
+    GeneralShop: "shop.GeneralShop"
+
+    # ----- GuildShop -----
+    # Scheduler: "alasio.SchedulerU00"
+    GuildShop: "shop.GuildShop"
+
+    # ----- MedalShop -----
+    # Scheduler: "alasio.SchedulerU00"
+    MedalShop: "shop.MedalShop"
+
+    # ----- MeritShop -----
+    # Scheduler: "alasio.SchedulerU00"
+    MeritShop: "shop.MeritShop"
+
+    # ----- CoreShop -----
+    # Scheduler: "alasio.SchedulerU00"
+    CoreShop: "shop.CoreShop"
 
     """
     ========== nav: dashboard ==========

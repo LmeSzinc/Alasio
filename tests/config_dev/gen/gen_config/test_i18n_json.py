@@ -319,7 +319,7 @@ Group:
         }
 
     def test_filter_order_primary_and_secondary_options(self, fs):
-        """A filter-order with secondary options translates both lists.
+        """A filter-order-item with secondary options translates both lists.
 
         The primary items and the secondary options live in two fields, so the
         generated file has to carry the labels of both.
@@ -328,7 +328,7 @@ Group:
 Group:
   args:
     Order:
-      dt: filter-order
+      dt: filter-order-item
       value: PlateT4-gun > Chip
       option: [PlateT4, Chip]
       option_dict:

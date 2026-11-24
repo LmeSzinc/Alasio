@@ -1,0 +1,34 @@
+GeneralShop:
+  groups:
+    Scheduler: SchedulerGeneralShop
+    GeneralShop:
+  displays:
+    - [ Scheduler, GeneralShop ]
+
+GuildShop:
+  groups:
+    Scheduler: SchedulerU00
+    GuildShop:
+  displays:
+    - [ Scheduler, GuildShop ]
+
+MedalShop:
+  groups:
+    Scheduler: SchedulerU00
+    MedalShop:
+  displays:
+    - [ Scheduler, MedalShop ]
+
+MeritShop:
+  groups:
+    Scheduler: SchedulerU00
+    MeritShop:
+  displays:
+    - [ Scheduler, MeritShop ]
+
+CoreShop:
+  groups:
+    Scheduler: SchedulerU00
+    CoreShop:
+  displays:
+    - [ Scheduler, CoreShop ]

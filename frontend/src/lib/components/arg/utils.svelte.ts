@@ -75,12 +75,18 @@ export type ArgData = {
    * The group is only a navigation aid of the frontend, the value stores the
    * option only
    *
-   * Secondary options of an item if arg is `dt=filter-order`, might be
+   * Secondary options of an item if arg is `dt=filter-order-item` or
+   * `dt=filter-order-pair`, might be
    * `{PlateT4: [gun, general], BookT3: [red, blue]}`. An item of the value then
    * carries one of its own secondary options as `item-option` (`PlateT4-gun`),
    * an item without an entry here is stored as itself (`Chip`)
    */
   option_dict?: Record<string, any[]>;
+  /**
+   * Entries of a `dt=filter-order-pair` value that carry no item at all, like
+   * the `shortest` of a commission filter
+   */
+  tokens?: any[];
   option_i18n?: Record<any, string>;
   // Msgspec constraints
   // https://jcristharif.com/msgspec/constraints.html

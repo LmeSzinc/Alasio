@@ -106,6 +106,41 @@
     },
     "config": {"task": ["OpsiAshAssist"], "group": []}
   },
+  "GeneralShop": {
+    "group": {
+      "Scheduler": {"file": "shop/shop_model.py", "cls": "SchedulerGeneralShop", "task": "GeneralShop"},
+      "GeneralShop": {"file": "shop/shop_model.py", "cls": "GeneralShop", "task": "GeneralShop"}
+    },
+    "config": {"task": ["GeneralShop"], "group": []}
+  },
+  "GuildShop": {
+    "group": {
+      "Scheduler": {"file": "alasio/alasio_model.py", "cls": "SchedulerU00", "task": "GuildShop"},
+      "GuildShop": {"file": "shop/shop_model.py", "cls": "GuildShop", "task": "GuildShop"}
+    },
+    "config": {"task": ["GuildShop"], "group": []}
+  },
+  "MedalShop": {
+    "group": {
+      "Scheduler": {"file": "alasio/alasio_model.py", "cls": "SchedulerU00", "task": "MedalShop"},
+      "MedalShop": {"file": "shop/shop_model.py", "cls": "MedalShop", "task": "MedalShop"}
+    },
+    "config": {"task": ["MedalShop"], "group": []}
+  },
+  "MeritShop": {
+    "group": {
+      "Scheduler": {"file": "alasio/alasio_model.py", "cls": "SchedulerU00", "task": "MeritShop"},
+      "MeritShop": {"file": "shop/shop_model.py", "cls": "MeritShop", "task": "MeritShop"}
+    },
+    "config": {"task": ["MeritShop"], "group": []}
+  },
+  "CoreShop": {
+    "group": {
+      "Scheduler": {"file": "alasio/alasio_model.py", "cls": "SchedulerU00", "task": "CoreShop"},
+      "CoreShop": {"file": "shop/shop_model.py", "cls": "CoreShop", "task": "CoreShop"}
+    },
+    "config": {"task": ["CoreShop"], "group": []}
+  },
   "_global_bind": {
     "group": {
       "Emulator": {"file": "alasio/device_model.py", "cls": "Emulator", "task": "Device"},

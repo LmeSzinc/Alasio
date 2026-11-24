@@ -29,11 +29,15 @@
     filter: Textarea,
     static: Static,
     "filter-order": FilterOrder,
+    "filter-order-item": FilterOrder,
+    "filter-order-pair": FilterOrder,
   };
   // Row actions are rendered by the layout next to the name, e.g. the edit
-  // button of filter-order (see FilterOrderAction.svelte)
+  // button of the ordered filter datatypes (see FilterOrderAction.svelte)
   const actionMap: Record<string, Component<InputProps>> = {
     "filter-order": FilterOrderAction,
+    "filter-order-item": FilterOrderAction,
+    "filter-order-pair": FilterOrderAction,
   };
   const layoutMap: Record<string, Component<LayoutProps>> = {
     filter: LayoutVertical,

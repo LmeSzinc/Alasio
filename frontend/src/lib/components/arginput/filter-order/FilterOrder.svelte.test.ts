@@ -170,6 +170,13 @@ function columnLabels(name: "selected" | "unused"): string[] {
   );
 }
 
+/** The group headers of the unused column, label and selected/total count. */
+function groupHeaders(): string[] {
+  return [...column("unused").querySelectorAll<HTMLElement>('[data-slot="filter-order-group"]')].map(
+    (el) => el.textContent?.replace(/\s+/g, " ").trim() ?? "",
+  );
+}
+
 /** The up / down / remove / add button of a row, found through its aria-label. */
 function rowButton(columnName: "selected" | "unused", action: string, item: string): HTMLButtonElement {
   const button = column(columnName).querySelector<HTMLButtonElement>(`[aria-label="${action} ${item}"]`);
@@ -581,12 +588,181 @@ describe("TestFilterOrderMultiInstance", () => {
   });
 });
 
-/** The arg with secondary options, as the backend sends it */
+describe("TestFilterOrderPair", () => {
+  it("shows a pair in the stored form, the option after the level separator", async () => {
+    const { target } = await mountArg(makePairArg());
+
+    expect(pillText(target)).toEqual(["UrgentCube-1:30", "UrgentCube-3", "Major", "shortest"]);
+  });
+
+  it("edits no secondary option in a selected row", async () => {
+    // A pair is the entry itself: changing the option means adding another one
+    const { target } = await mountArg(makePairArg());
+    await openDialog(target);
+
+    expect(column("selected").querySelectorAll('[data-slot="select-trigger"]')).toHaveLength(0);
+  });
+
+  it("groups the unused pairs under their item and counts the unused ones", async () => {
+    const { target } = await mountArg(makePairArg({ value: ["UrgentCube-1:30", "ExtraCube-1:30"] }));
+    await openDialog(target);
+
+    // The count is what is left to pick, not what is already picked: the column
+    // lists the unused entries
+    expect(groupHeaders()).toEqual(["UrgentCube 2/3", "ExtraCube 1/2", `${t.Input.FilterOrderTokens()} 1/1`]);
+    // The selected pair is not offered again, the bare item comes before the
+    // tokens; a row of a group reads as the whole entry, the same as the row it
+    // becomes in the selected column
+    expect(columnLabels("unused")).toEqual(["UrgentCube-1:45", "UrgentCube-3", "ExtraCube-0:30", "Major", "shortest"]);
+  });
+
+  it("shows the translated name of both levels in an unused row", async () => {
+    // A row is the identity of the value: the drag has to look like the row it
+    // becomes, so both levels are translated and joined by the separator
+    const { target } = await mountArg(
+      makePairArg({
+        value: [],
+        option: ["RetrofitT1"],
+        option_dict: { RetrofitT1: ["dd", "cl"] },
+        tokens: [],
+        option_i18n: { RetrofitT1: "T1 retrofit blueprint", dd: "Destroyer", cl: "Light cruiser" },
+      }),
+    );
+    await openDialog(target);
+
+    expect(columnLabels("unused")).toEqual(["T1 retrofit blueprint-Destroyer", "T1 retrofit blueprint-Light cruiser"]);
+  });
+
+  it("falls back to the whole entry when a level has no translation", async () => {
+    // The demo of the dev page declares no option_i18n, so both levels resolve
+    // to themselves and the row still reads as the whole entry
+    const { target } = await mountArg(
+      makePairArg({
+        value: ["UrgentCube-1:30"],
+        option: ["UrgentCube"],
+        option_dict: { UrgentCube: ["1:30", "1:45"] },
+        tokens: [],
+        option_i18n: undefined,
+      }),
+    );
+    await openDialog(target);
+
+    expect(columnLabels("unused")).toEqual(["UrgentCube-1:45"]);
+  });
+
+  it("keeps the header of a group whose pairs are all selected", async () => {
+    const { target } = await mountArg(makePairArg({ value: ["UrgentCube-1:30", "UrgentCube-1:45", "UrgentCube-3"] }));
+    await openDialog(target);
+
+    // The count reads 0/3 and the group offers no row any more, but the header
+    // stays so the item does not vanish from the column
+    expect(groupHeaders()).toEqual(["UrgentCube 0/3", "ExtraCube 2/2", `${t.Input.FilterOrderTokens()} 1/1`]);
+    expect(columnLabels("unused")).toEqual(["ExtraCube-0:30", "ExtraCube-1:30", "Major", "shortest"]);
+  });
+
+  it("keeps the header of a token group whose tokens are all selected", async () => {
+    const { target } = await mountArg(makePairArg({ value: ["shortest"] }));
+    await openDialog(target);
+
+    expect(groupHeaders()).toEqual(["UrgentCube 3/3", "ExtraCube 2/2", `${t.Input.FilterOrderTokens()} 0/1`]);
+    expect(columnLabels("unused")).toEqual([
+      "UrgentCube-1:30",
+      "UrgentCube-1:45",
+      "UrgentCube-3",
+      "ExtraCube-0:30",
+      "ExtraCube-1:30",
+      "Major",
+    ]);
+  });
+
+  it("adds a pair of a group at the end of the order", async () => {
+    const { target, arg } = await mountArg(makePairArg({ value: [] }));
+    await openDialog(target);
+
+    rowButton("unused", t.Input.FilterOrderAdd(), "UrgentCube-1:45").click();
+    await settle();
+    footerButton(t.Input.Save()).click();
+    await settle();
+
+    expect(arg.value).toEqual(["UrgentCube-1:45"]);
+  });
+
+  it("adds a token as it is", async () => {
+    const { target, arg } = await mountArg(makePairArg({ value: [] }));
+    await openDialog(target);
+
+    rowButton("unused", t.Input.FilterOrderAdd(), "shortest").click();
+    await settle();
+    footerButton(t.Input.Save()).click();
+    await settle();
+
+    expect(arg.value).toEqual(["shortest"]);
+  });
+
+  it("keeps an unknown pair and blocks saving", async () => {
+    const { target } = await mountArg(makePairArg({ value: ["UrgentCube-9:00"] }));
+    await openDialog(target);
+
+    expect(columnLabels("selected")).toEqual(["UrgentCube-9:00"]);
+    expect(footerButton(t.Input.Save()).disabled).toBe(true);
+  });
+
+  it("accepts the tokens of the arg as legal items", async () => {
+    const { target } = await mountArg(makePairArg({ value: ["shortest"] }));
+    await openDialog(target);
+
+    // A token is a legal entry, only the unknown pair blocks saving
+    expect(footerButton(t.Input.Save()).disabled).toBe(false);
+  });
+
+  it("marks an entry outside the definition in both views", async () => {
+    // "shortest" is not declared as a token of this arg, so it is not an item of
+    // the value at all: the pill line and the editor have to agree on it
+    const { target } = await mountArg(makePairArg({ value: ["UrgentCube-1:30", "shortest"], tokens: [] }));
+
+    expect(pills(target).querySelector(`[aria-label="${t.Input.FilterOrderInvalid()}"]`)).not.toBeNull();
+
+    await openDialog(target);
+    expect(columnLabels("selected")).toEqual(["UrgentCube-1:30", "shortest"]);
+    expect(column("selected").querySelector(`[aria-label="${t.Input.FilterOrderInvalid()}"]`)).not.toBeNull();
+    expect(footerButton(t.Input.Save()).disabled).toBe(true);
+  });
+
+  it("marks no token on the settings page", async () => {
+    // The pill line and the dialog must agree on what is legal, otherwise a
+    // stored token looks broken before the editor is opened
+    const { target } = await mountArg(makePairArg({ value: ["shortest"] }));
+
+    expect(pillText(target)).toEqual(["shortest"]);
+    expect(pills(target).querySelector(`[aria-label="${t.Input.FilterOrderInvalid()}"]`)).toBeNull();
+  });
+
+  it("still marks an unknown pair on the settings page", async () => {
+    const { target } = await mountArg(makePairArg({ value: ["UrgentCube-9:00"] }));
+
+    expect(pills(target).querySelector(`[aria-label="${t.Input.FilterOrderInvalid()}"]`)).not.toBeNull();
+  });
+});
+
+/** The arg of dt="filter-order-item", as the backend sends it */
 function makeSecondaryArg(overrides: Partial<ArgData> = {}): ArgData {
   return makeArg({
+    dt: "filter-order-item",
     value: ["PlateT4-gun", "Chip"],
     option: ["PlateT4", "BookT3", "Chip"],
     option_dict: { PlateT4: ["gun", "general"], BookT3: ["red", "blue"] },
+    ...overrides,
+  });
+}
+
+/** The arg of dt="filter-order-pair", as the backend sends it */
+function makePairArg(overrides: Partial<ArgData> = {}): ArgData {
+  return makeArg({
+    dt: "filter-order-pair",
+    value: ["UrgentCube-1:30", "UrgentCube-3", "Major", "shortest"],
+    option: ["UrgentCube", "ExtraCube", "Major"],
+    option_dict: { UrgentCube: ["1:30", "1:45", "3"], ExtraCube: ["0:30", "1:30"] },
+    tokens: ["shortest"],
     ...overrides,
   });
 }

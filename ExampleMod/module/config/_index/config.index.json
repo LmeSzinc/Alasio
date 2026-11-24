@@ -67,5 +67,16 @@
       "task": ["OpsiExplore", "OpsiDaily", "OpsiGeneral", "OpsiAshAssist"],
       "group": []
     }
+  },
+  "shop": {
+    "file": "shop/shop_config.json",
+    "i18n": [
+      "alasio/alasio_i18n.json",
+      "shop/shop_i18n.json"
+    ],
+    "config": {
+      "task": ["GeneralShop", "GuildShop", "MedalShop", "MeritShop", "CoreShop"],
+      "group": []
+    }
   }
 }
