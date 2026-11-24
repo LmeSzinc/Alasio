@@ -62,7 +62,7 @@ export function devNavGroups(): DevNavGroup[] {
       items: [
         { path: "/dev/assets", name: t.AssetManager.AssetManager() },
         { path: "/dev/golden-test", name: t.GoldenTest.Title() },
-        { path: "/dev/compat", name: "Browser Compatibility" },
+        { path: "/dev/compat", name: t.DevTool.BrowserCompatibility() },
       ],
     },
     {

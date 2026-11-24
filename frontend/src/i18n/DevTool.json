@@ -34,6 +34,13 @@
     "zh-TW": "開發工具",
     "es-ES": "Herramientas Dev"
   },
+  "BrowserCompatibility": {
+    "en-US": "Browser Compatibility",
+    "zh-CN": "浏览器兼容性",
+    "ja-JP": "ブラウザ互換性",
+    "zh-TW": "瀏覽器相容性",
+    "es-ES": "Compatibilidad del navegador"
+  },
   "DebugTool": {
     "en-US": "DebugTool",
     "zh-CN": "DebugTool",
