@@ -37,9 +37,12 @@
 
 <div class="h-full w-full overflow-auto p-4">
   <div class={cn("w-full space-y-4", className)}>
-    <!-- Page Header -->
+    <!--
+      No page title here: the layout header already shows the entry's label
+      ("Browser Compatibility"), so a heading would repeat it. The intro keeps
+      only what the header does not say.
+    -->
     <div class="space-y-2">
-      <h1 class="text-3xl font-bold">Browser Compatibility Test</h1>
       <p class="text-muted-foreground">Testing PostCSS polyfills for Tailwind v4 backwards compatibility</p>
       <div class="text-sm text-muted-foreground">Target: Chrome 99+, Safari 15.5+, iOS Safari 16.1+</div>
     </div>
