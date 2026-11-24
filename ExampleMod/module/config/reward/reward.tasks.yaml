@@ -1,0 +1,22 @@
+Commission:
+  groups:
+    Scheduler: SchedulerU00
+    Commission:
+  displays:
+    - [ Scheduler, Commission ]
+
+Tactical:
+  groups:
+    Scheduler: SchedulerU00
+    Tactical:
+    ControlExpOverflow:
+    AddNewStudent:
+  displays:
+    - [ Scheduler, Tactical, ControlExpOverflow, AddNewStudent ]
+
+Research:
+  groups:
+    Scheduler: SchedulerU00
+    Research:
+  displays:
+    - [ Scheduler, Research ]

@@ -1,0 +1,271 @@
+# The daily rewards of the game, ported from the Alas2026 reward nav. The
+# allowed values follow that config, the datatype is the new one:
+#
+# - Commission / Tactical: an order of (item, option) pairs (dt=filter-order-pair),
+#   several options of one item may coexist ("UrgentCube-1:30" and "UrgentCube-3").
+#   The Alas2026 config keeps this order in an unconstrained filter, so nothing
+#   tells the user which pairs exist; the pair datatype does.
+# - Research: a multi level filter (dt=filter-regex) decoded by "pattern", the
+#   Alas2026 config keeps it in an unconstrained filter as well.
+#
+# "shortest" / "first" / "reset" are commands: entries of the value that carry no
+# item and turn into a concrete behaviour at runtime.
+
+Commission:
+  args:
+    PresetFilter:
+      value: cube
+      option: [ cube, cube_24h, chip, chip_24h, oil, custom ]
+    CustomFilter:
+      dt: filter-order-pair
+      value: >-
+        DailyEvent > Gem-4 > Gem-2 > Gem-8
+        > ExtraCube-0:30 > UrgentCube-1:30 > UrgentCube-1:45 > UrgentCube-3
+        > ExtraDrill-5:20 > ExtraDrill-2 > ExtraDrill-3:20 > UrgentCube-2:15
+        > UrgentCube-4 > ExtraDrill-1 > UrgentCube-6 > ExtraCube-1:30
+        > ExtraDrill-2:40 > ExtraDrill-0:20 > Major > DailyChip
+        > DailyResource > ExtraPart-0:30 > ExtraOil-1 > UrgentBox-6
+        > ExtraCube-3 > ExtraPart-1 > UrgentBox-3 > ExtraCube-4
+        > ExtraPart-1:30 > ExtraOil-4 > UrgentBox-1 > ExtraCube-5
+        > ExtraCube-8 > ExtraOil-8 > UrgentDrill-4 > UrgentDrill-2:40
+        > UrgentDrill-2 > UrgentDrill-1 > UrgentDrill-1:30 > UrgentDrill-1:10
+        > Extra-0:20 > Extra-0:30 > Extra-1:00 > Extra-1:30
+        > Extra-2:00 > shortest
+      option: [
+        DailyEvent, Gem, ExtraCube, UrgentCube, ExtraDrill, Major, DailyChip,
+        DailyResource, ExtraPart, ExtraOil, UrgentBox, Extra, UrgentDrill,
+      ]
+      option_dict:
+        Gem: [ '4', '2', '8' ]
+        ExtraCube: [ '0:30', '1:30', '3', '4', '5', '8' ]
+        UrgentCube: [ '1:30', '1:45', '3', '2:15', '4', '6' ]
+        ExtraDrill: [ '5:20', '2', '3:20', '1', '2:40', '0:20' ]
+        ExtraPart: [ '0:30', '1', '1:30' ]
+        ExtraOil: [ '1', '4', '8' ]
+        UrgentBox: [ '6', '3', '1' ]
+        UrgentDrill: [ '4', '2:40', '2', '1', '1:30', '1:10' ]
+        Extra: [ '0:20', '0:30', '1:00', '1:30', '2:00' ]
+      option_command: [ shortest ]
+    DoMajorCommission: false
+
+Tactical:
+  args:
+    TacticalFilter:
+      dt: filter-order-pair
+      value: >-
+        Same-T4 > Same-T3 > Same-T2 > Same-T1
+        > Blue-T2 > Yellow-T2 > Red-T2 > Blue-T3
+        > Yellow-T3 > Red-T3 > Blue-T4 > Yellow-T4
+        > Red-T4 > Blue-T1 > Yellow-T1 > Red-T1
+        > first
+      option: [ Same, Blue, Yellow, Red ]
+      option_dict:
+        Same: [ 'T4', 'T3', 'T2', 'T1' ]
+        Blue: [ 'T2', 'T3', 'T4', 'T1' ]
+        Yellow: [ 'T2', 'T3', 'T4', 'T1' ]
+        Red: [ 'T2', 'T3', 'T4', 'T1' ]
+      option_command: [ first ]
+    RapidTrainingSlot:
+      value: do_not_use
+      option: [ do_not_use, slot_1, slot_2, slot_3, slot_4 ]
+
+ControlExpOverflow:
+  args:
+    Enable: true
+    T4Allow: 100
+    T3Allow: 100
+    T2Allow: 200
+    T1Allow: 200
+
+AddNewStudent:
+  args:
+    Enable: false
+    Favorite: true
+    MinLevel:
+      value: 50
+      range: 1~100
+
+Research:
+  args:
+    UseCube:
+      value: only_05_hour
+      option: [ always_use, only_05_hour, only_no_project, do_not_use ]
+    UseCoin:
+      value: always_use
+      option: [ always_use, only_05_hour, only_no_project, do_not_use ]
+    UsePart:
+      value: always_use
+      option: [ always_use, only_05_hour, only_no_project, do_not_use ]
+    AllowDelay:
+      value: true
+      fold_help: true
+    PresetFilter:
+      value: series_9_blueprint_ta152
+      fold_help: true
+      option: [
+        custom,
+        series_9_blueprint_ta152,
+        series_9_blueprint_only,
+        series_9_ta152_only,
+        series_8_blueprint_305,
+        series_8_blueprint_only,
+        series_8_305_only,
+        series_7_blueprint_la9,
+        series_7_blueprint_only,
+        series_7_la9_only,
+        series_6_blueprint_203,
+        series_6_blueprint_only,
+        series_6_203_only,
+        series_5_blueprint_152,
+        series_5_blueprint_only,
+        series_5_152_only,
+        series_4_blueprint_tenrai,
+        series_4_blueprint_only,
+        series_4_tenrai_only,
+        series_3_blueprint_234,
+        series_3_blueprint_only,
+        series_3_234_only,
+        series_2_than_3_457_234,
+        series_2_blueprint_457,
+        series_2_blueprint_only,
+        series_2_457_only,
+      ]
+    # Every level is one dropdown of the editor: the series, the family (a genre,
+    # a rarity, or one of the ships the series offers) and the detail (a
+    # duration). "pattern" decodes a stored item back into one value per level,
+    # so the editor always knows what an item says. The detail tables list the
+    # durations only: a project number can still be written by hand, a value
+    # outside the tables stays a legal predicate that simply never matches.
+    #
+    # The durations of a genre are the same in every series but the two hour E
+    # project of S9 (the game has no six hour one there), so E is the one genre
+    # that needs a table of its own.
+    CustomFilter:
+      dt: filter-regex
+      fold_help: true
+      value: >-
+        S9-DR-0.5 > S9-PRY-0.5 > S9-Q-0.5 > S9-H-0.5 > Q-0.5
+        > S9-DR-2.5 > S9-G-1.5 > S9-Q-1 > S9-DR-5 > 0.5
+        > S9-G-4 > S9-Q-2 > S9-PRY-2.5 > S8-E-880 > S8-E-180
+        > reset > S9-DR-8 > Q-1 > 1 > S9-E-315
+        > S9-G-2.5 > G-1.5 > 1.5 > S9-E-031 > S9-Q-4
+        > Q-2 > E-2 > 2 > DR-2.5 > PRY-2.5
+        > G-2.5 > 2.5 > S9-PRY-5 > S9-PRY-8 > Q-4
+        > G-4 > 4 > S9-C-6 > DR-5 > PRY-5
+        > 5 > C-6 > 6 > S9-C-8 > S9-C-12
+        > DR-8 > PRY-8 > C-8 > 8 > C-12
+        > 12
+      # The decoder of a stored item, one named group per level. The family
+      # group lists every ship of the game, so "S9-agir" is read as the ship
+      # "agir" of the series 9, not as a genre plus something.
+      # The decoder of a stored item, one named group per level. The family
+      # group lists every ship of the game, so "S9-agir" is read as the ship
+      # "agir" of the series 9, not as a genre plus something.
+      pattern: '(?P<series>S[1-9])?-?(?P<family>DR|PRY|maximmelmann|goudenleeuw|mecklenburg|hindenburg|saintlouis|valparaiso|anchorage|champagne|friedrich|kearsarge|marcopolo|rupprecht|takahashi|cheshire|gascogne|kitakaze|nakhimov|plymouth|shimanto|vittorio|chkalov|flandre|georgia|hakuryu|halford|monarch|neptune|schultz|seattle|august|bayard|daisen|dmitri|duncan|harbin|kansas|napoli|azuma|brest|drake|ibuki|izumo|mainz|orage|agir|odin|roon|[BCDEGHQT])?-?(?P<detail>\d{3}|\d\.\d|\d\d?)?'
+      option_command: [ reset ]
+      levels:
+        - name: series
+          option: [ 'S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7', 'S8', 'S9' ]
+        - name: family
+          option:
+            '': [ 'B', 'C', 'D', 'E', 'G', 'H', 'Q', 'T', 'DR', 'PRY' ]
+            S1: [
+                'B', 'C', 'D', 'E', 'G', 'H', 'Q', 'T', 'PRY', 'neptune', 'monarch', 'ibuki', 'izumo',
+                'roon', 'saintlouis',
+              ]
+            S2: [
+                'B', 'C', 'D', 'E', 'G', 'H', 'Q', 'T', 'DR', 'PRY', 'seattle', 'georgia', 'kitakaze',
+                'azuma', 'friedrich', 'gascogne',
+              ]
+            S3: [
+                'B', 'C', 'D', 'E', 'G', 'H', 'Q', 'T', 'DR', 'PRY', 'cheshire', 'drake', 'mainz', 'odin',
+                'champagne',
+              ]
+            S4: [
+                'B', 'C', 'D', 'E', 'G', 'H', 'Q', 'T', 'DR', 'PRY', 'anchorage', 'hakuryu', 'agir',
+                'august', 'marcopolo',
+              ]
+            S5: [
+                'B', 'C', 'D', 'E', 'G', 'H', 'Q', 'T', 'DR', 'PRY', 'plymouth', 'rupprecht', 'harbin',
+                'chkalov', 'brest',
+              ]
+            S6: [
+                'B', 'C', 'D', 'E', 'G', 'H', 'Q', 'T', 'DR', 'PRY', 'hindenburg', 'kearsarge', 'shimanto',
+                'schultz', 'flandre',
+              ]
+            S7: [
+                'B', 'C', 'D', 'E', 'G', 'H', 'Q', 'T', 'DR', 'PRY', 'halford', 'daisen', 'napoli',
+                'nakhimov', 'bayard',
+              ]
+            S8: [
+                'B', 'C', 'D', 'E', 'G', 'H', 'Q', 'T', 'DR', 'PRY', 'mecklenburg', 'goudenleeuw', 'dmitri',
+                'kansas', 'vittorio',
+              ]
+            S9: [
+                'B', 'C', 'D', 'E', 'G', 'H', 'Q', 'T', 'DR', 'PRY', 'valparaiso', 'maximmelmann', 'duncan',
+                'takahashi', 'orage',
+              ]
+        - name: detail
+          match: family
+          option:
+            '': [ '0.5', '1', '1.5', '2', '2.5', '3', '4', '5', '6', '8', '12' ]
+            B: [ '4' ]
+            C: [ '6', '8', '12' ]
+            D: [ '0.5', '2.5', '5', '8' ]
+            E: [ '2', '6' ]
+            G: [ '1.5', '2.5', '4' ]
+            H: [ '0.5', '1', '2', '4' ]
+            Q: [ '0.5', '1', '2', '4' ]
+            T: [ '3', '4', '6' ]
+            DR: [ '0.5', '2.5', '5', '8' ]
+            PRY: [ '0.5', '2.5', '5', '8' ]
+            neptune: [ '0.5', '2.5', '5', '8' ]
+            monarch: [ '0.5', '2.5', '5', '8' ]
+            ibuki: [ '0.5', '2.5', '5', '8' ]
+            izumo: [ '0.5', '2.5', '5', '8' ]
+            roon: [ '0.5', '2.5', '5', '8' ]
+            saintlouis: [ '0.5', '2.5', '5', '8' ]
+            seattle: [ '0.5', '2.5', '5', '8' ]
+            georgia: [ '0.5', '2.5', '5', '8' ]
+            kitakaze: [ '0.5', '2.5', '5', '8' ]
+            azuma: [ '0.5', '2.5', '5', '8' ]
+            friedrich: [ '0.5', '2.5', '5', '8' ]
+            gascogne: [ '0.5', '2.5', '5', '8' ]
+            cheshire: [ '0.5', '2.5', '5', '8' ]
+            drake: [ '0.5', '2.5', '5', '8' ]
+            mainz: [ '0.5', '2.5', '5', '8' ]
+            odin: [ '0.5', '2.5', '5', '8' ]
+            champagne: [ '0.5', '2.5', '5', '8' ]
+            anchorage: [ '0.5', '2.5', '5', '8' ]
+            hakuryu: [ '0.5', '2.5', '5', '8' ]
+            agir: [ '0.5', '2.5', '5', '8' ]
+            august: [ '0.5', '2.5', '5', '8' ]
+            marcopolo: [ '0.5', '2.5', '5', '8' ]
+            plymouth: [ '0.5', '2.5', '5', '8' ]
+            rupprecht: [ '0.5', '2.5', '5', '8' ]
+            harbin: [ '0.5', '2.5', '5', '8' ]
+            chkalov: [ '0.5', '2.5', '5', '8' ]
+            brest: [ '0.5', '2.5', '5', '8' ]
+            hindenburg: [ '0.5', '2.5', '5', '8' ]
+            kearsarge: [ '0.5', '2.5', '5', '8' ]
+            shimanto: [ '0.5', '2.5', '5', '8' ]
+            schultz: [ '0.5', '2.5', '5', '8' ]
+            flandre: [ '0.5', '2.5', '5', '8' ]
+            halford: [ '0.5', '2.5', '5', '8' ]
+            daisen: [ '0.5', '2.5', '5', '8' ]
+            napoli: [ '0.5', '2.5', '5', '8' ]
+            nakhimov: [ '0.5', '2.5', '5', '8' ]
+            bayard: [ '0.5', '2.5', '5', '8' ]
+            mecklenburg: [ '0.5', '2.5', '5', '8' ]
+            goudenleeuw: [ '0.5', '2.5', '5', '8' ]
+            dmitri: [ '0.5', '2.5', '5', '8' ]
+            kansas: [ '0.5', '2.5', '5', '8' ]
+            vittorio: [ '0.5', '2.5', '5', '8' ]
+            valparaiso: [ '0.5', '2.5', '5', '8' ]
+            maximmelmann: [ '0.5', '2.5', '5', '8' ]
+            duncan: [ '0.5', '2.5', '5', '8' ]
+            takahashi: [ '0.5', '2.5', '5', '8' ]
+            orage: [ '0.5', '2.5', '5', '8' ]
+            S9-E:
+              match: [ series, family ]
+              option: [ '2' ]

@@ -7,5 +7,6 @@
   },
   "general/general_model.py": {},
   "opsi/opsi_model.py": {},
+  "reward/reward_model.py": {},
   "shop/shop_model.py": {}
 }

@@ -1,0 +1,528 @@
+{
+  "Commission": {
+    "_info": {
+      "zh-CN": {"name": "委托", "help": ""},
+      "en-US": {"name": "Commission", "help": ""}
+    },
+    "PresetFilter": {
+      "zh-CN": {
+        "name": "预设过滤器",
+        "help": "选择一个预设的委托过滤，custom 表示使用下方的自定义顺序",
+        "option_i18n": {
+          "cube": "cube",
+          "cube_24h": "cube_24h",
+          "chip": "chip",
+          "chip_24h": "chip_24h",
+          "oil": "oil",
+          "custom": "custom"
+        }
+      },
+      "en-US": {
+        "name": "Preset filter",
+        "help": "Pick a preset commission filter, custom uses the order below",
+        "option_i18n": {
+          "cube": "cube",
+          "cube_24h": "cube_24h",
+          "chip": "chip",
+          "chip_24h": "chip_24h",
+          "oil": "oil",
+          "custom": "custom"
+        }
+      }
+    },
+    "CustomFilter": {
+      "zh-CN": {
+        "name": "自定义过滤器",
+        "help": "从高到低的委托优先级，同一委托的多个时长可以同时存在",
+        "option_i18n": {
+          "DailyEvent": "每日事件",
+          "Gem": "宝石委托",
+          "ExtraCube": "额外魔方",
+          "UrgentCube": "紧急魔方",
+          "ExtraDrill": "额外演习",
+          "Major": "主要委托",
+          "DailyChip": "日常芯片",
+          "DailyResource": "日常资源",
+          "ExtraPart": "额外部件",
+          "ExtraOil": "额外石油",
+          "UrgentBox": "紧急箱子",
+          "Extra": "额外",
+          "UrgentDrill": "紧急演习",
+          "4": "4",
+          "2": "2",
+          "8": "8",
+          "0:30": "0:30",
+          "1:30": "1:30",
+          "3": "3",
+          "5": "5",
+          "1:45": "1:45",
+          "2:15": "2:15",
+          "6": "6",
+          "5:20": "5:20",
+          "3:20": "3:20",
+          "1": "1",
+          "2:40": "2:40",
+          "0:20": "0:20",
+          "1:10": "1:10",
+          "1:00": "1:00",
+          "2:00": "2:00"
+        }
+      },
+      "en-US": {
+        "name": "Custom filter",
+        "help": "Priority from high to low, several durations of one commission may coexist",
+        "option_i18n": {
+          "DailyEvent": "Daily event",
+          "Gem": "Gem",
+          "ExtraCube": "Extra cube",
+          "UrgentCube": "Urgent cube",
+          "ExtraDrill": "Extra drill",
+          "Major": "Major",
+          "DailyChip": "Daily chip",
+          "DailyResource": "Daily resource",
+          "ExtraPart": "Extra part",
+          "ExtraOil": "Extra oil",
+          "UrgentBox": "Urgent box",
+          "Extra": "Extra",
+          "UrgentDrill": "Urgent drill",
+          "4": "4",
+          "2": "2",
+          "8": "8",
+          "0:30": "0:30",
+          "1:30": "1:30",
+          "3": "3",
+          "5": "5",
+          "1:45": "1:45",
+          "2:15": "2:15",
+          "6": "6",
+          "5:20": "5:20",
+          "3:20": "3:20",
+          "1": "1",
+          "2:40": "2:40",
+          "0:20": "0:20",
+          "1:10": "1:10",
+          "1:00": "1:00",
+          "2:00": "2:00"
+        }
+      }
+    },
+    "DoMajorCommission": {
+      "zh-CN": {"name": "执行主要委托", "help": ""},
+      "en-US": {"name": "Do major commission", "help": ""}
+    }
+  },
+  "Tactical": {
+    "_info": {
+      "zh-CN": {"name": "战术", "help": ""},
+      "en-US": {"name": "Tactical", "help": ""}
+    },
+    "TacticalFilter": {
+      "zh-CN": {
+        "name": "战术过滤器",
+        "help": "从高到低的战术训练优先级，同一类型的多个等级可以同时存在",
+        "option_i18n": {
+          "Same": "同类型",
+          "Blue": "蓝色",
+          "Yellow": "黄色",
+          "Red": "红色",
+          "T4": "T4",
+          "T3": "T3",
+          "T2": "T2",
+          "T1": "T1"
+        }
+      },
+      "en-US": {
+        "name": "Tactical filter",
+        "help": "Priority from high to low, several levels of one type may coexist",
+        "option_i18n": {
+          "Same": "Same type",
+          "Blue": "Blue",
+          "Yellow": "Yellow",
+          "Red": "Red",
+          "T4": "T4",
+          "T3": "T3",
+          "T2": "T2",
+          "T1": "T1"
+        }
+      }
+    },
+    "RapidTrainingSlot": {
+      "zh-CN": {
+        "name": "快速训练槽位",
+        "help": "",
+        "option_i18n": {
+          "do_not_use": "不使用",
+          "slot_1": "槽位 1",
+          "slot_2": "槽位 2",
+          "slot_3": "槽位 3",
+          "slot_4": "槽位 4"
+        }
+      },
+      "en-US": {
+        "name": "Rapid training slot",
+        "help": "",
+        "option_i18n": {
+          "do_not_use": "Do not use",
+          "slot_1": "Slot 1",
+          "slot_2": "Slot 2",
+          "slot_3": "Slot 3",
+          "slot_4": "Slot 4"
+        }
+      }
+    }
+  },
+  "ControlExpOverflow": {
+    "_info": {
+      "zh-CN": {"name": "经验溢出控制", "help": ""},
+      "en-US": {"name": "Exp overflow", "help": ""}
+    },
+    "Enable": {
+      "zh-CN": {"name": "启用", "help": ""},
+      "en-US": {"name": "Enable", "help": ""}
+    },
+    "T4Allow": {
+      "zh-CN": {"name": "T4 允许溢出", "help": ""},
+      "en-US": {"name": "T4 overflow", "help": ""}
+    },
+    "T3Allow": {
+      "zh-CN": {"name": "T3 允许溢出", "help": ""},
+      "en-US": {"name": "T3 overflow", "help": ""}
+    },
+    "T2Allow": {
+      "zh-CN": {"name": "T2 允许溢出", "help": ""},
+      "en-US": {"name": "T2 overflow", "help": ""}
+    },
+    "T1Allow": {
+      "zh-CN": {"name": "T1 允许溢出", "help": ""},
+      "en-US": {"name": "T1 overflow", "help": ""}
+    }
+  },
+  "AddNewStudent": {
+    "_info": {
+      "zh-CN": {"name": "新增学员", "help": ""},
+      "en-US": {"name": "Add new student", "help": ""}
+    },
+    "Enable": {
+      "zh-CN": {"name": "启用", "help": ""},
+      "en-US": {"name": "Enable", "help": ""}
+    },
+    "Favorite": {
+      "zh-CN": {"name": "收藏优先", "help": ""},
+      "en-US": {"name": "Favourite first", "help": ""}
+    },
+    "MinLevel": {
+      "zh-CN": {"name": "最低等级", "help": ""},
+      "en-US": {"name": "Min level", "help": ""}
+    }
+  },
+  "Research": {
+    "_info": {
+      "zh-CN": {"name": "科研", "help": ""},
+      "en-US": {"name": "Research", "help": ""}
+    },
+    "UseCube": {
+      "zh-CN": {
+        "name": "使用魔方",
+        "help": "",
+        "option_i18n": {
+          "always_use": "总是使用",
+          "only_05_hour": "仅 0.5 小时",
+          "only_no_project": "仅无项目时",
+          "do_not_use": "不使用"
+        }
+      },
+      "en-US": {
+        "name": "Use cube",
+        "help": "",
+        "option_i18n": {
+          "always_use": "Always",
+          "only_05_hour": "Only 0.5 hour",
+          "only_no_project": "Only when idle",
+          "do_not_use": "Do not use"
+        }
+      }
+    },
+    "UseCoin": {
+      "zh-CN": {
+        "name": "使用金币",
+        "help": "",
+        "option_i18n": {
+          "always_use": "总是使用",
+          "only_05_hour": "仅 0.5 小时",
+          "only_no_project": "仅无项目时",
+          "do_not_use": "不使用"
+        }
+      },
+      "en-US": {
+        "name": "Use coin",
+        "help": "",
+        "option_i18n": {
+          "always_use": "Always",
+          "only_05_hour": "Only 0.5 hour",
+          "only_no_project": "Only when idle",
+          "do_not_use": "Do not use"
+        }
+      }
+    },
+    "UsePart": {
+      "zh-CN": {
+        "name": "使用部件",
+        "help": "",
+        "option_i18n": {
+          "always_use": "总是使用",
+          "only_05_hour": "仅 0.5 小时",
+          "only_no_project": "仅无项目时",
+          "do_not_use": "不使用"
+        }
+      },
+      "en-US": {
+        "name": "Use part",
+        "help": "",
+        "option_i18n": {
+          "always_use": "Always",
+          "only_05_hour": "Only 0.5 hour",
+          "only_no_project": "Only when idle",
+          "do_not_use": "Do not use"
+        }
+      }
+    },
+    "AllowDelay": {
+      "zh-CN": {"name": "允许延迟", "help": ""},
+      "en-US": {"name": "Allow delay", "help": ""}
+    },
+    "PresetFilter": {
+      "zh-CN": {
+        "name": "预设过滤器",
+        "help": "选择一个预设的科研过滤器，custom 表示使用下方自定义顺序",
+        "option_i18n": {
+          "custom": "custom",
+          "series_9_blueprint_ta152": "series_9_blueprint_ta152",
+          "series_9_blueprint_only": "series_9_blueprint_only",
+          "series_9_ta152_only": "series_9_ta152_only",
+          "series_8_blueprint_305": "series_8_blueprint_305",
+          "series_8_blueprint_only": "series_8_blueprint_only",
+          "series_8_305_only": "series_8_305_only",
+          "series_7_blueprint_la9": "series_7_blueprint_la9",
+          "series_7_blueprint_only": "series_7_blueprint_only",
+          "series_7_la9_only": "series_7_la9_only",
+          "series_6_blueprint_203": "series_6_blueprint_203",
+          "series_6_blueprint_only": "series_6_blueprint_only",
+          "series_6_203_only": "series_6_203_only",
+          "series_5_blueprint_152": "series_5_blueprint_152",
+          "series_5_blueprint_only": "series_5_blueprint_only",
+          "series_5_152_only": "series_5_152_only",
+          "series_4_blueprint_tenrai": "series_4_blueprint_tenrai",
+          "series_4_blueprint_only": "series_4_blueprint_only",
+          "series_4_tenrai_only": "series_4_tenrai_only",
+          "series_3_blueprint_234": "series_3_blueprint_234",
+          "series_3_blueprint_only": "series_3_blueprint_only",
+          "series_3_234_only": "series_3_234_only",
+          "series_2_than_3_457_234": "series_2_than_3_457_234",
+          "series_2_blueprint_457": "series_2_blueprint_457",
+          "series_2_blueprint_only": "series_2_blueprint_only",
+          "series_2_457_only": "series_2_457_only"
+        }
+      },
+      "en-US": {
+        "name": "Preset filter",
+        "help": "Pick a preset research filter, custom uses the filter below",
+        "option_i18n": {
+          "custom": "custom",
+          "series_9_blueprint_ta152": "series_9_blueprint_ta152",
+          "series_9_blueprint_only": "series_9_blueprint_only",
+          "series_9_ta152_only": "series_9_ta152_only",
+          "series_8_blueprint_305": "series_8_blueprint_305",
+          "series_8_blueprint_only": "series_8_blueprint_only",
+          "series_8_305_only": "series_8_305_only",
+          "series_7_blueprint_la9": "series_7_blueprint_la9",
+          "series_7_blueprint_only": "series_7_blueprint_only",
+          "series_7_la9_only": "series_7_la9_only",
+          "series_6_blueprint_203": "series_6_blueprint_203",
+          "series_6_blueprint_only": "series_6_blueprint_only",
+          "series_6_203_only": "series_6_203_only",
+          "series_5_blueprint_152": "series_5_blueprint_152",
+          "series_5_blueprint_only": "series_5_blueprint_only",
+          "series_5_152_only": "series_5_152_only",
+          "series_4_blueprint_tenrai": "series_4_blueprint_tenrai",
+          "series_4_blueprint_only": "series_4_blueprint_only",
+          "series_4_tenrai_only": "series_4_tenrai_only",
+          "series_3_blueprint_234": "series_3_blueprint_234",
+          "series_3_blueprint_only": "series_3_blueprint_only",
+          "series_3_234_only": "series_3_234_only",
+          "series_2_than_3_457_234": "series_2_than_3_457_234",
+          "series_2_blueprint_457": "series_2_blueprint_457",
+          "series_2_blueprint_only": "series_2_blueprint_only",
+          "series_2_457_only": "series_2_457_only"
+        }
+      }
+    },
+    "CustomFilter": {
+      "zh-CN": {
+        "name": "自定义过滤器",
+        "help": "每一行按系列、类型、时长描述一个科研项目，从上到下依次尝试；按编号写的条目依然有效",
+        "option_i18n": {
+          "S1": "S1",
+          "S2": "S2",
+          "S3": "S3",
+          "S4": "S4",
+          "S5": "S5",
+          "S6": "S6",
+          "S7": "S7",
+          "S8": "S8",
+          "S9": "S9",
+          "B": "B",
+          "C": "C",
+          "D": "D",
+          "E": "E",
+          "G": "G",
+          "H": "H",
+          "Q": "Q",
+          "T": "T",
+          "DR": "决战方案 DR",
+          "PRY": "决战方案 PRY",
+          "neptune": "neptune",
+          "monarch": "monarch",
+          "ibuki": "ibuki",
+          "izumo": "izumo",
+          "roon": "roon",
+          "saintlouis": "saintlouis",
+          "seattle": "seattle",
+          "georgia": "georgia",
+          "kitakaze": "kitakaze",
+          "azuma": "azuma",
+          "friedrich": "friedrich",
+          "gascogne": "gascogne",
+          "cheshire": "cheshire",
+          "drake": "drake",
+          "mainz": "mainz",
+          "odin": "odin",
+          "champagne": "champagne",
+          "anchorage": "anchorage",
+          "hakuryu": "hakuryu",
+          "agir": "埃吉尔",
+          "august": "august",
+          "marcopolo": "marcopolo",
+          "plymouth": "plymouth",
+          "rupprecht": "rupprecht",
+          "harbin": "harbin",
+          "chkalov": "chkalov",
+          "brest": "brest",
+          "hindenburg": "hindenburg",
+          "kearsarge": "kearsarge",
+          "shimanto": "shimanto",
+          "schultz": "schultz",
+          "flandre": "flandre",
+          "halford": "halford",
+          "daisen": "daisen",
+          "napoli": "napoli",
+          "nakhimov": "nakhimov",
+          "bayard": "bayard",
+          "mecklenburg": "mecklenburg",
+          "goudenleeuw": "goudenleeuw",
+          "dmitri": "dmitri",
+          "kansas": "kansas",
+          "vittorio": "vittorio",
+          "valparaiso": "valparaiso",
+          "maximmelmann": "maximmelmann",
+          "duncan": "duncan",
+          "takahashi": "takahashi",
+          "orage": "orage",
+          "0.5": "0.5",
+          "1": "1",
+          "1.5": "1.5",
+          "2": "2",
+          "2.5": "2.5",
+          "3": "3",
+          "4": "4",
+          "5": "5",
+          "6": "6",
+          "8": "8",
+          "12": "12"
+        }
+      },
+      "en-US": {
+        "name": "Custom filter",
+        "help": "Every row describes a research project by series, type and duration, tried from top to bottom; a row written by project number stays valid",
+        "option_i18n": {
+          "S1": "S1",
+          "S2": "S2",
+          "S3": "S3",
+          "S4": "S4",
+          "S5": "S5",
+          "S6": "S6",
+          "S7": "S7",
+          "S8": "S8",
+          "S9": "S9",
+          "B": "B",
+          "C": "C",
+          "D": "D",
+          "E": "E",
+          "G": "G",
+          "H": "H",
+          "Q": "Q",
+          "T": "T",
+          "DR": "DR ship",
+          "PRY": "PRY ship",
+          "neptune": "neptune",
+          "monarch": "monarch",
+          "ibuki": "ibuki",
+          "izumo": "izumo",
+          "roon": "roon",
+          "saintlouis": "saintlouis",
+          "seattle": "seattle",
+          "georgia": "georgia",
+          "kitakaze": "kitakaze",
+          "azuma": "azuma",
+          "friedrich": "friedrich",
+          "gascogne": "gascogne",
+          "cheshire": "cheshire",
+          "drake": "drake",
+          "mainz": "mainz",
+          "odin": "odin",
+          "champagne": "champagne",
+          "anchorage": "anchorage",
+          "hakuryu": "hakuryu",
+          "agir": "Agir",
+          "august": "august",
+          "marcopolo": "marcopolo",
+          "plymouth": "plymouth",
+          "rupprecht": "rupprecht",
+          "harbin": "harbin",
+          "chkalov": "chkalov",
+          "brest": "brest",
+          "hindenburg": "hindenburg",
+          "kearsarge": "kearsarge",
+          "shimanto": "shimanto",
+          "schultz": "schultz",
+          "flandre": "flandre",
+          "halford": "halford",
+          "daisen": "daisen",
+          "napoli": "napoli",
+          "nakhimov": "nakhimov",
+          "bayard": "bayard",
+          "mecklenburg": "mecklenburg",
+          "goudenleeuw": "goudenleeuw",
+          "dmitri": "dmitri",
+          "kansas": "kansas",
+          "vittorio": "vittorio",
+          "valparaiso": "valparaiso",
+          "maximmelmann": "maximmelmann",
+          "duncan": "duncan",
+          "takahashi": "takahashi",
+          "orage": "orage",
+          "0.5": "0.5",
+          "1": "1",
+          "1.5": "1.5",
+          "2": "2",
+          "2.5": "2.5",
+          "3": "3",
+          "4": "4",
+          "5": "5",
+          "6": "6",
+          "8": "8",
+          "12": "12"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,341 @@
+{
+  "card-Commission-Commission": {
+    "_info": {"group": "Commission", "arg": "_info", "card": "card-Commission-Commission"},
+    "Scheduler": {
+      "Enable": {
+        "task": "Commission",
+        "group": "Scheduler",
+        "arg": "Enable",
+        "cls": "SchedulerU00",
+        "dt": "enable",
+        "value": false,
+        "option": ["true", "false"]
+      },
+      "NextRun": {
+        "task": "Commission",
+        "group": "Scheduler",
+        "arg": "NextRun",
+        "cls": "SchedulerU00",
+        "dt": "datetime",
+        "value": "2020-01-01T00:00:00Z"
+      }
+    },
+    "Commission": {
+      "PresetFilter": {
+        "task": "Commission",
+        "group": "Commission",
+        "arg": "PresetFilter",
+        "dt": "select",
+        "value": "cube",
+        "option": ["cube", "cube_24h", "chip", "chip_24h", "oil", "custom"]
+      },
+      "CustomFilter": {
+        "task": "Commission",
+        "group": "Commission",
+        "arg": "CustomFilter",
+        "dt": "filter-order-pair",
+        "value": ["DailyEvent", "Gem-4", "Gem-2", "Gem-8", "ExtraCube-0:30", "UrgentCube-1:30", "UrgentCube-1:45", "UrgentCube-3", "ExtraDrill-5:20", "ExtraDrill-2", "ExtraDrill-3:20", "UrgentCube-2:15", "UrgentCube-4", "ExtraDrill-1", "UrgentCube-6", "ExtraCube-1:30", "ExtraDrill-2:40", "ExtraDrill-0:20", "Major", "DailyChip", "DailyResource", "ExtraPart-0:30", "ExtraOil-1", "UrgentBox-6", "ExtraCube-3", "ExtraPart-1", "UrgentBox-3", "ExtraCube-4", "ExtraPart-1:30", "ExtraOil-4", "UrgentBox-1", "ExtraCube-5", "ExtraCube-8", "ExtraOil-8", "UrgentDrill-4", "UrgentDrill-2:40", "UrgentDrill-2", "UrgentDrill-1", "UrgentDrill-1:30", "UrgentDrill-1:10", "Extra-0:20", "Extra-0:30", "Extra-1:00", "Extra-1:30", "Extra-2:00", "shortest"],
+        "option": ["DailyEvent", "Gem", "ExtraCube", "UrgentCube", "ExtraDrill", "Major", "DailyChip", "DailyResource", "ExtraPart", "ExtraOil", "UrgentBox", "Extra", "UrgentDrill"],
+        "option_dict": {
+          "Gem": ["4", "2", "8"],
+          "ExtraCube": ["0:30", "1:30", "3", "4", "5", "8"],
+          "UrgentCube": ["1:30", "1:45", "3", "2:15", "4", "6"],
+          "ExtraDrill": ["5:20", "2", "3:20", "1", "2:40", "0:20"],
+          "ExtraPart": ["0:30", "1", "1:30"],
+          "ExtraOil": ["1", "4", "8"],
+          "UrgentBox": ["6", "3", "1"],
+          "UrgentDrill": ["4", "2:40", "2", "1", "1:30", "1:10"],
+          "Extra": ["0:20", "0:30", "1:00", "1:30", "2:00"]
+        },
+        "option_command": [
+          "shortest"
+        ],
+        "layout": "vert"
+      },
+      "DoMajorCommission": {
+        "task": "Commission",
+        "group": "Commission",
+        "arg": "DoMajorCommission",
+        "dt": "checkbox",
+        "value": false
+      }
+    }
+  },
+  "card-Tactical-Tactical": {
+    "_info": {"group": "Tactical", "arg": "_info", "card": "card-Tactical-Tactical"},
+    "Scheduler": {
+      "Enable": {
+        "task": "Tactical",
+        "group": "Scheduler",
+        "arg": "Enable",
+        "cls": "SchedulerU00",
+        "dt": "enable",
+        "value": false,
+        "option": ["true", "false"]
+      },
+      "NextRun": {
+        "task": "Tactical",
+        "group": "Scheduler",
+        "arg": "NextRun",
+        "cls": "SchedulerU00",
+        "dt": "datetime",
+        "value": "2020-01-01T00:00:00Z"
+      }
+    },
+    "Tactical": {
+      "TacticalFilter": {
+        "task": "Tactical",
+        "group": "Tactical",
+        "arg": "TacticalFilter",
+        "dt": "filter-order-pair",
+        "value": ["Same-T4", "Same-T3", "Same-T2", "Same-T1", "Blue-T2", "Yellow-T2", "Red-T2", "Blue-T3", "Yellow-T3", "Red-T3", "Blue-T4", "Yellow-T4", "Red-T4", "Blue-T1", "Yellow-T1", "Red-T1", "first"],
+        "option": ["Same", "Blue", "Yellow", "Red"],
+        "option_dict": {
+          "Same": ["T4", "T3", "T2", "T1"],
+          "Blue": ["T2", "T3", "T4", "T1"],
+          "Yellow": ["T2", "T3", "T4", "T1"],
+          "Red": ["T2", "T3", "T4", "T1"]
+        },
+        "option_command": [
+          "first"
+        ],
+        "layout": "vert"
+      },
+      "RapidTrainingSlot": {
+        "task": "Tactical",
+        "group": "Tactical",
+        "arg": "RapidTrainingSlot",
+        "dt": "select",
+        "value": "do_not_use",
+        "option": ["do_not_use", "slot_1", "slot_2", "slot_3", "slot_4"]
+      }
+    },
+    "ControlExpOverflow": {
+      "Enable": {
+        "task": "Tactical",
+        "group": "ControlExpOverflow",
+        "arg": "Enable",
+        "dt": "checkbox",
+        "value": true
+      },
+      "T4Allow": {
+        "task": "Tactical",
+        "group": "ControlExpOverflow",
+        "arg": "T4Allow",
+        "dt": "input-int",
+        "value": 100
+      },
+      "T3Allow": {
+        "task": "Tactical",
+        "group": "ControlExpOverflow",
+        "arg": "T3Allow",
+        "dt": "input-int",
+        "value": 100
+      },
+      "T2Allow": {
+        "task": "Tactical",
+        "group": "ControlExpOverflow",
+        "arg": "T2Allow",
+        "dt": "input-int",
+        "value": 200
+      },
+      "T1Allow": {
+        "task": "Tactical",
+        "group": "ControlExpOverflow",
+        "arg": "T1Allow",
+        "dt": "input-int",
+        "value": 200
+      }
+    },
+    "AddNewStudent": {
+      "Enable": {
+        "task": "Tactical",
+        "group": "AddNewStudent",
+        "arg": "Enable",
+        "dt": "checkbox",
+        "value": false
+      },
+      "Favorite": {
+        "task": "Tactical",
+        "group": "AddNewStudent",
+        "arg": "Favorite",
+        "dt": "checkbox",
+        "value": true
+      },
+      "MinLevel": {
+        "task": "Tactical",
+        "group": "AddNewStudent",
+        "arg": "MinLevel",
+        "dt": "input-int",
+        "value": 50,
+        "ge": 1,
+        "le": 100
+      }
+    }
+  },
+  "card-Research-Research": {
+    "_info": {"group": "Research", "arg": "_info", "card": "card-Research-Research"},
+    "Scheduler": {
+      "Enable": {
+        "task": "Research",
+        "group": "Scheduler",
+        "arg": "Enable",
+        "cls": "SchedulerU00",
+        "dt": "enable",
+        "value": false,
+        "option": ["true", "false"]
+      },
+      "NextRun": {
+        "task": "Research",
+        "group": "Scheduler",
+        "arg": "NextRun",
+        "cls": "SchedulerU00",
+        "dt": "datetime",
+        "value": "2020-01-01T00:00:00Z"
+      }
+    },
+    "Research": {
+      "UseCube": {
+        "task": "Research",
+        "group": "Research",
+        "arg": "UseCube",
+        "dt": "select",
+        "value": "only_05_hour",
+        "option": ["always_use", "only_05_hour", "only_no_project", "do_not_use"]
+      },
+      "UseCoin": {
+        "task": "Research",
+        "group": "Research",
+        "arg": "UseCoin",
+        "dt": "select",
+        "value": "always_use",
+        "option": ["always_use", "only_05_hour", "only_no_project", "do_not_use"]
+      },
+      "UsePart": {
+        "task": "Research",
+        "group": "Research",
+        "arg": "UsePart",
+        "dt": "select",
+        "value": "always_use",
+        "option": ["always_use", "only_05_hour", "only_no_project", "do_not_use"]
+      },
+      "AllowDelay": {
+        "task": "Research",
+        "group": "Research",
+        "arg": "AllowDelay",
+        "dt": "checkbox",
+        "value": true,
+        "fold_help": true
+      },
+      "PresetFilter": {
+        "task": "Research",
+        "group": "Research",
+        "arg": "PresetFilter",
+        "dt": "select",
+        "value": "series_9_blueprint_ta152",
+        "option": ["custom", "series_9_blueprint_ta152", "series_9_blueprint_only", "series_9_ta152_only", "series_8_blueprint_305", "series_8_blueprint_only", "series_8_305_only", "series_7_blueprint_la9", "series_7_blueprint_only", "series_7_la9_only", "series_6_blueprint_203", "series_6_blueprint_only", "series_6_203_only", "series_5_blueprint_152", "series_5_blueprint_only", "series_5_152_only", "series_4_blueprint_tenrai", "series_4_blueprint_only", "series_4_tenrai_only", "series_3_blueprint_234", "series_3_blueprint_only", "series_3_234_only", "series_2_than_3_457_234", "series_2_blueprint_457", "series_2_blueprint_only", "series_2_457_only"],
+        "fold_help": true
+      },
+      "CustomFilter": {
+        "task": "Research",
+        "group": "Research",
+        "arg": "CustomFilter",
+        "dt": "filter-regex",
+        "value": ["S9-DR-0.5", "S9-PRY-0.5", "S9-Q-0.5", "S9-H-0.5", "Q-0.5", "S9-DR-2.5", "S9-G-1.5", "S9-Q-1", "S9-DR-5", "0.5", "S9-G-4", "S9-Q-2", "S9-PRY-2.5", "S8-E-880", "S8-E-180", "reset", "S9-DR-8", "Q-1", "1", "S9-E-315", "S9-G-2.5", "G-1.5", "1.5", "S9-E-031", "S9-Q-4", "Q-2", "E-2", "2", "DR-2.5", "PRY-2.5", "G-2.5", "2.5", "S9-PRY-5", "S9-PRY-8", "Q-4", "G-4", "4", "S9-C-6", "DR-5", "PRY-5", "5", "C-6", "6", "S9-C-8", "S9-C-12", "DR-8", "PRY-8", "C-8", "8", "C-12", "12"],
+        "option_command": [
+          "reset"
+        ],
+        "levels": [
+          {
+            "name": "series",
+            "option": [
+              {"key": {}, "option": ["S1", "S2", "S3", "S4", "S5", "S6", "S7", "S8", "S9"]}
+            ]
+          },
+          {
+            "name": "family",
+            "option": [
+              {"key": {}, "option": ["B", "C", "D", "E", "G", "H", "Q", "T", "DR", "PRY"]},
+              {"key": {"series": "S1"}, "option": ["B", "C", "D", "E", "G", "H", "Q", "T", "PRY", "neptune", "monarch", "ibuki", "izumo", "roon", "saintlouis"]},
+              {"key": {"series": "S2"}, "option": ["B", "C", "D", "E", "G", "H", "Q", "T", "DR", "PRY", "seattle", "georgia", "kitakaze", "azuma", "friedrich", "gascogne"]},
+              {"key": {"series": "S3"}, "option": ["B", "C", "D", "E", "G", "H", "Q", "T", "DR", "PRY", "cheshire", "drake", "mainz", "odin", "champagne"]},
+              {"key": {"series": "S4"}, "option": ["B", "C", "D", "E", "G", "H", "Q", "T", "DR", "PRY", "anchorage", "hakuryu", "agir", "august", "marcopolo"]},
+              {"key": {"series": "S5"}, "option": ["B", "C", "D", "E", "G", "H", "Q", "T", "DR", "PRY", "plymouth", "rupprecht", "harbin", "chkalov", "brest"]},
+              {"key": {"series": "S6"}, "option": ["B", "C", "D", "E", "G", "H", "Q", "T", "DR", "PRY", "hindenburg", "kearsarge", "shimanto", "schultz", "flandre"]},
+              {"key": {"series": "S7"}, "option": ["B", "C", "D", "E", "G", "H", "Q", "T", "DR", "PRY", "halford", "daisen", "napoli", "nakhimov", "bayard"]},
+              {"key": {"series": "S8"}, "option": ["B", "C", "D", "E", "G", "H", "Q", "T", "DR", "PRY", "mecklenburg", "goudenleeuw", "dmitri", "kansas", "vittorio"]},
+              {"key": {"series": "S9"}, "option": ["B", "C", "D", "E", "G", "H", "Q", "T", "DR", "PRY", "valparaiso", "maximmelmann", "duncan", "takahashi", "orage"]}
+            ]
+          },
+          {
+            "name": "detail",
+            "option": [
+              {"key": {}, "option": ["0.5", "1", "1.5", "2", "2.5", "3", "4", "5", "6", "8", "12"]},
+              {"key": {"family": "B"}, "option": ["4"]},
+              {"key": {"family": "C"}, "option": ["6", "8", "12"]},
+              {"key": {"family": "D"}, "option": ["0.5", "2.5", "5", "8"]},
+              {"key": {"family": "E"}, "option": ["2", "6"]},
+              {"key": {"family": "G"}, "option": ["1.5", "2.5", "4"]},
+              {"key": {"family": "H"}, "option": ["0.5", "1", "2", "4"]},
+              {"key": {"family": "Q"}, "option": ["0.5", "1", "2", "4"]},
+              {"key": {"family": "T"}, "option": ["3", "4", "6"]},
+              {"key": {"family": "DR"}, "option": ["0.5", "2.5", "5", "8"]},
+              {"key": {"family": "PRY"}, "option": ["0.5", "2.5", "5", "8"]},
+              {"key": {"family": "neptune"}, "option": ["0.5", "2.5", "5", "8"]},
+              {"key": {"family": "monarch"}, "option": ["0.5", "2.5", "5", "8"]},
+              {"key": {"family": "ibuki"}, "option": ["0.5", "2.5", "5", "8"]},
+              {"key": {"family": "izumo"}, "option": ["0.5", "2.5", "5", "8"]},
+              {"key": {"family": "roon"}, "option": ["0.5", "2.5", "5", "8"]},
+              {"key": {"family": "saintlouis"}, "option": ["0.5", "2.5", "5", "8"]},
+              {"key": {"family": "seattle"}, "option": ["0.5", "2.5", "5", "8"]},
+              {"key": {"family": "georgia"}, "option": ["0.5", "2.5", "5", "8"]},
+              {"key": {"family": "kitakaze"}, "option": ["0.5", "2.5", "5", "8"]},
+              {"key": {"family": "azuma"}, "option": ["0.5", "2.5", "5", "8"]},
+              {"key": {"family": "friedrich"}, "option": ["0.5", "2.5", "5", "8"]},
+              {"key": {"family": "gascogne"}, "option": ["0.5", "2.5", "5", "8"]},
+              {"key": {"family": "cheshire"}, "option": ["0.5", "2.5", "5", "8"]},
+              {"key": {"family": "drake"}, "option": ["0.5", "2.5", "5", "8"]},
+              {"key": {"family": "mainz"}, "option": ["0.5", "2.5", "5", "8"]},
+              {"key": {"family": "odin"}, "option": ["0.5", "2.5", "5", "8"]},
+              {"key": {"family": "champagne"}, "option": ["0.5", "2.5", "5", "8"]},
+              {"key": {"family": "anchorage"}, "option": ["0.5", "2.5", "5", "8"]},
+              {"key": {"family": "hakuryu"}, "option": ["0.5", "2.5", "5", "8"]},
+              {"key": {"family": "agir"}, "option": ["0.5", "2.5", "5", "8"]},
+              {"key": {"family": "august"}, "option": ["0.5", "2.5", "5", "8"]},
+              {"key": {"family": "marcopolo"}, "option": ["0.5", "2.5", "5", "8"]},
+              {"key": {"family": "plymouth"}, "option": ["0.5", "2.5", "5", "8"]},
+              {"key": {"family": "rupprecht"}, "option": ["0.5", "2.5", "5", "8"]},
+              {"key": {"family": "harbin"}, "option": ["0.5", "2.5", "5", "8"]},
+              {"key": {"family": "chkalov"}, "option": ["0.5", "2.5", "5", "8"]},
+              {"key": {"family": "brest"}, "option": ["0.5", "2.5", "5", "8"]},
+              {"key": {"family": "hindenburg"}, "option": ["0.5", "2.5", "5", "8"]},
+              {"key": {"family": "kearsarge"}, "option": ["0.5", "2.5", "5", "8"]},
+              {"key": {"family": "shimanto"}, "option": ["0.5", "2.5", "5", "8"]},
+              {"key": {"family": "schultz"}, "option": ["0.5", "2.5", "5", "8"]},
+              {"key": {"family": "flandre"}, "option": ["0.5", "2.5", "5", "8"]},
+              {"key": {"family": "halford"}, "option": ["0.5", "2.5", "5", "8"]},
+              {"key": {"family": "daisen"}, "option": ["0.5", "2.5", "5", "8"]},
+              {"key": {"family": "napoli"}, "option": ["0.5", "2.5", "5", "8"]},
+              {"key": {"family": "nakhimov"}, "option": ["0.5", "2.5", "5", "8"]},
+              {"key": {"family": "bayard"}, "option": ["0.5", "2.5", "5", "8"]},
+              {"key": {"family": "mecklenburg"}, "option": ["0.5", "2.5", "5", "8"]},
+              {"key": {"family": "goudenleeuw"}, "option": ["0.5", "2.5", "5", "8"]},
+              {"key": {"family": "dmitri"}, "option": ["0.5", "2.5", "5", "8"]},
+              {"key": {"family": "kansas"}, "option": ["0.5", "2.5", "5", "8"]},
+              {"key": {"family": "vittorio"}, "option": ["0.5", "2.5", "5", "8"]},
+              {"key": {"family": "valparaiso"}, "option": ["0.5", "2.5", "5", "8"]},
+              {"key": {"family": "maximmelmann"}, "option": ["0.5", "2.5", "5", "8"]},
+              {"key": {"family": "duncan"}, "option": ["0.5", "2.5", "5", "8"]},
+              {"key": {"family": "takahashi"}, "option": ["0.5", "2.5", "5", "8"]},
+              {"key": {"family": "orage"}, "option": ["0.5", "2.5", "5", "8"]},
+              {"key": {"series": "S9", "family": "E"}, "option": ["2"]}
+            ]
+          }
+        ],
+        "fold_help": true,
+        "layout": "vert",
+        "pattern": "(?<series>S[1-9])?-?(?<family>DR|PRY|maximmelmann|goudenleeuw|mecklenburg|hindenburg|saintlouis|valparaiso|anchorage|champagne|friedrich|kearsarge|marcopolo|rupprecht|takahashi|cheshire|gascogne|kitakaze|nakhimov|plymouth|shimanto|vittorio|chkalov|flandre|georgia|hakuryu|halford|monarch|neptune|schultz|seattle|august|bayard|daisen|dmitri|duncan|harbin|kansas|napoli|azuma|brest|drake|ibuki|izumo|mainz|orage|agir|odin|roon|[BCDEGHQT])?-?(?<detail>\\d{3}|\\d\\.\\d|\\d\\d?)?"
+      }
+    }
+  }
+}

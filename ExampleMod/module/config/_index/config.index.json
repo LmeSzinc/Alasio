@@ -68,6 +68,17 @@
       "group": []
     }
   },
+  "reward": {
+    "file": "reward/reward_config.json",
+    "i18n": [
+      "alasio/alasio_i18n.json",
+      "reward/reward_i18n.json"
+    ],
+    "config": {
+      "task": ["Commission", "Tactical", "Research"],
+      "group": []
+    }
+  },
   "shop": {
     "file": "shop/shop_config.json",
     "i18n": [

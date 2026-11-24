@@ -106,6 +106,29 @@
     },
     "config": {"task": ["OpsiAshAssist"], "group": []}
   },
+  "Commission": {
+    "group": {
+      "Scheduler": {"file": "alasio/alasio_model.py", "cls": "SchedulerU00", "task": "Commission"},
+      "Commission": {"file": "reward/reward_model.py", "cls": "Commission", "task": "Commission"}
+    },
+    "config": {"task": ["Commission"], "group": []}
+  },
+  "Tactical": {
+    "group": {
+      "Scheduler": {"file": "alasio/alasio_model.py", "cls": "SchedulerU00", "task": "Tactical"},
+      "Tactical": {"file": "reward/reward_model.py", "cls": "Tactical", "task": "Tactical"},
+      "ControlExpOverflow": {"file": "reward/reward_model.py", "cls": "ControlExpOverflow", "task": "Tactical"},
+      "AddNewStudent": {"file": "reward/reward_model.py", "cls": "AddNewStudent", "task": "Tactical"}
+    },
+    "config": {"task": ["Tactical"], "group": []}
+  },
+  "Research": {
+    "group": {
+      "Scheduler": {"file": "alasio/alasio_model.py", "cls": "SchedulerU00", "task": "Research"},
+      "Research": {"file": "reward/reward_model.py", "cls": "Research", "task": "Research"}
+    },
+    "config": {"task": ["Research"], "group": []}
+  },
   "GeneralShop": {
     "group": {
       "Scheduler": {"file": "shop/shop_model.py", "cls": "SchedulerGeneralShop", "task": "GeneralShop"},

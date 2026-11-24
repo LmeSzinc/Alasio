@@ -274,5 +274,34 @@
         "en-US": "Core Shop"
       }
     }
+  },
+  "reward": {
+    "_info": {
+      "i18n": {
+        "zh-CN": "奖励",
+        "en-US": "Reward"
+      }
+    },
+    "card-Commission-Commission": {
+      "scheduler": true,
+      "i18n": {
+        "zh-CN": "委托",
+        "en-US": "Commission"
+      }
+    },
+    "card-Tactical-Tactical": {
+      "scheduler": true,
+      "i18n": {
+        "zh-CN": "战术",
+        "en-US": "Tactical"
+      }
+    },
+    "card-Research-Research": {
+      "scheduler": true,
+      "i18n": {
+        "zh-CN": "科研",
+        "en-US": "Research"
+      }
+    }
   }
 }

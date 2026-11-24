@@ -11,6 +11,7 @@ if t.TYPE_CHECKING:
     from ..general import general_model as general
     from ..main import main_model as main
     from ..opsi import opsi_model as opsi
+    from ..reward import reward_model as reward
     from ..shop import shop_model as shop
 
 
@@ -112,6 +113,23 @@ class ConfigGenerated(AlasioConfigBase):
     # ----- CoreShop -----
     # Scheduler: "alasio.SchedulerU00"
     CoreShop: "shop.CoreShop"
+
+    """
+    ========== nav: reward ==========
+    """
+    # ----- Commission -----
+    # Scheduler: "alasio.SchedulerU00"
+    Commission: "reward.Commission"
+
+    # ----- Tactical -----
+    # Scheduler: "alasio.SchedulerU00"
+    Tactical: "reward.Tactical"
+    ControlExpOverflow: "reward.ControlExpOverflow"
+    AddNewStudent: "reward.AddNewStudent"
+
+    # ----- Research -----
+    # Scheduler: "alasio.SchedulerU00"
+    Research: "reward.Research"
 
     """
     ========== nav: dashboard ==========
