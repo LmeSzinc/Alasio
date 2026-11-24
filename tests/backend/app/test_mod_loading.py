@@ -55,10 +55,13 @@ CASE_ROOTS = {
 PROBE_TIMEOUT = 60
 
 # content of ExampleMod/module/config/_index (tracked fixture files)
-MOD_NAV_NAMES = ['alas', 'gems', 'general', 'main', 'opsi']
-MOD_CONFIG_NAMES = ['alas', 'dashboard', 'gems', 'general', 'main', 'opsi']
-MOD_QUEUE_TASKS = ['GemsFarming', 'Main', 'OpsiAshAssist', 'OpsiDaily', 'OpsiExplore', 'RestartDevice', 'RestartGame']
-MOD_TASK_COUNT = 13
+MOD_NAV_NAMES = ['alas', 'gems', 'general', 'main', 'opsi', 'reward', 'shop']
+MOD_CONFIG_NAMES = ['alas', 'dashboard', 'gems', 'general', 'main', 'opsi', 'reward', 'shop']
+MOD_QUEUE_TASKS = [
+    'Commission', 'CoreShop', 'GemsFarming', 'GeneralShop', 'GuildShop', 'Main', 'MedalShop', 'MeritShop',
+    'OpsiAshAssist', 'OpsiDaily', 'OpsiExplore', 'Research', 'RestartDevice', 'RestartGame', 'Tactical'
+]
+MOD_TASK_COUNT = 21
 
 
 def _norm(path):
