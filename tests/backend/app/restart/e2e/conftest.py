@@ -292,6 +292,14 @@ class MockWorkerProcess:
 
     The interface is the slice of ``multiprocessing.Process`` the worker
     manager uses: start / is_alive / join / terminate / pid / exitcode.
+
+    The peer owns its end of the pipe. A Windows pipe whose handle is used by
+    two threads at once is not defined: a handle closed under a pending
+    overlapped read, or closed twice by the peer and by the terminating
+    thread, can close a handle that is already gone (or already recycled), and
+    the process dies with an access violation instead of a test failure. So
+    the peer reads and closes its connection, and the terminating thread only
+    asks it to stop.
     """
     # worker mods whose scheduler ignores the graceful stop (see
     # tests/backend/worker/worker_mods.py)
@@ -310,12 +318,23 @@ class MockWorkerProcess:
     # written before it starts polling), like they do with a real worker. A
     # real wait, not time.sleep: the runs freeze time.sleep
     STOP_DELAY = 0.05
+    # How often the peer looks at its stop flag while it waits for a command.
+    # The wait itself is on the pipe, so a command is read the moment it
+    # arrives, the timeout only bounds how long terminate() waits for an idle
+    # peer -- and the peer is never inside a read that another thread has to
+    # wake
+    POLL_INTERVAL = 0.01
 
     def __init__(self, mod, config, conn, name=''):
         self.mod = mod
         self.config = config
         self.name = name
         self.conn = conn
+        # serializes the report and the close of the peer: both touch the same
+        # pipe handle, and a close under a pending send is as undefined as a
+        # close under a pending read
+        self._conn_lock = threading.Lock()
+        self._terminated = threading.Event()
         self.pid = 0
         self.exitcode = None
         self._thread = None
@@ -340,7 +359,8 @@ class MockWorkerProcess:
         """Report the state of the worker through the pipe (see REPORT_GATE)"""
         try:
             self.REPORT_GATE.wait()
-            self.conn.send_bytes(msgspec.msgpack.encode(ConfigEvent(t='WorkerState', v='running')))
+            with self._conn_lock:
+                self.conn.send_bytes(msgspec.msgpack.encode(ConfigEvent(t='WorkerState', v='running')))
         except OSError:
             # the manager closed the pipe while the report was parked: the
             # entry was finalized without it
@@ -350,8 +370,10 @@ class MockWorkerProcess:
         """Play the worker protocol until the manager stops the worker"""
         try:
             stopped_by_command = False
-            while True:
+            while not self._terminated.is_set():
                 try:
+                    if not self.conn.poll(self.POLL_INTERVAL):
+                        continue
                     data = self.conn.recv_bytes()
                 except (EOFError, OSError):
                     break
@@ -371,10 +393,11 @@ class MockWorkerProcess:
                 threading.Event().wait(self.STOP_DELAY)
         finally:
             self.exitcode = 0
-            try:
-                self.conn.close()
-            except OSError:
-                pass
+            with self._conn_lock:
+                try:
+                    self.conn.close()
+                except OSError:
+                    pass
 
     def is_alive(self):
         return bool(self._thread is not None and self._thread.is_alive())
@@ -384,11 +407,18 @@ class MockWorkerProcess:
             self._thread.join(timeout)
 
     def terminate(self):
-        try:
-            self.conn.close()
-        except OSError:
-            pass
+        # only ask the peer to stop: the peer closes its own end when it
+        # leaves, see the class docstring
+        self._terminated.set()
         self.join(1.0)
+        if self._thread is None:
+            # a peer that never started has no thread to close its end: this is
+            # the only close the caller does, and nobody else holds the handle
+            with self._conn_lock:
+                try:
+                    self.conn.close()
+                except OSError:
+                    pass
         if self.exitcode is None:
             self.exitcode = -15
 
