@@ -19,7 +19,7 @@ import valueParser from "postcss-value-parser";
 
 /*
     This plugin polyfills @property definitions with regular CSS variables
-    Additionally, it removes `in <colorspace>` after `to left` or `to right` gradient args for older browsers
+    Additionally, it removes the color interpolation hint (`in oklab`) from gradients for older browsers
 */
 const propertyInjectPlugin = () => {
   return {
@@ -66,12 +66,27 @@ const propertyInjectPlugin = () => {
         }
       }
 
-      // 3. Remove `in <colorspace>` for gradients
+      // 3. Remove the color interpolation hint from gradients.
+      //    Chromium < 111 does not interpolate a gradient in a color space, and
+      //    a hinted gradient is invalid at computed-value time there: the whole
+      //    background-image is dropped and nothing is painted. Tailwind emits
+      //    the hint on `--tw-gradient-position` (to right, to bottom right, to
+      //    top, 45deg, ...) and repeats it inside an @supports block; both are
+      //    reduced to the plain position, which Tailwind keeps as the fallback
+      //    for browsers without the hint.
       root.walkDecls((decl: Declaration) => {
         if (!decl.value) return;
-        decl.value = decl.value.replaceAll(/\bto\s+(left|right)\s+in\s+[\w-]+/g, (_, direction) => {
-          return `to ${direction}`;
-        });
+        // A Tailwind gradient keeps its position (and the hint) in this variable
+        if (decl.prop === "--tw-gradient-position") {
+          decl.value = decl.value.replace(/\s+in\s+[\w-]+(?:\s+(?:longer|shorter|increasing|decreasing)\s+hue)?$/, "");
+          return;
+        }
+        // A gradient written out in a declaration value, e.g. an arbitrary value
+        if (!decl.value.includes("gradient(")) return;
+        decl.value = decl.value.replaceAll(
+          /\bto\s+((?:top|bottom|left|right)(?:\s+(?:top|bottom|left|right))?)\s+in\s+[\w-]+/g,
+          "to $1",
+        );
       });
     },
     postcssPlugin: "postcss-property-polyfill",
