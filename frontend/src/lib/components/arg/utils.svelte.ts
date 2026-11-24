@@ -88,6 +88,13 @@ export type ArgData = {
    * `shortest` of a commission filter
    */
   option_command?: any[];
+  /**
+   * Candidate tables of a `dt=filter-regex`, one entry per level: `pattern`
+   * decodes a stored item into one value per level, and each level offers the
+   * candidates of the table entry that matches the selection. The keys are
+   * already decoded by the backend, the frontend never parses a prefix.
+   */
+  levels?: { name: string; option: { key: Record<string, string>; option: string[] }[] }[];
   option_i18n?: Record<any, string>;
   // Msgspec constraints
   // https://jcristharif.com/msgspec/constraints.html
@@ -103,6 +110,8 @@ export type ArgData = {
   // The annotated value must be a multiple of multiple_of.
   multiple_of?: number;
   // A regex pattern that the annotated value must match against.
+  // On a dt="filter-regex" it is the decoder of every stored item instead (one
+  // named group per level), it is not a constraint there
   pattern?: string;
   // The annotated value must have a length greater than or equal to min_length.
   min_length?: number;

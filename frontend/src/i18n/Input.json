@@ -104,12 +104,19 @@
     "zh-TW": "長度必須最多為 {value}",
     "es-ES": "La longitud debe ser como máximo {value}"
   },
-  "FilterOrderInvalid": {
-    "en-US": "Invalid item, it is not in the option list",
-    "zh-CN": "无效项，不在可选项列表中",
-    "ja-JP": "無効な項目です（選択肢にありません）",
-    "zh-TW": "無效項目，不在可選項列表中",
-    "es-ES": "Elemento no válido, no está en la lista de opciones"
+  "FilterOrderDrag": {
+    "en-US": "Drag to reorder",
+    "zh-CN": "拖动排序",
+    "ja-JP": "ドラッグして並べ替え",
+    "zh-TW": "拖曳排序",
+    "es-ES": "Arrastrar para reordenar"
+  },
+  "FilterOrderAdd": {
+    "en-US": "Add",
+    "zh-CN": "添加",
+    "ja-JP": "追加",
+    "zh-TW": "新增",
+    "es-ES": "Añadir"
   },
   "FilterOrderDuplicate": {
     "en-US": "Duplicate item, it appears more than once in the order",
@@ -117,6 +124,13 @@
     "ja-JP": "重複した項目です（順序内に複数回あります）",
     "zh-TW": "重複項目，在順序中出現了不止一次",
     "es-ES": "Elemento duplicado, aparece más de una vez en el orden"
+  },
+  "FilterOrderInvalid": {
+    "en-US": "Invalid item, it is not in the option list",
+    "zh-CN": "无效项，不在可选项列表中",
+    "ja-JP": "無効な項目です（選択肢にありません）",
+    "zh-TW": "無效項目，不在可選項列表中",
+    "es-ES": "Elemento no válido, no está en la lista de opciones"
   },
   "FilterOrderEmpty": {
     "en-US": "Not set",
@@ -138,13 +152,6 @@
     "ja-JP": "コマンド",
     "zh-TW": "指令",
     "es-ES": "Comandos"
-  },
-  "FilterOrderReverted": {
-    "en-US": "Edits discarded",
-    "zh-CN": "编辑已撤销",
-    "ja-JP": "編集を破棄しました",
-    "zh-TW": "編輯已還原",
-    "es-ES": "Ediciones descartadas"
   },
   "FilterOrderSelected": {
     "en-US": "Selected",
@@ -174,6 +181,20 @@
     "zh-TW": "全部已使用",
     "es-ES": "Todos los elementos están en uso"
   },
+  "FilterOrderSecondary": {
+    "en-US": "Secondary option",
+    "zh-CN": "次级选项",
+    "ja-JP": "サブオプション",
+    "zh-TW": "次級選項",
+    "es-ES": "Opción secundaria"
+  },
+  "FilterOrderReverted": {
+    "en-US": "Edits discarded",
+    "zh-CN": "编辑已撤销",
+    "ja-JP": "編集を破棄しました",
+    "zh-TW": "編輯已還原",
+    "es-ES": "Ediciones descartadas"
+  },
   "FilterOrderResetDefault": {
     "en-US": "Reset to default",
     "zh-CN": "重置为默认",
@@ -195,19 +216,19 @@
     "zh-TW": "儲存",
     "es-ES": "Guardar"
   },
-  "FilterOrderDrag": {
-    "en-US": "Drag to reorder",
-    "zh-CN": "拖动排序",
-    "ja-JP": "ドラッグして並べ替え",
-    "zh-TW": "拖曳排序",
-    "es-ES": "Arrastrar para reordenar"
+  "FilterOrderAddFilter": {
+    "en-US": "Add filter",
+    "zh-CN": "添加过滤器",
+    "ja-JP": "フィルターを追加",
+    "zh-TW": "新增過濾器",
+    "es-ES": "Añadir filtro"
   },
-  "FilterOrderSecondary": {
-    "en-US": "Secondary option",
-    "zh-CN": "次级选项",
-    "ja-JP": "サブオプション",
-    "zh-TW": "次級選項",
-    "es-ES": "Opción secundaria"
+  "FilterOrderAny": {
+    "en-US": "FilterOrderAny",
+    "zh-CN": "FilterOrderAny",
+    "ja-JP": "FilterOrderAny",
+    "zh-TW": "FilterOrderAny",
+    "es-ES": "FilterOrderAny"
   },
   "FilterOrderMoveUp": {
     "en-US": "Move up",
@@ -229,13 +250,6 @@
     "ja-JP": "削除",
     "zh-TW": "移除",
     "es-ES": "Quitar"
-  },
-  "FilterOrderAdd": {
-    "en-US": "Add",
-    "zh-CN": "添加",
-    "ja-JP": "追加",
-    "zh-TW": "新增",
-    "es-ES": "Añadir"
   },
   "ConfigSet": {
     "en-US": "Config saved",

@@ -1,24 +1,17 @@
 <script lang="ts">
-  import { useDraggable, useDroppable } from "@dnd-kit-svelte/core";
-  import Copy from "@lucide/svelte/icons/copy";
-  import GripVertical from "@lucide/svelte/icons/grip-vertical";
-  import Plus from "@lucide/svelte/icons/plus";
-  import Trash2 from "@lucide/svelte/icons/trash-2";
-  import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
-  import { type DropIndicatorState, Indicator } from "$lib/components/dnd";
-  import { Button } from "$lib/components/ui/button";
+  import { type DropIndicatorState } from "$lib/components/dnd";
   import * as Select from "$lib/components/ui/select";
-  import * as Tooltip from "$lib/components/ui/tooltip";
   import { t } from "$lib/i18n";
-  import { cn } from "$lib/utils";
+  import FilterItem from "./FilterItem.svelte";
+  import FilterItemMarks from "./FilterItemMarks.svelte";
 
   /**
-   * One row of the filter-order editor, a draggable and droppable item.
+   * One row of the filter-order editor
    *
-   * The component is needed because the dnd hooks must run at component init,
-   * one instance per item: the two columns share this row, `column` decides
-   * the buttons and the droppable type. Only the grip is a drag hotspot, the
-   * row body itself stays inert.
+   * The row frame (element, drag registration, position, drop line, buttons) is
+   * FilterItem.svelte; this component decides what the row shows: the label, the
+   * secondary option edited in place, and the marks. The unused column adds the
+   * row with a plus button, the selected column orders it.
    */
   type Props = {
     /** The dnd identity of the row: rows are addressed by index, a value may repeat */
@@ -29,7 +22,7 @@
     column: "selected" | "unused";
     /** Label of the item, translated through option_i18n by the caller */
     label: string;
-    /** 1-based position in the selected column, unused for the unused column */
+    /** 0-based position in the selected column, unused for the unused column */
     index?: number;
     /** Length of the selected column, for the down button of the last row */
     count?: number;
@@ -58,7 +51,7 @@
     item,
     column,
     label,
-    index = 0,
+    index = undefined,
     count = 0,
     invalid = false,
     duplicate = false,
@@ -74,184 +67,68 @@
     onAdd,
   }: Props = $props();
 
-  // The droppable data type is the column, the dndRules of the provider map it
-  // to the accepted active type ("item"). The id is the row, not the value: a
-  // stored value may repeat an item, and two rows sharing an id would be dragged
-  // and highlighted together. The data carries the index so the drop math can
-  // address the row.
-  const dndData = $derived({
-    id: rowId,
-    data: { type: "item", item, index: column === "selected" ? index : undefined },
-  });
-  // svelte-ignore state_referenced_locally
-  const { attributes, listeners, isDragging, setNodeRef: setDraggableNode } = useDraggable(dndData);
-  // svelte-ignore state_referenced_locally
-  const { isOver, setNodeRef: setDroppableNode } = useDroppable({
-    id: rowId,
-    data: { type: column, index: column === "selected" ? index : undefined },
-  });
-
-  // The drop line is only meaningful in the selected column: a drop on an
-  // unused row just removes the item from the order
-  const indicator = $derived(
-    column === "selected" && dropIndicator?.targetId === rowId ? dropIndicator.position : null,
-  );
+  // Only a row of the order carries a position, the unused column adds rows
+  const ordered = $derived(column === "selected");
 </script>
 
-<div
-  use:setDraggableNode
-  use:setDroppableNode
-  data-dragging={isDragging.current}
-  data-slot="filter-order-item"
-  data-column={column}
-  class="drag-placeholder relative rounded-md"
+<FilterItem
+  {rowId}
+  {item}
+  index={ordered ? index : undefined}
+  {count}
+  {label}
+  droppableType={column}
+  rowSlot="filter-order-item"
+  {dropIndicator}
+  {onMoveUp}
+  {onMoveDown}
+  {onRemove}
+  onAdd={ordered ? undefined : onAdd}
 >
-  <div
-    class={cn(
-      "flex items-center gap-1 rounded-md border bg-card py-0.5 pr-0.5 pl-1.5 text-sm",
-      isOver.current && column === "unused" && "bg-accent",
-    )}
-  >
-    {#if column === "selected"}
-      <!-- The index carries the theme colour and a bold weight: it reads as a
-           counter of the order, not as a piece of the row's content -->
-      <span class="w-5 shrink-0 text-right text-xs font-bold text-primary tabular-nums">#{index + 1}</span>
-    {/if}
-    <!-- Only the grip activates a drag; the row body must not start one, so a
-         click on a row never moves the item by accident -->
-    <div
-      {...listeners.current}
-      {...attributes.current}
-      class="flex h-6 shrink-0 cursor-grab items-center px-1 text-muted-foreground"
-      aria-label={`${t.Input.FilterOrderDrag()} ${label}`}
-    >
-      <GripVertical class="size-4" />
-    </div>
-    <!-- The name and its secondary option share one box, the selector takes
-         2/5 of that box: the order buttons and the grip are not part of it, so
-         the columns line up row by row -->
-    <div class="flex min-w-0 flex-1 items-center gap-1">
-      <span data-slot="filter-order-label" class="min-w-0 flex-1 truncate">{label}</span>
-      {#if column === "selected" && secondaries.length > 0}
-        <!-- The secondary option of the row, edited in place: the item of the
-             value is "item-option" and the position never moves -->
-        {#if secondaries.length === 1 && !secondaryInvalid}
-          <span class="w-2/5 shrink-0 truncate text-xs text-muted-foreground">
-            {secondaryLabel(secondaries[0])}
-          </span>
-        {:else}
-          <Select.Root
-            type="single"
-            value={secondary ?? undefined}
-            onValueChange={(value) => value && onSecondaryChange?.(value)}
-          >
-            <Select.Trigger
-              size="sm"
-              class="h-6! w-2/5 shrink-0 gap-1 border-0 bg-accent px-1.5 py-0 text-xs shadow-none"
-              aria-label={`${t.Input.FilterOrderSecondary()} ${label}`}
-            >
-              <span class="min-w-0 flex-1 truncate text-left" class:text-destructive={secondaryInvalid}>
-                {secondary === null ? "" : secondaryLabel(secondary)}
-              </span>
-            </Select.Trigger>
-            <Select.Content>
-              <Select.Group>
-                {#if secondaryInvalid && secondary !== null}
-                  <Select.Item value={secondary} label={secondaryLabel(secondary)}>
-                    <span class="text-destructive">{secondaryLabel(secondary)}</span>
-                  </Select.Item>
-                {/if}
-                {#each secondaries as option (option)}
-                  {@const optionLabel = secondaryLabel(option)}
-                  <Select.Item value={option} label={optionLabel}>{optionLabel}</Select.Item>
-                {/each}
-              </Select.Group>
-            </Select.Content>
-          </Select.Root>
-        {/if}
-      {/if}
-    </div>
-    {#if duplicate}
-      <Tooltip.Provider>
-        <Tooltip.Root>
-          <Tooltip.Trigger>
-            <span role="img" class="inline-flex" aria-label={t.Input.FilterOrderDuplicate()}>
-              <Copy class="size-3 shrink-0 text-amber-600 dark:text-amber-400" />
-            </span>
-          </Tooltip.Trigger>
-          <Tooltip.Content>
-            <p>{t.Input.FilterOrderDuplicate()}</p>
-          </Tooltip.Content>
-        </Tooltip.Root>
-      </Tooltip.Provider>
-    {/if}
-    {#if invalid}
-      <Tooltip.Provider>
-        <Tooltip.Root>
-          <Tooltip.Trigger>
-            <span role="img" class="inline-flex" aria-label={t.Input.FilterOrderInvalid()}>
-              <TriangleAlert class="size-3 shrink-0 text-destructive" />
-            </span>
-          </Tooltip.Trigger>
-          <Tooltip.Content>
-            <p>{t.Input.FilterOrderInvalid()}</p>
-          </Tooltip.Content>
-        </Tooltip.Root>
-      </Tooltip.Provider>
-    {/if}
-    {#if column === "selected"}
-      <!-- No gap between the row buttons, the row stays compact -->
-      <div class="flex items-center">
-        <!-- Up / down are the two halves of one diamond: two triangles that
-             share their waist, so the control reads as a single rotated square
-             while each half stays its own button (each one highlights and
-             disables on its own). The shape is the SVG fill, the icon keeps the
-             size and the gap of the outlined variant -->
-        <div class="flex shrink-0 flex-col gap-px">
-          <button
-            type="button"
-            class="flex h-2 w-4 items-center justify-center text-muted-foreground transition-colors outline-none hover:text-foreground focus-visible:text-foreground disabled:pointer-events-none disabled:text-muted-foreground/25"
-            disabled={index === 0}
-            aria-label={`${t.Input.FilterOrderMoveUp()} ${label}`}
-            onclick={onMoveUp}
-          >
-            <!-- Filled triangle: the path is closed and painted with the
-                 current text color, so hover / disabled follow the row -->
-            <svg viewBox="0 0 12 6" class="h-1.5 w-3" aria-hidden="true">
-              <path d="M6 1 11 5H1z" fill="currentColor" stroke="none" />
-            </svg>
-          </button>
-          <button
-            type="button"
-            class="flex h-2 w-4 items-center justify-center text-muted-foreground transition-colors outline-none hover:text-foreground focus-visible:text-foreground disabled:pointer-events-none disabled:text-muted-foreground/25"
-            disabled={index === count - 1}
-            aria-label={`${t.Input.FilterOrderMoveDown()} ${label}`}
-            onclick={onMoveDown}
-          >
-            <svg viewBox="0 0 12 6" class="h-1.5 w-3" aria-hidden="true">
-              <path d="M1 1h10L6 5z" fill="currentColor" stroke="none" />
-            </svg>
-          </button>
-        </div>
-        <Button
-          variant="ghost"
-          size="icon-xs"
-          aria-label={`${t.Input.FilterOrderRemove()} ${label}`}
-          onclick={onRemove}
-        >
-          <Trash2 />
-        </Button>
-      </div>
+  <!-- The name and its secondary option share one box, the selector takes 2/5 of
+       that box: the order buttons and the grip are not part of it, so the columns
+       line up row by row -->
+  <span data-slot="filter-order-label" class="min-w-0 flex-1 truncate">{label}</span>
+  {#if ordered && secondaries.length > 0}
+    <!-- The secondary option of the row, edited in place: the item of the value
+         is "item-option" and the position never moves -->
+    {#if secondaries.length === 1 && !secondaryInvalid}
+      <span class="w-2/5 shrink-0 truncate text-xs text-muted-foreground">
+        {secondaryLabel(secondaries[0])}
+      </span>
     {:else}
-      <Button variant="ghost" size="icon-xs" aria-label={`${t.Input.FilterOrderAdd()} ${label}`} onclick={onAdd}>
-        <Plus />
-      </Button>
+      <Select.Root
+        type="single"
+        value={secondary ?? undefined}
+        onValueChange={(value) => value && onSecondaryChange?.(value)}
+      >
+        <Select.Trigger
+          size="sm"
+          class="h-6! w-2/5 shrink-0 gap-1 border-0 bg-accent px-1.5 py-0 text-xs shadow-none"
+          aria-label={`${t.Input.FilterOrderSecondary()} ${label}`}
+        >
+          <span class="min-w-0 flex-1 truncate text-left" class:text-destructive={secondaryInvalid}>
+            {secondary === null ? "" : secondaryLabel(secondary)}
+          </span>
+        </Select.Trigger>
+        <Select.Content>
+          <Select.Group>
+            {#if secondaryInvalid && secondary !== null}
+              <Select.Item value={secondary} label={secondaryLabel(secondary)}>
+                <span class="text-destructive">{secondaryLabel(secondary)}</span>
+              </Select.Item>
+            {/if}
+            {#each secondaries as option (option)}
+              {@const optionLabel = secondaryLabel(option)}
+              <Select.Item value={option} label={optionLabel}>{optionLabel}</Select.Item>
+            {/each}
+          </Select.Group>
+        </Select.Content>
+      </Select.Root>
     {/if}
-  </div>
-
-  {#if indicator === "top"}
-    <Indicator edge="top" />
-  {:else if indicator === "bottom"}
-    <Indicator edge="bottom" />
   {/if}
-</div>
+
+  {#if duplicate || invalid}
+    <FilterItemMarks {duplicate} {invalid} />
+  {/if}
+</FilterItem>

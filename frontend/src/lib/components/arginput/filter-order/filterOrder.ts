@@ -19,6 +19,9 @@ export type FilterOrderItem = string;
  * - filter-order:      one level, an item is bought once
  * - filter-order-item: two levels, the primary item is the identity
  * - filter-order-pair: two levels, the whole "item-option" is the identity
+ *
+ * dt="filter-regex" uses the single column editor of its own (see
+ * FilterRegexEditor.svelte), it is not part of this union.
  */
 export type FilterOrderDt = "filter-order" | "filter-order-item" | "filter-order-pair";
 
@@ -40,6 +43,11 @@ export function isGrouped(dt: string | undefined): boolean {
 /** True when the value may hold optionCommand, entries that carry no item at all */
 export function hasTokens(dt: string | undefined): boolean {
   return dt === "filter-order-pair";
+}
+
+/** True when an item is decoded by "pattern" into one value per level */
+export function isRegex(dt: string | undefined): boolean {
+  return dt === "filter-regex";
 }
 
 /**
@@ -352,4 +360,139 @@ export function cutPills(
   // to the last visible pill (dropping one can walk back into the line before)
   while (count > 1 && boxes[count - 1].right + gap + markerWidth > edge) count--;
   return count;
+}
+
+/**
+ * The select item that clears one level of a dt="filter-regex" row.
+ *
+ * The stored value of "any" is the empty string, which is not a selectable item
+ * of the select primitive, so the trigger maps it to this sentinel.
+ */
+export const ANY_ITEM = "\u0000any";
+
+/** The level values of one item, an unset level is the empty string */
+export type RegexValues = Record<string, string>;
+
+/** One candidate table entry of a level: the level values it is keyed by */
+export type RegexLevelEntry = { key: RegexValues; option: string[] };
+
+/** One level of a dt="filter-regex", already normalized by the backend */
+export type RegexLevel = { name: string; option: RegexLevelEntry[] };
+
+/**
+ * Compiled decode patterns, by the pattern string
+ *
+ * `new RegExp()` compiles its source on every call, and the pattern of a
+ * research filter is several hundred characters long: the editor decodes every
+ * row on every render, so compiling there would recompile it hundreds of times
+ * per keystroke. An app holds a handful of filter args, the map stays tiny.
+ */
+const COMPILED_PATTERNS = new Map<string, RegExp | null>();
+
+/**
+ * The compiled form of a decode pattern, or null when it does not compile
+ *
+ * @param pattern The decode pattern
+ * @returns The regex that reads one item, null when it can not be compiled
+ */
+function compileRegex(pattern: string): RegExp | null {
+  const cached = COMPILED_PATTERNS.get(pattern);
+  if (cached !== undefined) return cached;
+  let regex: RegExp | null = null;
+  try {
+    regex = new RegExp(`^(?:${pattern})$`);
+  } catch {
+    // A pattern the browser can not compile reads nothing, the caller shows
+    // the item as undecodable instead of throwing in a render
+    regex = null;
+  }
+  COMPILED_PATTERNS.set(pattern, regex);
+  return regex;
+}
+
+/**
+ * Decode one item of a dt="filter-regex" into its level values.
+ *
+ * The pattern is the decoder written by the mod author: one named group per
+ * level, the whole item matched. An unset group reads as the empty string, the
+ * same as the backend's `_decode_filter_regex()`.
+ *
+ * @param pattern The decode pattern, in javascript named group syntax
+ * @param item The item of the value
+ * @returns The level values, null when the pattern does not read the item
+ */
+export function decodeRegex(pattern: string | null | undefined, item: string): RegexValues | null {
+  if (!pattern) return null;
+  const regex = compileRegex(pattern);
+  if (!regex) return null;
+  const match = regex.exec(item);
+  if (!match) return null;
+  const values: RegexValues = {};
+  for (const [name, value] of Object.entries(match.groups ?? {})) values[name] = value ?? "";
+  return values;
+}
+
+/**
+ * Encode the level values of one item: the levels in order, an empty level is
+ * skipped (it means "any"), so no separator is left around it.
+ *
+ * @param levels The levels of the arg, in the declared order
+ * @param values The value of every level
+ * @returns The item of the value
+ */
+export function encodeRegex(levels: readonly RegexLevel[], values: RegexValues): string {
+  return levels
+    .map((level) => values[level.name] ?? "")
+    .filter((value) => value !== "")
+    .join(SECONDARY_SEPARATOR);
+}
+
+/**
+ * The candidates of one level for the current selection.
+ *
+ * Every table entry whose key is covered by the selection applies; the one
+ * keyed by the most levels wins, and the entry keyed by nothing is the fallback
+ * of the level. The value already selected is always offered, so a stored item
+ * that is not a candidate anymore stays selectable.
+ *
+ * @param level The level
+ * @param values The value of every level
+ * @returns The candidates of this level
+ */
+export function regexCandidates(level: RegexLevel, values: RegexValues): string[] {
+  let best: RegexLevelEntry | null = null;
+  let bestSize = -1;
+  for (const entry of level.option ?? []) {
+    const names = Object.keys(entry.key);
+    if (names.some((name) => (values[name] ?? "") !== entry.key[name])) continue;
+    if (names.length > bestSize) {
+      best = entry;
+      bestSize = names.length;
+    }
+  }
+  return best ? [...best.option] : [];
+}
+
+/**
+ * The item that results from changing one level of an item, the other levels
+ * are kept as they are.
+ *
+ * @param levels The levels of the arg
+ * @param pattern The decode pattern
+ * @param item The item being edited
+ * @param name The level to change
+ * @param value The new value of the level, empty for "any"
+ * @returns The new item, null when the item can not be decoded
+ */
+export function setRegexLevel(
+  levels: readonly RegexLevel[],
+  pattern: string | null | undefined,
+  item: string,
+  name: string,
+  value: string,
+): string | null {
+  const values = decodeRegex(pattern, item);
+  if (!values) return null;
+  values[name] = value;
+  return encodeRegex(levels, values);
 }

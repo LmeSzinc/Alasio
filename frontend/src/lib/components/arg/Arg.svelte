@@ -31,6 +31,7 @@
     "filter-order": FilterOrder,
     "filter-order-item": FilterOrder,
     "filter-order-pair": FilterOrder,
+    "filter-regex": FilterOrder,
   };
   // Row actions are rendered by the layout next to the name, e.g. the edit
   // button of the ordered filter datatypes (see FilterOrderAction.svelte)
@@ -38,6 +39,7 @@
     "filter-order": FilterOrderAction,
     "filter-order-item": FilterOrderAction,
     "filter-order-pair": FilterOrderAction,
+    "filter-regex": FilterOrderAction,
   };
   const layoutMap: Record<string, Component<LayoutProps>> = {
     filter: LayoutVertical,

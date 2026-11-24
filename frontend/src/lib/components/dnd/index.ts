@@ -8,7 +8,7 @@ export { default as DndProvider } from "./dndProvider.svelte";
 
 // 3. (Optional but good practice) Re-export any types that consumers might need.
 export type { IndicatorEdge } from "./Indicator.svelte";
-export type { DndEndCallbackDetail, DropIndicatorState } from "./dndProvider.svelte";
+export type { DndEndCallbackDetail, DndRules, DropIndicatorState } from "./dndProvider.svelte";
 
 // 4. Ultility functions
 export { applyDnd } from "./apply";

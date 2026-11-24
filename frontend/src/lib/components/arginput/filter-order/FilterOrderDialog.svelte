@@ -1,15 +1,11 @@
 <script lang="ts">
-  import { toast } from "svelte-sonner";
-  import GripVertical from "@lucide/svelte/icons/grip-vertical";
   import { type ArgData, getArgName, i18nTextToOneLine, useArgValue } from "$lib/components/arg/utils.svelte";
-  import { type DndEndCallbackDetail, DndProvider } from "$lib/components/dnd";
-  import { Button } from "$lib/components/ui/button";
-  import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "$lib/components/ui/dialog";
+  import { type DndEndCallbackDetail } from "$lib/components/dnd";
   import { t } from "$lib/i18n";
-  import { belowDragBand } from "$lib/window/dragRegion.svelte";
   import FilterOrderColumn from "./FilterOrderColumn.svelte";
   import FilterOrderGroupHeader from "./FilterOrderGroupHeader.svelte";
   import FilterOrderItem from "./FilterOrderItem.svelte";
+  import FilterPopup from "./FilterPopup.svelte";
   import {
     type DropTarget,
     type FilterOrderItem as FilterOrderItemValue,
@@ -33,8 +29,9 @@
    * doc/2026-10-03_filter-order.md §3.2).
    *
    * Every edit only touches the local `draft`; the value is committed through
-   * `onSave` when the user presses save with a changed order, and discarded
-   * with an "edits discarded" toast when the dialog is cancelled.
+   * `onSave` when the user presses save with a changed order. The dialog shell,
+   * the footer buttons and the "edits discarded" toast of a cancel live in
+   * FilterPopup.svelte, shared with the other filter editors.
    *
    * The reset button is not a draft operation: it resets the whole arg to its
    * default through `onReset` (the single-arg reset of the backend, the same
@@ -223,12 +220,6 @@
 
   const dndRules = { selected: ["item"], unused: ["item"] };
 
-  // The Toaster keeps every toast below the app header, so only the lifetime
-  // is set here
-  const toastOptions = {
-    duration: 2000,
-  };
-
   function labelOf(item: FilterOrderItemValue): string {
     // A row of a filter-order-item shows its primary item, the secondary option
     // has its own selector. A row of a filter-order-pair shows the whole entry.
@@ -312,174 +303,117 @@
     if (!item) return;
     draft = insertRow(draft, item, target);
   }
-
-  function save() {
-    if (blocked) return;
-    if (isDirty) onSave([...draft]);
-    open = false;
-  }
-
-  function cancel() {
-    if (isDirty) {
-      toast.info(t.Input.FilterOrderReverted(), toastOptions);
-    }
-    open = false;
-  }
-
-  /**
-   * Reset the arg to its default value (see the header comment): a committed
-   * change of the whole arg, unlike save / cancel which only deal with the
-   * draft.
-   */
-  function resetDefault() {
-    onReset?.();
-    open = false;
-  }
-
-  // Every close request that comes from the dialog itself (escape, overlay
-  // click, close button) is a cancel; saving closes the dialog
-  // programmatically, which does not pass through here
-  function onOpenChange(next: boolean) {
-    if (!next) cancel();
-  }
-
-  // The dialog is centred below the drag band of the desktop client, so its
-  // title row stays clickable instead of sitting under the window drag strip
-  const band = $derived(belowDragBand());
 </script>
 
-<Dialog bind:open {onOpenChange}>
-  <!-- The dnd provider sits OUTSIDE the dialog content on purpose: the content
-       is a fixed, transform-centered box, and a fixed positioned drag overlay
-       inside it would be positioned against that box instead of the viewport,
-       offsetting the overlay and the drop math by the dialog position -->
-  <DndProvider orientation="vertical" {dndRules} {onDndEnd}>
-    {#snippet children({ dropIndicator })}
-      <!-- The base class centres the dialog in the viewport; `top` and
-           `max-height` move it below the drag band of the desktop client -->
-      <DialogContent
-        class="flex h-[640px] flex-col gap-6 sm:max-w-[720px]"
-        style="top: {band.top}; max-height: {band.maxHeight};"
-      >
-        <DialogHeader>
-          <DialogTitle>{displayName}</DialogTitle>
-        </DialogHeader>
-        <div class="grid min-h-0 flex-1 grid-cols-2 gap-4">
-          <!-- Selected: the user order, every row carries the up / down /
-               remove buttons, dragging is an alternative to them -->
-          <div data-slot="filter-order-column" data-column="selected" class="flex min-h-0 min-w-0 flex-col gap-y-1.5">
-            <div class="border-b border-border pb-1.5 text-xs font-medium text-muted-foreground">
-              {t.Input.FilterOrderSelected()}
+<FilterPopup
+  bind:open
+  title={displayName}
+  dirty={isDirty}
+  {blocked}
+  {dndRules}
+  {onDndEnd}
+  onSave={() => onSave([...draft])}
+  {onReset}
+  overlayLabel={(item) => fullLabelOf(item)}
+>
+  {#snippet children({ dropIndicator })}
+    <div class="grid min-h-0 flex-1 grid-cols-2 gap-4">
+      <!-- Selected: the user order, every row carries the up / down /
+           remove buttons, dragging is an alternative to them -->
+      <div data-slot="filter-order-column" data-column="selected" class="flex min-h-0 min-w-0 flex-col gap-y-1.5">
+        <div class="border-b border-border pb-1.5 text-xs font-medium text-muted-foreground">
+          {t.Input.FilterOrderSelected()}
+        </div>
+        <FilterOrderColumn column="selected">
+          {#if draft.length === 0}
+            <div class="flex min-h-16 items-center justify-center px-2 text-center text-xs text-muted-foreground">
+              {t.Input.FilterOrderSelectedEmpty()}
             </div>
-            <FilterOrderColumn column="selected">
-              {#if draft.length === 0}
-                <div class="flex min-h-16 items-center justify-center px-2 text-center text-xs text-muted-foreground">
-                  {t.Input.FilterOrderSelectedEmpty()}
-                </div>
-              {:else}
-                <!-- The key carries the index: a repeated item is a legal row to
-                     show (the value is blocked until one of its rows is
-                     dropped), but two equal items can not share a key -->
-                {#each draft as item, index (`${index}\u0000${item}`)}
-                  <FilterOrderItem
-                    rowId={String(index)}
-                    {item}
-                    column="selected"
-                    {index}
-                    count={draft.length}
-                    {dropIndicator}
-                    invalid={isInvalid(item)}
-                    duplicate={duplicated.has(index)}
-                    label={labelOf(item)}
-                    secondary={secondaryOf(item)}
-                    secondaries={secondariesOf(item)}
-                    secondaryInvalid={isSecondaryInvalid(item)}
-                    secondaryLabel={(value) => arg.getLabel(value)}
-                    onSecondaryChange={(next) => onSecondaryChange(index, next)}
-                    onMoveUp={() => onMoveUp(index)}
-                    onMoveDown={() => onMoveDown(index)}
-                    onRemove={() => onRemove(index)}
-                  />
-                {/each}
-              {/if}
-            </FilterOrderColumn>
-          </div>
+          {:else}
+            <!-- The key carries the index: a repeated item is a legal row to
+                 show (the value is blocked until one of its rows is
+                 dropped), but two equal items can not share a key -->
+            {#each draft as item, index (`${index}\u0000${item}`)}
+              <FilterOrderItem
+                rowId={String(index)}
+                {item}
+                column="selected"
+                {index}
+                count={draft.length}
+                {dropIndicator}
+                invalid={isInvalid(item)}
+                duplicate={duplicated.has(index)}
+                label={labelOf(item)}
+                secondary={secondaryOf(item)}
+                secondaries={secondariesOf(item)}
+                secondaryInvalid={isSecondaryInvalid(item)}
+                secondaryLabel={(value) => arg.getLabel(value)}
+                onSecondaryChange={(next) => onSecondaryChange(index, next)}
+                onMoveUp={() => onMoveUp(index)}
+                onMoveDown={() => onMoveDown(index)}
+                onRemove={() => onRemove(index)}
+              />
+            {/each}
+          {/if}
+        </FilterOrderColumn>
+      </div>
 
-          <!-- Unused: the rest of "option", its order is always the option
-               order, a drop on it only removes the item from the order -->
-          <div data-slot="filter-order-column" data-column="unused" class="flex min-h-0 min-w-0 flex-col gap-y-1.5">
-            <div class="border-b border-border pb-1.5 text-xs font-medium text-muted-foreground">
-              {t.Input.FilterOrderUnused()}
-            </div>
-            <FilterOrderColumn column="unused">
-              {#if grouped}
-                {#if unusedBlocks.length === 0}
-                  <div class="flex min-h-16 items-center justify-center px-2 text-center text-xs text-muted-foreground">
-                    {t.Input.FilterOrderUnusedEmpty()}
-                  </div>
-                {:else}
-                  <!-- Every block is one primary item of "option", in the option
-                       order: a bare row when it declares no secondary options, a
-                       non-draggable header plus its unused pairs when it does -->
-                  {#each unusedBlocks as block (block.key)}
-                    {#if block.kind === "group"}
-                      <FilterOrderGroupHeader label={block.label} remaining={block.remaining} total={block.total} />
-                      {#each block.rows as row (row.value)}
-                        <FilterOrderItem
-                          rowId={`unused-${row.value}`}
-                          item={row.value}
-                          column="unused"
-                          label={row.label}
-                          onAdd={() => onAdd(row.value)}
-                        />
-                      {/each}
-                    {:else}
-                      <FilterOrderItem
-                        rowId={`unused-${block.value}`}
-                        item={block.value}
-                        column="unused"
-                        label={block.label}
-                        onAdd={() => onAdd(block.value)}
-                      />
-                    {/if}
+      <!-- Unused: the rest of "option", its order is always the option
+           order, a drop on it only removes the item from the order -->
+      <div data-slot="filter-order-column" data-column="unused" class="flex min-h-0 min-w-0 flex-col gap-y-1.5">
+        <div class="border-b border-border pb-1.5 text-xs font-medium text-muted-foreground">
+          {t.Input.FilterOrderUnused()}
+        </div>
+        <FilterOrderColumn column="unused">
+          {#if grouped}
+            {#if unusedBlocks.length === 0}
+              <div class="flex min-h-16 items-center justify-center px-2 text-center text-xs text-muted-foreground">
+                {t.Input.FilterOrderUnusedEmpty()}
+              </div>
+            {:else}
+              <!-- Every block is one primary item of "option", in the option
+                   order: a bare row when it declares no secondary options, a
+                   non-draggable header plus its unused pairs when it does -->
+              {#each unusedBlocks as block (block.key)}
+                {#if block.kind === "group"}
+                  <FilterOrderGroupHeader label={block.label} remaining={block.remaining} total={block.total} />
+                  {#each block.rows as row (row.value)}
+                    <FilterOrderItem
+                      rowId={`unused-${row.value}`}
+                      item={row.value}
+                      column="unused"
+                      label={row.label}
+                      onAdd={() => onAdd(row.value)}
+                    />
                   {/each}
-                {/if}
-              {:else if unused.length === 0}
-                <div class="flex min-h-16 items-center justify-center px-2 text-center text-xs text-muted-foreground">
-                  {t.Input.FilterOrderUnusedEmpty()}
-                </div>
-              {:else}
-                {#each unused as item (item)}
+                {:else}
                   <FilterOrderItem
-                    rowId={`unused-${item}`}
-                    {item}
+                    rowId={`unused-${block.value}`}
+                    item={block.value}
                     column="unused"
-                    label={labelOf(item)}
-                    onAdd={() => onAdd(item)}
+                    label={block.label}
+                    onAdd={() => onAdd(block.value)}
                   />
-                {/each}
-              {/if}
-            </FilterOrderColumn>
-          </div>
-        </div>
-
-        <DialogFooter>
-          <Button variant="ghost" onclick={resetDefault}>{t.Input.FilterOrderResetDefault()}</Button>
-          <Button variant="outline" onclick={cancel}>{t.Input.Cancel()}</Button>
-          <Button onclick={save} disabled={blocked}>{t.Input.Save()}</Button>
-        </DialogFooter>
-      </DialogContent>
-    {/snippet}
-
-    {#snippet dragOverlay({ active })}
-      {#if active}
-        <div class="flex w-64 items-center gap-x-1.5 rounded-md border bg-popover px-2 py-1.5 text-sm shadow-xl">
-          <GripVertical class="size-4 text-muted-foreground" />
-          <span class="truncate">
-            {fullLabelOf(String((active.data as { item?: string } | undefined)?.item ?? ""))}
-          </span>
-        </div>
-      {/if}
-    {/snippet}
-  </DndProvider>
-</Dialog>
+                {/if}
+              {/each}
+            {/if}
+          {:else if unused.length === 0}
+            <div class="flex min-h-16 items-center justify-center px-2 text-center text-xs text-muted-foreground">
+              {t.Input.FilterOrderUnusedEmpty()}
+            </div>
+          {:else}
+            {#each unused as item (item)}
+              <FilterOrderItem
+                rowId={`unused-${item}`}
+                {item}
+                column="unused"
+                label={labelOf(item)}
+                onAdd={() => onAdd(item)}
+              />
+            {/each}
+          {/if}
+        </FilterOrderColumn>
+      </div>
+    </div>
+  {/snippet}
+</FilterPopup>

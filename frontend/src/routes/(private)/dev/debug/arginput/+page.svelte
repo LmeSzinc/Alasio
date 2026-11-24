@@ -370,6 +370,88 @@
         },
       },
     ),
+    // dt=filter-regex shows the pills of the decoded items and opens the single
+    // column editor: every row is an inline level selector, the last row is the
+    // always visible constructor (see FilterRegexDialog.svelte)
+    FilterRegex: makeCard(
+      info("FilterRegex", "Filter Regex", "dt=filter-regex · single column, inline level selects"),
+      {
+        FilterRegex: {
+          // The levels of a research filter: the series, the family (a genre, a
+          // rarity or a ship) and the detail (a duration or a project number).
+          // The keys of a level table are decoded by the backend, the frontend
+          // looks them up by level values
+          Filter: arg("FilterRegex", "Filter", "filter-regex", ["S9-DR-0.5", "S9-E-315", "Q-1", "0.5", "reset"], {
+            name: "filter-regex",
+            help: "Research priority, three levels decoded by pattern; reset is a command",
+            levels: [
+              { name: "series", option: [{ key: {}, option: ["S8", "S9"] }] },
+              {
+                name: "family",
+                option: [
+                  { key: {}, option: ["B", "C", "D", "Q"] },
+                  { key: { series: "S9" }, option: ["B", "C", "D", "Q", "agir"] },
+                ],
+              },
+              {
+                name: "detail",
+                option: [
+                  { key: {}, option: ["0.5", "1", "2"] },
+                  { key: { family: "B" }, option: ["4"] },
+                  { key: { family: "Q" }, option: ["0.5", "1", "2", "4", "002", "010"] },
+                  { key: { series: "S9", family: "E" }, option: ["2", "031", "315"] },
+                ],
+              },
+            ],
+            pattern: "(?<series>S[1-9])?-?(?<family>DR|PRY|agir|[BCDEGHQT])?-?(?<detail>\\d{3}|\\d\\.\\d|\\d\\d?)?",
+            option_command: ["reset"],
+            option_i18n: { S9: "Series 9", DR: "DR ship", "0.5": "0.5 h", agir: "Agir", reset: "reset" },
+            layout: "vert",
+          }),
+          // A repeated item, an item the pattern can not read (S9-X-1), an
+          // undeclared command (shortest) and names long enough to truncate
+          FilterEdge: arg(
+            "FilterRegex",
+            "FilterEdge",
+            "filter-regex",
+            [
+              "S9-DR-0.5",
+              "S9-DR-0.5",
+              "S9-X-1",
+              "S9-E-315",
+              "reset",
+              "shortest",
+              "GearDesignPlanT3-OrdnanceTestingReportT3",
+            ],
+            {
+              name: "filter-regex (edge)",
+              help: "S9-DR-0.5 repeats, S9-X-1 is not decoded by pattern, shortest is not a declared command",
+              levels: [
+                { name: "series", option: [{ key: {}, option: ["S8", "S9"] }] },
+                {
+                  name: "family",
+                  option: [
+                    { key: {}, option: ["B", "C", "D", "Q"] },
+                    { key: { series: "S9" }, option: ["B", "C", "D", "Q", "agir"] },
+                  ],
+                },
+                {
+                  name: "detail",
+                  option: [
+                    { key: {}, option: ["0.5", "1", "2"] },
+                    { key: { family: "B" }, option: ["4"] },
+                    { key: { series: "S9", family: "E" }, option: ["2", "031", "315"] },
+                  ],
+                },
+              ],
+              pattern: "(?<series>S[1-9])?-?(?<family>DR|PRY|agir|[BCDEGHQT])?-?(?<detail>\\d{3}|\\d\\.\\d|\\d\\d?)?",
+              option_command: ["reset"],
+              layout: "vert",
+            },
+          ),
+        },
+      },
+    ),
     // Enable is only displayed in the card badge, so both states are shown here
     EnableOn: schedulerCard("card-ArgInput-EnableOn", "Enable · On", "dt=enable · card badge, click to toggle", true),
     EnableOff: schedulerCard(

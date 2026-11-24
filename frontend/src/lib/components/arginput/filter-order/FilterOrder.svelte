@@ -10,7 +10,9 @@
     type PillBox,
     SECONDARY_SEPARATOR,
     cutPills,
+    decodeRegex,
     duplicateIndexes,
+    isRegex,
     isTwoLevel,
     splitOption,
     validItems,
@@ -37,10 +39,45 @@
   const optionDict = $derived(data.option_dict ?? {});
   const optionCommand = $derived(Array.isArray(data.option_command) ? data.option_command : []);
   const twoLevel = $derived(isTwoLevel(dt));
+  // dt="filter-regex" has no "option": the candidates live in the level tables
+  // and the item is decoded by "pattern"
+  const regex = $derived(isRegex(dt));
+  const levels = $derived(Array.isArray(data.levels) ? data.levels : []);
+  const pattern = $derived(data.pattern ?? null);
   const valid = $derived(validItems(options, optionDict, dt, optionCommand));
   // A stored value may repeat an item: only the later occurrences are marked,
   // the first one is where the item belongs
   const duplicated = $derived(duplicateIndexes(items.map(String)));
+  /**
+   * The level values of every filter-regex item, decoded once per value
+   *
+   * The pill line and its hidden probe both render every pill, and each pill
+   * reads its values twice (the invalid mark and the label), so decoding in the
+   * label would run the pattern of the arg four times per item per render.
+   */
+  const decoded = $derived.by(() => {
+    const map = new Map<string, ReturnType<typeof decodeRegex>>();
+    if (!regex) return map;
+    for (const item of items) {
+      const text = String(item);
+      map.set(text, optionCommand.includes(item) ? null : decodeRegex(pattern, text));
+    }
+    return map;
+  });
+
+  /** True for a command of a filter-regex, it carries no level at all */
+  function isCommand(item: any): boolean {
+    return regex && optionCommand.includes(item);
+  }
+
+  /**
+   * The level values of a filter-regex item, null when the pattern can not read
+   * it. A predicate outside the candidate tables is not an error, it only never
+   * matches, so only an unreadable item is marked.
+   */
+  function regexValues(item: any) {
+    return decoded.get(String(item)) ?? null;
+  }
 
   /**
    * True for an item that is in the value but not in the legal items anymore,
@@ -49,6 +86,7 @@
    * repairs such a value on load, the demo shows the editor handling it)
    */
   function isInvalid(item: any): boolean {
+    if (regex) return !isCommand(item) && regexValues(item) === null;
     if (twoLevel) return !valid.has(String(item));
     return options.length > 0 && !options.includes(item);
   }
@@ -62,6 +100,17 @@
   function labelOf(item: any): string {
     // A command carries no level, and it is shown as it is stored
     if (optionCommand.includes(item)) return String(item);
+    // A filter-regex writes its levels "S9-E-315": the translated value of
+    // every level, in the declared order
+    if (regex) {
+      const values = regexValues(item);
+      if (!values) return String(item);
+      return levels
+        .map((level: { name: string }) => values[level.name] ?? "")
+        .filter((value: string) => value !== "")
+        .map((value: string) => arg.getLabel(value))
+        .join(SECONDARY_SEPARATOR);
+    }
     if (!twoLevel) return arg.getLabel(item);
     const [primary, secondary] = splitOption(String(item));
     if (secondary === null) return arg.getLabel(primary);

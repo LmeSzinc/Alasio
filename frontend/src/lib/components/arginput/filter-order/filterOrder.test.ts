@@ -14,18 +14,23 @@
 import { describe, expect, it } from "vitest";
 import {
   type PillBox,
+  type RegexLevel,
   appendItem,
   composeOption,
   cutPills,
+  decodeRegex,
   defaultItem,
   duplicateIndexes,
+  encodeRegex,
   insertRow,
   moveItem,
   moveRow,
   primaryOf,
+  regexCandidates,
   removeAt,
   removeItem,
   sameList,
+  setRegexLevel,
   splitOption,
   validItems,
 } from "./filterOrder";
@@ -348,5 +353,122 @@ describe("TestDefaultItem", () => {
   it("adds a primary without secondary options as itself", () => {
     expect(defaultItem("Chip", { PlateT4: ["gun"] })).toBe("Chip");
     expect(defaultItem("Chip")).toBe("Chip");
+  });
+});
+
+/** The decoder of the tests, in the javascript named group syntax */
+const RESEARCH_PATTERN = "(?<series>S[1-9])?-?(?<family>DR|PRY|agir|[BCDEGHQT])?-?(?<detail>\\d{3}|\\d\\.\\d|\\d\\d?)?";
+
+/** levels of a research filter, the keys are already decoded by the backend */
+const RESEARCH_LEVELS: RegexLevel[] = [
+  { name: "series", option: [{ key: {}, option: ["S8", "S9"] }] },
+  {
+    name: "family",
+    option: [
+      { key: {}, option: ["B", "C", "D", "Q"] },
+      { key: { series: "S9" }, option: ["B", "C", "D", "Q", "agir"] },
+    ],
+  },
+  {
+    name: "detail",
+    option: [
+      { key: {}, option: ["0.5", "1", "2"] },
+      { key: { family: "Q" }, option: ["0.5", "1", "2", "4"] },
+      { key: { series: "S9", family: "E" }, option: ["2", "031", "315"] },
+    ],
+  },
+];
+
+describe("TestDecodeRegex", () => {
+  it("reads one value per level", () => {
+    expect(decodeRegex(RESEARCH_PATTERN, "S9-E-315")).toEqual({
+      series: "S9",
+      family: "E",
+      detail: "315",
+    });
+  });
+
+  it("leaves an unset level as the empty string", () => {
+    expect(decodeRegex(RESEARCH_PATTERN, "0.5")).toEqual({ series: "", family: "", detail: "0.5" });
+    expect(decodeRegex(RESEARCH_PATTERN, "Q-1")).toEqual({ series: "", family: "Q", detail: "1" });
+  });
+
+  it("reads the ALAS spelling without the level separator", () => {
+    expect(decodeRegex(RESEARCH_PATTERN, "S9-DR0.5")).toEqual({
+      series: "S9",
+      family: "DR",
+      detail: "0.5",
+    });
+  });
+
+  it("returns null for an item the pattern does not read", () => {
+    expect(decodeRegex(RESEARCH_PATTERN, "S9-X-1")).toBeNull();
+    expect(decodeRegex(RESEARCH_PATTERN, "reset")).toBeNull();
+  });
+
+  it("reads an empty item as every level being any", () => {
+    expect(decodeRegex(RESEARCH_PATTERN, "")).toEqual({ series: "", family: "", detail: "" });
+  });
+
+  it("returns null for a missing or an uncompilable pattern", () => {
+    expect(decodeRegex(null, "S9")).toBeNull();
+    expect(decodeRegex("(", "S9")).toBeNull();
+  });
+});
+
+describe("TestEncodeRegex", () => {
+  it("joins the set levels with the level separator", () => {
+    expect(encodeRegex(RESEARCH_LEVELS, { series: "S9", family: "DR", detail: "0.5" })).toBe("S9-DR-0.5");
+  });
+
+  it("skips a level that is any", () => {
+    expect(encodeRegex(RESEARCH_LEVELS, { series: "", family: "E", detail: "315" })).toBe("E-315");
+    expect(encodeRegex(RESEARCH_LEVELS, { detail: "0.5" })).toBe("0.5");
+  });
+
+  it("is the empty string when nothing is set", () => {
+    expect(encodeRegex(RESEARCH_LEVELS, {})).toBe("");
+  });
+});
+
+describe("TestRegexCandidates", () => {
+  const family = RESEARCH_LEVELS[1];
+  const detail = RESEARCH_LEVELS[2];
+
+  it("offers the table of the most specific matching key", () => {
+    expect(regexCandidates(family, { series: "S9" })).toEqual(["B", "C", "D", "Q", "agir"]);
+  });
+
+  it("falls back to the table of no key", () => {
+    expect(regexCandidates(family, { series: "S8" })).toEqual(["B", "C", "D", "Q"]);
+    expect(regexCandidates(family, {})).toEqual(["B", "C", "D", "Q"]);
+  });
+
+  it("prefers the key of two levels", () => {
+    expect(regexCandidates(detail, { series: "S9", family: "E" })).toEqual(["2", "031", "315"]);
+    expect(regexCandidates(detail, { family: "E" })).toEqual(["0.5", "1", "2"]);
+    expect(regexCandidates(detail, { family: "Q" })).toEqual(["0.5", "1", "2", "4"]);
+  });
+
+  it("offers nothing without a matching table", () => {
+    expect(regexCandidates({ name: "x", option: [{ key: { series: "S9" }, option: ["a"] }] }, {})).toEqual([]);
+  });
+});
+
+describe("TestSetRegexLevel", () => {
+  it("changes one level and keeps the others", () => {
+    expect(setRegexLevel(RESEARCH_LEVELS, RESEARCH_PATTERN, "S9-DR-0.5", "family", "Q")).toBe("S9-Q-0.5");
+  });
+
+  it("clears a level to any", () => {
+    expect(setRegexLevel(RESEARCH_LEVELS, RESEARCH_PATTERN, "S9-E-315", "series", "")).toBe("E-315");
+  });
+
+  it("sets a level that was any", () => {
+    expect(setRegexLevel(RESEARCH_LEVELS, RESEARCH_PATTERN, "0.5", "detail", "4")).toBe("4");
+  });
+
+  it("returns null for an item it can not read", () => {
+    expect(setRegexLevel(RESEARCH_LEVELS, RESEARCH_PATTERN, "reset", "series", "S9")).toBeNull();
   });
 });

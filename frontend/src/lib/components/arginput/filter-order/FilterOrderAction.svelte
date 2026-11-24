@@ -3,17 +3,23 @@
   import { Button } from "$lib/components/ui/button";
   import { t } from "$lib/i18n";
   import FilterOrderDialog from "./FilterOrderDialog.svelte";
+  import FilterRegexDialog from "./FilterRegexDialog.svelte";
+  import { isRegex } from "./filterOrder";
 
   /**
-   * The row action of dt="filter-order": the always visible edit button of the
-   * title row, plus the editor dialog it opens (see
+   * The row action of the ordered filter datatypes: the always visible edit
+   * button of the title row, plus the editor dialog it opens (see
    * doc/2026-10-03_filter-order.md §4.2). The button and the dialog state live
-   * in this component, so several filter-order rows on one page stay
-   * independent of each other.
+   * in this component, so several filter rows on one page stay independent of
+   * each other.
+   *
+   * dt="filter-regex" opens its single column editor, the three filter-order
+   * datatypes the transfer editor.
    */
   let { data = $bindable(), handleEdit, handleReset }: InputProps = $props();
 
   const arg = $derived(useArgValue<string[]>(data));
+  const regex = $derived(isRegex(data.dt));
   let editing = $state(false);
 
   function handleSave(next: string[]) {
@@ -38,4 +44,8 @@
   {t.Input.FilterOrderEdit()}
 </Button>
 
-<FilterOrderDialog bind:open={editing} {data} value={arg.value} onSave={handleSave} onReset={handleResetDefault} />
+{#if regex}
+  <FilterRegexDialog bind:open={editing} {data} value={arg.value} onSave={handleSave} onReset={handleResetDefault} />
+{:else}
+  <FilterOrderDialog bind:open={editing} {data} value={arg.value} onSave={handleSave} onReset={handleResetDefault} />
+{/if}

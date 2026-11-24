@@ -70,6 +70,40 @@ class ResizeObserverStub {
 // for unmount.
 let mounted: any[] = [];
 
+/**
+ * An IntersectionObserver that reports nothing on its own: a test hands the
+ * intersection of one element to it, the same as a scroll would.
+ */
+class VisibilityObserverStub {
+  /** The callback of every live observer, by observed element */
+  static callbacks = new Map<Element, (entries: any[]) => void>();
+  callback: (entries: any[]) => void;
+
+  constructor(callback: (entries: any[]) => void) {
+    this.callback = callback;
+  }
+
+  observe(target: Element) {
+    VisibilityObserverStub.callbacks.set(target, this.callback);
+  }
+
+  unobserve(target: Element) {
+    VisibilityObserverStub.callbacks.delete(target);
+  }
+
+  disconnect() {
+    for (const [target, callback] of VisibilityObserverStub.callbacks) {
+      if (callback === this.callback) VisibilityObserverStub.callbacks.delete(target);
+    }
+  }
+
+  /** Tell the observer of the element that it is on screen */
+  static intersect(target: Element) {
+    VisibilityObserverStub.callbacks.get(target)?.([{ target, isIntersecting: true }]);
+    VisibilityObserverStub.callbacks.delete(target);
+  }
+}
+
 /** The arg as the backend sends it (backend sets `layout: vert` itself). */
 function makeArg(overrides: Partial<ArgData> = {}): ArgData {
   return {
@@ -988,5 +1022,270 @@ describe("TestFilterOrderSecondary", () => {
     const style = dialog()!.getAttribute("style");
     expect(style).toContain("calc(50% + 0px)");
     expect(style).toContain("calc(100% - 32px)");
+  });
+});
+
+/** The decoder of the regex tests, in the javascript named group syntax */
+const REGEX_PATTERN = "(?<series>S[1-9])?-?(?<family>DR|PRY|agir|[BCDEGHQT])?-?(?<detail>\\d{3}|\\d\\.\\d|\\d\\d?)?";
+
+/** The arg of dt="filter-regex", the level tables are normalized by the backend */
+function makeRegexArg(overrides: Partial<ArgData> = {}): ArgData {
+  return makeArg({
+    arg: "Filter",
+    dt: "filter-regex",
+    value: ["S9-DR-0.5", "S9-E-315", "reset"],
+    option: undefined,
+    option_i18n: { S9: "Series 9" },
+    levels: [
+      { name: "series", option: [{ key: {}, option: ["S8", "S9"] }] },
+      {
+        name: "family",
+        option: [
+          { key: {}, option: ["B", "C", "D", "Q"] },
+          { key: { series: "S9" }, option: ["B", "C", "D", "Q", "agir"] },
+        ],
+      },
+      {
+        name: "detail",
+        option: [
+          { key: {}, option: ["0.5", "1", "2"] },
+          { key: { family: "Q" }, option: ["0.5", "1", "2", "4"] },
+          { key: { series: "S9", family: "E" }, option: ["2", "031", "315"] },
+        ],
+      },
+    ],
+    pattern: REGEX_PATTERN,
+    option_command: ["reset"],
+    ...overrides,
+  });
+}
+
+/** The single column of the regex editor */
+function regexColumn(): HTMLElement {
+  return dialog()!.querySelector<HTMLElement>('[data-slot="filter-regex-column"]')!;
+}
+
+/** The rows of the regex editor, in the order of the value */
+function regexRows(): HTMLElement[] {
+  return [...regexColumn().querySelectorAll<HTMLElement>('[data-slot="filter-item"]')];
+}
+
+/**
+ * The text of every regex row: the label of a command or of an unreadable item,
+ * read from the remove button, an editable row has the selects instead.
+ */
+function regexRowTexts(): string[] {
+  const prefix = `${t.Input.FilterOrderRemove()} `;
+  return regexRows().map((row) => {
+    const button = [...row.querySelectorAll<HTMLButtonElement>("button")].find((el) =>
+      el.getAttribute("aria-label")?.startsWith(prefix),
+    );
+    return button?.getAttribute("aria-label")?.slice(prefix.length) ?? "";
+  });
+}
+
+/** The constructor row at the end of the list */
+function regexComposer(): HTMLElement {
+  return regexColumn().querySelector<HTMLElement>('[data-slot="filter-regex-composer"]')!;
+}
+
+/** The scroll port of the regex editor, the constructor row must stay out of it */
+function regexScrollList(): HTMLElement {
+  return regexColumn().querySelector<HTMLElement>('[data-slot="filter-order-list"]')!;
+}
+
+/** The level select of one row, and of the constructor row */
+function regexTriggers(scope: HTMLElement): HTMLElement[] {
+  return [...scope.querySelectorAll<HTMLElement>('[data-slot="select-trigger"]')];
+}
+
+/** Open a level select and pick a value of its popup */
+async function pickLevel(trigger: HTMLElement, label: string) {
+  trigger.click();
+  await settle();
+  selectOption(label);
+  await settle();
+}
+
+function composerButton(label: string): HTMLButtonElement {
+  const button = [...regexComposer().querySelectorAll("button")].find(
+    (el) => el.textContent?.trim() === label || el.getAttribute("aria-label") === label,
+  );
+  expect(button, `no "${label}" button in the constructor row`).not.toBeNull();
+  return button as HTMLButtonElement;
+}
+
+describe("TestFilterRegex", () => {
+  it("shows the decoded levels as pills", async () => {
+    const { target } = await mountArg(makeRegexArg({ value: ["S9-DR-0.5", "0.5", "reset"] }));
+
+    expect(pillText(target)).toEqual(["Series 9-DR-0.5", "0.5", "reset"]);
+  });
+
+  it("marks only the item the pattern can not read", async () => {
+    const { target } = await mountArg(makeRegexArg({ value: ["S9-E-315", "S9-X-1", "reset"] }));
+
+    expect(pillMarks(target, `[role="img"][aria-label="${t.Input.FilterOrderInvalid()}"]`)).toEqual([
+      false,
+      true,
+      false,
+    ]);
+  });
+
+  it("opens a single column editor with a constructor row", async () => {
+    const { target } = await mountArg(makeRegexArg());
+    await openDialog(target);
+
+    expect(regexRowTexts()).toEqual(["Series 9-DR-0.5", "Series 9-E-315", "reset"]);
+    // A readable row is its own editor: one select per level
+    expect(regexTriggers(regexRows()[0])).toHaveLength(3);
+    // A command carries no level, so it is a plain label
+    expect(regexTriggers(regexRows()[2])).toHaveLength(0);
+    // The constructor row edits every level as well
+    expect(regexTriggers(regexComposer())).toHaveLength(3);
+  });
+
+  it("heads the add area and keeps no selected heading on the single column", async () => {
+    const { target } = await mountArg(makeRegexArg());
+    await openDialog(target);
+
+    // The list is one column, a "selected" heading would suggest a second one
+    expect(regexColumn().textContent).not.toContain(t.Input.FilterOrderSelected());
+    // The row that adds a predicate has its own heading, it is not the last row
+    const add = regexColumn().querySelector<HTMLElement>('[data-slot="filter-regex-add"]')!;
+    expect(add.textContent).toContain(t.Input.FilterOrderAddFilter());
+    expect(add.contains(regexComposer())).toBe(true);
+  });
+
+  it("keeps the constructor row out of the scrolling list", async () => {
+    // A long order must not hide the one row the user always needs
+    const { target } = await mountArg(makeRegexArg());
+    await openDialog(target);
+
+    expect(regexScrollList().contains(regexComposer())).toBe(false);
+    expect(regexScrollList().contains(regexRows()[0])).toBe(true);
+  });
+
+  it("fills the list on the frame after the dialog opens", async () => {
+    // The click that opens the dialog must not wait for the whole list: the
+    // shell is painted first, the rows follow on the next frame
+    const { target } = await mountArg(makeRegexArg());
+    editButtons(target)[0].click();
+    await flushEffects();
+
+    expect(dialog()).not.toBeNull();
+    expect(regexRows()).toHaveLength(0);
+
+    await settle();
+    expect(regexRows()).toHaveLength(3);
+  });
+
+  it("builds the editor of a row when it comes to the screen", async () => {
+    // The rows of a long filter mount as the text of their value, the selects
+    // of a row are built when it is scrolled into view
+    vi.stubGlobal("IntersectionObserver", VisibilityObserverStub);
+    try {
+      const value = Array.from({ length: 20 }, (_, index) => (index % 2 === 0 ? "Q-1" : "0.5"));
+      const { target } = await mountArg(makeRegexArg({ value, option_i18n: {} }));
+      await openDialog(target);
+
+      // The first rows are prepared with the dialog
+      expect(regexTriggers(regexRows()[0])).toHaveLength(3);
+      // The far rows are text until they are scrolled to
+      expect(regexTriggers(regexRows()[19])).toHaveLength(0);
+      expect(regexRows()[19].querySelector('[data-slot="filter-regex-label"]')).not.toBeNull();
+
+      VisibilityObserverStub.intersect(regexRows()[19]);
+      await settle();
+
+      expect(regexTriggers(regexRows()[19])).toHaveLength(3);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("frames every row with the position, the grip and the row buttons", async () => {
+    // The frame of a row (index, grip, up / down, remove) is FilterItem, shared
+    // by the rows; only the middle of the row is the editor of this datatype
+    const { target } = await mountArg(makeRegexArg({ option_i18n: {} }));
+    await openDialog(target);
+
+    const rows = regexRows();
+    expect(rows.map((row) => row.querySelector("span")!.textContent)).toEqual(["#1", "#2", "#3"]);
+    expect(rows[1].querySelector(`[aria-label^="${t.Input.FilterOrderDrag()}"]`)).not.toBeNull();
+    // The first row can not move up, the last one can not move down
+    const up = rows[0].querySelector<HTMLButtonElement>(`[aria-label^="${t.Input.FilterOrderMoveUp()}"]`)!;
+    const down = rows[2].querySelector<HTMLButtonElement>(`[aria-label^="${t.Input.FilterOrderMoveDown()}"]`)!;
+    expect(up.disabled).toBe(true);
+    expect(down.disabled).toBe(true);
+    expect(rows[0].querySelector(`[aria-label^="${t.Input.FilterOrderRemove()}"]`)).not.toBeNull();
+  });
+
+  it("edits a level in place and saves the new item", async () => {
+    const { target, arg, handleEdit } = await mountArg(makeRegexArg());
+    await openDialog(target);
+
+    // The second select of the first row is its family
+    await pickLevel(regexTriggers(regexRows()[0])[1], "Q");
+    footerButton(t.Input.Save()).click();
+    await settle();
+
+    expect(arg.value).toEqual(["S9-Q-0.5", "S9-E-315", "reset"]);
+    expect(handleEdit).toHaveBeenCalledTimes(1);
+  });
+
+  it("adds the item described by the constructor row", async () => {
+    const { target, arg } = await mountArg(makeRegexArg({ value: [], option_i18n: {} }));
+    await openDialog(target);
+
+    await pickLevel(regexTriggers(regexComposer())[0], "S9");
+    await pickLevel(regexTriggers(regexComposer())[2], "1");
+    expect(regexComposer().textContent).toContain("S9-1");
+    composerButton(t.Input.FilterOrderAdd()).click();
+    await settle();
+    footerButton(t.Input.Save()).click();
+    await settle();
+
+    expect(arg.value).toEqual(["S9-1"]);
+  });
+
+  it("appends the row of a command button", async () => {
+    const { target, arg } = await mountArg(makeRegexArg({ value: [] }));
+    await openDialog(target);
+
+    composerButton("reset").click();
+    await settle();
+    // A command is an entry of its own, it is offered once
+    expect([...regexComposer().querySelectorAll("button")].some((el) => el.textContent?.trim() === "reset")).toBe(
+      false,
+    );
+    footerButton(t.Input.Save()).click();
+    await settle();
+
+    expect(arg.value).toEqual(["reset"]);
+  });
+
+  it("blocks saving a repeated item", async () => {
+    const { target } = await mountArg(makeRegexArg({ value: ["S9-E-315", "S9-E-315"], option_i18n: {} }));
+    await openDialog(target);
+
+    expect(footerButton(t.Input.Save()).disabled).toBe(true);
+    deleteOf(regexRows()[1], "S9-E-315").click();
+    await settle();
+
+    expect(footerButton(t.Input.Save()).disabled).toBe(false);
+  });
+
+  it("blocks saving an item the pattern can not read, and removing it unblocks", async () => {
+    const { target } = await mountArg(makeRegexArg({ value: ["S9-X-1", "S9-E-315"] }));
+    await openDialog(target);
+
+    expect(regexTriggers(regexRows()[0])).toHaveLength(0);
+    expect(regexRows()[0].querySelector(`[aria-label="${t.Input.FilterOrderInvalid()}"]`)).not.toBeNull();
+    expect(footerButton(t.Input.Save()).disabled).toBe(true);
+    deleteOf(regexRows()[0], "S9-X-1").click();
+    await settle();
+
+    expect(footerButton(t.Input.Save()).disabled).toBe(false);
   });
 });
