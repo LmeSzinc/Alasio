@@ -99,7 +99,9 @@
     )}
   >
     {#if column === "selected"}
-      <span class="w-5 shrink-0 text-right text-xs text-muted-foreground tabular-nums">#{index + 1}</span>
+      <!-- The index carries the theme colour and a bold weight: it reads as a
+           counter of the order, not as a piece of the row's content -->
+      <span class="w-5 shrink-0 text-right text-xs font-bold text-primary tabular-nums">#{index + 1}</span>
     {/if}
     <!-- Only the grip activates a drag; the row body must not start one, so a
          click on a row never moves the item by accident -->
@@ -220,7 +222,6 @@
         <Button
           variant="ghost"
           size="icon-xs"
-          class="text-destructive hover:text-destructive"
           aria-label={`${t.Input.FilterOrderRemove()} ${label}`}
           onclick={onRemove}
         >
