@@ -46,6 +46,7 @@ scenario has to race a fixed window.
 import datetime
 import multiprocessing
 import os
+import socket
 import threading
 from types import SimpleNamespace
 
@@ -294,12 +295,13 @@ class MockWorkerProcess:
     manager uses: start / is_alive / join / terminate / pid / exitcode.
 
     The peer owns its end of the pipe. A Windows pipe whose handle is used by
-    two threads at once is not defined: a handle closed under a pending
-    overlapped read, or closed twice by the peer and by the terminating
-    thread, can close a handle that is already gone (or already recycled), and
-    the process dies with an access violation instead of a test failure. So
-    the peer reads and closes its connection, and the terminating thread only
-    asks it to stop.
+    two threads at once is not defined: a handle closed twice, or closed under
+    a pending overlapped read by a thread that never owned it, can close a
+    handle that is already gone (or already recycled), and the process dies
+    with an access violation instead of a test failure. So every close goes
+    through ``_close_conn()``, which closes once and under a lock, and the
+    peer reads its pipe without a timeout: waking a parked read is the job of
+    ``terminate()``, exactly like the death of a real worker process.
     """
     # worker mods whose scheduler ignores the graceful stop (see
     # tests/backend/worker/worker_mods.py)
@@ -318,12 +320,9 @@ class MockWorkerProcess:
     # written before it starts polling), like they do with a real worker. A
     # real wait, not time.sleep: the runs freeze time.sleep
     STOP_DELAY = 0.05
-    # How often the peer looks at its stop flag while it waits for a command.
-    # The wait itself is on the pipe, so a command is read the moment it
-    # arrives, the timeout only bounds how long terminate() waits for an idle
-    # peer -- and the peer is never inside a read that another thread has to
-    # wake
-    POLL_INTERVAL = 0.01
+    # How long terminate() waits for a peer to leave before it ends the wait of
+    # the peer itself, see terminate()
+    TERMINATE_TIMEOUT = 1.0
 
     def __init__(self, mod, config, conn, name=''):
         self.mod = mod
@@ -334,7 +333,6 @@ class MockWorkerProcess:
         # pipe handle, and a close under a pending send is as undefined as a
         # close under a pending read
         self._conn_lock = threading.Lock()
-        self._terminated = threading.Event()
         self.pid = 0
         self.exitcode = None
         self._thread = None
@@ -370,10 +368,8 @@ class MockWorkerProcess:
         """Play the worker protocol until the manager stops the worker"""
         try:
             stopped_by_command = False
-            while not self._terminated.is_set():
+            while True:
                 try:
-                    if not self.conn.poll(self.POLL_INTERVAL):
-                        continue
                     data = self.conn.recv_bytes()
                 except (EOFError, OSError):
                     break
@@ -393,11 +389,43 @@ class MockWorkerProcess:
                 threading.Event().wait(self.STOP_DELAY)
         finally:
             self.exitcode = 0
-            with self._conn_lock:
+            self._close_conn()
+
+    def _close_conn(self):
+        """
+        Close the peer end of the pipe, once and from one thread at a time
+
+        ``Connection.close()`` is idempotent but not atomic: two threads that
+        pass the closed check together close the same handle twice, and the
+        second close hits whatever the system handed the number to next. The
+        lock makes the check and the close one step, so the peer leaving by
+        itself and a terminating thread never close together.
+
+        On POSIX the pipe of a duplex ``Pipe()`` is a socketpair, and closing
+        the descriptor does not wake a read blocked in another thread: only
+        data, EOF or ``shutdown()`` do. The shutdown is the one
+        ``WorkerState.conn_close()`` of the manager does (see
+        ``alasio.backend.worker.manager``), so a peer parked in
+        ``recv_bytes()`` leaves at once instead of on the next command.
+        """
+        with self._conn_lock:
+            conn = self.conn
+            try:
+                sock = socket.socket(fileno=conn.fileno())
+            except (AttributeError, OSError, ValueError):
+                # not a socket (the named pipe of a Windows spawn)
+                pass
+            else:
                 try:
-                    self.conn.close()
+                    sock.shutdown(socket.SHUT_RDWR)
                 except OSError:
                     pass
+                finally:
+                    sock.detach()
+            try:
+                conn.close()
+            except OSError:
+                pass
 
     def is_alive(self):
         return bool(self._thread is not None and self._thread.is_alive())
@@ -407,18 +435,21 @@ class MockWorkerProcess:
             self._thread.join(timeout)
 
     def terminate(self):
-        # only ask the peer to stop: the peer closes its own end when it
-        # leaves, see the class docstring
-        self._terminated.set()
-        self.join(1.0)
-        if self._thread is None:
-            # a peer that never started has no thread to close its end: this is
-            # the only close the caller does, and nobody else holds the handle
-            with self._conn_lock:
-                try:
-                    self.conn.close()
-                except OSError:
-                    pass
+        """
+        End the peer, like the manager ends a worker process
+
+        A real worker is a process: terminating it closes its end of the pipe
+        from the outside, and the read of the worker never returns. The peer
+        of the runs is a thread, so the terminating side ends the wait of that
+        thread through the pipe -- the same wake-up the death of a process is.
+        The peer only closes the pipe when it leaves by itself, and
+        ``_close_conn()`` keeps the two closers apart.
+        """
+        if self._thread is not None and not self.is_alive():
+            # the peer left by itself, its pipe is closed already
+            return
+        self._close_conn()
+        self.join(self.TERMINATE_TIMEOUT)
         if self.exitcode is None:
             self.exitcode = -15
 
