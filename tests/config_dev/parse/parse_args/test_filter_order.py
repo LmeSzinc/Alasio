@@ -387,6 +387,7 @@ option_dict:
         assert e.value.msg == '"option_dict" value of "PlateT4" has duplicate item "gun"'
 
     def test_separator_in_option(self):
+        """A primary item can not hold the item:option separator."""
         with pytest.raises(DefinitionError) as e:
             parse_arg("""\
 dt: filter-order
@@ -395,18 +396,65 @@ option: ['Plate:T4']
 option_dict:
   'Plate:T4': [gun]
 """)
-        assert 'must not contain ":"' in str(e.value)
+        assert e.value.msg == '"option" item "Plate:T4" must not contain ":", it separates the secondary option'
 
     def test_separator_in_secondary(self):
+        """A secondary option may hold the separator, the split takes the first one."""
+        arg = parse_arg("""\
+dt: filter-order
+value: PlateT4:gun:x
+option: [PlateT4]
+option_dict:
+  PlateT4: ['gun:x']
+""")
+        assert arg.value == ('PlateT4:gun:x',)
+        assert arg.get_literal_groups() == [['PlateT4:gun:x']]
+
+    def test_list_separator_in_option(self):
+        """>" separates the items of a value, so a primary item can not hold one."""
+        with pytest.raises(DefinitionError) as e:
+            parse_arg("""\
+dt: filter-order
+value: []
+option: ['Plate>T4']
+""")
+        assert e.value.msg == (
+            '"option" item "Plate>T4" must not contain ">", it separates the items of the value')
+
+    def test_list_separator_in_secondary(self):
         with pytest.raises(DefinitionError) as e:
             parse_arg("""\
 dt: filter-order
 value: []
 option: [PlateT4]
 option_dict:
-  PlateT4: ['gun:x']
+  PlateT4: ['gun>x']
 """)
-        assert 'must not contain ":"' in str(e.value)
+        assert e.value.msg == (
+            '"option_dict" item of "PlateT4" "gun>x" must not contain ">", '
+            'it separates the items of the value')
+
+    def test_list_separator_is_checked_without_secondary_options(self):
+        """The rule is not limited to an arg with "option_dict"."""
+        with pytest.raises(DefinitionError) as e:
+            parse_arg("""\
+dt: filter-order
+value: []
+option: ['PlateT4>x']
+""")
+        assert 'must not contain ">"' in str(e.value)
+
+    def test_separator_is_checked_in_value(self):
+        """A value item holding a list separator is not a legal item either."""
+        with pytest.raises(DefinitionError) as e:
+            parse_arg("""\
+dt: filter-order
+value: ['PlateT4:gun>x']
+option: [PlateT4]
+option_dict:
+  PlateT4: [gun]
+""")
+        assert 'is not a valid item of "PlateT4"' in str(e.value)
 
     def test_value_must_be_list(self):
         with pytest.raises(DefinitionError) as e:

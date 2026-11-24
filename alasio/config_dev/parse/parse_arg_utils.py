@@ -27,10 +27,13 @@ TYPE_ARG_LITERAL = frozenset((
     'filter-order',
 ))
 
-# Separator of a dt="filter-order" item that carries a secondary option, e.g.
-# "PlateT4:gun". The item is split on the first separator, so an arg that
-# declares "option_dict" must not use it in the primary or secondary items.
+# Separators of a dt="filter-order" value. An item is written
+# "{item}:{option}", the items of a value are separated by ">" (`item-A > item-B`).
+# A primary item can not hold either of them, a secondary option can hold the
+# first one (the item is split on its first separator, so "PlateT4:a:b" is the
+# item "PlateT4" with the option "a:b") but never the second one.
 FILTER_ORDER_SEPARATOR = ':'
+FILTER_ORDER_LIST_SEPARATOR = '>'
 
 # Msgspec range constraints of an arg, in the order they are reported
 # key: constraint key of ArgData, value: whether the boundary value itself is allowed
@@ -114,6 +117,34 @@ def validate_option(option: list, value: Any) -> None:
             raise DefinitionError(f'"option" has duplicate value "{item}"')
 
 
+def _validate_filter_order_item_chars(item, where, allow_separator=False):
+    """
+    Validate the characters of a dt="filter-order" item
+
+    ">" separates the items of a value and ":" separates a primary item from
+    its secondary option, so neither may appear where the parser would read it
+    as a separator. A secondary option may contain the item separator (the
+    split takes the first one only), the primary item may not.
+
+    Args:
+        item (str): Primary item or secondary option to check
+        where (str): Location of the item, for the error message
+        allow_separator (bool): True for a secondary option, which may contain
+            the "item:option" separator
+
+    Raises:
+        DefinitionError:
+    """
+    if FILTER_ORDER_LIST_SEPARATOR in item:
+        raise DefinitionError(
+            f'{where} "{item}" must not contain "{FILTER_ORDER_LIST_SEPARATOR}", '
+            'it separates the items of the value')
+    if not allow_separator and FILTER_ORDER_SEPARATOR in item:
+        raise DefinitionError(
+            f'{where} "{item}" must not contain "{FILTER_ORDER_SEPARATOR}", '
+            'it separates the secondary option')
+
+
 def expand_filter_order_items(option, option_dict=None):
     """
     Expand "option" and "option_dict" into the legal items of dt="filter-order"
@@ -150,7 +181,8 @@ def _validate_filter_order_option_dict(option, option_dict):
     "option_dict" maps a primary item to the secondary options it offers. A
     primary item with an entry must be used with one of them, an item without
     an entry has no secondary option at all. Both sides become part of a
-    composite item, so they must be str and must not contain the separator.
+    composite item, so they must be str; the character rules are checked by
+    validate_filter_order() for the items and here for the options.
 
     Args:
         option (list): Primary items of the arg, already validated
@@ -166,10 +198,6 @@ def _validate_filter_order_option_dict(option, option_dict):
         if type(item) is not str:
             raise DefinitionError(
                 f'"option" item "{item}" must be a str if "option_dict" is defined')
-        if FILTER_ORDER_SEPARATOR in item:
-            raise DefinitionError(
-                f'"option" item "{item}" must not contain "{FILTER_ORDER_SEPARATOR}", '
-                'it separates the secondary option')
         primary_items.add(item)
 
     for primary, options in option_dict.items():
@@ -185,10 +213,8 @@ def _validate_filter_order_option_dict(option, option_dict):
         for option_item in options:
             if type(option_item) is not str:
                 raise DefinitionError(f'"option_dict" item "{option_item}" must be a str')
-            if FILTER_ORDER_SEPARATOR in option_item:
-                raise DefinitionError(
-                    f'"option_dict" item "{option_item}" must not contain '
-                    f'"{FILTER_ORDER_SEPARATOR}"')
+            _validate_filter_order_item_chars(
+                option_item, f'"option_dict" item of "{primary}"', allow_separator=True)
             counts[option_item] += 1
         for option_item, count in counts.items():
             if count > 1:
@@ -229,6 +255,11 @@ def validate_filter_order(option: list, value: Any, option_dict: Any = None) -> 
     option_keys = set()
     for item in option:
         validate_literal_item(item)
+        # The character rules apply to every filter-order, not only to one with
+        # secondary options: the value is parsed on the same separators either
+        # way, and a stray one would be read as a separator at runtime
+        if type(item) is str:
+            _validate_filter_order_item_chars(item, '"option" item')
         counts[item] += 1
         option_keys.add(_literal_key(item))
     for item, count in counts.items():
