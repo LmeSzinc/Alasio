@@ -18,3 +18,12 @@ export const TestTopStack = createStackContext<number, number>("test_top_stack",
 
 /** Lets a test unmount the nested layer without unmounting the root */
 export const stackFixtureState = $state({ nestedVisible: true });
+
+/**
+ * Which pages `SwapStack` shows.
+ *
+ * `newPage` is switched on by the test; the fixture then drops `oldPage` in a
+ * nested flush, so the old page's teardown runs after the new page pushed its
+ * layer and reads it as a write of the running batch.
+ */
+export const swapFixtureState = $state({ oldPage: true, newPage: false });

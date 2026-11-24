@@ -47,13 +47,36 @@ export interface StackHandle<T> {
 interface StackEntry<L> {
   value: L;
   priority: number;
-  /** Push order, keeps layers of equal priority in the order they were added */
-  seq: number;
 }
 
-interface ContextValue<L> {
+/** What consumers read: the folded layers and how many there are */
+interface StackSnapshot<T> {
+  value: T;
+  size: number;
+}
+
+/**
+ * State of one installed stack.
+ *
+ * The entries are a plain array and `snapshot` is the only reactive value; it
+ * is recomputed from the entries whenever they change. This is not an
+ * optimisation. An effect teardown reads reactive state as it was before the
+ * batch being flushed (svelte reverts the writes that caused the teardown, see
+ * `teardown_view` in its runtime), and `untrack` does not change that: it turns
+ * tracking off, the value read is the same one. A teardown that rebuilt the
+ * entries from a reactive read therefore dropped a layer pushed earlier in the
+ * same flush — the route hand-over, where the page being left removes its layer
+ * while the page being entered declares its own, left the shell without a layer
+ * at all. Mutating a plain array and publishing the result cannot read such a
+ * stale value.
+ */
+interface ContextValue<L, T> {
+  /** Plain, never proxied: see the note on this interface */
   entries: StackEntry<L>[];
-  nextSeq: number;
+  /** Folded entries, reactive: reading it subscribes the caller */
+  readonly snapshot: StackSnapshot<T>;
+  /** Recomputes `snapshot` from `entries` */
+  publish(): void;
 }
 
 /**
@@ -62,13 +85,18 @@ interface ContextValue<L> {
  * Args:
  *   name: Unique name, used as the context key
  *   fold: Reduces the layers to the value the consumers read; it receives them
- *     from the lowest priority to the highest, so the last one is the winner
+ *     from the lowest priority to the highest, so the last one is the winner.
+ *     It runs once per change of the stack, so it has to be cheap and free of
+ *     side effects
  */
 export function createStackContext<L, T>(name: string, fold: StackFold<L, T>) {
   const key = Symbol(name);
 
+  // `sort` is stable (the ES2019 requirement), so layers of equal priority keep
+  // the order they were added in: the array itself is the push order, and no
+  // sequence number has to be handed out and kept in sync with it.
   function ordered(entries: readonly StackEntry<L>[]): L[] {
-    return [...entries].sort((a, b) => a.priority - b.priority || a.seq - b.seq).map((entry) => entry.value);
+    return [...entries].sort((a, b) => a.priority - b.priority).map((entry) => entry.value);
   }
 
   /**
@@ -79,31 +107,55 @@ export function createStackContext<L, T>(name: string, fold: StackFold<L, T>) {
    * `onMount`), where `getContext` is not available anymore.
    */
   function init(): StackHandle<T> {
-    const context: ContextValue<L> = $state({ entries: [], nextSeq: 0 });
+    const entries: StackEntry<L>[] = [];
+    // Raw: the folded value is whatever `fold` returns (a snippet, a region)
+    // and must not be proxied, and the stack compares it by identity anyway
+    let snapshot = $state.raw<StackSnapshot<T>>({ value: fold([]), size: 0 });
+    const context: ContextValue<L, T> = {
+      entries,
+      get snapshot() {
+        return snapshot;
+      },
+      publish() {
+        snapshot = { value: fold(ordered(entries)), size: entries.length };
+      },
+    };
     setContext(key, context);
     return {
       get value() {
-        return fold(ordered(context.entries));
+        return context.snapshot.value;
       },
       get size() {
-        return context.entries.length;
+        return context.snapshot.size;
       },
     };
   }
 
-  function current(): ContextValue<L> | undefined {
-    return getContext<ContextValue<L>>(key);
+  function current(): ContextValue<L, T> | undefined {
+    return getContext<ContextValue<L, T>>(key);
+  }
+
+  /** Appends a layer that stays until the component that added it is destroyed */
+  function add(context: ContextValue<L, T>, layer: L, priority: number) {
+    context.entries.push({ value: layer, priority });
+    context.publish();
+  }
+
+  /** Drops the most recent entry of `layer`, in place: the array is shared */
+  function drop(context: ContextValue<L, T>, layer: L) {
+    for (let index = context.entries.length - 1; index >= 0; index -= 1) {
+      if (context.entries[index].value !== layer) continue;
+      context.entries.splice(index, 1);
+      context.publish();
+      return;
+    }
   }
 
   /** Appends a layer that stays until `clean()` removes it */
   function push(layer: L, options?: LayerOptions) {
     const context = current();
     if (!context) return;
-    context.entries = [
-      ...context.entries,
-      { value: layer, priority: options?.priority ?? LAYOUT_LAYER, seq: context.nextSeq },
-    ];
-    context.nextSeq += 1;
+    add(context, layer, options?.priority ?? LAYOUT_LAYER);
   }
 
   /**
@@ -132,15 +184,13 @@ export function createStackContext<L, T>(name: string, fold: StackFold<L, T>) {
 
     $effect(() => {
       // Untracked: pushing must not make this effect depend on what it edits
-      untrack(() => {
-        context.entries = [...context.entries, { value: layer, priority, seq: context.nextSeq }];
-        context.nextSeq += 1;
-      });
+      untrack(() => add(context, layer, priority));
       return () => {
-        // Untracked for the same reason, and `getContext` is already captured
-        untrack(() => {
-          context.entries = context.entries.filter((entry) => entry.value !== layer);
-        });
+        // Untracked for the same reason, and `getContext` is already captured.
+        // The teardown only edits the plain entries: a reactive read here would
+        // see the stack as it was before this flush and take the layers of the
+        // components mounted alongside this one with it.
+        untrack(() => drop(context, layer));
       };
     });
   }
@@ -154,13 +204,21 @@ export function createStackContext<L, T>(name: string, fold: StackFold<L, T>) {
   function clean(layer?: L) {
     const context = current();
     if (!context) return;
-    context.entries = layer === undefined ? [] : context.entries.filter((entry) => entry.value !== layer);
+    if (layer === undefined) {
+      context.entries.length = 0;
+    } else {
+      for (let index = context.entries.length - 1; index >= 0; index -= 1) {
+        if (context.entries[index].value === layer) context.entries.splice(index, 1);
+      }
+    }
+    context.publish();
   }
 
   /** Folded value of the nearest stack, `undefined` when there is none */
   function read(): T | undefined {
     const context = current();
-    return context ? fold(ordered(context.entries)) : undefined;
+    if (!context) return undefined;
+    return context.snapshot.value;
   }
 
   return { init, push, use, clean, read };

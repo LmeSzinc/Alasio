@@ -7,13 +7,15 @@
  * cases here are the ones that guarantee it: mount order decides precedence,
  * and a destroyed layer takes only its own entry with it.
  */
-import { mount, unmount } from "svelte";
+import { flushSync, mount, unmount } from "svelte";
 import { afterEach, describe, expect, it } from "vitest";
 import PriorityStack from "$lib/test-utils/PriorityStack.svelte";
+import SamePriorityStack from "$lib/test-utils/SamePriorityStack.svelte";
 import StackNode from "$lib/test-utils/StackNode.svelte";
+import SwapStack from "$lib/test-utils/SwapStack.svelte";
 import TopStackNode from "$lib/test-utils/TopStackNode.svelte";
 import { flushEffects } from "$lib/test-utils/flush-effects";
-import { stackFixtureState } from "$lib/test-utils/stack-fixture.svelte";
+import { stackFixtureState, swapFixtureState } from "$lib/test-utils/stack-fixture.svelte";
 
 let mounted: ReturnType<typeof mount> | undefined;
 let target: HTMLElement | undefined;
@@ -48,6 +50,12 @@ function renderPriority(): void {
   mounted = mount(PriorityStack, { target });
 }
 
+function renderSamePriority(): void {
+  target = document.createElement("div");
+  document.body.appendChild(target);
+  mounted = mount(SamePriorityStack, { target });
+}
+
 /** Winner of the priority fixture */
 function priorityValue(): number | undefined {
   const text = target?.querySelector("[data-testid=priority-value]")?.textContent;
@@ -60,6 +68,8 @@ afterEach(() => {
     mounted = undefined;
   }
   stackFixtureState.nestedVisible = true;
+  swapFixtureState.oldPage = true;
+  swapFixtureState.newPage = false;
   document.body.innerHTML = "";
   target = undefined;
 });
@@ -143,5 +153,40 @@ describe("TestStackOrder", () => {
     await flushEffects();
 
     expect(topValue()).toBe(11);
+  });
+});
+
+describe("TestStackSamePriority", () => {
+  it("keeps layers of equal priority in the order they were added", async () => {
+    // Equal priority falls back to the order the layers were added in, which
+    // the stack takes from the entries array itself rather than from a
+    // sequence number. The fold reads the last layer, so a reversed or
+    // otherwise unstable order would return the first one instead of the third.
+    renderSamePriority();
+    await flushEffects();
+
+    expect(topValue()).toBe(3);
+  });
+});
+
+describe("TestStackReplacingPage", () => {
+  it("keeps the layer of the page that replaces a destroyed one", async () => {
+    // The layout pushes one layer whose identity changes with the route, and
+    // the router replaces the page in a single update: the teardown of the old
+    // page and the push of the new one land in the same batch. The new layer
+    // must survive, otherwise the shell falls back to its empty state on every
+    // route that hands over from a page which declared a layer of its own.
+    target = document.createElement("div");
+    document.body.appendChild(target);
+    mounted = mount(SwapStack, { target });
+    await flushEffects();
+    expect(topValue()).toBe(1);
+
+    flushSync(() => {
+      swapFixtureState.newPage = true;
+    });
+    await flushEffects();
+
+    expect(topValue()).toBe(2);
   });
 });
