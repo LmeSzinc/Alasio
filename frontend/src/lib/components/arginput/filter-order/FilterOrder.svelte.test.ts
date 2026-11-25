@@ -1115,6 +1115,25 @@ function composerButton(label: string): HTMLButtonElement {
   return button as HTMLButtonElement;
 }
 
+/** The chip of one declared command, in the command list below the constructor row */
+function commandChip(command: string): HTMLElement {
+  const chip = [...regexComposer().querySelectorAll<HTMLElement>('[data-slot="filter-command"]')].find(
+    (el) => el.querySelector('[data-slot="filter-command-label"]')?.textContent?.trim() === command,
+  );
+  expect(chip, `no chip for the command "${command}"`).not.toBeNull();
+  return chip!;
+}
+
+/** The add button of a command chip, its aria-label carries the command */
+function commandAddButton(command: string): HTMLButtonElement {
+  const chip = commandChip(command);
+  const button = [...chip.querySelectorAll("button")].find((el) =>
+    el.getAttribute("aria-label")?.endsWith(` ${command}`),
+  );
+  expect(button, `no add button for the command "${command}"`).not.toBeNull();
+  return button as HTMLButtonElement;
+}
+
 describe("TestFilterRegex", () => {
   it("shows the decoded levels as pills", async () => {
     const { target } = await mountArg(makeRegexArg({ value: ["S9-DR-0.5", "0.5", "reset"] }));
@@ -1249,20 +1268,64 @@ describe("TestFilterRegex", () => {
     expect(arg.value).toEqual(["S9-1"]);
   });
 
-  it("appends the row of a command button", async () => {
+  it("offers every command as a chip with a grip and an add button", async () => {
+    const { target } = await mountArg(makeRegexArg({ value: [] }));
+    await openDialog(target);
+
+    const chip = commandChip("reset");
+    expect(chip.querySelector(`[aria-label^="${t.Input.FilterOrderDrag()}"]`)).not.toBeNull();
+    expect(commandAddButton("reset").disabled).toBe(false);
+    expect(chip.getAttribute("data-used")).toBe("false");
+  });
+
+  it("appends the row of a command and marks the chip as used", async () => {
     const { target, arg } = await mountArg(makeRegexArg({ value: [] }));
     await openDialog(target);
 
-    composerButton("reset").click();
+    commandAddButton("reset").click();
     await settle();
-    // A command is an entry of its own, it is offered once
-    expect([...regexComposer().querySelectorAll("button")].some((el) => el.textContent?.trim() === "reset")).toBe(
-      false,
-    );
+
+    // A command is an entry of its own: the chip stays, its button becomes the
+    // check mark and is disabled, and the chip is dimmed
+    expect(regexRowTexts()).toEqual(["reset"]);
+    const chip = commandChip("reset");
+    expect(chip.getAttribute("data-used")).toBe("true");
+    const button = commandAddButton("reset");
+    expect(button.disabled).toBe(true);
+    expect(button.getAttribute("aria-label")).toBe(`${t.Input.FilterOrderAdded()} reset`);
+
     footerButton(t.Input.Save()).click();
     await settle();
 
     expect(arg.value).toEqual(["reset"]);
+  });
+
+  it("shows the command of the value as used", async () => {
+    const { target } = await mountArg(makeRegexArg());
+    await openDialog(target);
+
+    expect(commandChip("reset").getAttribute("data-used")).toBe("true");
+    expect(commandAddButton("reset").disabled).toBe(true);
+  });
+
+  it("bounds the command list to three lines that scroll", async () => {
+    // A filter may declare a dozen commands, the add area must not push the
+    // list out of the dialog
+    const commands = Array.from({ length: 12 }, (_, index) => `cmd${index}`);
+    const { target } = await mountArg(
+      makeRegexArg({
+        value: [],
+        option_command: commands,
+        pattern: REGEX_PATTERN,
+        option_i18n: {},
+      }),
+    );
+    await openDialog(target);
+
+    const list = regexComposer().querySelector<HTMLElement>('[data-slot="filter-commands"]')!;
+    expect(list.className).toContain("max-h-20");
+    expect(list.className).toContain("overflow-y-auto");
+    expect(list.querySelectorAll('[data-slot="filter-command"]')).toHaveLength(12);
   });
 
   it("blocks saving a repeated item", async () => {

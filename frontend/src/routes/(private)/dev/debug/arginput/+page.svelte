@@ -404,7 +404,21 @@
               },
             ],
             pattern: "(?<series>S[1-9])?-?(?<family>DR|PRY|agir|[BCDEGHQT])?-?(?<detail>\\d{3}|\\d\\.\\d|\\d\\d?)?",
-            option_command: ["reset"],
+            // The commands wrap and stop at three lines: a dozen of them shows
+            // the folding, reset is used by the value above
+            option_command: [
+              "reset",
+              "shortest",
+              "cheapest",
+              "first",
+              "rerun",
+              "night",
+              "event",
+              "major",
+              "daily",
+              "weekly",
+              "extra",
+            ],
             option_i18n: { S9: "Series 9", DR: "DR ship", "0.5": "0.5 h", agir: "Agir", reset: "reset" },
             layout: "vert",
           }),

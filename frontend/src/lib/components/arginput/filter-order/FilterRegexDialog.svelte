@@ -194,6 +194,9 @@
     }
     const item = String(activeData?.item ?? "");
     if (!item) return;
+    // A command is unique: dragging one that is already in the order in is a
+    // no-op, the chip of a used command stays draggable (see FilterCommandItem)
+    if (optionCommand.includes(item) && draft.includes(item)) return;
     draft = insertRow(draft, item, target);
   }
 </script>
@@ -258,7 +261,8 @@
         </div>
         <FilterRegexComposer
           {levels}
-          commands={optionCommand.filter((command) => !draft.includes(command))}
+          commands={optionCommand}
+          used={optionCommand.filter((command) => draft.includes(command))}
           label={(value) => arg.getLabel(value)}
           {onAdd}
         />

@@ -111,6 +111,13 @@
     "zh-TW": "拖曳排序",
     "es-ES": "Arrastrar para reordenar"
   },
+  "FilterOrderAdded": {
+    "en-US": "Added",
+    "zh-CN": "已添加",
+    "ja-JP": "追加済み",
+    "zh-TW": "已新增",
+    "es-ES": "Añadido"
+  },
   "FilterOrderAdd": {
     "en-US": "Add",
     "zh-CN": "添加",
