@@ -1147,6 +1147,11 @@ function regexPreview(scope: HTMLElement): HTMLElement {
   return preview!;
 }
 
+/** The placeholder boxes of the levels of a row that is not prepared yet */
+function regexLevelBoxes(scope: HTMLElement): HTMLElement[] {
+  return [...scope.querySelectorAll<HTMLElement>('[data-slot="filter-regex-level"]')];
+}
+
 /** The text of the preview of an unset item, set apart by its parentheses */
 function emptyPreviewText(): string {
   return `(${t.Input.FilterOrderEmpty()})`;
@@ -1388,8 +1393,8 @@ describe("TestFilterRegex", () => {
   });
 
   it("builds the editor of a row when it comes to the screen", async () => {
-    // The rows of a long filter mount as the text of their value, the selects
-    // of a row are built when it is scrolled into view
+    // The rows of a long filter mount as the boxes of their level values, the
+    // selects of a row are built when it is scrolled into view
     vi.stubGlobal("IntersectionObserver", VisibilityObserverStub);
     try {
       const value = Array.from({ length: 20 }, (_, index) => (index % 2 === 0 ? "Q-1" : "0.5"));
@@ -1398,14 +1403,62 @@ describe("TestFilterRegex", () => {
 
       // The first rows are prepared with the dialog
       expect(regexTriggers(regexRows()[0])).toHaveLength(3);
-      // The far rows are text until they are scrolled to
+      // The far rows are placeholder boxes until they are scrolled to
       expect(regexTriggers(regexRows()[19])).toHaveLength(0);
-      expect(regexRows()[19].querySelector('[data-slot="filter-regex-label"]')).not.toBeNull();
+      expect(regexLevelBoxes(regexRows()[19])).toHaveLength(3);
 
       VisibilityObserverStub.intersect(regexRows()[19]);
       await settle();
 
       expect(regexTriggers(regexRows()[19])).toHaveLength(3);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("reads the level values in the place of the selects, not as a copy of the preview", async () => {
+    // A row below the eager rows is painted for a frame before its selects
+    // exist. A single plain label of the whole item starts with the same text
+    // the preview shows, so that frame would read as a duplicated row; the box
+    // of every level takes the place and the width of its select instead.
+    vi.stubGlobal("IntersectionObserver", VisibilityObserverStub);
+    try {
+      const value = Array.from({ length: 20 }, (_, index) => (index % 2 === 0 ? "Q-1" : "0.5"));
+      const { target } = await mountArg(makeRegexArg({ value }));
+      await openDialog(target);
+
+      const row = regexRows()[19];
+      expect(regexPreview(row).textContent?.trim()).toBe("0.5");
+
+      // One box per level, in the declared order: the first two levels are
+      // "any" (the item sets no value for them), the last one is the detail
+      const boxes = regexLevelBoxes(row);
+      expect(boxes.map((box) => box.textContent?.trim())).toEqual([
+        t.Input.FilterOrderAny(),
+        t.Input.FilterOrderAny(),
+        "0.5",
+      ]);
+      // The box of a select takes the same column: every column class of a
+      // hydrated trigger is on the placeholder too, so the swap moves nothing
+      // (the trigger marks its height important, the token is the same)
+      const triggerClasses = regexTriggers(regexRows()[0])[0].className.split(/\s+/).map((name) => name.replace(/!$/, ""));
+      for (const box of boxes) {
+        const boxClasses = box.className.split(/\s+/);
+        for (const shared of ["h-6", "min-w-0", "flex-1", "items-center", "rounded-md", "bg-accent"]) {
+          expect(triggerClasses).toContain(shared);
+          expect(boxClasses).toContain(shared);
+        }
+      }
+
+      VisibilityObserverStub.intersect(row);
+      await settle();
+
+      // The selects read the same values in the same order
+      expect(regexTriggers(row).map((trigger) => trigger.textContent?.trim())).toEqual([
+        t.Input.FilterOrderAny(),
+        t.Input.FilterOrderAny(),
+        "0.5",
+      ]);
     } finally {
       vi.unstubAllGlobals();
     }

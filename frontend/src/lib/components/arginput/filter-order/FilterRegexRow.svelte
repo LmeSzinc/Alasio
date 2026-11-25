@@ -31,10 +31,10 @@
    * A command carries no level, and an item the pattern can not read can not be
    * rendered as selects: the preview is the whole item of such a row.
    *
-   * A row of a long filter mounts as the plain text of its value and turns into
-   * its selects once it is on screen (see `visibleOnce`): the selects of one row
-   * cost more than the row itself, and a filter of a hundred rows is opened far
-   * more often than the rows of its end are read.
+   * A row of a long filter mounts as the boxes of its level values and turns
+   * into its selects once it is on screen (see `visibleOnce`): the selects of
+   * one row cost more than the row itself, and a filter of a hundred rows is
+   * opened far more often than the rows of its end are read.
    */
   type Props = {
     /** The drag identity of the row, rows are addressed by index */
@@ -105,16 +105,22 @@
   {#if showLevels && values !== null}
     <FilterRegexLevels {levels} {values} {label} onchange={onLevelChange} />
   {:else if values !== null}
-    <!-- The plain text of the value, the same the selects read once the row is
-         prepared: the label spans the level columns, so the preview of a row
-         keeps its width when the selects arrive and the row never reflows -->
-    <span
-      data-slot="filter-regex-label"
-      class="flex h-6 min-w-0 basis-0 items-center truncate text-xs"
-      style:flex-grow={Math.max(levels.length, 1)}
-    >
-      {text}
-    </span>
+    <!-- A row that is not prepared yet: one plain box per level, in the place
+         and the size of its selects. A single label would read as a second copy
+         of the preview (a level predicate starts with its own full text), and
+         the frame before the selects arrive would look like a different row.
+         The boxes take the same widths, so the row never reflows. -->
+    {#each levels as level (level.name)}
+      {@const value = values[level.name] ?? ""}
+      <span
+        class="flex h-6 min-w-0 flex-1 items-center rounded-md bg-accent px-1.5 text-xs"
+        data-slot="filter-regex-level"
+      >
+        <span class="min-w-0 flex-1 truncate text-left" class:text-muted-foreground={value === ""}>
+          {value === "" ? t.Input.FilterOrderAny() : label(value)}
+        </span>
+      </span>
+    {/each}
   {:else}
     <!-- A command or an unreadable item has no select to edit: the filler keeps
          the preview at the width of one level, in line with the other rows -->
