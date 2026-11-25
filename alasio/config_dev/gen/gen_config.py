@@ -492,6 +492,9 @@ class ConfigGenerator(ParseGroups, ParseTasks):
         if arg.option_dict:
             i18n_options.extend(arg.option_dict.keys())
             i18n_options.extend(o for options in arg.option_dict.values() for o in options)
+        # Commands are shown by the editor as well (the pair dialog and the regex
+        # command list), so they are translated like every other option
+        i18n_options.extend(arg.option_command or ())
         # A filter-regex has no "option": its candidates live in the level
         # tables, they are translated the same way as the plain options
         for level in arg.levels or []:

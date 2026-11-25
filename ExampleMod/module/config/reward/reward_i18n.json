@@ -65,7 +65,8 @@
           "0:20": "0:20",
           "1:10": "1:10",
           "1:00": "1:00",
-          "2:00": "2:00"
+          "2:00": "2:00",
+          "shortest": "最短"
         }
       },
       "en-US": {
@@ -102,7 +103,8 @@
           "0:20": "0:20",
           "1:10": "1:10",
           "1:00": "1:00",
-          "2:00": "2:00"
+          "2:00": "2:00",
+          "shortest": "shortest"
         }
       }
     },
@@ -128,7 +130,8 @@
           "T4": "T4",
           "T3": "T3",
           "T2": "T2",
-          "T1": "T1"
+          "T1": "T1",
+          "first": "优先第一个"
         }
       },
       "en-US": {
@@ -142,7 +145,8 @@
           "T4": "T4",
           "T3": "T3",
           "T2": "T2",
-          "T1": "T1"
+          "T1": "T1",
+          "first": "first"
         }
       }
     },
@@ -361,6 +365,7 @@
         "name": "自定义过滤器",
         "help": "每一行按系列、类型、时长描述一个科研项目，从上到下依次尝试；按编号写的条目依然有效",
         "option_i18n": {
+          "reset": "重置",
           "S1": "S1",
           "S2": "S2",
           "S3": "S3",
@@ -444,6 +449,7 @@
         "name": "Custom filter",
         "help": "Every row describes a research project by series, type and duration, tried from top to bottom; a row written by project number stays valid",
         "option_i18n": {
+          "reset": "reset",
           "S1": "S1",
           "S2": "S2",
           "S3": "S3",
