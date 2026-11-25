@@ -88,13 +88,13 @@
         "group": "Tactical",
         "arg": "TacticalFilter",
         "dt": "filter-order-pair",
-        "value": ["Same-T4", "Same-T3", "Same-T2", "Same-T1", "Blue-T2", "Yellow-T2", "Red-T2", "Blue-T3", "Yellow-T3", "Red-T3", "Blue-T4", "Yellow-T4", "Red-T4", "Blue-T1", "Yellow-T1", "Red-T1", "first"],
-        "option": ["Same", "Blue", "Yellow", "Red"],
+        "value": ["BookT4-same", "BookT3-same", "BookT2-same", "BookT1-same", "BookT2-blue", "BookT2-yellow", "BookT2-red", "BookT3-blue", "BookT3-yellow", "BookT3-red", "BookT4-blue", "BookT4-yellow", "BookT4-red", "BookT1-blue", "BookT1-yellow", "BookT1-red", "first"],
+        "option": ["BookT4", "BookT3", "BookT2", "BookT1"],
         "option_dict": {
-          "Same": ["T4", "T3", "T2", "T1"],
-          "Blue": ["T2", "T3", "T4", "T1"],
-          "Yellow": ["T2", "T3", "T4", "T1"],
-          "Red": ["T2", "T3", "T4", "T1"]
+          "BookT4": ["same", "red", "blue", "yellow"],
+          "BookT3": ["same", "red", "blue", "yellow"],
+          "BookT2": ["same", "red", "blue", "yellow"],
+          "BookT1": ["same", "red", "blue", "yellow"]
         },
         "option_command": [
           "first"

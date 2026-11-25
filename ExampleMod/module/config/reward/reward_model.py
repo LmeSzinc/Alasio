@@ -35,16 +35,18 @@ class Commission(a.GroupBase):
 
 
 LITERAL_Tactical_TacticalFilter = t.Literal[
-    'Same-T4', 'Same-T3', 'Same-T2', 'Same-T1', 'Blue-T2', 'Blue-T3', 'Blue-T4', 'Blue-T1', 'Yellow-T2', 'Yellow-T3',
-    'Yellow-T4', 'Yellow-T1', 'Red-T2', 'Red-T3', 'Red-T4', 'Red-T1', 'first',
+    'BookT4-same', 'BookT4-red', 'BookT4-blue', 'BookT4-yellow', 'BookT3-same', 'BookT3-red', 'BookT3-blue',
+    'BookT3-yellow', 'BookT2-same', 'BookT2-red', 'BookT2-blue', 'BookT2-yellow', 'BookT1-same', 'BookT1-red',
+    'BookT1-blue', 'BookT1-yellow', 'first',
 ]
 LITERAL_Tactical_RapidTrainingSlot = t.Literal['do_not_use', 'slot_1', 'slot_2', 'slot_3', 'slot_4']
 
 
 class Tactical(a.GroupBase):
     TacticalFilter: t.Tuple[LITERAL_Tactical_TacticalFilter, ...] = (
-        'Same-T4', 'Same-T3', 'Same-T2', 'Same-T1', 'Blue-T2', 'Yellow-T2', 'Red-T2', 'Blue-T3', 'Yellow-T3', 'Red-T3',
-        'Blue-T4', 'Yellow-T4', 'Red-T4', 'Blue-T1', 'Yellow-T1', 'Red-T1', 'first',
+        'BookT4-same', 'BookT3-same', 'BookT2-same', 'BookT1-same', 'BookT2-blue', 'BookT2-yellow', 'BookT2-red',
+        'BookT3-blue', 'BookT3-yellow', 'BookT3-red', 'BookT4-blue', 'BookT4-yellow', 'BookT4-red', 'BookT1-blue',
+        'BookT1-yellow', 'BookT1-red', 'first',
     )
     RapidTrainingSlot: LITERAL_Tactical_RapidTrainingSlot = 'do_not_use'
 

@@ -121,31 +121,31 @@
     "TacticalFilter": {
       "zh-CN": {
         "name": "战术过滤器",
-        "help": "从高到低的战术训练优先级，同一类型的多个等级可以同时存在",
+        "help": "从高到低的战术训练优先级，同一等级的多个类型可以同时存在",
         "option_i18n": {
-          "Same": "同类型",
-          "Blue": "蓝色",
-          "Yellow": "黄色",
-          "Red": "红色",
-          "T4": "T4",
-          "T3": "T3",
-          "T2": "T2",
-          "T1": "T1",
+          "BookT4": "教材T4",
+          "BookT3": "教材T3",
+          "BookT2": "教材T2",
+          "BookT1": "教材T1",
+          "same": "同类型",
+          "red": "攻击教材",
+          "blue": "防御教材",
+          "yellow": "辅助教材",
           "first": "优先第一个"
         }
       },
       "en-US": {
         "name": "Tactical filter",
-        "help": "Priority from high to low, several levels of one type may coexist",
+        "help": "Priority from high to low, several types of one level may coexist",
         "option_i18n": {
-          "Same": "Same type",
-          "Blue": "Blue",
-          "Yellow": "Yellow",
-          "Red": "Red",
-          "T4": "T4",
-          "T3": "T3",
-          "T2": "T2",
-          "T1": "T1",
+          "BookT4": "T4 book",
+          "BookT3": "T3 book",
+          "BookT2": "T2 book",
+          "BookT1": "T1 book",
+          "same": "Same type",
+          "red": "Attack book",
+          "blue": "Defense book",
+          "yellow": "Support book",
           "first": "first"
         }
       }

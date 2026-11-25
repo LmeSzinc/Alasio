@@ -50,20 +50,26 @@ Commission:
 
 Tactical:
   args:
+    # The groups are the tiers of the skill books, the options are the kinds:
+    # a red book trains attack, a blue book trains defence, a yellow book
+    # trains support, "same" is the book matching the type of the student.
+    # A tier group holds its four kinds, the order of the value is the
+    # priority of the training.
     TacticalFilter:
       dt: filter-order-pair
       value: >-
-        Same-T4 > Same-T3 > Same-T2 > Same-T1
-        > Blue-T2 > Yellow-T2 > Red-T2 > Blue-T3
-        > Yellow-T3 > Red-T3 > Blue-T4 > Yellow-T4
-        > Red-T4 > Blue-T1 > Yellow-T1 > Red-T1
+        BookT4-same > BookT3-same > BookT2-same > BookT1-same
+        > BookT2-blue > BookT2-yellow > BookT2-red
+        > BookT3-blue > BookT3-yellow > BookT3-red
+        > BookT4-blue > BookT4-yellow > BookT4-red
+        > BookT1-blue > BookT1-yellow > BookT1-red
         > first
-      option: [ Same, Blue, Yellow, Red ]
+      option: [ BookT4, BookT3, BookT2, BookT1 ]
       option_dict:
-        Same: [ 'T4', 'T3', 'T2', 'T1' ]
-        Blue: [ 'T2', 'T3', 'T4', 'T1' ]
-        Yellow: [ 'T2', 'T3', 'T4', 'T1' ]
-        Red: [ 'T2', 'T3', 'T4', 'T1' ]
+        BookT4: [ same, red, blue, yellow ]
+        BookT3: [ same, red, blue, yellow ]
+        BookT2: [ same, red, blue, yellow ]
+        BookT1: [ same, red, blue, yellow ]
       option_command: [ first ]
     RapidTrainingSlot:
       value: do_not_use
