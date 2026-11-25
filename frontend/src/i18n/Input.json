@@ -223,6 +223,13 @@
     "zh-TW": "儲存",
     "es-ES": "Guardar"
   },
+  "FilterOrderClear": {
+    "en-US": "Clear",
+    "zh-CN": "清空",
+    "ja-JP": "クリア",
+    "zh-TW": "清除",
+    "es-ES": "Limpiar"
+  },
   "FilterOrderAddFilter": {
     "en-US": "Add filter",
     "zh-CN": "添加过滤器",
@@ -231,11 +238,11 @@
     "es-ES": "Añadir filtro"
   },
   "FilterOrderAny": {
-    "en-US": "FilterOrderAny",
-    "zh-CN": "FilterOrderAny",
-    "ja-JP": "FilterOrderAny",
-    "zh-TW": "FilterOrderAny",
-    "es-ES": "FilterOrderAny"
+    "en-US": "Any",
+    "zh-CN": "任意",
+    "ja-JP": "任意",
+    "zh-TW": "任意",
+    "es-ES": "Cualquiera"
   },
   "FilterOrderMoveUp": {
     "en-US": "Move up",

@@ -1,10 +1,10 @@
 <script lang="ts">
   import { type DropIndicatorState } from "$lib/components/dnd";
   import { t } from "$lib/i18n";
-  import { cn } from "$lib/utils";
   import FilterItem from "./FilterItem.svelte";
   import FilterItemMarks from "./FilterItemMarks.svelte";
   import FilterRegexLevels from "./FilterRegexLevels.svelte";
+  import FilterRegexPreview from "./FilterRegexPreview.svelte";
   import type { RegexLevel, RegexValues } from "./filterOrder";
 
   /**
@@ -23,8 +23,13 @@
    * The row frame (element, drag registration, position, drop line, buttons) is
    * FilterItem.svelte; this component decides what the middle of the row edits.
    *
+   * Every row starts with the output preview: the item as it would be stored,
+   * right after the grip, as wide as one level select. The selects that follow
+   * it read the translated labels, so the preview is where the composed string
+   * can be checked.
+   *
    * A command carries no level, and an item the pattern can not read can not be
-   * rendered as selects, both show a plain label instead.
+   * rendered as selects: the preview is the whole item of such a row.
    *
    * A row of a long filter mounts as the plain text of its value and turns into
    * its selects once it is on screen (see `visibleOnce`): the selects of one row
@@ -96,17 +101,24 @@
   {onMoveDown}
   {onRemove}
 >
+  <FilterRegexPreview {item} {invalid} />
   {#if showLevels && values !== null}
     <FilterRegexLevels {levels} {values} {label} onchange={onLevelChange} />
-  {:else}
+  {:else if values !== null}
     <!-- The plain text of the value, the same the selects read once the row is
-         prepared: the row keeps its height and never reflows -->
+         prepared: the label spans the level columns, so the preview of a row
+         keeps its width when the selects arrive and the row never reflows -->
     <span
       data-slot="filter-regex-label"
-      class={cn("flex h-6 min-w-0 flex-1 items-center truncate text-xs", invalid && "text-destructive")}
+      class="flex h-6 min-w-0 basis-0 items-center truncate text-xs"
+      style:flex-grow={Math.max(levels.length, 1)}
     >
       {text}
     </span>
+  {:else}
+    <!-- A command or an unreadable item has no select to edit: the filler keeps
+         the preview at the width of one level, in line with the other rows -->
+    <span aria-hidden="true" class="min-w-0 basis-0" style:flex-grow={Math.max(levels.length, 1)}></span>
   {/if}
 
   {#if duplicate || invalid}

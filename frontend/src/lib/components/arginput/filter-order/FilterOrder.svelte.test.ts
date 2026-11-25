@@ -1099,6 +1099,18 @@ function regexTriggers(scope: HTMLElement): HTMLElement[] {
   return [...scope.querySelectorAll<HTMLElement>('[data-slot="select-trigger"]')];
 }
 
+/** The output preview at the head of a row, and of the constructor row */
+function regexPreview(scope: HTMLElement): HTMLElement {
+  const preview = scope.querySelector<HTMLElement>('[data-slot="filter-regex-preview"]');
+  expect(preview, "no output preview in the row").not.toBeNull();
+  return preview!;
+}
+
+/** The text of the preview of an unset item, set apart by its parentheses */
+function emptyPreviewText(): string {
+  return `(${t.Input.FilterOrderEmpty()})`;
+}
+
 /** Open a level select and pick a value of its popup */
 async function pickLevel(trigger: HTMLElement, label: string) {
   trigger.click();
@@ -1162,6 +1174,127 @@ describe("TestFilterRegex", () => {
     expect(regexTriggers(regexRows()[2])).toHaveLength(0);
     // The constructor row edits every level as well
     expect(regexTriggers(regexComposer())).toHaveLength(3);
+  });
+
+  it("previews the stored item at the head of every row, as wide as a level", async () => {
+    const { target } = await mountArg(makeRegexArg());
+    await openDialog(target);
+
+    // The raw string a save would write, also for the row of a command that has
+    // no level to edit, and the placeholder of the constructor row before
+    // anything is picked
+    expect(regexRows().map((row) => regexPreview(row).textContent?.trim())).toEqual(["S9-DR-0.5", "S9-E-315", "reset"]);
+    expect(regexPreview(regexComposer()).textContent?.trim()).toBe(emptyPreviewText());
+    expect(regexPreview(regexComposer()).getAttribute("data-empty")).toBe("true");
+
+    // The preview and every level select take one column each
+    for (const row of [...regexRows(), regexComposer()]) {
+      expect(regexPreview(row).className).toContain("flex-1");
+      for (const trigger of regexTriggers(row)) expect(trigger.className).toContain("flex-1");
+    }
+
+    // The preview sits between the grip and the selects
+    const row = regexRows()[0];
+    const grip = row.querySelector(`[aria-label^="${t.Input.FilterOrderDrag()}"]`)!;
+    const preview = regexPreview(row);
+    expect(grip.compareDocumentPosition(preview) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(preview.compareDocumentPosition(regexTriggers(row)[0]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("aligns the constructor row with the rows of the list", async () => {
+    const { target } = await mountArg(makeRegexArg());
+    await openDialog(target);
+
+    // The rows scroll inside an inset content, the constructor row sits outside
+    // that port and has to keep the same inset, or its border sticks out on the
+    // right of the borders above it
+    expect(regexComposer().className).toContain("p-0.5");
+    expect(regexComposer().className).toContain("pr-2.5");
+
+    // A row ends with the diamond of the up / down buttons and the remove
+    // button, the constructor row carries a reset and an add: the reset takes
+    // the width of the diamond and the add that of the remove button, so the
+    // levels of the constructor end where the levels of the rows end
+    const add = composerButton(t.Input.FilterOrderAdd());
+    const cluster = add.parentElement!;
+    expect(cluster.className).toContain("flex items-center");
+    expect(cluster.children).toHaveLength(2);
+    const clear = cluster.children[0] as HTMLElement;
+    expect(clear.getAttribute("aria-label")).toBe(t.Input.FilterOrderClear());
+    expect(clear.className).toContain("w-4");
+    expect(cluster.children[1]).toBe(add);
+  });
+
+  it("keeps the grip of the constructor row from dragging an empty row", async () => {
+    const { target } = await mountArg(makeRegexArg({ value: [], option_i18n: {} }));
+    await openDialog(target);
+
+    const grip = regexComposer().querySelector<HTMLElement>(`[aria-label="${t.Input.FilterOrderDrag()}"]`)!;
+    // An empty row inserts nothing, so it must not start a drag at all
+    expect(grip.getAttribute("aria-disabled")).toBe("true");
+    expect(grip.getAttribute("tabindex")).toBe("-1");
+    expect(grip.className).toContain("cursor-not-allowed");
+    expect(grip.className).not.toContain("cursor-grab");
+
+    await pickLevel(regexTriggers(regexComposer())[0], "S9");
+
+    // Once it describes an item, the row drags into the list as usual
+    expect(grip.getAttribute("aria-disabled")).toBe("false");
+    expect(grip.getAttribute("tabindex")).toBe("0");
+    expect(grip.className).toContain("cursor-grab");
+  });
+
+  it("keeps the reset and the add of the constructor row dead while it is unset", async () => {
+    const { target } = await mountArg(makeRegexArg({ value: [], option_i18n: {} }));
+    await openDialog(target);
+
+    // An unset row has nothing to clear and nothing to add: hovering either
+    // button must neither paint the ghost hover of a live button nor drop the
+    // cursor. The base class takes the pointer events away from a disabled
+    // button, which also drops its cursor, so both are pinned back here
+    for (const button of [composerButton(t.Input.FilterOrderClear()), composerButton(t.Input.FilterOrderAdd())]) {
+      expect(button.disabled).toBe(true);
+      expect(button.className).toContain("disabled:pointer-events-auto");
+      expect(button.className).toContain("disabled:cursor-not-allowed");
+      expect(button.className).toContain("disabled:hover:bg-transparent");
+      expect(button.className).toContain("disabled:hover:text-current");
+    }
+
+    await pickLevel(regexTriggers(regexComposer())[0], "S9");
+
+    // A described row can act, so both buttons come alive (the disabled look
+    // stays in the class list, it only applies while the button is disabled)
+    for (const button of [composerButton(t.Input.FilterOrderClear()), composerButton(t.Input.FilterOrderAdd())]) {
+      expect(button.disabled).toBe(false);
+    }
+  });
+
+  it("clears the level selection of the constructor row", async () => {
+    const { target, arg } = await mountArg(makeRegexArg({ value: [], option_i18n: {} }));
+    await openDialog(target);
+
+    const clear = composerButton(t.Input.FilterOrderClear());
+    // Nothing is selected yet, there is nothing to clear
+    expect(clear.disabled).toBe(true);
+    expect(composerButton(t.Input.FilterOrderAdd()).disabled).toBe(true);
+
+    await pickLevel(regexTriggers(regexComposer())[0], "S9");
+    expect(regexPreview(regexComposer()).textContent?.trim()).toBe("S9");
+    expect(clear.disabled).toBe(false);
+
+    clear.click();
+    await settle();
+
+    // Every level is back to "any", the preview back to the placeholder, and
+    // the row adds nothing
+    expect(regexPreview(regexComposer()).textContent?.trim()).toBe(emptyPreviewText());
+    for (const trigger of regexTriggers(regexComposer()))
+      expect(trigger.textContent).toContain(t.Input.FilterOrderAny());
+    expect(clear.disabled).toBe(true);
+    footerButton(t.Input.Save()).click();
+    await settle();
+
+    expect(arg.value).toEqual([]);
   });
 
   it("heads the add area and keeps no selected heading on the single column", async () => {
