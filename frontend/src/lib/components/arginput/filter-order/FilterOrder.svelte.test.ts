@@ -1119,6 +1119,13 @@ async function pickLevel(trigger: HTMLElement, label: string) {
   await settle();
 }
 
+/** The drag grip of one command chip, found through its aria-label */
+function commandGrip(command: string): HTMLElement {
+  const grip = commandChip(command).querySelector<HTMLElement>(`[aria-label^="${t.Input.FilterOrderDrag()}"]`);
+  expect(grip, `no grip for the command "${command}"`).not.toBeNull();
+  return grip!;
+}
+
 function composerButton(label: string): HTMLButtonElement {
   const button = [...regexComposer().querySelectorAll("button")].find(
     (el) => el.textContent?.trim() === label || el.getAttribute("aria-label") === label,
@@ -1439,6 +1446,31 @@ describe("TestFilterRegex", () => {
 
     expect(commandChip("reset").getAttribute("data-used")).toBe("true");
     expect(commandAddButton("reset").disabled).toBe(true);
+  });
+
+  it("refuses to start a drag on a used command", async () => {
+    // The command is already in the list, so the drop handler refuses it: a drag
+    // that still starts would only draw the drop line of the list and insert
+    // nothing, so the grip itself is disabled
+    const { target } = await mountArg(makeRegexArg({ option_command: ["reset", "shortest"] }));
+    await openDialog(target);
+
+    const used = commandGrip("reset");
+    expect(used.getAttribute("aria-disabled")).toBe("true");
+    expect(used.getAttribute("tabindex")).toBe("-1");
+    expect(used.className).toContain("cursor-not-allowed");
+    expect(used.className).not.toContain("cursor-grab");
+
+    // An unused command keeps its grip
+    const unused = commandGrip("shortest");
+    expect(unused.getAttribute("aria-disabled")).toBe("false");
+    expect(unused.getAttribute("tabindex")).toBe("0");
+    expect(unused.className).toContain("cursor-grab");
+
+    // Appending a command into the draft takes its grip as well
+    commandAddButton("shortest").click();
+    await settle();
+    expect(commandGrip("shortest").getAttribute("aria-disabled")).toBe("true");
   });
 
   it("bounds the command list to three lines that scroll", async () => {

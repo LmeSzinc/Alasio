@@ -10,15 +10,15 @@
   /**
    * One declared command of a filter arg, in the command list below the list
    *
-   * The chip is always draggable: dragging it into the list inserts the command
-   * where it is dropped, and the plus button appends it at the end. A command is
-   * unique, so a command the order already holds shows a check instead of the
-   * plus and the chip is dimmed; dragging it in is a no-op (the drop handler of
-   * the dialog refuses a duplicate), the row in the list is the one to move.
+   * The chip is draggable while the order does not hold it yet: dragging it into
+   * the list inserts the command where it is dropped, and the plus button
+   * appends it at the end. A command is unique, so a command the order already
+   * holds shows a check instead of the plus and the chip is dimmed.
    *
-   * The grip stays active for a used command on purpose: a disabled draggable
-   * would bind no listeners at all, and a grip that silently does nothing is
-   * worse than a drop that is ignored.
+   * A used command gets no drag at all: the drop handler of the dialog refuses
+   * the duplicate, so a drag that starts on its grip can only draw the drop line
+   * of the list and then insert nothing. The grip says so instead of offering a
+   * gesture that leads nowhere, the row in the list is the one to move.
    */
   type Props = {
     /** The command, as declared by the arg */
@@ -39,6 +39,12 @@
     id: `command-${command}`,
     data: { type: "item", item: command },
   });
+
+  // A used command binds no listener: the drag would be measured and its drop
+  // line drawn, only for the drop to be refused. `listeners` follows the flag,
+  // so a command the draft gains or loses takes the grip with it.
+  const gripListeners = $derived(used ? {} : listeners.current);
+  const canDrag = $derived(!used);
 </script>
 
 <div
@@ -51,11 +57,17 @@
     used && "bg-muted text-muted-foreground",
   )}
 >
-  <!-- Only the grip starts a drag -->
+  <!-- Only the grip starts a drag, and only while the command is still unused -->
   <div
-    {...listeners.current}
     {...attributes.current}
-    class={cn("flex h-5 shrink-0 cursor-grab items-center px-0.5 text-muted-foreground", used && "opacity-60")}
+    {...gripListeners}
+    role="button"
+    tabindex={canDrag ? 0 : -1}
+    aria-disabled={!canDrag}
+    class={cn(
+      "flex h-5 shrink-0 items-center px-0.5 text-muted-foreground",
+      canDrag ? "cursor-grab" : "cursor-not-allowed opacity-60",
+    )}
     aria-label={`${t.Input.FilterOrderDrag()} ${label}`}
   >
     <GripVertical class="size-3.5" />

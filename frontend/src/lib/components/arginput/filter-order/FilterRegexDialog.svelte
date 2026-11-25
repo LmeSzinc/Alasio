@@ -194,8 +194,9 @@
     }
     const item = String(activeData?.item ?? "");
     if (!item) return;
-    // A command is unique: dragging one that is already in the order in is a
-    // no-op, the chip of a used command stays draggable (see FilterCommandItem)
+    // A command is unique: a used command has no drag of its own (see
+    // FilterCommandItem), the guard stays for a drag that was already running
+    // when the command entered the draft
     if (optionCommand.includes(item) && draft.includes(item)) return;
     draft = insertRow(draft, item, target);
   }
