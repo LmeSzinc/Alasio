@@ -19,13 +19,19 @@
    * accepts a drop on the empty area and on the gaps between the rows; `id` is
    * stable (`filter-order-{column}`), the drop handler maps it to "insert
    * first" (top area) or "append last" (the rest).
+   *
+   * The port is exposed as `viewport` so the editor can bring a row into view:
+   * a row the user just added lands at the end of a long list, which the port
+   * may have scrolled far away from.
    */
   type Props = {
     /** Which column this is, it decides the droppable type of the container */
     column: "selected" | "unused";
+    /** The scroll port of the column, bound by the editor that scrolls it */
+    viewport?: HTMLElement | null;
     children: Snippet;
   };
-  let { column, children }: Props = $props();
+  let { column, viewport = $bindable(null), children }: Props = $props();
 
   // svelte-ignore state_referenced_locally
   const { isOver, setNodeRef } = useDroppable({
@@ -40,7 +46,7 @@
   data-column={column}
   class={cn("relative min-h-0 flex-1 rounded-md", isOver.current && "bg-accent/30")}
 >
-  <ScrollArea class="h-full">
+  <ScrollArea class="h-full" bind:viewportRef={viewport}>
     <!-- The right padding keeps the item text out of the scrollbar -->
     <div class="flex flex-col gap-y-1 p-0.5 pr-2.5">
       {@render children()}

@@ -1,3 +1,5 @@
+import { tick } from "svelte";
+
 /**
  * Find the closest scrollable parent of an element.
  */
@@ -12,6 +14,22 @@ export function findScrollParent(node: HTMLElement | null) {
     parent = parent.parentElement;
   }
   return null;
+}
+
+/**
+ * Bring a scroll port to its end, once the update that grew it is on screen.
+ *
+ * A row appended by a click is written in the same tick the button was pressed,
+ * so right after the call the port still measures the list without that row and
+ * a scroll would stop one row short of the end. Waiting for the tick is what
+ * makes the last row visible.
+ *
+ * @param element The scroll port, null when the list is not on screen
+ */
+export async function scrollToEnd(element: HTMLElement | null): Promise<void> {
+  if (!element) return;
+  await tick();
+  element.scrollTop = element.scrollHeight;
 }
 
 /**

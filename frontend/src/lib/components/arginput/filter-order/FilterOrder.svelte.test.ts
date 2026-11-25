@@ -245,6 +245,34 @@ function footerButton(label: string): HTMLButtonElement {
   return button as HTMLButtonElement;
 }
 
+/**
+ * jsdom lays nothing out, so a scroll port reports no content and no scroll at
+ * all. This gives it a content height and records the scroll the editor makes,
+ * the same way the log viewer test fakes its viewport.
+ */
+function fakeScrollPort(element: HTMLElement, height: number, clientHeight = 100) {
+  const state = { top: 0 };
+  Object.defineProperties(element, {
+    scrollHeight: { get: () => height, configurable: true },
+    clientHeight: { get: () => clientHeight, configurable: true },
+    scrollTop: {
+      get: () => state.top,
+      set: (value: number) => (state.top = value),
+      configurable: true,
+    },
+  });
+  return state;
+}
+
+/** The scroll port of one column of the transfer dialog */
+function columnViewport(name: "selected" | "unused"): HTMLElement {
+  const port = column(name).querySelector<HTMLElement>(
+    '[data-slot="filter-order-list"] [data-slot="scroll-area-viewport"]',
+  );
+  expect(port, `no scroll port in the ${name} column`).not.toBeNull();
+  return port!;
+}
+
 async function openDialog(target: HTMLElement) {
   editButtons(target)[0].click();
   await settle();
@@ -418,6 +446,19 @@ describe("TestFilterOrderDialog", () => {
     await settle();
     expect(columnLabels("selected")).toEqual(["Fleet-1", "Submarine", "Fleet-2"]);
     expect(columnLabels("unused")).toEqual(["Fleet-3", "Fleet-4", "Call Submarine"]);
+  });
+
+  it("scrolls the order to the end when a row is appended", async () => {
+    // A list longer than the dialog appends the row below the fold: the port
+    // has to follow, or the click reads as if it did nothing
+    const { target } = await mountArg(makeArg({ value: ["Fleet-1"] }));
+    await openDialog(target);
+
+    const port = fakeScrollPort(columnViewport("selected"), 900);
+    rowButton("unused", t.Input.FilterOrderAdd(), "Fleet-2").click();
+    await settle();
+
+    expect(port.top).toBe(900);
   });
 
   it("moves an item with the up / down buttons", async () => {
@@ -1111,6 +1152,13 @@ function emptyPreviewText(): string {
   return `(${t.Input.FilterOrderEmpty()})`;
 }
 
+/** The scroll port of the single column of the regex editor */
+function regexViewport(): HTMLElement {
+  const port = regexScrollList().querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]');
+  expect(port, "no scroll port in the regex column").not.toBeNull();
+  return port!;
+}
+
 /** Open a level select and pick a value of its popup */
 async function pickLevel(trigger: HTMLElement, label: string) {
   trigger.click();
@@ -1406,6 +1454,20 @@ describe("TestFilterRegex", () => {
     await settle();
 
     expect(arg.value).toEqual(["S9-1"]);
+  });
+
+  it("scrolls the list to the end when the constructor appends a predicate", async () => {
+    // The constructor always appends, and a filter longer than the dialog would
+    // put the new row out of sight right after the user asked for it
+    const { target } = await mountArg(makeRegexArg({ value: [], option_i18n: {} }));
+    await openDialog(target);
+
+    const port = fakeScrollPort(regexViewport(), 640);
+    await pickLevel(regexTriggers(regexComposer())[0], "S9");
+    composerButton(t.Input.FilterOrderAdd()).click();
+    await settle();
+
+    expect(port.top).toBe(640);
   });
 
   it("offers every command as a chip with a grip and an add button", async () => {

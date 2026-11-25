@@ -2,6 +2,7 @@
   import { type ArgData, getArgName, i18nTextToOneLine, useArgValue } from "$lib/components/arg/utils.svelte";
   import { type DndEndCallbackDetail } from "$lib/components/dnd";
   import { t } from "$lib/i18n";
+  import { scrollToEnd } from "$lib/use/scroll.svelte";
   import FilterOrderColumn from "./FilterOrderColumn.svelte";
   import FilterPopup from "./FilterPopup.svelte";
   import FilterRegexComposer from "./FilterRegexComposer.svelte";
@@ -146,6 +147,11 @@
 
   const dndRules = { selected: ["item"] };
 
+  // The scroll port of the list, so a row added at the end can be brought into
+  // view: the constructor always appends, and a filter longer than the dialog
+  // would otherwise take the new row out of sight
+  let listViewport = $state<HTMLElement | null>(null);
+
   function onMoveUp(index: number) {
     draft = moveItem(draft, index, -1);
   }
@@ -170,6 +176,8 @@
   function onAdd(item: FilterOrderItemValue) {
     if (!item) return;
     draft = [...draft, item];
+    // The row is appended at the end, which may be out of sight
+    void scrollToEnd(listViewport);
   }
 
   /**
@@ -217,7 +225,7 @@
     <!-- One column, no heading: the list is the whole editor, and a heading of
          "selected" would suggest there is another column to compare with -->
     <div data-slot="filter-regex-column" class="flex min-h-0 min-w-0 flex-1 flex-col gap-y-1.5">
-      <FilterOrderColumn column="selected">
+      <FilterOrderColumn column="selected" bind:viewport={listViewport}>
         {#if draft.length === 0}
           <div class="flex min-h-16 items-center justify-center px-2 text-center text-xs text-muted-foreground">
             {t.Input.FilterOrderSelectedEmpty()}

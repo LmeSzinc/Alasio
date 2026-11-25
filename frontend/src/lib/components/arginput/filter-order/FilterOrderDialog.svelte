@@ -2,6 +2,7 @@
   import { type ArgData, getArgName, i18nTextToOneLine, useArgValue } from "$lib/components/arg/utils.svelte";
   import { type DndEndCallbackDetail } from "$lib/components/dnd";
   import { t } from "$lib/i18n";
+  import { scrollToEnd } from "$lib/use/scroll.svelte";
   import FilterOrderColumn from "./FilterOrderColumn.svelte";
   import FilterOrderGroupHeader from "./FilterOrderGroupHeader.svelte";
   import FilterOrderItem from "./FilterOrderItem.svelte";
@@ -220,6 +221,11 @@
 
   const dndRules = { selected: ["item"], unused: ["item"] };
 
+  // The scroll port of the selected column, so a row added at the end can be
+  // brought into view: a list longer than the dialog would otherwise take the
+  // new row without any sign that it was added
+  let selectedViewport = $state<HTMLElement | null>(null);
+
   function labelOf(item: FilterOrderItemValue): string {
     // A row of a filter-order-item shows its primary item, the secondary option
     // has its own selector. A row of a filter-order-pair shows the whole entry.
@@ -257,6 +263,8 @@
   /** A row added from the unused column, commands are added as they are */
   function onAdd(item: FilterOrderItemValue) {
     draft = appendItem(draft, completeItem(String(item)));
+    // The row is appended at the end, which may be out of sight
+    void scrollToEnd(selectedViewport);
   }
 
   /** Replace the secondary option of a row, the position of the row is kept */
@@ -324,7 +332,7 @@
         <div class="border-b border-border pb-1.5 text-xs font-medium text-muted-foreground">
           {t.Input.FilterOrderSelected()}
         </div>
-        <FilterOrderColumn column="selected">
+        <FilterOrderColumn column="selected" bind:viewport={selectedViewport}>
           {#if draft.length === 0}
             <div class="flex min-h-16 items-center justify-center px-2 text-center text-xs text-muted-foreground">
               {t.Input.FilterOrderSelectedEmpty()}
