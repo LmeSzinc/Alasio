@@ -160,6 +160,17 @@ describe("TestAdvancedDemo", () => {
     await settle();
 
     expect(plain.textContent).toContain(help);
+
+    // the question mark stays on the row, so the help can be folded again
+    // without closing the advanced settings
+    const question = [...plain.querySelectorAll("button")].find(
+      (button) => button.getAttribute("aria-label") === t.Input.ShowHelp(),
+    );
+    expect(question, "the question mark must survive the advanced toggle").not.toBeUndefined();
+    question!.click();
+    await settle();
+
+    expect(plain.textContent).not.toContain(help);
   });
 
   it("offers no cog on a card without an advanced arg", async () => {

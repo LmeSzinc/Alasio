@@ -318,6 +318,53 @@ export function useArgValue<T>(data: ArgData) {
 }
 
 /**
+ * Visibility of a text that folds behind a toggle of its own row, and that also
+ * opens while the setting around it is expanded (a card's advanced settings).
+ *
+ * The two inputs are getters rather than values, so this composable is created
+ * once during component init and still follows its inputs: a plain value would
+ * freeze at what it had on the first render. Call it at the top level of the
+ * component and do NOT wrap it in `$derived` the way `useArgValue` is wrapped:
+ * rebuilding the object would drop a fold the user made by hand.
+ *
+ * The toggle of the row keeps its own say. Flipping `visible` by hand is not
+ * undone by the next run of the expand sync, because that effect reads only its
+ * two inputs.
+ *
+ * example:
+ *   const help = useVisible(() => !!data.fold_help, () => isAdvanced);
+ *   <ToggleHelp bind:helpVisible={help.visible} />
+ *   {#if data.help && help.shown}...{/if}
+ *
+ * @param foldHelp A function returning true when the row has a folded text
+ * @param expanded A function returning true while the setting around it is open
+ * @returns An object with the expanded state of the text (`visible`, usable as
+ *     the bind target of the toggle) and whether to render the text (`shown`)
+ */
+export function useVisible(foldHelp: () => boolean, expanded: () => boolean) {
+  // Seed with the state the row mounts in: a row that the expand just revealed
+  // lands on screen already expanded, and must not flash folded for one frame.
+  let visible = $state(foldHelp() && expanded());
+  $effect(() => {
+    // A row without a folded text has nothing to sync, and a row that appears
+    // behind the expand is already seeded above
+    if (foldHelp()) visible = expanded();
+  });
+
+  return {
+    get visible() {
+      return visible;
+    },
+    set visible(newVisible: boolean) {
+      visible = newVisible;
+    },
+    get shown() {
+      return !foldHelp() || visible;
+    },
+  };
+}
+
+/**
  * Validate input value based on data type (dt field) and convert to appropriate type
  *
  * @param value The input value to validate

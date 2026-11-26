@@ -3,7 +3,7 @@
   import AdvancedBadge from "./AdvancedBadge.svelte";
   import I18nText from "./I18nText.svelte";
   import ToggleHelp from "./ToggleHelp.svelte";
-  import { type LayoutProps, getArgName } from "./utils.svelte";
+  import { type LayoutProps, getArgName, useVisible } from "./utils.svelte";
 
   let {
     data = $bindable(),
@@ -18,9 +18,12 @@
 
   const displayName = $derived(getArgName(data));
 
-  let helpVisible = $state(false);
-  const shouldFoldHelp = $derived(data.fold_help && !isAdvanced);
-  const isHelpShown = $derived(!shouldFoldHelp || helpVisible);
+  // The help opens with the advanced settings of the card, and its own question
+  // mark folds it on its own, see useVisible()
+  const help = useVisible(
+    () => !!data.fold_help,
+    () => isAdvanced,
+  );
 </script>
 
 <div class={cn("flex flex-col gap-y-2", className)}>
@@ -30,8 +33,8 @@
     {#if data.advanced}
       <AdvancedBadge />
     {/if}
-    {#if shouldFoldHelp}
-      <ToggleHelp bind:helpVisible />
+    {#if data.fold_help}
+      <ToggleHelp bind:helpVisible={help.visible} />
     {/if}
   </div>
 
@@ -41,7 +44,7 @@
   </div>
 
   <!-- Third row: help -->
-  {#if data.help && isHelpShown}
+  {#if data.help && help.shown}
     <div class="flex flex-col justify-center gap-0.5">
       <I18nText text={data.help} class="text-xs text-muted-foreground" />
     </div>

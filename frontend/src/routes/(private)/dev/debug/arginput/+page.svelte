@@ -98,6 +98,9 @@
           Retry: arg("Tuning", "Retry", "input-int", 3, { name: "input-int (advanced)", advanced: true }),
           Timeout: arg("Tuning", "Timeout", "input-float", 0.85, {
             name: "input-float (advanced)",
+            // The advanced settings reveal this row and its folded help in one
+            // gesture; its own question mark stays to fold the help alone
+            fold_help: true,
             help: "This group holds advanced args only, so it and its separator are gone while the toggle is closed",
             advanced: true,
           }),
@@ -633,7 +636,8 @@
     <p class="text-sm text-muted-foreground">
       The last two cards demo the advanced settings: an arg marked
       <code class="rounded bg-muted px-1">advanced</code> stays out of the card until the cog of the card header is opened,
-      a row it reveals carries a gray pill, and a card without an advanced arg has no cog at all.
+      a row it reveals carries a gray pill, and a card without an advanced arg has no cog at all. Opening the cog also expands
+      every folded help, and the question mark of a row stays on screen either way.
     </p>
   </div>
 

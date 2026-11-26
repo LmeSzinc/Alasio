@@ -98,10 +98,23 @@ function makeAdvancedCard(): CardData {
     },
     Settings: {
       EnableTask: arg("Main", "EnableTask", "checkbox", true, { name: "Enable Task" }),
+      // A plain row whose help stays folded behind the question mark
+      Mode: arg("Main", "Mode", "select", "normal", {
+        name: "Mode",
+        option: ["normal", "hard"],
+        fold_help: true,
+        help: "Folded help of a plain row",
+      }),
       AmbushEvade: arg("Main", "AmbushEvade", "checkbox", true, { name: "Ambush Evade", advanced: true }),
     },
     Tuning: {
-      Threshold: arg("Main", "Threshold", "input-int", 3, { name: "Threshold", advanced: true }),
+      // An advanced row with a folded help of its own: the toggle opens both
+      Threshold: arg("Main", "Threshold", "input-int", 3, {
+        name: "Threshold",
+        advanced: true,
+        fold_help: true,
+        help: "Folded help of an advanced row",
+      }),
     },
   } as unknown as CardData;
 }
@@ -148,6 +161,13 @@ function advancedToggle(target: HTMLElement): HTMLButtonElement | undefined {
 /** The wrapper of the toggle whose ::after draws the underline */
 function underlineOf(button: HTMLButtonElement): HTMLElement {
   return button.querySelector("span")!;
+}
+
+/** The question mark that folds the help of a row */
+function helpToggle(target: HTMLElement): HTMLButtonElement | undefined {
+  return [...target.querySelectorAll<HTMLButtonElement>("button")].find(
+    (button) => button.getAttribute("aria-label") === t.Input.ShowHelp(),
+  );
 }
 
 /** The reset button of the card header, the other hover action beside the toggle */
@@ -447,6 +467,59 @@ describe("TestArgCardAdvanced", () => {
     // only the toggle carries a state of its own
     expect(resetButton(target).hasAttribute("aria-pressed")).toBe(false);
     expect(advancedToggle(target)!.getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("keeps the question mark of a folded help while the advanced settings are open", async () => {
+    const target = await mountCard(makeAdvancedCard());
+    const help = "Folded help of a plain row";
+
+    // folded by default: only the question mark is on screen
+    expect(target.textContent).not.toContain(help);
+    expect(helpToggle(target)).not.toBeUndefined();
+
+    advancedToggle(target)!.click();
+    await settle();
+
+    // opening the advanced settings expands the help …
+    expect(target.textContent).toContain(help);
+    // … and the question mark stays, so the row can be folded again
+    expect(helpToggle(target)).not.toBeUndefined();
+    helpToggle(target)!.click();
+    await settle();
+
+    expect(target.textContent).toContain("Enable Task");
+    expect(target.textContent).not.toContain(help);
+  });
+
+  it("opens the folded help of an advanced row together with the row", async () => {
+    const target = await mountCard(makeAdvancedCard());
+    const help = "Folded help of an advanced row";
+
+    // one question mark belongs to the plain row, the second one is behind the
+    // toggle and can not be seen yet
+    expect(target.querySelectorAll(`button[aria-label="${t.Input.ShowHelp()}"]`)).toHaveLength(1);
+    expect(target.textContent).not.toContain(help);
+
+    advancedToggle(target)!.click();
+    await settle();
+
+    // the row and its revealed help arrive in the same pass
+    expect(target.textContent).toContain("Threshold");
+    expect(target.textContent).toContain(help);
+    expect(target.querySelectorAll(`button[aria-label="${t.Input.ShowHelp()}"]`)).toHaveLength(2);
+  });
+
+  it("folds the help back when the advanced settings close", async () => {
+    const target = await mountCard(makeAdvancedCard());
+    advancedToggle(target)!.click();
+    await settle();
+    expect(target.textContent).toContain("Folded help of a plain row");
+
+    advancedToggle(target)!.click();
+    await settle();
+
+    expect(target.textContent).not.toContain("Folded help of a plain row");
+    expect(helpToggle(target)).not.toBeUndefined();
   });
 
   it("keeps the separator of a group of advanced rows only out of sight", async () => {

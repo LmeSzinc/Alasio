@@ -3,7 +3,7 @@
   import AdvancedBadge from "./AdvancedBadge.svelte";
   import I18nText from "./I18nText.svelte";
   import ToggleHelp from "./ToggleHelp.svelte";
-  import { type LayoutProps, getArgName } from "./utils.svelte";
+  import { type LayoutProps, getArgName, useVisible } from "./utils.svelte";
 
   let {
     data = $bindable(),
@@ -19,9 +19,12 @@
   const isCompact = $derived(parentWidth && parentWidth < 640);
   const displayName = $derived(getArgName(data));
 
-  let helpVisible = $state(false);
-  const shouldFoldHelp = $derived(data.fold_help && !isAdvanced);
-  const isHelpShown = $derived(!shouldFoldHelp || helpVisible);
+  // The help opens with the advanced settings of the card, and its own question
+  // mark folds it on its own, see useVisible()
+  const help = useVisible(
+    () => !!data.fold_help,
+    () => isAdvanced,
+  );
 </script>
 
 <div class={cn("flex flex-col justify-center gap-y-1", className)}>
@@ -33,8 +36,8 @@
       {#if data.advanced}
         <AdvancedBadge />
       {/if}
-      {#if shouldFoldHelp}
-        <ToggleHelp bind:helpVisible />
+      {#if data.fold_help}
+        <ToggleHelp bind:helpVisible={help.visible} />
       {/if}
     </div>
 
@@ -45,7 +48,7 @@
   </div>
 
   <!-- Bottom row: help (left) and placeholder (right) -->
-  {#if data.help && isHelpShown}
+  {#if data.help && help.shown}
     <div class={cn("flex flex-row gap-x-4", isCompact && "flex-col")}>
       <!-- Bottom-left: help (spans full width in compact mode) -->
       <div class={cn("flex min-w-0 flex-col justify-center gap-0.5", !isCompact && "flex-1")}>
