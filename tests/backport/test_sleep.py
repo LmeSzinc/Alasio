@@ -220,10 +220,24 @@ class TestSleepResourceUse:
     """The sleep must not busy wait and must not hold the interpreter"""
 
     def test_does_not_burn_cpu(self):
-        """Sleeping costs no CPU time, busy waiting would burn all of it"""
-        start = time.process_time()
-        sleep(0.06)
-        assert time.process_time() - start < 0.010
+        """Sleeping costs no CPU time of the caller, busy waiting would burn it
+
+        The CPU time is measured per thread. The suite runs in a worker of
+        pytest-xdist, whose other threads (the thread pools, the trio thread
+        cache) burn CPU of the same process while a test sleeps, and
+        time.process_time() adds that CPU to the sample: a single scheduler
+        tick of another thread is enough to fail a sleep that burned nothing.
+        A busy wait burns the time in the calling thread itself, which is what
+        time.thread_time() measures.
+
+        The bound is a quarter of the slept time. The scheduler accounts the
+        CPU time in ticks (15.6ms on Windows), so a sample is noisy by one
+        tick, and a sleep that busy waits still misses it by a wide margin.
+        """
+        period = 0.1
+        start = time.thread_time()
+        sleep(period)
+        assert time.thread_time() - start < period / 4
 
     def test_releases_the_interpreter(self):
         """Other threads keep running while the caller sleeps"""
