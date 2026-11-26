@@ -3,13 +3,12 @@ The worker peer of the runs: who closes its end of the pipe
 
 The peer of the restart runs is an in-process thread, so its pipe is a real
 ``multiprocessing`` connection of this process, shared by the thread that
-terminates the peer and by the peer itself. Only one thread may close it, see
+terminates the peer and by the peer itself. Only the peer closes it, see
 ``MockWorkerProcess``.
 
 The waits of these tests are real waits: the runs freeze ``time.sleep`` and the
 clock, so a wait on them would return before the peer ever ran.
 """
-import socket
 import threading
 
 import msgspec
@@ -65,27 +64,69 @@ def close_counts(recording):
 
 def test_terminate_ends_a_parked_peer_and_closes_the_pipe_once():
     """
-    A terminated peer leaves its blocked read and closes its pipe exactly once
+    A terminated peer leaves its wait on the pipe and closes the pipe itself
 
     A real worker process is ended from the outside, and its blocked read never
-    returns: terminate() does the same through the pipe. Two closers of one
-    handle is what the runs must not do -- a Windows pipe handle closed twice
-    closes whatever the number was handed to next, which killed the test worker
-    with an access violation instead of failing a test.
+    returns. A peer has no process to end, so terminate() tells it to go down
+    and the peer leaves its own wait, at its next look at the pipe.
+
+    The pipe of a peer is a real connection of this process. A Windows pipe
+    handle closed under a read that another thread still has in flight, or
+    closed twice, closes whatever the number was handed to next, which killed
+    the test worker with an access violation instead of failing a test: the
+    terminating thread must not touch the handle at all.
     """
     process, recording, parent = make_peer()
     process.start()
     try:
-        # some time in the read of the pipe, not in the spawn of the thread
+        # some time in the wait of the pipe, not in the spawn of the thread
         threading.Event().wait(0.05)
         process.terminate()
         opened, closed = close_counts(recording)
         assert process.exitcode == 0
         assert not process.is_alive()
-        assert len(opened) == 1, recording.closers
-        assert opened[0] == 'MainThread', recording.closers
-        assert sorted(closed) == ['cfg_a'], recording.closers
+        assert opened == ['cfg_a'], recording.closers
+        assert closed == [], recording.closers
     finally:
+        parent.close()
+
+
+def test_terminate_of_a_peer_that_never_started_closes_its_pipe():
+    """
+    A peer without a thread has no reader of its pipe: terminate closes it
+    """
+    process, recording, parent = make_peer()
+    try:
+        process.terminate()
+        assert process.exitcode == -15
+        assert close_counts(recording) == (['MainThread'], []), recording.closers
+    finally:
+        parent.close()
+
+
+def test_a_terminated_peer_is_reported_as_a_kill_without_closing():
+    """
+    A peer that is still parked keeps its pipe: terminate reports the kill
+
+    A peer parked in its own wait cannot be moved out of it by the terminating
+    thread, and closing the pipe underneath it is exactly the undefined
+    operation the runs must not do. The exit status reports the kill and the
+    peer keeps ownership of the pipe; it closes the pipe itself when its wait
+    is over.
+    """
+    process, recording, parent = make_peer()
+    # the peer parks for much longer than terminate() is willing to wait
+    process.POLL_INTERVAL = 0.5
+    process.TERMINATE_TIMEOUT = 0.05
+    process.start()
+    try:
+        assert process.waiting.wait(1.0), 'the peer did not reach its wait'
+        process.terminate()
+        assert close_counts(recording) == ([], []), recording.closers
+        assert process.exitcode == -15
+        assert process.conn is not None
+    finally:
+        process.join(5.0)
         parent.close()
 
 
@@ -102,90 +143,10 @@ def test_a_peer_stopped_by_a_command_closes_its_own_pipe_once():
         opened, closed = close_counts(recording)
         assert opened == ['cfg_a'], recording.closers
         assert closed == [], recording.closers
-        # the peer is gone: terminate() has no read to wake, and must not close
+        # the peer is gone: terminate() has no read to end, and must not close
         # the pipe a second time
         process.terminate()
         assert close_counts(recording) == (['cfg_a'], []), recording.closers
         assert process.exitcode == 0
     finally:
-        parent.close()
-
-
-def test_terminate_of_a_peer_that_never_started_closes_its_pipe():
-    """
-    A peer without a thread has no owner of its pipe: terminate closes it
-    """
-    process, recording, parent = make_peer()
-    try:
-        process.terminate()
-        assert process.exitcode == -15
-        assert close_counts(recording) == (['MainThread'], []), recording.closers
-    finally:
-        parent.close()
-
-
-class SocketConn:
-    """
-    The peer end of a socket pair, shaped like the pipe of a POSIX spawn
-
-    On POSIX the pipe of a duplex ``Pipe()`` is a socketpair and the peer reads
-    it with a blocking ``os.read()``, which no ``close()`` wakes. The Windows
-    named pipe is not a socket, so this stands in for the POSIX side and runs on
-    every platform.
-    """
-
-    def __init__(self, sock):
-        self._sock = sock
-        self.closed = False
-
-    def fileno(self):
-        return self._sock.fileno()
-
-    def recv_bytes(self):
-        data = self._sock.recv(4096)
-        if not data:
-            raise EOFError
-        return data
-
-    def close(self):
-        self.closed = True
-        self._sock.close()
-
-
-def test_closing_the_peer_end_wakes_a_blocked_read():
-    """
-    The close ends a read parked in the pipe, like the death of a process does
-
-    A POSIX close alone does not wake a read blocked in another thread, only
-    data, EOF or ``shutdown()`` do: without the shutdown a terminated peer stays
-    parked until its pipe breaks for another reason, which is what kept the
-    Windows crash fix from working on the POSIX jobs.
-    """
-    process, _, parent = make_peer()
-    left, right = socket.socketpair()
-    conn = SocketConn(right)
-    process.conn = conn
-    outcome = []
-    reading = threading.Event()
-
-    def read():
-        reading.set()
-        try:
-            conn.recv_bytes()
-            outcome.append('data')
-        except (EOFError, OSError) as exc:
-            outcome.append(type(exc).__name__)
-
-    thread = threading.Thread(target=read, name='cfg_a', daemon=True)
-    thread.start()
-    try:
-        reading.wait()
-        threading.Event().wait(0.05)
-        process._close_conn()
-        thread.join(5.0)
-        assert not thread.is_alive(), 'the read of the peer was not woken'
-        assert outcome and outcome[0] in ('EOFError', 'OSError'), outcome
-        assert conn.closed
-    finally:
-        left.close()
         parent.close()

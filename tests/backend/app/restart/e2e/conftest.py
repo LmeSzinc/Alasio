@@ -46,7 +46,6 @@ scenario has to race a fixed window.
 import datetime
 import multiprocessing
 import os
-import socket
 import threading
 from types import SimpleNamespace
 
@@ -294,14 +293,16 @@ class MockWorkerProcess:
     The interface is the slice of ``multiprocessing.Process`` the worker
     manager uses: start / is_alive / join / terminate / pid / exitcode.
 
-    The peer owns its end of the pipe. A Windows pipe whose handle is used by
-    two threads at once is not defined: a handle closed twice, or closed under
-    a pending overlapped read by a thread that never owned it, can close a
-    handle that is already gone (or already recycled), and the process dies
-    with an access violation instead of a test failure. So every close goes
-    through ``_close_conn()``, which closes once and under a lock, and the
-    peer reads its pipe without a timeout: waking a parked read is the job of
-    ``terminate()``, exactly like the death of a real worker process.
+    The peer owns its end of the pipe, and only it closes it. A Windows pipe
+    whose handle is used by two threads at once is not defined: a handle
+    closed twice, or closed under a pending overlapped read by a thread that
+    never owned it, can close a handle that is already gone (or already
+    recycled), and the process dies with an access violation instead of a test
+    failure. So the peer waits on its pipe with ``poll()`` instead of parking
+    in ``recv_bytes()``: a read of a pipe cannot be woken from the outside
+    without closing the handle under it, so the peer checks for data and for
+    its own end of life itself, and every close goes through ``_close_conn()``,
+    which closes once and under a lock.
     """
     # worker mods whose scheduler ignores the graceful stop (see
     # tests/backend/worker/worker_mods.py)
@@ -320,8 +321,15 @@ class MockWorkerProcess:
     # written before it starts polling), like they do with a real worker. A
     # real wait, not time.sleep: the runs freeze time.sleep
     STOP_DELAY = 0.05
-    # How long terminate() waits for a peer to leave before it ends the wait of
-    # the peer itself, see terminate()
+    # How long the peer waits on its pipe before it looks at its own end of
+    # life again, in seconds. The peer polls the pipe instead of parking in
+    # recv_bytes(): nothing outside a pipe can wake a read of it -- closing the
+    # handle under that read is undefined on Windows and does not wake it on
+    # POSIX -- so the peer asks the pipe itself whether there is data, and ends
+    # its own read. A real worker is ended by its process dying, which is what
+    # terminate() is for; the peer has no process to die.
+    POLL_INTERVAL = 0.02
+    # How long terminate() waits for a peer to leave, see terminate()
     TERMINATE_TIMEOUT = 1.0
 
     def __init__(self, mod, config, conn, name=''):
@@ -333,6 +341,12 @@ class MockWorkerProcess:
         # pipe handle, and a close under a pending send is as undefined as a
         # close under a pending read
         self._conn_lock = threading.Lock()
+        # set by terminate(): the peer is going down like a killed process, so
+        # it leaves its read at the next look at it
+        self._terminated = threading.Event()
+        # set while the peer waits on the pipe, so a test can act on a peer that
+        # is inside its wait instead of guessing how long its start takes
+        self.waiting = threading.Event()
         self.pid = 0
         self.exitcode = None
         self._thread = None
@@ -368,10 +382,14 @@ class MockWorkerProcess:
         """Play the worker protocol until the manager stops the worker"""
         try:
             stopped_by_command = False
-            while True:
+            while not self._terminated.is_set():
                 try:
+                    self.waiting.set()
+                    if not self.conn.poll(self.POLL_INTERVAL):
+                        continue
                     data = self.conn.recv_bytes()
                 except (EOFError, OSError):
+                    # the manager closed its end of the pipe
                     break
                 command = DECODER_CACHE.COMMAND_EVENT.decode(data)
                 if command.c not in ('scheduler-stopping', 'kill', 'force-kill'):
@@ -382,9 +400,9 @@ class MockWorkerProcess:
                 break
             # the graceful stop of a worker takes a moment in production (it
             # finishes its current task first): the short wait keeps the order
-            # of the manager's logs the one of a real run. A pipe the manager
-            # closed underneath the peer means a force kill, and a killed
-            # process is gone at once, so the wait is skipped
+            # of the manager's logs the one of a real run. A peer ended by
+            # terminate() is a killed process, which is gone at once, so the
+            # wait is skipped
             if stopped_by_command:
                 threading.Event().wait(self.STOP_DELAY)
         finally:
@@ -395,35 +413,20 @@ class MockWorkerProcess:
         """
         Close the peer end of the pipe, once and from one thread at a time
 
-        ``Connection.close()`` is idempotent but not atomic: two threads that
-        pass the closed check together close the same handle twice, and the
-        second close hits whatever the system handed the number to next. The
-        lock makes the check and the close one step, so the peer leaving by
-        itself and a terminating thread never close together.
+        The peer closes its own end, from the thread that read it, when it
+        leaves the loop of ``_run()``, so no read of the handle is in flight
+        and the manager's own read of the other end ends on it. A peer that
+        never started closes the pipe from ``terminate()``, which has no reader
+        to race either.
 
-        On POSIX the pipe of a duplex ``Pipe()`` is a socketpair, and closing
-        the descriptor does not wake a read blocked in another thread: only
-        data, EOF or ``shutdown()`` do. The shutdown is the one
-        ``WorkerState.conn_close()`` of the manager does (see
-        ``alasio.backend.worker.manager``), so a peer parked in
-        ``recv_bytes()`` leaves at once instead of on the next command.
+        ``Connection.close()`` is idempotent but not atomic: two threads that
+        pass its closed check together close the same handle twice, and the
+        second close hits whatever the system handed the number to next. The
+        lock makes the check and the close one step.
         """
         with self._conn_lock:
-            conn = self.conn
             try:
-                sock = socket.socket(fileno=conn.fileno())
-            except (AttributeError, OSError, ValueError):
-                # not a socket (the named pipe of a Windows spawn)
-                pass
-            else:
-                try:
-                    sock.shutdown(socket.SHUT_RDWR)
-                except OSError:
-                    pass
-                finally:
-                    sock.detach()
-            try:
-                conn.close()
+                self.conn.close()
             except OSError:
                 pass
 
@@ -438,19 +441,30 @@ class MockWorkerProcess:
         """
         End the peer, like the manager ends a worker process
 
-        A real worker is a process: terminating it closes its end of the pipe
-        from the outside, and the read of the worker never returns. The peer
-        of the runs is a thread, so the terminating side ends the wait of that
-        thread through the pipe -- the same wake-up the death of a process is.
-        The peer only closes the pipe when it leaves by itself, and
-        ``_close_conn()`` keeps the two closers apart.
+        A real worker is a process: terminating it ends its read from the
+        outside, and the reader never returns. The peer has no process to
+        kill, so it is told to go down and leaves its read itself, at its next
+        look at the pipe; the thread that read the pipe closes it. Closing the
+        pipe here instead would close a handle under a read the peer still has
+        in flight: undefined on Windows, and on POSIX it does not even wake the
+        read.
+
+        A peer that never started has no reader at all, so its pipe is closed
+        here.
         """
-        if self._thread is not None and not self.is_alive():
+        if self._thread is None:
+            # no reader owns the pipe, closing it here wakes nobody
+            self._close_conn()
+            self.exitcode = -15
+            return
+        if not self.is_alive():
             # the peer left by itself, its pipe is closed already
             return
-        self._close_conn()
+        self._terminated.set()
         self.join(self.TERMINATE_TIMEOUT)
         if self.exitcode is None:
+            # the exit status of a kill, reported without touching a pipe that
+            # is still being read
             self.exitcode = -15
 
     def process_graceful_kill(self):
