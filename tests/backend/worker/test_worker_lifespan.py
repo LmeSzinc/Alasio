@@ -4,12 +4,15 @@ WorkerManager 生命周期测试
 测试 worker 的启动、停止和状态管理等基本功能
 """
 import multiprocessing
+import socket
+import sys
 import threading
 import time
+from multiprocessing.connection import Connection
 
 import pytest
 
-from alasio.backend.worker.manager import WORKER_STOPPING_STATE, WorkerManager, WorkerState
+from alasio.backend.worker.manager import WORKER_STOPPING_STATE, WorkerManager, WorkerState, _shutdown_wake
 from alasio.logger import logger
 from alasio.testing.timeout import AssertTimeout
 from tests.backend.worker.const import *
@@ -581,6 +584,48 @@ class TestResourceManagement:
         assert state.conn is None
         assert state.process is None
         assert state.recv_thread is None
+
+    @pytest.mark.skipif(sys.platform == 'win32', reason='the wake of a socket pipe is the POSIX branch')
+    def test_the_posix_wake_ends_a_read_of_a_socket_pipe(self):
+        """
+        The POSIX wake ends a read parked on a socket pipe
+
+        On POSIX the pipe of a duplex ``Pipe()`` is a socketpair, and closing the
+        descriptor does not wake a read blocked on it in another thread: only
+        data, EOF or ``shutdown()`` do. ``_shutdown_wake()`` is that shutdown,
+        and the read has to come back from it -- without it a stopped worker
+        leaves its reader parked forever.
+
+        The pipe is a socketpair here, the shape POSIX has. The Windows named
+        pipe takes the other branch of ``conn_close()``, where the close of the
+        handle itself ends the pending overlapped read, so there is nothing of
+        this to exercise there and the test is skipped.
+        """
+        left, right = socket.socketpair()
+        conn = Connection(left.detach())
+        peer = Connection(right.detach())
+        outcome = []
+
+        def read():
+            try:
+                outcome.append(conn.recv_bytes())
+            except (EOFError, OSError):
+                outcome.append(None)
+
+        thread = threading.Thread(target=read, daemon=True)
+        thread.start()
+        try:
+            # let the reader park in recv_bytes()
+            time.sleep(0.1)
+
+            _shutdown_wake(conn)
+            thread.join(timeout=1)
+
+            assert not thread.is_alive(), 'the shutdown did not wake the read'
+            assert outcome == [None], 'the read delivered a message'
+        finally:
+            conn.close()
+            peer.close()
 
     def test_reset_runtime_forgets_the_run(self):
         """

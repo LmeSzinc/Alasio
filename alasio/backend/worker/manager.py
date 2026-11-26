@@ -1,4 +1,6 @@
 import multiprocessing
+import socket
+import sys
 import threading
 import time
 from multiprocessing.connection import Connection
@@ -89,6 +91,38 @@ EXIT_POLL_INTERVAL = 0.01
 # The wait itself is a 10-minute scale wait; the poll only has to keep the
 # abort event (restart_cancel) and worker stops reasonably responsive.
 RESTART_WAIT_POLL = 0.1
+
+
+def _shutdown_wake(conn):
+    """
+    Wake a read blocked on a pipe of another thread (POSIX)
+
+    The pipe of a duplex ``Pipe()`` is a socketpair there, and the recv thread
+    reads it with a blocking read. Closing the descriptor does not end that
+    read, only data, EOF or ``shutdown()`` do -- and the thread has to leave the
+    read before the entry can be reset. The socket is built on the descriptor of
+    the connection and detached after the call, so the connection keeps owning
+    (and closing) the descriptor itself.
+
+    Args:
+        conn (Connection): The pipe to wake
+
+    Returns:
+        None
+    """
+    try:
+        sock = socket.socket(fileno=conn.fileno())
+    except (AttributeError, OSError, ValueError):
+        # not a socket (a pipe built with os.pipe): the close of the caller is
+        # the only wake-up, and the read may stay until the peer is gone
+        return
+    try:
+        sock.shutdown(socket.SHUT_RDWR)
+    except OSError:
+        # the peer is gone already, the read ended on its own
+        pass
+    finally:
+        sock.detach()
 
 
 class WorkerState(msgspec.Struct):
@@ -192,7 +226,7 @@ class WorkerState(msgspec.Struct):
 
     def conn_close(self):
         """
-        Close the pipe of the entry, once
+        Close the pipe of the entry, once, and wake a read parked on it
 
         The pipe has several potential closers -- the recv thread when its read
         ends on its own, and whoever stops the worker, which has to end the read
@@ -204,15 +238,19 @@ class WorkerState(msgspec.Struct):
         field is one step under the lock, so exactly one of them owns the pipe
         and closes it, and the others find nothing of their own to close.
 
-        A close while a read of the same pipe is in flight is what ends that
-        read on Windows, and the entry cannot be reset without it. It happens
-        after the worker process is stopped, so the read is the only operation
-        left on the pipe and its peer is gone.
+        The close has to end a read that is already blocked, and the two
+        platforms end it differently: Windows completes the pending overlapped
+        read when the handle is closed, POSIX does not -- there only a
+        ``shutdown()`` wakes a read blocked in another thread, and the
+        descriptor is closed after it. The shutdown does not release the handle,
+        so the connection still owns the one it closes.
         """
         with self.conn_lock:
             conn, self.conn = self.conn, None
         if conn is None:
             return
+        if sys.platform != 'win32':
+            _shutdown_wake(conn)
         try:
             conn.close()
         except OSError:
