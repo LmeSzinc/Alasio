@@ -1,7 +1,8 @@
 <script lang="ts">
   // !!![svelte-drop-dev-page]!!!
   import ArgCard from "$lib/components/arg/ArgCard.svelte";
-  import type { CardData } from "$lib/components/arg/utils.svelte";
+  import type { ArgData, CardData } from "$lib/components/arg/utils.svelte";
+  import type { DashboardEditEvent } from "$lib/components/dashboard/dashboardEdit";
   import { cardWidth } from "$lib/use/cardWidth.svelte";
   import { elementSize } from "$lib/use/size.svelte";
 
@@ -14,15 +15,13 @@
     return new Date(Date.now() - ms).toISOString().replace("Z", "");
   }
 
-  const noop = () => {};
-
-  // Build a reusable arg template
+  // The generated config carries no `dt` on the `_info` row of a dashboard
+  // group: the row is rendered from `_info.dashboard`
   function info(group: string, dashboard: string, color: string, name: string): any {
     return {
       group,
       arg: "_info",
       task: "Dashboard",
-      dt: "dashboard-value",
       dashboard,
       dashboard_color: color,
       name,
@@ -36,68 +35,37 @@
     return arg(group, "Time", "datetime", ago(msAgo));
   }
 
-  // --- Dashboard types as a single card (simulating real config) ---
-  // CardData declares an index signature for the groups, so object literals
-  // with a typed `_info` are not assignable to it directly; the other debug
-  // pages cast for the same reason (see arginput / configdisplay).
-  let dashboardCard = $state({
-    _info: { group: "DashboardDemo", arg: "_info", card: "card-Dashboard-Demo", name: "Dashboard Types" } as any,
-    Amount: {
-      _info: info("Amount", "Amount", "#eb8efe", "Gems"),
-      Value: arg("Amount", "Value", "input-int", 8654),
-      Time: timeArg("Amount", 5 * 60 * 1000),
-    },
-    Total: {
-      _info: info("Total", "Total", "#7f7f7f", "Oil"),
-      Value: arg("Total", "Value", "input-int", 1234, { ge: 0, le: 25000 }),
-      Time: timeArg("Total", 5 * 60 * 1000),
-    },
-    Remain: {
-      _info: info("Remain", "Remain", "#4caf50", "Fuel"),
-      Value: arg("Remain", "Value", "input-int", 3200, { ge: 0, le: 5000 }),
-      Time: timeArg("Remain", 15 * 60 * 1000),
-    },
-    DynamicTotal: {
-      _info: info("DynamicTotal", "DynamicTotal", "#ff9800", "Dorm Food"),
-      Value: arg("DynamicTotal", "Value", "input-int", 5000),
-      Total: arg("DynamicTotal", "Total", "static", 40000),
-      Time: timeArg("DynamicTotal", 30 * 60 * 1000),
-    },
-    SoftTotal: {
-      _info: info("SoftTotal", "SoftTotal", "#00acc1", "Weekly Points"),
-      Value: arg("SoftTotal", "Value", "input-int", 12345, { ge: 0, le: 25000 }),
-      Total: arg("SoftTotal", "Total", "static", 23145, { ge: 0, le: 25000 }),
-      Time: timeArg("SoftTotal", 30 * 60 * 1000),
-    },
-    Progress: {
-      _info: info("Progress", "Progress", "#1e88e5", "Campaign"),
-      Value: arg("Progress", "Value", "input-float", 45.67),
-      Time: timeArg("Progress", 10 * 1000),
-    },
-    Overflow: {
-      _info: info("Overflow", "Progress", "#e53935", "Overflow (150%)"),
-      Value: arg("Overflow", "Value", "input-float", 150),
-      Time: timeArg("Overflow", 2 * 60 * 1000),
-    },
-    Planner: {
-      _info: info("Planner", "Planner", "#8e24aa", "Research"),
-      Progress: arg("Planner", "Progress", "input-int", 80),
-      Eta: arg("Planner", "Eta", "input", "01:23:45"),
-      GreenValue: arg("Planner", "GreenValue", "input-int", 8, { ge: 0 }),
-      GreenTotal: arg("Planner", "GreenTotal", "input-int", 10, { ge: 0 }),
-      Custom: arg("Planner", "Custom", "input", "hidden"),
-      Time: timeArg("Planner", 30 * 1000),
-    },
-    PlannerDone: {
-      _info: info("PlannerDone", "Planner", "#2196f3", "Commission"),
-      Progress: arg("PlannerDone", "Progress", "input-int", 100),
-      Eta: arg("PlannerDone", "Eta", "input", "00:00:00"),
-      Time: timeArg("PlannerDone", 5 * 1000),
-    },
-  } as CardData);
+  /**
+   * One card per dashboard datatype: a card holds exactly one dashboard group,
+   * named after its datatype, so the row of one type can be compared with the
+   * row of another one card at a time.
+   */
+  type Section = {
+    /** Heading of the section */
+    title: string;
+    /** What the type means and how its row reads */
+    help: string;
+    card: CardData;
+  };
+
+  /**
+   * A card with a single dashboard group of the given datatype.
+   *
+   * @param dt Value of `_info.dashboard`, the datatype the row renders as
+   * @param name Displayed name of the item, e.g. "Gems"
+   * @param color Dot color of the item, see `dashboard_color`
+   * @param args Args of the group, besides `_info`
+   * @returns The card data of one dashboard group
+   */
+  function demoCard(dt: string, name: string, color: string, args: Record<string, any>): CardData {
+    return {
+      _info: { group: dt, arg: "_info", card: `card-Dashboard-${dt}`, name: dt } as any,
+      [dt]: { _info: info(dt, dt, color, name), ...args },
+    } as CardData;
+  }
 
   // --- Non-dashboard card (normal args, for comparison) ---
-  let normalCard = $state({
+  const normalCard = {
     _info: { group: "NormalDemo", arg: "_info", card: "card-Normal-Demo", name: "Non-Dashboard (normal args)" } as any,
     Settings: {
       _info: { group: "Settings", arg: "_info", name: "Settings", value: "" } as any,
@@ -112,10 +80,10 @@
       Retries: arg("Output", "Retries", "input-int", 3, { ge: 1, le: 10 }),
       Notes: arg("Output", "Notes", "textarea", "Optional notes here"),
     },
-  } as CardData);
+  } as CardData;
 
   // --- Mixed card (dashboard + non-dashboard groups side by side) ---
-  let mixedCard = $state({
+  const mixedCard = {
     _info: { group: "MixedDemo", arg: "_info", card: "card-Mixed-Demo", name: "Mixed: Dashboard + Normal" } as any,
     // Dashboard groups
     Gems: {
@@ -154,63 +122,154 @@
       MaxDepth: arg("Advanced", "MaxDepth", "input-int", 3, { ge: 0, le: 10 }),
       Debug: arg("Advanced", "Debug", "checkbox", false),
     },
-  } as CardData);
+  } as CardData;
 
-  const noopEdit = noop;
-  const noopReset = noop;
+  // --- Dashboard datatypes, one card each ---
+  // CardData declares an index signature for the groups, so object literals
+  // with a typed `_info` are not assignable to it directly; the other debug
+  // pages cast for the same reason (see arginput / configdisplay).
+  const sections = $state<Section[]>([
+    {
+      title: "Amount",
+      help: "DashboardAmount: one number, the row reads the value only. The edit button right of it opens the whole record: Value and the Time it was recorded at.",
+      card: demoCard("Amount", "Gems", "#eb8efe", {
+        Value: arg("Amount", "Value", "input-int", 8654, { ge: 0 }),
+        Time: timeArg("Amount", 5 * 60 * 1000),
+      }),
+    },
+    {
+      title: "Total",
+      help: "DashboardTotal: the value over a fixed total. The denominator is the `le` bound of Value, the row reads 1234 / 25000.",
+      card: demoCard("Total", "Oil", "#7f7f7f", {
+        Value: arg("Total", "Value", "input-int", 1234, { ge: 0, le: 25000 }),
+        Time: timeArg("Total", 5 * 60 * 1000),
+      }),
+    },
+    {
+      title: "Remain",
+      help: "DashboardRemain: the runs left today, the same row shape as Total, here 2 / 3.",
+      card: demoCard("Remain", "HardCampaign", "#4caf50", {
+        Value: arg("Remain", "Value", "input-int", 2, { ge: 0, le: 3 }),
+        Time: timeArg("Remain", 15 * 60 * 1000),
+      }),
+    },
+    {
+      title: "DynamicTotal",
+      help: "DashboardDynamicTotal: the value over a Total the script writes at runtime, so the denominator is the Total arg and not a bound. The dialog edits both halves.",
+      card: demoCard("DynamicTotal", "SimulatedUniverse", "#ff9800", {
+        Value: arg("DynamicTotal", "Value", "input-int", 5000, { ge: 0 }),
+        Total: arg("DynamicTotal", "Total", "input-int", 40000, { ge: 0 }),
+        Time: timeArg("DynamicTotal", 30 * 60 * 1000),
+      }),
+    },
+    {
+      title: "SoftTotal",
+      help: "DashboardSoftTotal: the value over a soft Total the value may pass, while neither half may pass the hard limit of Value.le (25000). The dialog edits both halves.",
+      card: demoCard("SoftTotal", "WeeklyPoints", "#00acc1", {
+        Value: arg("SoftTotal", "Value", "input-int", 12345, { ge: 0, le: 25000 }),
+        Total: arg("SoftTotal", "Total", "input-int", 23145, { ge: 0, le: 25000 }),
+        Time: timeArg("SoftTotal", 30 * 60 * 1000),
+      }),
+    },
+    {
+      title: "Progress",
+      help: "DashboardProgress: a percentage. A value out of range is clamped to 0-100 instead of overflowing the row (150 reads 100.00%).",
+      card: demoCard("Progress", "Campaign", "#1e88e5", {
+        Value: arg("Progress", "Value", "input-float", 45.67, { ge: 0 }),
+        Time: timeArg("Progress", 10 * 1000),
+      }),
+    },
+    {
+      title: "Planner",
+      help: "DashboardPlanner: the Progress and Eta of a plan, plus its complete Value/Total pairs (8 / 10 and 22 / 44 here). Every arg of the group is editable in the dialog, the plan numbers and the pairs included.",
+      card: demoCard("Planner", "Research", "#8e24aa", {
+        Progress: arg("Planner", "Progress", "input-int", 80, { ge: 0 }),
+        Eta: arg("Planner", "Eta", "input", "01:23:45"),
+        GreenValue: arg("Planner", "GreenValue", "input-int", 8, { ge: 0 }),
+        GreenTotal: arg("Planner", "GreenTotal", "input-int", 10, { ge: 0 }),
+        BlueValue: arg("Planner", "BlueValue", "input-int", 22, { ge: 0 }),
+        BlueTotal: arg("Planner", "BlueTotal", "input-int", 44, { ge: 0 }),
+        // A setting of the group that is not a plan number: the dialog shows it
+        // like any other editable arg, the row above only summarizes the plan
+        Custom: arg("Planner", "Custom", "input", "hidden"),
+        Time: timeArg("Planner", 30 * 1000),
+      }),
+    },
+    // The composition demos do not follow the one-type-per-card rule: they show
+    // how dashboard and normal groups share a card
+    {
+      title: "Non-Dashboard (normal args)",
+      help: "Groups without `_info.dashboard`: every arg renders as its own row instead of one compact dashboard row.",
+      card: normalCard,
+    },
+    {
+      title: "Mixed: Dashboard + Normal Groups",
+      help: "Dashboard and normal groups interleaved in the same card, as they appear in the real config pages.",
+      card: mixedCard,
+    },
+  ]);
+
+  // --- Edit handlers ---
+  /**
+   * There is no backend on a dev page, so a save from the record editor is
+   * applied to the mock cards directly: the events carry (task, group, arg),
+   * the same reference the real page sends, which is enough to find the row.
+   * A group name shared by two demo cards (the mixed card repeats a few of
+   * them) is updated in both, they are the same mock group shown twice.
+   *
+   * The save toast of a config page belongs to that page (it fires on the rpc
+   * success), so this page does not fake one: the dialog is the feature shown
+   * here, and its own feedback (the discarded edits of a cancel) still runs.
+   *
+   * @param events Arg edits of one save
+   */
+  function applyEvents(events: DashboardEditEvent[]) {
+    for (const event of events) {
+      if (event.group === "_info") continue;
+      for (const section of sections) {
+        const group = section.card[event.group];
+        if (!group) continue;
+        const row = group[event.arg];
+        if (!row) continue;
+        row.value = event.value;
+      }
+    }
+  }
+
+  function handleMultiEdit(events: DashboardEditEvent[]) {
+    applyEvents(events);
+  }
+
+  // The rows of a dashboard group edit their arg directly (select, checkbox,
+  // input); a caller without a batch save falls back to one event per arg
+  function handleEdit(data: ArgData) {
+    applyEvents([{ task: data.task, group: data.group, arg: data.arg, value: data.value }]);
+  }
+
+  const noopReset = () => {};
 </script>
 
 <div class="container mx-auto flex flex-col gap-8 p-6 pb-20" use:elementSize={containerSize}>
   <h1 class="text-3xl font-bold">Dashboard Group Types</h1>
   <p class="text-muted-foreground">
-    Each group with <code class="rounded bg-muted px-1">_info.dashboard</code> is rendered as a single compact arg row. Compare
-    with normal (non-dashboard) groups below.
+    Each dashboard datatype has a card of its own, holding exactly one group with
+    <code class="rounded bg-muted px-1">_info.dashboard</code>, so the row of one type can be compared with another one
+    card at a time. Every dashboard group carries one summary row; the edit button right of its value opens a dialog
+    with every editable arg of the group, saved as one batch.
   </p>
 
-  <!-- Dashboard-only card -->
-  <section class="space-y-3">
-    <h2 class="text-xl font-semibold">All Dashboard Types</h2>
-    <p class="text-sm text-muted-foreground">
-      Amount, Total, Remain, DynamicTotal, SoftTotal, Progress, and Planner types &mdash; each rendered as a single arg
-      row with PrettyValue on the right and time below.
-    </p>
-    <ArgCard
-      bind:cardData={dashboardCard}
-      parentWidth={containerSize.width}
-      handleEdit={noopEdit}
-      handleReset={noopReset}
-      class={cardClass}
-    />
-  </section>
-
-  <!-- Non-dashboard comparison -->
-  <section class="space-y-3">
-    <h2 class="text-xl font-semibold">Non-Dashboard (normal args)</h2>
-    <p class="text-sm text-muted-foreground">
-      Groups without <code class="rounded bg-muted px-1">_info.dashboard</code> &mdash; each arg renders individually as separate
-      rows.
-    </p>
-    <ArgCard
-      bind:cardData={normalCard}
-      parentWidth={containerSize.width}
-      handleEdit={noopEdit}
-      handleReset={noopReset}
-      class={cardClass}
-    />
-  </section>
-
-  <!-- Mixed card -->
-  <section class="space-y-3">
-    <h2 class="text-xl font-semibold">Mixed: Dashboard + Normal Groups</h2>
-    <p class="text-sm text-muted-foreground">
-      Dashboard and normal groups interleaved in the same card, as they would appear in the real config overview.
-    </p>
-    <ArgCard
-      bind:cardData={mixedCard}
-      parentWidth={containerSize.width}
-      handleEdit={noopEdit}
-      handleReset={noopReset}
-      class={cardClass}
-    />
-  </section>
+  {#each sections as section, index (section.title)}
+    <section class="space-y-3">
+      <h2 class="text-xl font-semibold">{section.title}</h2>
+      <p class="text-sm text-muted-foreground">{section.help}</p>
+      <ArgCard
+        bind:cardData={sections[index].card}
+        parentWidth={containerSize.width}
+        {handleEdit}
+        handleReset={noopReset}
+        {handleMultiEdit}
+        class={cardClass}
+      />
+    </section>
+  {/each}
 </div>
