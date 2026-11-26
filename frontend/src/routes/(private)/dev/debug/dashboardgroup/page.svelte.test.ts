@@ -138,6 +138,22 @@ describe("TestDashboardGroupPageSave", () => {
     expect(target.textContent).toBe(before);
   });
 
+  it("scrolls the dialog of a group with many values", async () => {
+    // The "Many values" section is the last card of the page: 30 rows do not
+    // fit the dialog, which scrolls them instead of growing past the viewport
+    const target = await mountPage();
+    const buttons = [...target.querySelectorAll<HTMLButtonElement>(`button[aria-label="${t.Input.DashboardEdit()}"]`)];
+    buttons[buttons.length - 1].click();
+    await settle();
+
+    const rows = dialog()!.querySelectorAll('[data-slot="dashboard-edit-row"]');
+    expect(rows.length).toBe(30);
+    const port = dialog()!.querySelector<HTMLElement>('[class*="overflow-y-auto"]');
+    expect(port).not.toBeNull();
+    expect(port!.contains(rows[0])).toBe(true);
+    expect(port!.contains(rows[29])).toBe(true);
+  });
+
   it("stays silent when cancelling an unchanged record", async () => {
     const target = await mountPage();
     await openDialog(target);

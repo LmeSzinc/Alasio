@@ -128,6 +128,48 @@
   // CardData declares an index signature for the groups, so object literals
   // with a typed `_info` are not assignable to it directly; the other debug
   // pages cast for the same reason (see arginput / configdisplay).
+  /**
+   * A group with a lot of values: the summary row on the card must stay one
+   * line, and the edit dialog of the group has to scroll its rows.
+   *
+   * @param group Group name of the mock group
+   * @returns Args of the group, besides `_info`
+   */
+  function manyArgs(group: string): Record<string, any> {
+    const args: Record<string, any> = {
+      Value: arg(group, "Value", "input-int", 12345, { ge: 0, le: 25000 }),
+      Total: arg(group, "Total", "input-int", 23145, { ge: 0, le: 25000 }),
+    };
+    // Twelve complete Value/Total pairs, the row of the card summarizes them all
+    for (const name of [
+      "Green",
+      "Blue",
+      "Red",
+      "Purple",
+      "Yellow",
+      "White",
+      "Black",
+      "Pink",
+      "Gray",
+      "Cyan",
+      "Lime",
+      "Orange",
+    ]) {
+      args[`${name}Value`] = arg(group, `${name}Value`, "input-int", 8, { ge: 0 });
+      args[`${name}Total`] = arg(group, `${name}Total`, "input-int", 10, { ge: 0 });
+    }
+    // Settings of the group itself, they are rows of the dialog as well
+    args.Control = arg(group, "Control", "select", "prevent_yellow_face", {
+      option: ["keep_exp_bonus", "prevent_green_face", "prevent_yellow_face", "prevent_red_face"],
+    });
+    args.Recover = arg(group, "Recover", "select", "not_in_dormitory", {
+      option: ["not_in_dormitory", "dormitory_floor_1", "dormitory_floor_2"],
+    });
+    args.Oath = arg(group, "Oath", "checkbox", false);
+    args.Time = timeArg(group, 5 * 60 * 1000);
+    return args;
+  }
+
   const sections = $state<Section[]>([
     {
       title: "Amount",
@@ -206,6 +248,13 @@
       title: "Mixed: Dashboard + Normal Groups",
       help: "Dashboard and normal groups interleaved in the same card, as they appear in the real config pages.",
       card: mixedCard,
+    },
+    // Not a datatype of its own: a group with a lot of values, to see the row
+    // stay one line and the dialog scroll
+    {
+      title: "Many values",
+      help: "One dashboard group with 12 Value/Total pairs and three settings: the row on the card stays one summary line, every pair and setting is a row of the edit dialog, which scrolls its 30 rows.",
+      card: demoCard("SoftTotal", "ManyValues", "#7e57c2", manyArgs("ManyValues")),
     },
   ]);
 
