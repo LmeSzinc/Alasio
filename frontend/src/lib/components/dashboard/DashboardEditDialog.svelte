@@ -4,6 +4,7 @@
   import { Button } from "$lib/components/ui/button";
   import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "$lib/components/ui/dialog";
   import { t } from "$lib/i18n";
+  import { belowDragBand } from "$lib/window/dragRegion.svelte";
   import Arg from "../arg/Arg.svelte";
   import type { ArgData } from "../arg/utils.svelte";
   import { type DashboardChange, parseDashboardField, sameField } from "./dashboardEdit";
@@ -183,6 +184,11 @@
   function onOpenChange(next: boolean) {
     if (!next) cancel();
   }
+
+  // The dialog is centred below the drag band of the desktop client, so its
+  // title row stays clickable instead of sitting under the window drag strip
+  // (the same as FilterPopup)
+  const band = $derived(belowDragBand());
 </script>
 
 <Dialog bind:open {onOpenChange}>
@@ -193,8 +199,11 @@
     stays below that cap, which would shrink every field. 520px leaves ~472px
     of inner width (p-6), so 45% of a row passes the 12.5rem cap and both fields
     read exactly as wide as the ones on the page.
+
+    The base class centres the dialog in the viewport; `top` and `max-height`
+    move it below the drag band of the desktop client (see belowDragBand).
   -->
-  <DialogContent class="flex max-h-[85vh] flex-col sm:max-w-[520px]">
+  <DialogContent class="flex flex-col sm:max-w-[520px]" style="top: {band.top}; max-height: {band.maxHeight};">
     <DialogHeader>
       <DialogTitle>{name}</DialogTitle>
     </DialogHeader>

@@ -22,6 +22,7 @@ import type { ArgData } from "$lib/components/arg/utils.svelte";
 import { formatToLocal, parseToUTC } from "$lib/components/arginput/dateutils.svelte";
 import { t } from "$lib/i18n";
 import { flushEffects } from "$lib/test-utils/flush-effects";
+import { dragRegionState } from "$lib/window/dragRegion.svelte";
 import DashboardEdit from "./DashboardEdit.svelte";
 
 vi.mock("svelte-sonner", () => ({
@@ -245,6 +246,7 @@ afterEach(() => {
   }
   mounted = [];
   document.body.innerHTML = "";
+  dragRegionState.current = null;
   vi.useRealTimers();
   vi.unstubAllGlobals();
 });
@@ -340,6 +342,29 @@ describe("TestDashboardEditDialog", () => {
       { task: "Dashboard", group: "Research", arg: "Eta", value: "0.5d" },
       { task: "Dashboard", group: "Research", arg: "Time", value: NOW.toISOString() },
     ]);
+  });
+
+  it("centres the dialog below the drag band of the desktop client", async () => {
+    // The band swallows clicks on the window top, so the dialog is centred in
+    // the area below it instead of in the whole viewport
+    dragRegionState.current = { height: 48, left: 0, right: 0 };
+    const { target } = await mountGroup(makeGroup());
+    await openDialog(target);
+
+    const style = dialog()!.getAttribute("style");
+    expect(style).toContain("calc(50% + 24px)");
+    expect(style).toContain("calc(100% - 80px)");
+  });
+
+  it("centres the dialog in the viewport without a band", async () => {
+    // A plain browser has no host and therefore no band
+    dragRegionState.current = null;
+    const { target } = await mountGroup(makeGroup());
+    await openDialog(target);
+
+    const style = dialog()!.getAttribute("style");
+    expect(style).toContain("calc(50% + 0px)");
+    expect(style).toContain("calc(100% - 32px)");
   });
 
   it("titles an untranslated group by its group name", async () => {
