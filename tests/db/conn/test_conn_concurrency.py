@@ -71,8 +71,9 @@ class TestConcurrency:
             futures = [executor.submit(worker, i) for i in range(20)]
             results = [f.result() for f in as_completed(futures)]
 
-        # All tasks should succeed
-        assert all(r is True for r in results)
+        # All tasks should succeed: the message carries what a failing task
+        # raised, a bare all(...) hides the reason the pool could not serve it
+        assert all(r is True for r in results), results
 
         # Verify data
         with pool.cursor() as cursor:
