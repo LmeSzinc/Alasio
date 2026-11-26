@@ -1,7 +1,7 @@
 {
   "name": "alasio-frontend",
   "private": true,
-  "version": "2.0.5",
+  "version": "2.0.7",
   "type": "module",
   "engines": {
     "node": "^22.22.2 || ^24.15.0 || >=26.0.0"
