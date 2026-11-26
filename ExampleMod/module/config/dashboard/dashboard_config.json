@@ -97,7 +97,8 @@
         "i18ngroup": "DashboardProgress",
         "dt": "input-float",
         "value": 0.0,
-        "ge": 0
+        "ge": 0,
+        "le": 100
       }
     },
     "Planner": {
@@ -117,7 +118,8 @@
         "i18ngroup": "DashboardPlanner",
         "dt": "input-int",
         "value": 0,
-        "ge": 0
+        "ge": 0,
+        "le": 100
       },
       "Eta": {
         "task": "Dashboard",

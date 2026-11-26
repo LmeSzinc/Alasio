@@ -104,7 +104,7 @@
     },
     Campaign: {
       _info: info("Campaign", "Progress", "#1e88e5", "Campaign"),
-      Value: arg("Campaign", "Value", "input-float", 45.67),
+      Value: arg("Campaign", "Value", "input-float", 45.67, { ge: 0, le: 100 }),
       Time: timeArg("Campaign", 30 * 1000),
     },
     Research: {
@@ -173,9 +173,9 @@
     },
     {
       title: "Progress",
-      help: "DashboardProgress: a percentage. A value out of range is clamped to 0-100 instead of overflowing the row (150 reads 100.00%).",
+      help: "DashboardProgress: a percentage bounded by 0~100, the limit is the arg constraint itself. The row still clamps a value out of range to 0-100 when one reaches it (150 reads 100.00%).",
       card: demoCard("Progress", "Campaign", "#1e88e5", {
-        Value: arg("Progress", "Value", "input-float", 45.67, { ge: 0 }),
+        Value: arg("Progress", "Value", "input-float", 45.67, { ge: 0, le: 100 }),
         Time: timeArg("Progress", 10 * 1000),
       }),
     },
@@ -183,7 +183,7 @@
       title: "Planner",
       help: "DashboardPlanner: the Progress and Eta of a plan, plus its complete Value/Total pairs (8 / 10 and 22 / 44 here). Every arg of the group is editable in the dialog, the plan numbers and the pairs included.",
       card: demoCard("Planner", "Research", "#8e24aa", {
-        Progress: arg("Planner", "Progress", "input-int", 80, { ge: 0 }),
+        Progress: arg("Planner", "Progress", "input-int", 80, { ge: 0, le: 100 }),
         Eta: arg("Planner", "Eta", "input", "01:23:45"),
         GreenValue: arg("Planner", "GreenValue", "input-int", 8, { ge: 0 }),
         GreenTotal: arg("Planner", "GreenTotal", "input-int", 10, { ge: 0 }),

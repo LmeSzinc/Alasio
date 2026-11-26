@@ -35,12 +35,12 @@ DashboardProgress:
     Value:
       value: 0
       dt: input-float
-      range: x>=0
+      range: 0~100
 
 DashboardPlanner:
   parent: DashboardBase
   args:
     Progress:
       value: 0
-      range: x>=0
+      range: 0~100
     Eta: ""

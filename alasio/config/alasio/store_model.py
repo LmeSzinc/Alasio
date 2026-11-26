@@ -541,7 +541,8 @@ class DashboardProgress(DashboardBase):
         Progress:
             parent: DashboardProgress
     """
-    Value: e.Annotated[float, m.Meta(ge=0)] = 0
+    # A progress is a percentage, so it is bounded on both sides
+    Value: e.Annotated[float, m.Meta(ge=0, le=100)] = 0
 
 
 class DashboardPlanner(DashboardBase):
@@ -561,5 +562,6 @@ class DashboardPlanner(DashboardBase):
                     value: 0
                     range: x>=0
     """
-    Progress: a.T_INT_GE0 = 0
+    # A progress is a percentage, so it is bounded on both sides
+    Progress: e.Annotated[int, m.Meta(ge=0, le=100)] = 0
     Eta: str = ''
