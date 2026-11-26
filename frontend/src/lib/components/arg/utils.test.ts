@@ -6,62 +6,11 @@ import {
   getDashboardPairText,
   i18nTextToLines,
   i18nTextToOneLine,
-  isDashboardInternalArg,
-  isDashboardPairArg,
 } from "./utils.svelte";
-
-describe("TestIsDashboardInternalArg", () => {
-  it.each([
-    ["_info", "Amount"],
-    ["Value", "Amount"],
-    ["Value", "Progress"],
-    ["Value", "DynamicTotal"],
-    ["Value", "SoftTotal"],
-    ["Time", "Progress"],
-    ["ServerUpdate", "Planner"],
-    ["Total", "DynamicTotal"],
-    ["Total", "SoftTotal"],
-    ["Progress", "Planner"],
-    ["Eta", "Planner"],
-  ])("hides %s of %s", (argKey, dashboardType) => {
-    expect(isDashboardInternalArg(argKey, dashboardType)).toBe(true);
-  });
-
-  it.each([
-    ["Total", "Total"],
-    ["Total", "Amount"],
-    ["Value", "Planner"],
-    ["Progress", "Progress"],
-    ["Progress", "Amount"],
-    ["Eta", "Progress"],
-    ["GreenValue", "Planner"],
-    ["GreenTotal", "Planner"],
-  ])("keeps %s of %s visible", (argKey, dashboardType) => {
-    expect(isDashboardInternalArg(argKey, dashboardType)).toBe(false);
-  });
-});
 
 function pairArg(value: any): ArgData {
   return { task: "Dashboard", group: "Planner", arg: "Arg", dt: "input-int", value };
 }
-
-describe("TestIsDashboardPairArg", () => {
-  it("accepts both sides of a complete pair", () => {
-    const group = { GreenValue: pairArg(8), GreenTotal: pairArg(10) };
-    expect(isDashboardPairArg("GreenValue", group)).toBe(true);
-    expect(isDashboardPairArg("GreenTotal", group)).toBe(true);
-  });
-
-  it("rejects unpaired args", () => {
-    expect(isDashboardPairArg("GreenValue", { GreenValue: pairArg(8) })).toBe(false);
-    expect(isDashboardPairArg("GreenTotal", { GreenTotal: pairArg(10) })).toBe(false);
-  });
-
-  it("rejects non-pair args", () => {
-    expect(isDashboardPairArg("Custom", { Custom: pairArg(1) })).toBe(false);
-    expect(isDashboardPairArg("Progress", { Progress: pairArg(80) })).toBe(false);
-  });
-});
 
 describe("TestGetDashboardPairText", () => {
   it("returns empty without a complete pair", () => {

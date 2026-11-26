@@ -144,6 +144,13 @@ export type InputProps = {
   handleEdit?: (data: ArgData) => void;
   handleReset?: (data: ArgData) => void;
   isDesc?: boolean;
+  /**
+   * Called with the validity of the field: true while the text it shows is not
+   * accepted. Such a text is kept inside the input and never committed to
+   * `data.value`, so this is the only way for a form around the input to know
+   * that a field is refusing what was typed.
+   */
+  onInvalidChange?: (invalid: boolean) => void;
 };
 
 export type LayoutProps = InputProps & {
@@ -207,47 +214,14 @@ export function i18nTextToOneLine(text: I18nTextData | undefined | null): string
 }
 
 /**
- * Args of a dashboard group that are managed by the framework and must not be
- * rendered as editable rows in the config card.
- *
- * @param argKey Arg name
- * @param dashboardType Dashboard type from `_info.dashboard`, e.g. "Planner"
- * @returns True if the arg is internal to the dashboard type
- */
-export function isDashboardInternalArg(argKey: string, dashboardType: string): boolean {
-  if (argKey === "_info") return true;
-  if (argKey === "Time" || argKey === "ServerUpdate") return true;
-  // Value is the built-in dashboard value of every type except Planner, where
-  // it is a regular arg and may be used as a Value/Total pair.
-  if (argKey === "Value" && dashboardType !== "Planner") return true;
-  if ((dashboardType === "DynamicTotal" || dashboardType === "SoftTotal") && argKey === "Total") return true;
-  if (dashboardType === "Planner" && (argKey === "Progress" || argKey === "Eta")) return true;
-  return false;
-}
-
-/**
- * True when arg is one side of a complete Value/Total pair.
- *
- * @param argKey Arg name
- * @param groupData Dashboard group args
- * @returns True for both the Value and the Total of a complete pair
- */
-export function isDashboardPairArg(argKey: string, groupData: Record<string, ArgData>): boolean {
-  if (argKey.endsWith("Value")) {
-    return `${argKey.slice(0, -"Value".length)}Total` in groupData;
-  }
-  if (argKey.endsWith("Total")) {
-    return `${argKey.slice(0, -"Total".length)}Value` in groupData;
-  }
-  return false;
-}
-
-/**
  * Format the Value/Total pairs of a dashboard group for display.
  *
  * A pair is an arg ending with "Value" and its matching "Total" arg. Unpaired
  * args are ignored. One pair renders as "8 / 10"; multiple pairs render as
  * "(8, 33) / (10, 44)" in the order of the Value args.
+ *
+ * The editable args of a dashboard group (its Value/Total pairs included) are
+ * listed by dashboardFields() in $lib/components/dashboard/dashboardEdit.
  *
  * @param groupData Dashboard group args
  * @returns Pair text, empty when no complete pair exists

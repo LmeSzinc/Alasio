@@ -5,6 +5,7 @@
   import { elementSize, elementViewportSize } from "$lib/use/size.svelte";
   import { cn } from "$lib/utils";
   import type UIState from "$private/config/[config_name]/state.svelte";
+  import type { DashboardEditEvent } from "../dashboard/dashboardEdit";
   import ArgCard from "./ArgCard.svelte";
   import type { CardData, InfoData, InputProps } from "./utils.svelte";
 
@@ -14,6 +15,7 @@
     ui?: UIState;
     handleEdit?: InputProps["handleEdit"];
     handleReset?: InputProps["handleReset"];
+    handleMultiEdit?: (events: DashboardEditEvent[]) => void;
     handleCardReset?: (data: InfoData) => void;
     class?: string;
   };
@@ -23,6 +25,7 @@
     ui,
     handleEdit,
     handleReset,
+    handleMultiEdit,
     handleCardReset,
     class: className,
   }: $props = $props();
@@ -153,6 +156,7 @@
         {parentWidth}
         {handleEdit}
         {handleReset}
+        {handleMultiEdit}
         {handleCardReset}
         flashing={flashingCard === cardKey}
         class={cardClass}

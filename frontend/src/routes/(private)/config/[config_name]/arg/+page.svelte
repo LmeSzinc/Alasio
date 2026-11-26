@@ -2,6 +2,7 @@
   import { untrack } from "svelte";
   import { toast } from "svelte-sonner";
   import type { ArgData, CardData, InfoData } from "$lib/components/arg/utils.svelte";
+  import type { DashboardEditEvent } from "$lib/components/dashboard/dashboardEdit";
   import { t } from "$lib/i18n";
   import { useTopic } from "$lib/ws";
   import ArgCardList from "$src/lib/components/arg/ArgCardList.svelte";
@@ -11,6 +12,7 @@
   type ConfigArgData = Record<string, CardData>;
   const topicClient = useTopic<ConfigArgData>("ConfigArg");
   const setRpc = topicClient.rpc();
+  const batchSetRpc = topicClient.rpc();
   const resetRpc = topicClient.rpc();
   const cardResetRpc = topicClient.rpc();
 
@@ -22,6 +24,11 @@
       arg: data.arg,
       value: data.value,
     });
+  }
+  function handleMultiEdit(events: DashboardEditEvent[]) {
+    // One dashboard record (Value + Time) is one edit: the backend saves the
+    // batch atomically, so a value never lands without its timestamp
+    batchSetRpc.call("batch_set", { events });
   }
   function handleReset(data: ArgData) {
     resetRpc.call("reset", {
@@ -44,6 +51,13 @@
   };
   $effect(() => {
     if (setRpc.successMsg) {
+      untrack(() => {
+        toast.success(t.Input.ConfigSet(), toastOptions);
+      });
+    }
+  });
+  $effect(() => {
+    if (batchSetRpc.successMsg) {
       untrack(() => {
         toast.success(t.Input.ConfigSet(), toastOptions);
       });
@@ -73,6 +87,7 @@
       {ui}
       {handleEdit}
       {handleReset}
+      {handleMultiEdit}
       {handleCardReset}
     />
   {/if}

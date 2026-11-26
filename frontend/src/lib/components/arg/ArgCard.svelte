@@ -1,25 +1,20 @@
 <script lang="ts">
   import StaticDatetime from "../arginput/StaticDatetime.svelte";
+  import DashboardEdit from "../dashboard/DashboardEdit.svelte";
   import PrettyValue from "../dashboard/PrettyValue.svelte";
+  import type { DashboardEditEvent } from "../dashboard/dashboardEdit";
   import Arg from "./Arg.svelte";
   import ArgGroupCard from "./ArgGroupCard.svelte";
   import CardEnable from "./CardEnable.svelte";
   import LayoutHorizontalLike from "./LayoutHorizontalLike.svelte";
-  import {
-    type ArgData,
-    type CardData,
-    type InfoData,
-    type InputProps,
-    getDashboardPairText,
-    isDashboardInternalArg,
-    isDashboardPairArg,
-  } from "./utils.svelte";
+  import { type ArgData, type CardData, type InfoData, type InputProps, getDashboardPairText } from "./utils.svelte";
 
   type Props = {
     cardData: CardData;
     parentWidth: number;
     handleEdit: InputProps["handleEdit"];
     handleReset: InputProps["handleReset"];
+    handleMultiEdit?: (events: DashboardEditEvent[]) => void;
     handleCardReset?: (data: InfoData) => void;
     flashing?: boolean;
     class?: string;
@@ -29,6 +24,7 @@
     parentWidth,
     handleEdit,
     handleReset,
+    handleMultiEdit,
     handleCardReset,
     flashing = false,
     class: className,
@@ -45,19 +41,6 @@
   });
 
   let isAdvanced = $state(false);
-
-  // Get extra args from a dashboard group
-  function getDashboardArgs(groupData: Record<string, ArgData>, dashboardType: string): string[] {
-    return Object.entries(groupData)
-      .filter(([argKey, _]) => {
-        if (isDashboardInternalArg(argKey, dashboardType)) return false;
-        // A Planner only displays its complete Value/Total pairs; custom
-        // settings such as "Custom" stay in the model but out of the card.
-        if (dashboardType === "Planner" && !isDashboardPairArg(argKey, groupData)) return false;
-        return true;
-      })
-      .map(([argKey]) => argKey);
-  }
 </script>
 
 <ArgGroupCard title={Info?.name || "UnknownGroupName"} help={Info?.help} {flashing} class={className}>
@@ -76,32 +59,29 @@
   {#each Object.entries(Groups) as [groupKey, groupData]}
     <hr />
     {@const dashboardType = (groupData._info as ArgData | undefined)?.dashboard ?? ""}
-    {@const dashboardArgs = getDashboardArgs(groupData, dashboardType)}
     {@const pairText = dashboardType === "Planner" ? getDashboardPairText(groupData) : ""}
     {#if dashboardType}
-      <!-- Dashboard -->
-      <div class="flex flex-col gap-y-1.5">
-        <!-- Display dashboard value and time as a compact arg -->
-        <LayoutHorizontalLike data={groupData._info as ArgData}>
-          {#snippet InputSnippet()}
-            <PrettyValue data={groupData} variant="primary" class="w-full text-left" />
-          {/snippet}
-          {#snippet PlaceholderSnippet()}
-            <div class="flex flex-col gap-y-0.5">
-              {#if pairText}
-                <div class="truncate text-xs text-muted-foreground" title={pairText}>{pairText}</div>
-              {/if}
-              {#if groupData.Time}
-                <StaticDatetime data={groupData.Time} class="justify-start" />
-              {/if}
-            </div>
-          {/snippet}
-        </LayoutHorizontalLike>
-        <!-- Display extra dashboard args -->
-        {#each dashboardArgs as argKey}
-          <Arg bind:data={cardData[groupKey][argKey]} {parentWidth} {handleEdit} {handleReset} {isAdvanced} />
-        {/each}
-      </div>
+      <!-- Dashboard: one summary row, every editable arg lives in the dialog -->
+      <LayoutHorizontalLike data={groupData._info as ArgData}>
+        {#snippet InputSnippet()}
+          <!-- The record editor sits right of the value: its dialog edits every
+               editable arg of the group (see dashboardFields) as one batch -->
+          <div class="flex w-full min-w-0 items-center gap-x-1">
+            <PrettyValue data={groupData} variant="primary" class="min-w-0 flex-1 text-left" />
+            <DashboardEdit data={groupData} {handleEdit} {handleMultiEdit} />
+          </div>
+        {/snippet}
+        {#snippet PlaceholderSnippet()}
+          <div class="flex flex-col gap-y-0.5">
+            {#if pairText}
+              <div class="truncate text-xs text-muted-foreground" title={pairText}>{pairText}</div>
+            {/if}
+            {#if groupData.Time}
+              <StaticDatetime data={groupData.Time} class="justify-start" />
+            {/if}
+          </div>
+        {/snippet}
+      </LayoutHorizontalLike>
     {:else}
       <!-- Normal group -->
       <div class="flex flex-col gap-y-1.5">

@@ -265,6 +265,20 @@
     "zh-TW": "移除",
     "es-ES": "Quitar"
   },
+  "DashboardEdit": {
+    "en-US": "Edit record",
+    "zh-CN": "编辑记录",
+    "ja-JP": "記録を編集",
+    "zh-TW": "編輯記錄",
+    "es-ES": "Editar registro"
+  },
+  "DashboardEditsDiscarded": {
+    "en-US": "Edits discarded",
+    "zh-CN": "编辑已撤销",
+    "ja-JP": "編集を破棄しました",
+    "zh-TW": "編輯已還原",
+    "es-ES": "Ediciones descartadas"
+  },
   "ConfigSet": {
     "en-US": "Config saved",
     "zh-CN": "设置已保存",
