@@ -14,6 +14,12 @@ import time
 
 from .conftest import NOW, at
 
+# The clocks FrozenWallClock documents as untouched, bound at import time so a
+# patch of the module attribute cannot move the reference under the test
+REAL_SLEEP = time.sleep
+REAL_MONOTONIC = time.monotonic
+REAL_PERF_COUNTER = time.perf_counter
+
 
 class TestFrozenWallClock:
     def test_the_wall_clock_is_the_instant_of_the_run(self):
@@ -28,16 +34,33 @@ class TestFrozenWallClock:
         assert time.time() == at(4, 0)
         assert datetime.datetime.now().hour == 4
 
+    def test_the_clocks_of_durations_are_the_real_ones(self):
+        """
+        The instant is patched, the clocks of durations are not
+
+        Asserted on identity rather than on a measurement: the objects are the
+        ones the interpreter had before the fixture ran, and that is exactly the
+        property the runs depend on. A frozen sleep would not be a slow sleep,
+        it would be another function.
+        """
+        assert time.sleep is REAL_SLEEP
+        assert time.monotonic is REAL_MONOTONIC
+        assert time.perf_counter is REAL_PERF_COUNTER
+
     def test_a_sleep_really_sleeps(self):
-        """time.sleep is not patched: it waits, the way a worker's stop waits"""
-        # the two clocks have different origins (monotonic is the uptime on
-        # Windows, perf_counter a high resolution counter): each is measured
-        # against its own reading
-        mono = time.monotonic()
-        perf = time.perf_counter()
-        time.sleep(0.02)
-        assert time.monotonic() - mono >= 0.015
-        assert time.perf_counter() - perf >= 0.015
+        """
+        time.sleep is not patched: it waits, the way a worker's stop waits
+
+        The wait is measured with perf_counter, the high resolution counter of
+        the platform. time.monotonic is the millisecond tick of GetTickCount64
+        on Windows, which is far too coarse to time a short wait: a read on it
+        can report a wait of 20ms as one tick of 15.6ms.
+        """
+        start = time.perf_counter()
+        time.sleep(0.2)
+        # a frozen sleep returns at once, and a real one cannot return in half
+        # the time it was asked for
+        assert time.perf_counter() - start >= 0.1
 
     def test_the_wall_clock_holds_still_while_the_real_clock_runs(self):
         """The passage of time is not what the run reads: only the instant is"""
