@@ -26,8 +26,12 @@
 
   let open = $state(false);
   let triggerEl = $state<HTMLElement | null>(null);
-  let tablistEl = $state<HTMLElement | null>(null);
   let listboxEl = $state<HTMLElement | null>(null);
+  // The rendered node of a group or an option, keyed by the same value the
+  // `each` block is keyed by: a row keeps its key for its whole lifetime, so a
+  // lookup never returns the node of a row that moved to another index.
+  let tabEls: Record<string, HTMLElement> = $state({});
+  let optionEls: Record<string, HTMLElement> = $state({});
 
   // The options column shows `activeGroup` (the preview) while the selected
   // value stays untouched until an option is clicked.
@@ -47,10 +51,6 @@
     return Math.min(Math.max(index, 0), max);
   }
 
-  function elementAt(parent: HTMLElement | null, index: number) {
-    return parent?.querySelector<HTMLElement>(`[data-index="${index}"]`) ?? null;
-  }
-
   /** Show `group` in the options column, without committing anything. */
   function previewGroup(group: string) {
     activeGroup = group;
@@ -60,7 +60,8 @@
   }
 
   function focusActiveTab() {
-    elementAt(tablistEl, activeTabIndex)?.focus?.();
+    if (activeGroup === null) return;
+    tabEls[activeGroup]?.focus?.();
   }
 
   function focusOptionColumn() {
@@ -163,10 +164,13 @@
     // Read the group as well: switching group must scroll even when the
     // highlighted index happens to be the same
     if (!activeGroup) return;
-    const index = highlighted;
+    // Read the highlight as well: moving it must scroll even when the group
+    // stays the same
+    const option = options[highlighted];
+    if (option === undefined) return;
     tick().then(() => {
       if (!open) return;
-      elementAt(listboxEl, index)?.scrollIntoView?.({ block: "nearest" });
+      optionEls[option]?.scrollIntoView?.({ block: "nearest" });
     });
   });
 </script>
@@ -220,7 +224,6 @@
             role="tablist"
             aria-orientation="vertical"
             tabindex={-1}
-            bind:this={tablistEl}
             onpointerenter={() => (focusColumn = "group")}
             class="max-h-(--bits-floating-available-height) overflow-y-auto overscroll-contain border-r border-border py-1"
           >
@@ -232,7 +235,7 @@
                 aria-selected={group === activeGroup}
                 aria-controls={panelId}
                 tabindex={-1}
-                data-index={index}
+                bind:this={tabEls[group]}
                 class={cn(
                   "flex w-full cursor-default items-center gap-1 px-2 py-1 text-left outline-hidden",
                   "hover:bg-accent hover:text-accent-foreground",
@@ -275,7 +278,7 @@
                   id={optionId(index)}
                   aria-selected={option === arg.value}
                   tabindex={-1}
-                  data-index={index}
+                  bind:this={optionEls[option]}
                   class={cn(
                     "flex cursor-default items-center gap-2 px-2 py-1",
                     index === highlighted && "bg-accent text-accent-foreground",

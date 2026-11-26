@@ -311,3 +311,76 @@ describe("TestSecondarySelectColumnIndicator", () => {
     expect(indicatorRow()).toBe("2-2");
   });
 });
+
+describe("TestSecondarySelectFocus", () => {
+  it("moves the focus between the columns with the arrow keys", async () => {
+    const { target } = await mountInput();
+    await openPopup(target);
+
+    // Left hands the focus to the tab of the previewed group
+    await press("ArrowLeft");
+    expect(document.activeElement).toBe(document.querySelector('[role="tab"][aria-selected="true"]'));
+
+    // Right hands it back to the listbox, which owns the highlight
+    await press("ArrowRight");
+    expect(document.activeElement).toBe(document.querySelector('[role="listbox"]'));
+  });
+
+  it("follows the previewed group with the focus", async () => {
+    const { target } = await mountInput();
+    await openPopup(target);
+
+    await press("ArrowLeft");
+    await press("ArrowDown");
+
+    expect(activeTab()).toBe("Chapter 3");
+    expect(document.activeElement).toBe(document.querySelector('[role="tab"][aria-selected="true"]'));
+  });
+});
+
+describe("TestSecondarySelectScroll", () => {
+  /** jsdom implements no scrolling, the component calls it through `?.` */
+  let scrollIntoView: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    scrollIntoView = vi.fn();
+    (Element.prototype as any).scrollIntoView = scrollIntoView;
+  });
+
+  afterEach(() => {
+    delete (Element.prototype as any).scrollIntoView;
+  });
+
+  /** The option node the component scrolled last. */
+  function lastScrolled(): Element | undefined {
+    return scrollIntoView.mock.contexts.at(-1) as Element | undefined;
+  }
+
+  function optionRow(text: string): Element | undefined {
+    return [...document.querySelectorAll('[role="option"]')].find((el) => el.textContent?.trim() === text);
+  }
+
+  it("keeps the highlighted option in view", async () => {
+    const { target } = await mountInput();
+    await openPopup(target);
+
+    // The popup opens on the current value, which is scrolled into view
+    expect(lastScrolled()).toBe(optionRow("2-2"));
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest" });
+
+    // Moving the highlight scrolls the option it lands on
+    await press("ArrowUp");
+    expect(lastScrolled()).toBe(optionRow("2-1"));
+  });
+
+  it("keeps the option in view when the group changes", async () => {
+    const { target } = await mountInput();
+    await openPopup(target);
+
+    await press("ArrowLeft");
+    await press("ArrowDown");
+
+    expect(labels('[role="option"]')).toEqual(["3-1", "3-2"]);
+    expect(lastScrolled()).toBe(optionRow("3-1"));
+  });
+});
