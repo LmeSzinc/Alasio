@@ -11,6 +11,7 @@
     isAdvanced = false,
     handleEdit,
     handleReset,
+    onInvalidChange,
     class: className,
   }: LayoutProps = $props();
 
@@ -32,7 +33,7 @@
 
   <!-- Second row: input -->
   <div class="flex items-center">
-    <InputComponent {data} {handleEdit} {handleReset} />
+    <InputComponent {data} {handleEdit} {handleReset} {onInvalidChange} />
   </div>
 
   <!-- Third row: help -->

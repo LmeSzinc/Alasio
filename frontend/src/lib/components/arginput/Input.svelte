@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { untrack } from "svelte";
+  import { onDestroy, untrack } from "svelte";
   import {
     type InputProps,
     useArgValue,
@@ -12,7 +12,14 @@
   import Reset from "./_Reset.svelte";
   import { formatToLocal, parseToUTC, tzOffset } from "./dateutils.svelte";
 
-  let { data = $bindable(), class: className, handleEdit, handleReset, isDesc = false }: InputProps = $props();
+  let {
+    data = $bindable(),
+    class: className,
+    handleEdit,
+    handleReset,
+    isDesc = false,
+    onInvalidChange,
+  }: InputProps = $props();
   const arg = $derived(useArgValue<string>(data));
 
   // --- Datetime handling ---
@@ -85,10 +92,24 @@
         arg.value = value;
       });
     }
+    return null;
   });
 
   // The actual error message to display
   const errorMessage = $derived(showError ? validationError : null);
+
+  // The text being typed lives inside this input and is only committed to the
+  // arg once it passes validation, so a form around the input can not see a
+  // rejected text in the arg: the validity is reported instead.
+  //
+  // Only the validity is tracked: the report itself runs untracked, so a caller
+  // that stores what it hears does not feed back into this effect (which would
+  // re-run on every store and report again, forever). A caller therefore has to
+  // treat a repeated report as the same state, and the ones here do.
+  $effect(() => {
+    const invalid = errorMessage !== null;
+    untrack(() => onInvalidChange?.(invalid));
+  });
 
   let debounceTimer: ReturnType<typeof setTimeout>;
   function onInput(event: Event) {
@@ -189,6 +210,7 @@
       onfocus={onFocus}
       oninput={onInput}
       onblur={onBlur}
+      aria-invalid={errorMessage !== null}
     />
 
     <!-- Draw bottom border with peer, the box of dt="input-line" has all 4 sides -->
