@@ -717,4 +717,8 @@ class AdbProtocolTCP:
             # the connection died under the client, connect() rebuilds it
             self._broken = True
             self._abort_streams()
+            # release the descriptor here: a broken connection kept until the
+            # next connect() may hold a descriptor for as long as the caller
+            # keeps the object, and the next connect() may never come
+            self._close_socket(sock)
         logger.warning(f'Connection to {self.host}:{self.port} is broken, receiving ended: {reason}')

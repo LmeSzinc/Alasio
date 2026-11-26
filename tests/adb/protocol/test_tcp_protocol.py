@@ -1434,6 +1434,41 @@ class TestDisconnect:
                 client.disconnect()
 
 
+class TestConnectionRelease:
+    """A connection the device dropped releases its resources itself
+
+    The dispatch thread holds the client object for as long as the connection
+    is open, so a client a caller forgot is never collected and its release can
+    not be left to the garbage collector. The thread that notices the end of
+    the link is what closes the socket.
+    """
+
+    def test_a_broken_connection_releases_its_descriptor(self):
+        """A connection the device dropped does not keep its socket open"""
+        with FakeAdbd() as adbd:
+            client = AdbProtocolTCP(port=adbd.port)
+            client.timeout = 0.3
+            client.connect()
+            try:
+                sock = client._sock
+                assert sock.fileno() != -1
+
+                adbd.drop_connections()
+                adbd.wait_for(lambda: sock.fileno() == -1, message='the descriptor is still open')
+
+                # the object is kept for the error message and for a reconnect
+                assert client._sock is sock
+                assert client._broken is True
+                with pytest.raises(AdbConnectionClosed) as e:
+                    client.open_stream('shell:x')
+                assert 'broken' in str(e.value)
+            finally:
+                # a socket already closed is not an error of the disconnect
+                client.disconnect()
+
+        assert client._sock is None
+
+
 class TestConnectFailure:
     """The handshake that does not end in a CNXN"""
 
