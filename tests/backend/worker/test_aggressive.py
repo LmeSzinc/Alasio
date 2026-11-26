@@ -3,7 +3,6 @@ WorkerManager 鲁棒性测试
 
 测试异常情况下的恢复能力
 """
-import time
 
 import pytest
 
@@ -40,13 +39,13 @@ class TestWorkerResilience:
 
         # 等待 Manager 发现并处理
         # Manager 的 _io_loop 应该会因为 pipe EOF 而触发 _handle_disconnect
+        # AssertTimeout retries the block only while it raises AssertionError: the
+        # condition has to be an assert. Written as "if ...: break" the loop ends
+        # after a single pass, which gives the manager no time to report the state
         for _ in AssertTimeout(WORKER_STOP_TIMEOUT):
             with _:
-                if state.state == 'error':
-                    break
-                time.sleep(0.1)
+                assert state.state == 'error'
 
-        assert state.state == 'error'
         assert not state.process or not state.process.is_alive()
 
     def test_close_worker_pipe_directly(self, manager):
