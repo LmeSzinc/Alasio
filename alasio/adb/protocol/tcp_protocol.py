@@ -1,11 +1,15 @@
 import socket
+from collections import deque
 from struct import Struct
-from threading import Lock, Thread
+from threading import Lock, Thread, current_thread
 from time import perf_counter
 from typing import Literal
 
 from alasio.adb.protocol.cnxn import DeviceFeatures
-from alasio.adb.protocol.const import *
+from alasio.adb.protocol.const import (
+    ADB_COMMANDS, ADB_MAX_PAYLOAD, ADB_VERSION, ADB_VERSION_SKIP_CHECKSUM, CLSE, CNXN, OKAY, OPEN, WRTE,
+    AdbConnectionClosed, AdbConnectionTimeout, AdbMessageInvalid, AdbStreamClosed, AdbStreamTimeout
+)
 from alasio.logger import logger
 
 
@@ -21,6 +25,16 @@ class AdbStreamTCP:
         self.send_event = Lock()
         self.send_event.acquire()  # service is send on stream opening
         self.recv_event = Lock()
+        # True once the CLSE of this side was sent. A stream ends when both
+        # sides sent one, the device keeps a stream the host never answered,
+        # and a kept stream makes the device refuse the next OPEN that uses the
+        # same local id.
+        self.close_sent = False
+        self._close_lock = Lock()
+        # True when the connection was dropped under the stream: the output is
+        # incomplete, and a caller must not mistake it for the output of a
+        # command that ended
+        self.aborted = False
 
         # result buffer
         self.data_buffer: "deque[bytes]" = deque()
@@ -31,32 +45,71 @@ class AdbStreamTCP:
 
     __repr__ = __str__
 
+    def mark_close_sent(self) -> bool:
+        """
+        Claim the CLSE of this stream.
+
+        Returns:
+            bool: True for the caller that has to send it, False for every
+                caller after that
+        """
+        with self._close_lock:
+            if self.close_sent:
+                return False
+            self.close_sent = True
+            return True
+
     def __enter__(self):
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        self.close()
+        try:
+            self.close()
+        except (AdbConnectionClosed, AdbConnectionTimeout) as e:
+            # a close that fails must not replace the error of the block, that
+            # error is what the caller has to see
+            if exc_type is None:
+                raise
+            logger.warning(f'Failed to close stream after an error: {e}')
 
     def close(self):
         """
         Raises:
+            AdbConnectionClosed:
             AdbConnectionTimeout:
         """
         self.protocol.close_stream(self)
 
     def recv_until_close(self, timeout: "int | float" = 20) -> bytes:
-        while 1:
+        """
+        Receive data of the stream until the device closes it.
+
+        Args:
+            timeout (int | float): Seconds to wait for the close. Defaults to 20.
+
+        Returns:
+            bytes: Everything received on the stream, in order
+
+        Raises:
+            AdbStreamTimeout: When the device does not close the stream in time
+            AdbConnectionClosed: When the connection was dropped under the
+                stream, its output is incomplete
+        """
+        # the state decides first: the data of an already closed stream is
+        # returned whatever the timeout is, and a signal of an earlier message
+        # can not stand for the close
+        while self.state != 'closed' and self.state != 'closing':
             # the accounting is only reached when a message woke the wait, and
             # the clock must not move under it: a wall clock correction would
             # stretch the timeout by the size of the jump, or cut it short
             if timeout < 0.001:
                 raise AdbStreamTimeout('Timeout when receiving stream until close')
             start = perf_counter()
-            if self.recv_event.acquire(timeout=timeout):
-                if self.state == 'closed' or self.state == 'closing':
-                    break
-                # else: message
+            self.recv_event.acquire(timeout=timeout)
             timeout -= perf_counter() - start
+
+        if self.aborted:
+            raise AdbConnectionClosed(f'Connection lost while receiving the stream: {self}')
 
         # build output
         data = b''.join(self.data_buffer)
@@ -80,50 +133,147 @@ class AdbProtocolTCP:
         self._send_lock = Lock()
         self._sock: "socket.socket | None" = None
         self._recv_thread: "Thread | None" = None
+        # True when the receiving thread gave up on the connection, the socket
+        # object is still here but it can neither read nor write any more
+        self._broken = False
 
         # internal states
         self._message_struct = Struct('<6I')
-        # maximum payload that device claims, init with our MAX_PAYLOAD
+        # maximum payload the device accepts, init with our MAX_PAYLOAD
         self._max_payload = ADB_MAX_PAYLOAD
+        # protocol version of this connection: the lower of ours and the one
+        # the device answered with, the checksum is optional from 0x01000001 on
+        self._protocol_version = ADB_VERSION
 
-        # local stream ID pool, init with 8 IDs, starting from 1
-        self._stream_id_pool = set(range(1, 9))
-        self._stream_id_next = 9
+        # local stream ID, a counter that is never rewound: the device may
+        # still send a message of a stream that ended, and a reused id would
+        # put that message on the stream of an unrelated caller
+        self._stream_id_next = 1
         self._stream_dict: "dict[int, AdbStreamTCP]" = {}
 
         # device features
         self.features = DeviceFeatures([])
 
     def _stream_id_allocate(self) -> int:
-        # reuse existing ID first
-        pool = self._stream_id_pool
-        try:
-            return pool.pop()
-        except KeyError:
-            pass
-        # pool exhausted, add 8 news (7 added to pool, 1 return)
-        new = self._stream_id_next
-        for n in range(new + 1, self._stream_id_next + 8):
-            pool.add(n)
-        return new
+        local_id = self._stream_id_next
+        self._stream_id_next += 1
+        return local_id
 
-    def _stream_id_release(self, n: int):
-        self._stream_id_pool.add(n)
+    def _require_sock(self) -> socket.socket:
+        """
+        Get the socket of the connection.
+
+        Returns:
+            socket.socket: The connected socket
+
+        Raises:
+            AdbConnectionClosed: When there is no connection, or when the
+                connection is known to be broken
+        """
+        sock = self._sock
+        addr = f'{self.host}:{self.port}'
+        if sock is None:
+            raise AdbConnectionClosed(f'Not connected to {addr}, call connect() first')
+        if self._broken:
+            raise AdbConnectionClosed(f'Connection to {addr} is broken, call connect() again')
+        return sock
+
+    @staticmethod
+    def _close_socket(sock: "socket.socket | None"):
+        """
+        Close a socket and wake the reads another thread blocks on it.
+
+        Args:
+            sock (socket.socket): Socket to close, None is ignored
+        """
+        if sock is None:
+            return
+        # shutdown() is what wakes a recv() blocked in another thread, close()
+        # alone leaves that thread waiting on a descriptor nobody will write
+        try:
+            sock.shutdown(socket.SHUT_RDWR)
+        except (OSError, AttributeError):
+            # not connected, already closed, or a socket stand-in without it
+            pass
+        try:
+            sock.close()
+        except OSError:
+            pass
+
+    def _abort_streams(self):
+        """
+        Drop every stream of the connection and wake the callers waiting on it.
+
+        The caller holds `_connect_lock`. A caller that waits on the stream of a
+        connection that is gone must not wait for the timeout of the wait.
+        """
+        streams = self._stream_dict
+        self._stream_dict = {}
+        for stream in streams.values():
+            stream.aborted = True
+            stream.state = 'closed'
+            for event in (stream.send_event, stream.recv_event):
+                try:
+                    event.release()
+                except RuntimeError:
+                    pass
+
+    def _drop_connection(self):
+        """
+        Forget the current connection, close its socket and drop its streams.
+
+        The caller holds `_connect_lock`, and it has to join the returned thread
+        itself, outside of the lock: the dispatch thread takes that lock too.
+
+        Returns:
+            Thread | None: The dispatch thread of the dropped connection
+        """
+        sock = self._sock
+        thread = self._recv_thread
+        self._sock = None
+        self._recv_thread = None
+        self._broken = False
+        if sock is None:
+            return None
+
+        # we don't need graceful stream close before socket close, because adbd
+        # will do anyway, so we just release resources on our side
+        self._abort_streams()
+
+        self._close_socket(sock)
+        return thread
 
     def connect(self):
+        """
+        Connect to the device and read its CNXN.
+
+        Raises:
+            ConnectionRefusedError: When nothing listens on the address
+            AdbConnectionTimeout: When the device does not answer in time
+            AdbConnectionClosed: When the device closes the connection during
+                the handshake
+            AdbMessageInvalid: When the device does not answer with a CNXN
+        """
         with self._connect_lock:
             # check if already connected
-            if self._sock is not None:
+            if self._sock is not None and not self._broken:
                 return
+            # the receiving thread gave up on the previous connection, its
+            # socket is dead although the object is still here
+            if self._sock is not None:
+                self._drop_connection()
 
             addr = f'{self.host}:{self.port}'
             logger.info(f'Connecting to {addr}')
 
             # open TCP connection
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            # may raise ConnectionRefusedError
-            sock.connect((self.host, self.port))
+            # bound the connect itself, an unreachable host would otherwise wait
+            # for the default timeout of the system, tens of seconds on most
             sock.settimeout(self.timeout)
+            # a request is small and waits for its answer, Nagle would delay
+            # each of them by up to 40ms
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
 
             cnxn = (
                 b"host::features=shell_v2,cmd,stat_v2,ls_v2,fixed_push_mkdir,apex,abb,"
@@ -131,29 +281,37 @@ class AdbProtocolTCP:
                 b"sendrecv_v2,sendrecv_v2_brotli,sendrecv_v2_lz4,sendrecv_v2_zstd,sendrecv_v2_dry_run_send"
             )
             try:
+                try:
+                    # may raise ConnectionRefusedError
+                    sock.connect((self.host, self.port))
+                except socket.timeout as e:
+                    raise AdbConnectionTimeout(f'{e.__class__.__name__} when connecting: {e}')
+
                 # send CNXN
                 self.message_send(sock, CNXN, ADB_VERSION, ADB_MAX_PAYLOAD, cnxn)
 
                 # recv CNXN from device
                 command, arg0, arg1, data = self.message_recv(sock)
-                if command == CNXN:
-                    logger.info(f'Connected to {addr}')
-                    self._sock = sock
-                    self._max_payload = min(arg1, ADB_MAX_PAYLOAD)
-                    self.features = DeviceFeatures.from_cnxn(data)
-                else:
+                if command != CNXN:
                     raise AdbMessageInvalid(f'Expect {CNXN} after connection but got {command}')
             except Exception:
                 # cleanup on error
-                try:
-                    sock.close()
-                except Exception:
-                    pass
+                self._close_socket(sock)
                 self.features = DeviceFeatures([])
+                self._max_payload = ADB_MAX_PAYLOAD
+                self._protocol_version = ADB_VERSION
                 raise
 
-            # start recv thread
-            self._recv_thread = Thread(target=self._task_dispatch_message, daemon=True)
+            logger.info(f'Connected to {addr}')
+            self._sock = sock
+            self._broken = False
+            self._protocol_version = min(arg0, ADB_VERSION)
+            self._max_payload = min(arg1, ADB_MAX_PAYLOAD)
+            self.features = DeviceFeatures.from_cnxn(data)
+
+            # start recv thread, it reads the socket it was started for and
+            # stops as soon as the connection is replaced
+            self._recv_thread = Thread(target=self._task_dispatch_message, args=(sock,), daemon=True)
             self._recv_thread.start()
 
     def disconnect(self):
@@ -164,31 +322,13 @@ class AdbProtocolTCP:
 
             addr = f'{self.host}:{self.port}'
             logger.info(f'Disconnecting to {addr}')
+            thread = self._drop_connection()
 
-            # close TCP connection
-            sock = self._sock
-            self._sock = None
-            if sock:
-                try:
-                    sock.close()
-                except Exception:
-                    pass
+        # join outside of the lock, the dispatch thread takes it as well
+        if thread is not None and thread.is_alive() and thread is not current_thread():
+            thread.join(timeout=2)
 
-            # close stream
-            # we don't need graceful stream close before socket close, because adbd will do anyway
-            # so we just release resources on our side
-            stream_dict = self._stream_dict
-            self._stream_dict = {}
-            for local_id in stream_dict:
-                self._stream_id_release(local_id)
-
-            # stop recv thread
-            thread = self._recv_thread
-            self._recv_thread = None
-            if thread and thread.is_alive():
-                thread.join(timeout=2)
-
-            logger.info(f'Disconnected to {addr}')
+        logger.info(f'Disconnected to {addr}')
 
     def message_send(self, sock: socket.socket, command: bytes, arg0, arg1, data=b''):
         """
@@ -198,6 +338,9 @@ class AdbProtocolTCP:
         """
         # print('send', command, arg0, arg1, data)
         data_length = len(data)
+        # the checksum of an outgoing message is always computed: the CNXN is
+        # sent before the version of the device is known, and a peer of an old
+        # version verifies it. A device that does not need the field ignores it
         data_check = sum(data) & 0xFFFFFFFF
         command = int.from_bytes(command, 'little')
         magic = command ^ 0xFFFFFFFF
@@ -208,13 +351,15 @@ class AdbProtocolTCP:
         try:
             with self._send_lock:
                 sock.sendall(payload)
+        except socket.timeout as e:
+            # socket.timeout is an OSError, it has to be caught before the
+            # wider clause or a slow device would look like a closed one
+            raise AdbConnectionTimeout(f'{e.__class__.__name__} while sending: {e}')
         except (ConnectionError, OSError) as e:
             # BrokenPipeError
             # ConnectionAbortedError
             # ConnectionResetError
             raise AdbConnectionClosed(f'{e.__class__.__name__} while sending: {e}')
-        except socket.timeout as e:
-            raise AdbConnectionTimeout(f'{e.__class__.__name__} while sending: {e}')
 
     @staticmethod
     def recv_exact(sock: socket.socket, length: int, header_timeout=True) -> bytes:
@@ -227,10 +372,11 @@ class AdbProtocolTCP:
         if header_timeout:
             try:
                 data = sock.recv(length)
+            except socket.timeout as e:
+                # before OSError, socket.timeout is a subclass of it
+                raise AdbConnectionTimeout(f'{e.__class__.__name__} when receiving header: {e}')
             except (ConnectionError, OSError) as e:
                 raise AdbConnectionClosed(f'{e.__class__.__name__} when receiving header: {e}')
-            except socket.timeout as e:
-                raise AdbConnectionTimeout(f'{e.__class__.__name__} when receiving header: {e}')
         else:
             # wait until getting any data
             # No `sock.settimeout(None)` because setting timeout between None and 5 back and forth
@@ -239,10 +385,10 @@ class AdbProtocolTCP:
                 try:
                     data = sock.recv(length)
                     break
-                except (ConnectionError, OSError) as e:
-                    raise AdbConnectionClosed(f'{e.__class__.__name__}: {e}')
                 except socket.timeout:
                     continue
+                except (ConnectionError, OSError) as e:
+                    raise AdbConnectionClosed(f'{e.__class__.__name__}: {e}')
 
         total = len(data)
         if not total:
@@ -256,10 +402,10 @@ class AdbProtocolTCP:
         while 1:
             try:
                 chunk = sock.recv(remain)
-            except (ConnectionError, OSError) as e:
-                raise AdbConnectionClosed(f'{e.__class__.__name__} when receiving chunk: {e}')
             except socket.timeout as e:
                 raise AdbConnectionTimeout(f'{e.__class__.__name__} when receiving chunk: {e}')
+            except (ConnectionError, OSError) as e:
+                raise AdbConnectionClosed(f'{e.__class__.__name__} when receiving chunk: {e}')
             if not chunk:
                 raise AdbConnectionClosed('No data when receiving chunk')
 
@@ -277,7 +423,7 @@ class AdbProtocolTCP:
         Raises:
             AdbConnectionClosed:
             AdbConnectionTimeout:
-            AdbMessageValidateError:
+            AdbMessageInvalid:
         """
         header = self.recv_exact(stream, 24, header_timeout=header_timeout)
         command, arg0, arg1, data_length, data_check, magic = self._message_struct.unpack(header)
@@ -292,13 +438,26 @@ class AdbProtocolTCP:
         if magic != expected_magic:
             raise AdbMessageInvalid(f'Magic not match, expect {expected_magic}, got {magic}')
 
+        # a device can not send more than the payload we advertised, believing
+        # an impossible length would wait for gigabytes of data
+        if data_length > ADB_MAX_PAYLOAD:
+            raise AdbMessageInvalid(f'Payload length {data_length} exceeds {ADB_MAX_PAYLOAD}')
+
         # recv payload
         if data_length > 0:
             payload = self.recv_exact(stream, data_length)
-            # validate checksum
-            checksum = sum(payload) & 0xFFFFFFFF
-            if checksum != data_check:
-                raise AdbMessageInvalid(f'Checksum not match, expect {data_check}, got {checksum}')
+            # From 0x01000001 on the checksum is optional for the whole
+            # connection: the peer sends 0 instead of the sum of the payload and
+            # the text of the protocol is that nobody verifies it. The check is
+            # skipped before the sum is computed, a pass over every payload
+            # would prove nothing there and costs the same as the copy of it.
+            # The version of the CNXN is in its own header, every message after
+            # it belongs to the connection the handshake negotiated.
+            version = min(arg0, ADB_VERSION) if command_name == CNXN else self._protocol_version
+            if version < ADB_VERSION_SKIP_CHECKSUM:
+                checksum = sum(payload) & 0xFFFFFFFF
+                if checksum != data_check:
+                    raise AdbMessageInvalid(f'Checksum not match, expect {data_check}, got {checksum}')
         else:
             payload = b''
 
@@ -308,7 +467,21 @@ class AdbProtocolTCP:
         """
         Args:
             service: Command like "shell:echo hello"
+
+        Returns:
+            AdbStreamTCP: The opened stream
+
+        Raises:
+            AdbConnectionClosed: When there is no connection
+            AdbConnectionTimeout: When the device does not answer in time
+            AdbStreamClosed: When the device refuses the service
         """
+        if '\x00' in service:
+            # the service name ends at the first null byte, sending one inside
+            # would truncate the name on the device
+            raise ValueError(f'Service name can not contain a null byte: {service!r}')
+
+        sock = self._require_sock()
         with self._connect_lock:
             local_id = self._stream_id_allocate()
             stream = AdbStreamTCP(local_id, service, protocol=self)
@@ -319,30 +492,36 @@ class AdbProtocolTCP:
             service_data = service.encode('utf-8')
             if not service_data.endswith(b'\x00'):
                 service_data += b'\x00'
-            self.message_send(self._sock, OPEN, stream.local_id, 0, service_data)
+            self.message_send(sock, OPEN, stream.local_id, 0, service_data)
 
             # wait until opened
             # use connection-level timeout as this should be fast and not related to stream
             timeout = self.timeout
-            while 1:
+            while stream.state != 'opened' and stream.state != 'closed':
                 # the clock must not move under the accounting: a wall clock
                 # correction would stretch the timeout or cut it short
                 if timeout < 0.001:
                     raise AdbConnectionTimeout(f'Timeout when opening stream {stream}')
                 start = perf_counter()
-                if stream.send_event.acquire(timeout=timeout):
-                    if stream.state == 'opened':
-                        break
-                    if stream.state == 'closed':
-                        break
-                    # else: unknown message (not OPEN)
+                stream.send_event.acquire(timeout=timeout)
                 timeout -= perf_counter() - start
         except Exception:
-            # drop stream on error
+            # the device may still answer this id, the stream is dropped and the
+            # id is never handed out again, so a late answer can not open or
+            # close the stream of an unrelated caller
             with self._connect_lock:
                 self._stream_dict.pop(local_id, None)
-                self._stream_id_release(local_id)
             raise
+
+        if stream.aborted:
+            # the connection was dropped while this open was waiting
+            raise AdbConnectionClosed(f'Connection lost while opening stream {service}')
+
+        if stream.state == 'closed' and not stream.remote_id:
+            # adbd refuses a service it can not create with a CLSE and no OKAY,
+            # a caller must not mistake that for a command without output. A
+            # command that already ended has a remote id and keeps its output.
+            raise AdbStreamClosed(f'Device refused the service: {service}')
 
         # opened
         return stream
@@ -350,6 +529,10 @@ class AdbProtocolTCP:
     def close_stream(self, stream: AdbStreamTCP):
         """
         Close a stream
+
+        Raises:
+            AdbConnectionClosed:
+            AdbConnectionTimeout:
         """
         state = stream.state
         if state == 'closed':
@@ -360,30 +543,78 @@ class AdbProtocolTCP:
             logger.warning(f'Cannot close stream without remote_id: {stream}')
             return
 
-        # request to close
+        sock = self._require_sock()
+
+        # request to close, a stream that already got the CLSE of the device
+        # was answered by the dispatch thread
         if state == 'opened' or state == 'opening':
-            self.message_send(self._sock, CLSE, stream.local_id, remote_id)
-        # wait until closed
-        # use connection-level timeout as this should be fast and not related to stream
-        if not stream.recv_event.acquire(timeout=self.timeout):
-            raise AdbConnectionTimeout(f'Timeout when closing stream {stream}')
+            if stream.mark_close_sent():
+                self.message_send(sock, CLSE, stream.local_id, remote_id)
+
+        # wait until closed, the device confirms with a CLSE of its own but any
+        # message of the stream wakes the wait, so the state decides and not the
+        # signal
+        timeout = self.timeout
+        while stream.state != 'closed':
+            # use connection-level timeout as this should be fast and not related to stream
+            if timeout < 0.001:
+                raise AdbConnectionTimeout(f'Timeout when closing stream {stream}')
+            start = perf_counter()
+            stream.recv_event.acquire(timeout=timeout)
+            timeout -= perf_counter() - start
 
     def sendto_stream(self, stream: AdbStreamTCP, data: bytes):
+        """
+        Write data to a stream, a chunk per acknowledged message.
+
+        Args:
+            stream (AdbStreamTCP): Open stream to write
+            data (bytes): Data to write, empty data sends nothing
+
+        Raises:
+            AdbStreamClosed: When the stream is not open any more. The message
+                says how many bytes were acknowledged, the rest of the data may
+                have been written to the device as well
+            AdbConnectionClosed: When there is no connection
+            AdbConnectionTimeout: When the device does not acknowledge a chunk
+        """
+        sock = self._require_sock()
+        if stream.state != 'opened':
+            raise AdbStreamClosed(f'Cannot send to a stream in state {stream.state}: {stream}')
         remote_id = stream.remote_id
         if not remote_id:
-            logger.warning(f'Cannot sendto stream without remote_id: {stream}')
-            return
+            raise AdbStreamClosed(f'Cannot send to a stream without remote_id: {stream}')
 
-        # just info that any message is sent, no need to wait
-        stream.send_event.acquire(blocking=False)
-        self.message_send(self._sock, WRTE, stream.local_id, remote_id, data)
+        # the device advertised how much it accepts in one message, a larger
+        # payload is dropped by an old adbd and closes the connection
+        chunk_size = self._max_payload or ADB_MAX_PAYLOAD
+        for start in range(0, len(data), chunk_size):
+            chunk = data[start:start + chunk_size]
+            # drop a signal left by an earlier message, only the OKAY of this
+            # chunk may end the wait below
+            stream.send_event.acquire(blocking=False)
+            # a command that exited closes its stream, and the rest of the data
+            # has nobody to read it
+            if stream.state != 'opened':
+                raise AdbStreamClosed(f'Stream closed after {start} of {len(data)} bytes: {stream}')
+            self.message_send(sock, WRTE, stream.local_id, remote_id, chunk)
+            # wait OKAY
+            if not stream.send_event.acquire(timeout=self.timeout):
+                raise AdbConnectionTimeout(f'Timeout when sendto stream {stream}')
+            if stream.state != 'opened':
+                raise AdbStreamClosed(f'Stream closed after {start} of {len(data)} bytes: {stream}')
 
-        # wait OKAY
-        # use connection-level timeout as this should be fast and not related to stream
-        if not stream.send_event.acquire(timeout=self.timeout):
-            raise AdbConnectionTimeout(f'Timeout when sendto stream {stream}')
+    def _dispatch_message(self, sock: socket.socket, command: bytes, remote_id: int, local_id: int, data: bytes):
+        """
+        Dispatch one message of the device to its stream.
 
-    def _dispatch_message(self, command: bytes, remote_id: int, local_id: int, data: bytes):
+        Args:
+            sock (socket.socket): Connection the message came from
+            command (bytes): Command of the message
+            remote_id (int): Stream id of the device
+            local_id (int): Stream id of ours
+            data (bytes): Payload of the message
+        """
         try:
             stream = self._stream_dict[local_id]
         except KeyError:
@@ -414,7 +645,7 @@ class AdbProtocolTCP:
         elif command == WRTE:
             if stream.state == 'opened':
                 # response device with OKAY
-                self.message_send(self._sock, OKAY, stream.local_id, stream.remote_id)
+                self.message_send(sock, OKAY, stream.local_id, stream.remote_id)
                 stream.data_buffer.append(data)
                 try:
                     stream.recv_event.release()
@@ -428,9 +659,17 @@ class AdbProtocolTCP:
             # release stream
             with self._connect_lock:
                 self._stream_dict.pop(local_id, None)
-                self._stream_id_release(local_id)
-            # confirm closed
             stream.state = 'closed'
+            # a stream ends when both sides sent a CLSE. adbd keeps the stream
+            # of a command that ended until the host answers, and refuses the
+            # next OPEN of a host that reuses the local id of a kept stream.
+            # A stream that already sent its CLSE, or one the device refused
+            # without creating it (remote_id 0), has nothing to answer.
+            if remote_id and stream.mark_close_sent():
+                try:
+                    self.message_send(sock, CLSE, local_id, remote_id)
+                except (AdbConnectionClosed, AdbConnectionTimeout) as e:
+                    logger.warning(f'Failed to answer the CLSE of stream {stream}: {e}')
             try:
                 stream.send_event.release()
             except RuntimeError:
@@ -440,18 +679,42 @@ class AdbProtocolTCP:
             except RuntimeError:
                 pass
 
-    def _task_dispatch_message(self):
+    def _task_dispatch_message(self, sock: socket.socket):
+        reason = 'closed'
         while 1:
-            sock = self._sock
-            if sock is None:
+            # a reconnect replaces self._sock, the thread of the previous
+            # connection must not read the socket of the new one
+            if self._sock is not sock:
                 break
             try:
                 msg = self.message_recv(sock, header_timeout=False)
-            except (AdbConnectionClosed, AdbConnectionTimeout):
+            except (AdbConnectionClosed, AdbConnectionTimeout) as e:
+                reason = f'{e.__class__.__name__}: {e}'
                 break
             except AdbMessageInvalid as e:
-                logger.warning(f'Invalid message to dispatch: {e}')
-                continue
-            self._dispatch_message(*msg)
+                # the stream of a message that failed validation can not be
+                # trusted: the payload of it would be read as a header, and a
+                # device that never stops sending would spin this thread
+                reason = f'AdbMessageInvalid: {e}'
+                break
+            try:
+                self._dispatch_message(sock, *msg)
+            except (AdbConnectionClosed, AdbConnectionTimeout) as e:
+                reason = f'{e.__class__.__name__}: {e}'
+                break
+            except Exception as e:
+                # a thread that dies silently leaves every stream waiting for a
+                # message that will never be dispatched
+                logger.exception(f'Unexpected error when dispatching a message: {e}')
+                reason = f'unexpected error: {e}'
+                break
 
-        # logger.info('_task_dispatch_message end')
+        with self._connect_lock:
+            if self._sock is not sock:
+                # the connection was replaced while this thread was ending, the
+                # streams of the new one are not ours to touch
+                return
+            # the connection died under the client, connect() rebuilds it
+            self._broken = True
+            self._abort_streams()
+        logger.warning(f'Connection to {self.host}:{self.port} is broken, receiving ended: {reason}')

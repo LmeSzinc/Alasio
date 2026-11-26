@@ -1,3 +1,10 @@
+"""
+Tests for the tcp transport of the adb protocol.
+
+The protocol is checked against `fake_adbd`, a device that speaks the wire
+format of a real adbd and records what the client sends it.
+"""
+
 import socket
 import threading
 import time
@@ -7,12 +14,39 @@ import pytest
 
 import alasio.adb.protocol.tcp_protocol as tcp_protocol
 from alasio.adb.protocol.const import (
-    ADB_MAX_PAYLOAD, ADB_VERSION, CLSE, CNXN, OKAY, OPEN, WRTE, AdbConnectionTimeout, AdbStreamTimeout
+    ADB_MAX_PAYLOAD, ADB_VERSION, ADB_VERSION_SKIP_CHECKSUM, CLSE, CNXN, OKAY, OPEN, WRTE, AdbConnectionClosed,
+    AdbConnectionTimeout, AdbMessageInvalid, AdbStreamClosed, AdbStreamTimeout, ShellResult
 )
-from alasio.adb.protocol.tcp import AdbTCP
 from alasio.adb.protocol.tcp_protocol import AdbProtocolTCP, AdbStreamTCP
+from alasio.logger import logger
+from tests.adb.protocol.fake_adbd import FakeAdbd, ShellReply, encode_message
 
 _MESSAGE = Struct('<6I')
+# The builtin the module under test calls for the checksum of a payload, kept
+# before a test replaces the name inside the module
+_BUILTIN_SUM = sum
+
+
+def counting_sum(calls):
+    """
+    Build a sum() that records the length of every bytes handed to it.
+
+    The module computes the checksum of a payload with sum(). A test replaces
+    the name inside the module with this one, to tell whether the pass over the
+    payload happened at all.
+
+    Args:
+        calls (list): List the lengths are appended to
+
+    Returns:
+        callable: A sum() that records the call and adds up
+    """
+
+    def counted(iterable, *args):
+        calls.append(len(iterable))
+        return _BUILTIN_SUM(iterable, *args)
+
+    return counted
 
 
 class _Protocol:
@@ -25,14 +59,21 @@ class _Protocol:
         self.closed.append(stream)
 
 
-class _Socket:
-    """The protocol only sends through sendall() while a stream opens"""
+class _NullSock:
+    """A socket that records what the protocol sends and never answers"""
 
     def __init__(self):
         self.sent = []
+        self.closed = False
 
     def sendall(self, data):
         self.sent.append(data)
+
+    def shutdown(self, how):
+        pass
+
+    def close(self):
+        self.closed = True
 
 
 def make_stream(state='opened'):
@@ -80,6 +121,38 @@ def wake_repeatedly(stream, interval=0.005):
     return stop_it
 
 
+def decode_message(raw):
+    """
+    Decode one message of the adb transport, independently of the client
+
+    Args:
+        raw (bytes): Header and payload of a message
+
+    Returns:
+        tuple: (command, arg0, arg1, length, checksum, magic, payload)
+    """
+    command, arg0, arg1, length, checksum, magic = _MESSAGE.unpack(raw[:24])
+    return command.to_bytes(4, 'little'), arg0, arg1, length, checksum, magic, raw[24:]
+
+
+def packed(command, arg0, arg1, data=b'', magic=None, checksum=None):
+    """
+    Build one message the way a device builds it, for the tests of the client
+
+    Args:
+        command (bytes): Command name
+        arg0 (int): First argument
+        arg1 (int): Second argument
+        data (bytes): Payload
+        magic (int): Magic to write instead of the correct one
+        checksum (int): Checksum to write instead of the correct one
+
+    Returns:
+        bytes: The message
+    """
+    return encode_message(command, arg0, arg1, data, magic=magic, checksum=checksum)
+
+
 class TestRecvUntilClose:
     """Reading a stream until the device closes it"""
 
@@ -101,6 +174,29 @@ class TestRecvUntilClose:
         assert stream.recv_until_close(timeout=1) == b'abc'
         assert list(stream.data_buffer) == []
 
+    def test_a_closed_stream_needs_no_timeout(self):
+        """The data of a closed stream is returned even with a timeout of zero"""
+        stream = make_stream()
+        stream.data_buffer.append(b'abc')
+        stream.state = 'closed'
+
+        assert stream.recv_until_close(timeout=0) == b'abc'
+
+    def test_an_empty_closed_stream_returns_nothing(self):
+        """A command without output returns empty bytes, not a timeout"""
+        stream = make_stream(state='closed')
+
+        assert stream.recv_until_close(timeout=0) == b''
+
+    def test_many_chunks_are_joined_in_order(self):
+        """A device sends the output of a command in many writes"""
+        stream = make_stream()
+        for chunk in (b'a', b'bb', b'ccc'):
+            stream.data_buffer.append(chunk)
+        stream.state = 'closed'
+
+        assert stream.recv_until_close(timeout=1) == b'abbccc'
+
     def test_times_out_when_the_stream_never_closes(self):
         """A stream that keeps sending without closing still times out"""
         stream = make_stream()
@@ -114,6 +210,32 @@ class TestRecvUntilClose:
             stop()
 
         assert 0.15 < elapsed < 2.0
+
+    def test_a_message_does_not_stand_for_the_close(self):
+        """A signal of one write is not the close, the reader keeps waiting
+
+        The signal is released by a helper thread while the reader waits, which
+        is what the dispatch thread does for every write of the device.
+        """
+        stream = make_stream()
+        stream.data_buffer.append(b'partial')
+        signalled = threading.Event()
+
+        def signal_once():
+            # hold the event, then release it: one message of the device
+            stream.recv_event.acquire()
+            signalled.set()
+            time.sleep(0.05)
+            stream.recv_event.release()
+
+        thread = threading.Thread(target=signal_once, daemon=True)
+        thread.start()
+        try:
+            assert signalled.wait(timeout=5)
+            with pytest.raises(AdbStreamTimeout):
+                stream.recv_until_close(timeout=0.2)
+        finally:
+            thread.join(timeout=5)
 
 
 class TestTimeoutClock:
@@ -156,7 +278,7 @@ class TestTimeoutClock:
             monkeypatch.setattr(tcp_protocol, 'time', lambda: time.perf_counter() + 60.0)
 
         protocol = AdbProtocolTCP()
-        protocol._sock = _Socket()
+        protocol._sock = _NullSock()
         protocol.timeout = 0.2
 
         start = time.perf_counter()
@@ -167,13 +289,53 @@ class TestTimeoutClock:
         assert elapsed >= 0.15
 
 
+class TestStreamIds:
+    """The local stream ids of a connection are never handed out twice
+
+    A device may still send a message of a stream that ended, and a reused id
+    would put that message on the stream of an unrelated caller: a late CLSE
+    would close a stream that is reading the output of its command, and a late
+    OKAY would open one that the device refused. adbd itself only ever hands out
+    the next id of a counter, and so does the client.
+    """
+
+    def test_the_first_ids(self):
+        """A connection starts at 1"""
+        protocol = AdbProtocolTCP()
+
+        assert [protocol._stream_id_allocate() for _ in range(8)] == [1, 2, 3, 4, 5, 6, 7, 8]
+
+    def test_the_counter_keeps_growing(self):
+        """The 17th stream gets 17, not the id of a stream that ended"""
+        protocol = AdbProtocolTCP()
+        allocated = [protocol._stream_id_allocate() for _ in range(40)]
+
+        assert len(set(allocated)) == 40
+        assert allocated == list(range(1, 41))
+
+    def test_a_closed_stream_does_not_free_its_id(self):
+        """The id of a stream that ended stays out of the pool for good"""
+        protocol = AdbProtocolTCP()
+        first = protocol._stream_id_allocate()
+
+        assert protocol._stream_id_allocate() == first + 1
+        assert protocol._stream_id_allocate() == first + 2
+
+    def test_a_long_lived_connection_never_repeats(self):
+        """A thousand streams of one connection are a thousand ids"""
+        protocol = AdbProtocolTCP()
+        allocated = {protocol._stream_id_allocate() for _ in range(1000)}
+
+        assert len(allocated) == 1000
+
+
 class TestOpenStream:
     """Opening a stream"""
 
     def test_times_out_when_the_device_never_answers(self):
         """A device that does not answer OPEN is given up on at the timeout"""
         protocol = AdbProtocolTCP()
-        protocol._sock = _Socket()
+        protocol._sock = _NullSock()
         protocol.timeout = 0.2
 
         start = time.perf_counter()
@@ -186,7 +348,7 @@ class TestOpenStream:
     def test_sends_open_before_waiting(self):
         """The service name is sent as the payload of OPEN"""
         protocol = AdbProtocolTCP()
-        sock = _Socket()
+        sock = _NullSock()
         protocol._sock = sock
         protocol.timeout = 0.05
 
@@ -194,169 +356,1311 @@ class TestOpenStream:
             protocol.open_stream('shell:echo hi')
 
         assert len(sock.sent) == 1
-        command, arg0, arg1, data_length, _check, _magic = _MESSAGE.unpack(sock.sent[0][:24])
-        assert command.to_bytes(4, 'little') == OPEN
-        assert sock.sent[0][24:] == b'shell:echo hi\x00'
-        assert data_length == len(b'shell:echo hi\x00')
+        command, arg0, arg1, length, checksum, magic, data = decode_message(sock.sent[0])
+        assert command == OPEN
+        assert arg0 == 1
+        assert arg1 == 0
+        assert data == b'shell:echo hi\x00'
+        assert length == len(data)
+        assert checksum == sum(data) & 0xFFFFFFFF
+        assert magic == int.from_bytes(OPEN, 'little') ^ 0xFFFFFFFF
 
     def test_drops_the_stream_when_the_open_fails(self):
-        """A failed open leaves no stream and no allocated id behind"""
+        """A failed open leaves no stream behind"""
         protocol = AdbProtocolTCP()
-        protocol._sock = _Socket()
+        protocol._sock = _NullSock()
         protocol.timeout = 0.05
-        before = set(protocol._stream_id_pool)
 
         with pytest.raises(AdbConnectionTimeout):
             protocol.open_stream('shell:echo')
 
         assert protocol._stream_dict == {}
-        assert set(protocol._stream_id_pool) == before
 
+    def test_abandons_the_id_of_a_failed_open(self):
+        """The id of a failed open is never handed out again
 
-def _pack(command, arg0, arg1, data=b''):
-    """
-    Build one adb message
+        The device may still answer the OPEN after the timeout, with an OKAY of
+        a stream it created. A reused id would put that answer on the stream of
+        an unrelated caller.
+        """
+        protocol = AdbProtocolTCP()
+        protocol._sock = _NullSock()
+        protocol.timeout = 0.05
 
-    Args:
-        command (bytes): Command name
-        arg0 (int): First argument
-        arg1 (int): Second argument
-        data (bytes): Payload
+        with pytest.raises(AdbConnectionTimeout):
+            protocol.open_stream('shell:echo')
 
-    Returns:
-        bytes: The complete message
-    """
-    value = int.from_bytes(command, 'little')
-    header = _MESSAGE.pack(value, arg0, arg1, len(data), sum(data) & 0xFFFFFFFF, value ^ 0xFFFFFFFF)
-    return header + data
+        # the id of the failed open is spent, the next open gets the next one
+        assert protocol._stream_id_next == 2
 
+    def test_rejects_a_null_byte_in_the_service(self):
+        """The service name ends at the first null, a null inside truncates it"""
+        protocol = AdbProtocolTCP()
+        protocol._sock = _NullSock()
 
-def _recv_exact(sock, length):
-    """
-    Read exactly length bytes
+        with pytest.raises(ValueError) as e:
+            protocol.open_stream('shell:echo hi\x00rm -rf /')
 
-    Args:
-        sock (socket.socket): Connected socket
-        length (int): Bytes to read
+        assert 'null byte' in str(e.value)
+        assert protocol._stream_dict == {}
+        assert _NullSock().sent == []
 
-    Returns:
-        bytes | None: The data, None when the peer closed the connection
-    """
-    buffer = b''
-    while len(buffer) < length:
-        chunk = sock.recv(length - len(buffer))
-        if not chunk:
-            return None
-        buffer += chunk
-    return buffer
+    def test_rejects_a_trailing_null_byte(self):
+        """A null byte is refused wherever it sits, the caller adds none
 
+        The null that ends the service name is added by the client. A caller
+        that passes one would get a second one on the wire, the device would
+        read an empty command, so every null is refused instead of trimmed.
+        """
+        protocol = AdbProtocolTCP()
+        sock = _NullSock()
+        protocol._sock = sock
 
-def _read_message(sock):
-    """
-    Read one adb message
+        with pytest.raises(ValueError):
+            protocol.open_stream('shell:echo\x00')
 
-    Args:
-        sock (socket.socket): Connected socket
+        assert sock.sent == []
+        assert protocol._stream_dict == {}
 
-    Returns:
-        tuple | None: (command, arg0, arg1, data), None at the end of the stream
-    """
-    header = _recv_exact(sock, 24)
-    if header is None:
-        return None
-    command, arg0, arg1, length, _check, _magic = _MESSAGE.unpack(header)
-    data = b''
-    if length:
-        data = _recv_exact(sock, length)
-        if data is None:
-            return None
-    return command.to_bytes(4, 'little'), arg0, arg1, data
+    def test_one_null_terminator_on_the_wire(self):
+        """The payload of OPEN is the service and exactly one null"""
+        protocol = AdbProtocolTCP()
+        sock = _NullSock()
+        protocol._sock = sock
+        protocol.timeout = 0.05
 
+        with pytest.raises(AdbConnectionTimeout):
+            protocol.open_stream('shell:echo')
 
-class _FakeAdbd(threading.Thread):
-    """A minimal adbd: the CNXN handshake, then one shell stream per OPEN"""
+        assert decode_message(sock.sent[0])[6] == b'shell:echo\x00'
 
-    def __init__(self, reply):
-        super().__init__(daemon=True)
-        self.reply = reply
-        self.server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.server.bind(('127.0.0.1', 0))
-        self.server.listen(8)
-        self.port = self.server.getsockname()[1]
+    def test_raises_when_not_connected(self):
+        """An open without a connection says so instead of failing on None"""
+        protocol = AdbProtocolTCP()
 
-    def run(self):
-        while True:
-            try:
-                connection, _ = self.server.accept()
-            except OSError:
-                return
-            threading.Thread(target=self._serve, args=(connection,), daemon=True).start()
+        with pytest.raises(AdbConnectionClosed) as e:
+            protocol.open_stream('shell:echo')
 
-    def _serve(self, sock):
-        try:
-            message = _read_message(sock)
-            if not message or message[0] != CNXN:
-                return
-            sock.sendall(_pack(CNXN, ADB_VERSION, ADB_MAX_PAYLOAD, b'device::features=shell_v2,cmd'))
-            while True:
-                message = _read_message(sock)
-                if message is None:
-                    return
-                command, arg0, arg1, _data = message
-                if command == OPEN:
-                    local, remote = arg0, arg0 + 1000
-                    sock.sendall(_pack(OKAY, remote, local))
-                    body = (
-                        bytes([1]) + len(self.reply).to_bytes(4, 'little') + self.reply
-                        + bytes([3]) + (1).to_bytes(4, 'little') + b'\x00'
-                    )
-                    sock.sendall(_pack(WRTE, remote, local, body))
-                    sock.sendall(_pack(CLSE, remote, local))
-                elif command == WRTE:
-                    sock.sendall(_pack(OKAY, arg1, arg0))
-                elif command == CLSE:
-                    return
-        finally:
-            try:
-                sock.close()
-            except OSError:
-                pass
+        assert 'Not connected' in str(e.value)
 
-    def close(self):
-        self.server.close()
+    def test_raises_when_the_connection_is_broken(self):
+        """A connection the device closed is refused before anything is sent"""
+        protocol = AdbProtocolTCP()
+        protocol._sock = _NullSock()
+        protocol._broken = True
+
+        with pytest.raises(AdbConnectionClosed) as e:
+            protocol.open_stream('shell:echo')
+
+        assert 'broken' in str(e.value)
 
 
 class TestProtocolRoundTrip:
     """The protocol against a device that speaks it"""
 
-    def test_a_shell_call_returns_the_device_output(self):
-        """One shell call opens a stream, reads it to the close and parses it"""
-        adbd = _FakeAdbd(b'hello')
-        adbd.start()
-        client = AdbTCP(host='127.0.0.1', port=adbd.port)
-        try:
+    def test_a_stream_returns_the_output_of_the_device(self):
+        """One open reads the stream to the close"""
+        with FakeAdbd(responder=lambda command, shell_v2: ShellReply(stdout=b'hello\n')) as adbd:
+            client = AdbProtocolTCP(port=adbd.port)
             client.connect()
-            result = client.shell('echo hello')
-        finally:
-            client.disconnect()
-            adbd.close()
+            try:
+                with client.open_stream('shell,v2:echo hello') as stream:
+                    data = stream.recv_until_close(timeout=5)
+            finally:
+                client.disconnect()
 
-        assert result.stdout == b'hello'
+        result = ShellResult.from_shell_v2(data)
+        assert result.stdout == b'hello\n'
         assert result.exitcode == 0
-        assert result.shell_v2 is True
+        assert adbd.opens == ['shell,v2:echo hello']
+        assert adbd.violations == []
 
-    def test_repeated_shell_calls_reuse_the_connection(self):
+    def test_repeated_streams_reuse_the_connection(self):
         """The connection outlives the streams, one connect serves many calls"""
-        adbd = _FakeAdbd(b'x')
-        adbd.start()
-        client = AdbTCP(host='127.0.0.1', port=adbd.port)
-        try:
+        with FakeAdbd(responder=lambda command, shell_v2: ShellReply(stdout=b'x')) as adbd:
+            client = AdbProtocolTCP(port=adbd.port)
             client.connect()
-            for _ in range(20):
-                assert client.shell('echo x').stdout == b'x'
-            # every stream id was released: the next call reuses a free one
-            assert client._stream_dict == {}
-        finally:
+            try:
+                for _ in range(20):
+                    with client.open_stream('shell:x') as stream:
+                        assert stream.recv_until_close(timeout=5) == b'x'
+                # every stream id was released: the next call reuses a free one
+                assert client._stream_dict == {}
+                assert adbd.connections == 1
+            finally:
+                client.disconnect()
+
+    def test_a_refused_service_raises(self):
+        """A CLSE instead of an OKAY means the device has no such service"""
+        with FakeAdbd(refuse=lambda service: service.startswith('bogus')) as adbd:
+            client = AdbProtocolTCP(port=adbd.port)
+            client.connect()
+            try:
+                with pytest.raises(AdbStreamClosed) as e:
+                    client.open_stream('bogus:cmd')
+                assert 'refused' in str(e.value)
+                assert client._stream_dict == {}
+            finally:
+                client.disconnect()
+
+    def test_a_command_that_ends_before_the_open_returns_keeps_its_output(self):
+        """The device may close the stream before the client looks at it
+
+        The OKAY, the output and the CLSE of a short command arrive back to
+        back. The open may observe the stream as opened or already closed, and
+        neither may be reported as a refused service, the output is there.
+        """
+        with FakeAdbd(responder=lambda command, shell_v2: ShellReply(stdout=b'fast')) as adbd:
+            client = AdbProtocolTCP(port=adbd.port)
+            client.connect()
+            try:
+                stream = client.open_stream('shell,v2:fast')
+                assert stream.state in ('opened', 'closed')
+                assert stream.remote_id != 0
+                result = ShellResult.from_shell_v2(stream.recv_until_close(timeout=5))
+                assert result.stdout == b'fast'
+                assert result.exitcode == 0
+            finally:
+                client.disconnect()
+
+    def test_no_two_concurrent_streams_share_an_id(self):
+        """Forty streams at once, every one of them gets its own output
+
+        The local ids of the connection are a pool, a stream that is still open
+        must never have the id of another one, or the output of a command lands
+        on the stream of a different caller.
+        """
+        count = 40
+
+        def responder(command, shell_v2):
+            return ShellReply(stdout=command.encode())
+
+        with FakeAdbd(responder=responder) as adbd:
+            client = AdbProtocolTCP(port=adbd.port)
+            client.connect()
+            barrier = threading.Barrier(count, timeout=10)
+            output = {}
+            errors = []
+
+            def run(index):
+                command = 'echo %d' % index
+                try:
+                    barrier.wait()
+                    with client.open_stream('shell,v2:%s' % command) as stream:
+                        output[index] = ShellResult.from_shell_v2(stream.recv_until_close(timeout=10)).stdout
+                except Exception as e:
+                    errors.append((index, e))
+
+            threads = [threading.Thread(target=run, args=(i,)) for i in range(count)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join(timeout=30)
+
             client.disconnect()
-            adbd.close()
+
+        assert errors == []
+        assert output == {i: ('echo %d' % i).encode() for i in range(count)}
+        assert adbd.violations == []
+
+    def test_the_service_of_a_unicode_command(self):
+        """A command is utf-8 on the wire, a chinese one survives"""
+        command = 'echo 你好'
+
+        with FakeAdbd(responder=lambda cmd, shell_v2: ShellReply(stdout=(cmd or '').encode())) as adbd:
+            client = AdbProtocolTCP(port=adbd.port)
+            client.connect()
+            try:
+                with client.open_stream('shell,v2:' + command) as stream:
+                    data = stream.recv_until_close(timeout=5)
+            finally:
+                client.disconnect()
+
+        assert adbd.opens == [command and 'shell,v2:' + command]
+        assert data.startswith(bytes([1]))
+        assert command.encode() in data
+
+    def test_the_device_sees_a_valid_set_of_messages(self):
+        """Every message the client sends passes the checks of the device"""
+        with FakeAdbd(responder=lambda command, shell_v2: ShellReply(stdout=b'y' * 100)) as adbd:
+            client = AdbProtocolTCP(port=adbd.port)
+            client.connect()
+            try:
+                for _ in range(5):
+                    with client.open_stream('shell:y') as stream:
+                        stream.recv_until_close(timeout=5)
+            finally:
+                client.disconnect()
+
+        assert adbd.violations == []
+        assert adbd.opens_without_nul == []
+        # a stream the device sends is acknowledged
+        assert adbd.write_okays >= 5
+
+
+class TestMessageFormat:
+    """The bytes the client writes follow the transport"""
+
+    def test_message_header(self):
+        """The six fields of the header, the checksum and the magic included"""
+        protocol = AdbProtocolTCP()
+        sock = _NullSock()
+
+        protocol.message_send(sock, OPEN, 7, 8, b'abc')
+
+        command, arg0, arg1, length, checksum, magic, data = decode_message(sock.sent[0])
+        assert (command, arg0, arg1, length) == (OPEN, 7, 8, 3)
+        assert data == b'abc'
+        assert checksum == sum(b'abc')
+        assert magic == int.from_bytes(OPEN, 'little') ^ 0xFFFFFFFF
+
+    def test_checksum_of_a_binary_payload(self):
+        """The checksum is a sum masked to 32 bits, high bytes do not sign it"""
+        protocol = AdbProtocolTCP()
+        sock = _NullSock()
+        payload = b'\xff' * 1000
+
+        protocol.message_send(sock, WRTE, 1, 2, payload)
+
+        assert decode_message(sock.sent[0])[4] == (1000 * 0xFF) & 0xFFFFFFFF
+
+    def test_the_handshake_of_a_real_connection(self):
+        """The CNXN the client sends advertises the version and the features"""
+        with FakeAdbd() as adbd:
+            client = AdbProtocolTCP(port=adbd.port)
+            client.connect()
+            try:
+                hello = adbd.hello
+                version = adbd.client_version
+                max_payload = adbd.client_max_payload
+            finally:
+                client.disconnect()
+
+        assert hello.startswith(b'host::features=')
+        assert b'shell_v2' in hello
+        assert version == ADB_VERSION
+        assert version >= ADB_VERSION_SKIP_CHECKSUM
+        assert max_payload == ADB_MAX_PAYLOAD
+
+    def test_the_max_payload_of_the_device_is_the_send_limit(self):
+        """The client never sends more than the device advertised"""
+        with FakeAdbd(max_payload=4096) as adbd:
+            client = AdbProtocolTCP(port=adbd.port)
+            client.connect()
+            try:
+                assert client._max_payload == 4096
+            finally:
+                client.disconnect()
+
+    def test_a_device_that_advertises_more_than_we_accept(self):
+        """The payload we advertise caps what we accept, not the device"""
+        with FakeAdbd(max_payload=1024 * 1024) as adbd:
+            client = AdbProtocolTCP(port=adbd.port)
+            client.connect()
+            try:
+                assert client._max_payload == ADB_MAX_PAYLOAD
+            finally:
+                client.disconnect()
+
+
+class TestMessageRecvValidation:
+    """A message of the device that is not valid"""
+
+    def test_bad_magic_of_the_banner(self):
+        """A banner with a wrong magic is refused at the handshake"""
+        with FakeAdbd() as adbd:
+            adbd.fault_on_reply = 'bad_magic'
+            client = AdbProtocolTCP(port=adbd.port)
+            client.timeout = 1
+
+            with pytest.raises(AdbMessageInvalid) as e:
+                client.connect()
+
+        assert 'Magic' in str(e.value)
+        assert client._sock is None
+
+    def test_bad_checksum_of_the_banner(self):
+        """A banner with a wrong checksum is refused at the handshake"""
+        with FakeAdbd() as adbd:
+            adbd.fault_on_reply = 'bad_checksum'
+            client = AdbProtocolTCP(port=adbd.port)
+            client.timeout = 1
+
+            with pytest.raises(AdbMessageInvalid) as e:
+                client.connect()
+
+        assert 'Checksum' in str(e.value)
+
+    def test_an_impossible_payload_length(self):
+        """A header that claims 4GB is refused instead of waited for"""
+        with FakeAdbd() as adbd:
+            adbd.fault_on_reply = 'oversize_length'
+            client = AdbProtocolTCP(port=adbd.port)
+            client.timeout = 1
+
+            start = time.perf_counter()
+            with pytest.raises(AdbMessageInvalid) as e:
+                client.connect()
+            elapsed = time.perf_counter() - start
+
+        assert 'Payload length' in str(e.value)
+        assert elapsed < 1
+
+    def test_an_unknown_command(self):
+        """A command outside the protocol is refused"""
+        with FakeAdbd() as adbd:
+            adbd.fault_on_reply = 'unknown_command'
+            client = AdbProtocolTCP(port=adbd.port)
+            client.timeout = 1
+
+            with pytest.raises(AdbMessageInvalid) as e:
+                client.connect()
+
+        assert 'Invalid command' in str(e.value)
+
+    def test_a_garbage_banner(self):
+        """A peer that does not speak adb fails the handshake, not a read"""
+        with FakeAdbd() as adbd:
+            # six words of an unknown command, a full header of nonsense
+            adbd.cnxn_reply = b'XXXX' * 6
+            client = AdbProtocolTCP(port=adbd.port)
+            client.timeout = 1
+
+            with pytest.raises(AdbMessageInvalid):
+                client.connect()
+
+    def test_an_invalid_message_ends_the_connection(self):
+        """A bad message mid session drops the connection, it is not skipped
+
+        The payload of a message that failed validation can not be trusted, the
+        rest of the stream would be read as headers. The client must report the
+        connection as broken instead of spinning on the same bytes, and the
+        streams of it must end at once instead of waiting for their timeouts.
+        """
+        with FakeAdbd(responder=lambda command, shell_v2: ShellReply(stdout=b'x')) as adbd:
+            client = AdbProtocolTCP(port=adbd.port)
+            client.timeout = 0.3
+            client.connect()
+            try:
+                adbd.fault_on_reply = 'bad_magic'
+                with pytest.raises(AdbConnectionClosed):
+                    client.open_stream('shell:x')
+                assert adbd.wait_for(lambda: client._broken)
+                with pytest.raises(AdbConnectionClosed) as e:
+                    client.open_stream('shell:x')
+                assert 'broken' in str(e.value)
+            finally:
+                client.disconnect()
+
+    def test_a_message_of_an_unknown_stream_is_dropped(self):
+        """A stale message of a stream that ended does not kill the thread"""
+        protocol = AdbProtocolTCP()
+        sock = _NullSock()
+        protocol._sock = sock
+
+        protocol._dispatch_message(sock, WRTE, 1000, 42, b'stale')
+        protocol._dispatch_message(sock, OKAY, 1000, 42, b'')
+        protocol._dispatch_message(sock, CLSE, 1000, 42, b'')
+
+        # nothing is acknowledged, the stream does not exist any more
+        assert sock.sent == []
+        assert protocol._stream_dict == {}
+
+    def test_a_write_of_a_stream_that_is_not_open_is_not_acknowledged(self):
+        """A device that writes before the OKAY is not confirmed"""
+        protocol = AdbProtocolTCP()
+        sock = _NullSock()
+        protocol._sock = sock
+        stream = make_stream(state='opening')
+        protocol._stream_dict[stream.local_id] = stream
+
+        with logger.mock_capture_writer() as capture:
+            protocol._dispatch_message(sock, WRTE, 9, stream.local_id, b'early')
+
+        assert sock.sent == []
+        assert capture.fd.any_contains('Unexpected command')
+        assert list(stream.data_buffer) == []
+
+
+class TestChecksumVersion:
+    """The checksum field of the version that does not require one
+
+    From 0x01000001 on the checksum is optional: a device of that version sends
+    0 instead of the sum of the payload, and the receiver skips the check before
+    it computes anything. Version 0x01000000 has no such right: an old adbd that
+    sends 0 is a device that computed nothing.
+    """
+
+    @staticmethod
+    def recv_one(version, message):
+        """
+        Receive one message of a socket pair, as a connection of a version
+
+        Args:
+            version (int): Protocol version of the connection
+            message (bytes): Bytes the device sends
+
+        Returns:
+            tuple: (payload of the message, protocol of the receive)
+        """
+        protocol = AdbProtocolTCP()
+        protocol._protocol_version = version
+        reader, writer = socket.socketpair()
+        writer.sendall(message)
+        try:
+            _, arg0, _, payload = protocol.message_recv(reader)
+        finally:
+            reader.close()
+            writer.close()
+        return payload, protocol
+
+    def test_the_client_speaks_the_version_that_may_skip_it(self):
+        """The CNXN carries 0x01000001, a modern device then stops summing"""
+        with FakeAdbd(version=ADB_VERSION_SKIP_CHECKSUM) as adbd:
+            client = AdbProtocolTCP(port=adbd.port)
+            client.connect()
+            try:
+                assert adbd.client_version == ADB_VERSION
+                assert client._protocol_version == ADB_VERSION_SKIP_CHECKSUM
+            finally:
+                client.disconnect()
+
+        assert ADB_VERSION >= ADB_VERSION_SKIP_CHECKSUM
+
+    def test_the_connection_uses_the_lower_of_the_two_versions(self):
+        """An old device answers with its own version, the connection keeps it
+
+        The checksum of that connection is mandatory in both directions.
+        """
+        with FakeAdbd() as adbd:
+            assert adbd.version == 0x01000000
+            client = AdbProtocolTCP(port=adbd.port)
+            client.connect()
+            try:
+                assert client._protocol_version == 0x01000000
+            finally:
+                client.disconnect()
+
+    def test_a_device_that_sends_no_checksum(self):
+        """A device of 0x01000001 that leaves the field at 0 is accepted"""
+        with FakeAdbd(version=ADB_VERSION_SKIP_CHECKSUM,
+                      responder=lambda command, shell_v2: ShellReply(stdout=b'x\n')) as adbd:
+            adbd.zero_checksum = True
+            client = AdbProtocolTCP(port=adbd.port)
+            client.timeout = 2
+            client.connect()
+            try:
+                assert client._protocol_version == ADB_VERSION_SKIP_CHECKSUM
+                with client.open_stream('shell,v2:echo x') as stream:
+                    result = ShellResult.from_shell_v2(stream.recv_until_close(timeout=5))
+                assert result.stdout == b'x\n'
+            finally:
+                client.disconnect()
+
+    def test_a_checksum_of_that_version_is_not_verified(self):
+        """A wrong checksum of a connection that may omit it is not an error
+
+        The field proves nothing there, so the value is never read. The bytes
+        are still covered by the checksum of TCP.
+        """
+        with FakeAdbd(version=ADB_VERSION_SKIP_CHECKSUM,
+                      responder=lambda command, shell_v2: ShellReply(stdout=b'x\n')) as adbd:
+            adbd.fault_on_reply = 'bad_checksum'
+            client = AdbProtocolTCP(port=adbd.port)
+            client.timeout = 2
+            client.connect()
+            try:
+                with client.open_stream('shell,v2:echo x') as stream:
+                    result = ShellResult.from_shell_v2(stream.recv_until_close(timeout=5))
+                assert result.stdout == b'x\n'
+            finally:
+                client.disconnect()
+
+    def test_the_sum_is_not_computed_for_that_version(self, monkeypatch):
+        """The branch is taken before the sum, not after it
+
+        Computing the sum of a payload and then ignoring it costs the same as
+        the check, a pass over every byte of every message of the connection.
+        """
+        calls = []
+        monkeypatch.setattr(tcp_protocol, 'sum', counting_sum(calls), raising=False)
+
+        payload, protocol = self.recv_one(ADB_VERSION_SKIP_CHECKSUM,
+                                          packed(WRTE, 1, 1, b'hello', checksum=0xDEADBEEF))
+
+        assert payload == b'hello'
+        assert calls == []
+        assert protocol._protocol_version == ADB_VERSION_SKIP_CHECKSUM
+
+    def test_the_sum_is_computed_for_an_old_version(self, monkeypatch):
+        """The payload of a connection that requires it is summed and checked"""
+        calls = []
+        monkeypatch.setattr(tcp_protocol, 'sum', counting_sum(calls), raising=False)
+
+        payload, _ = self.recv_one(0x01000000, packed(WRTE, 1, 1, b'hello'))
+
+        assert payload == b'hello'
+        assert calls == [5]
+
+    def test_an_old_device_may_not_skip_the_checksum(self):
+        """A device of 0x01000000 that sends 0 is refused"""
+        with pytest.raises(AdbMessageInvalid) as e:
+            self.recv_one(0x01000000, packed(WRTE, 1, 1, b'hello', checksum=0))
+
+        assert 'Checksum' in str(e.value)
+
+    def test_an_old_device_with_a_wrong_checksum(self):
+        """A device of 0x01000000 that sends a wrong checksum is refused"""
+        with pytest.raises(AdbMessageInvalid) as e:
+            self.recv_one(0x01000000, packed(WRTE, 1, 1, b'hello', checksum=0x1))
+
+        assert 'Checksum' in str(e.value)
+
+    def test_a_handshake_of_an_old_device_without_checksum(self):
+        """The version of the CNXN itself decides, not the one stored
+
+        An old device that answers with version 0x01000000 and a checksum of 0
+        is refused even before the connection version is set.
+        """
+        protocol = AdbProtocolTCP()
+        protocol._protocol_version = ADB_VERSION_SKIP_CHECKSUM
+        reader, writer = socket.socketpair()
+        writer.sendall(packed(CNXN, 0x01000000, ADB_MAX_PAYLOAD, b'device::features=shell_v2', checksum=0))
+        try:
+            with pytest.raises(AdbMessageInvalid):
+                protocol.message_recv(reader)
+        finally:
+            reader.close()
+            writer.close()
+
+    def test_a_handshake_of_a_new_device_without_checksum(self):
+        """A banner of 0x01000001 without a checksum is the normal answer"""
+        payload, _ = self.recv_one(
+            ADB_VERSION_SKIP_CHECKSUM,
+            packed(CNXN, ADB_VERSION_SKIP_CHECKSUM, ADB_MAX_PAYLOAD, b'device::features=shell_v2', checksum=0),
+        )
+
+        assert payload == b'device::features=shell_v2'
+
+    def test_a_modern_device_accepts_a_zero_checksum_from_the_host(self):
+        """The field is optional in both directions on such a connection
+
+        Verified against a real device: adbd of 0x01000001 answered a CNXN, an
+        OPEN and a WRTE whose checksum field is 0. The fake device must accept
+        them too, or it would be stricter than the device it mirrors and a test
+        would keep a host from using the same right.
+        """
+        with FakeAdbd(version=ADB_VERSION_SKIP_CHECKSUM) as adbd:
+            reader = AdbProtocolTCP()
+            sock = socket.create_connection(('127.0.0.1', adbd.port), timeout=5)
+            try:
+                sock.sendall(packed(CNXN, ADB_VERSION_SKIP_CHECKSUM, ADB_MAX_PAYLOAD,
+                                    b'host::features=shell_v2', checksum=0))
+                command, _, _, _ = reader.message_recv(sock)
+                assert command == CNXN
+
+                sock.sendall(packed(OPEN, 1, 0, b'shell,v2:echo hi\x00', checksum=0))
+                command, _, _, _ = reader.message_recv(sock)
+                assert command == OKAY
+            finally:
+                sock.close()
+
+        assert adbd.violations == []
+        assert adbd.opens == ['shell,v2:echo hi']
+
+
+class TestSendToStream:
+    """Writing to a stream"""
+
+    @staticmethod
+    def open_cat(client):
+        """
+        Open a stream that stays open, the way a command reading stdin does
+
+        Args:
+            client (AdbProtocolTCP): Connected client
+
+        Returns:
+            AdbStreamTCP: The open stream
+        """
+        return client.open_stream('shell,v2,raw:cat')
+
+    def make_client(self, adbd, timeout=1):
+        """
+        Connect a client to a device
+
+        Args:
+            adbd (FakeAdbd): The device
+            timeout (float): Timeout of the connection. Defaults to 1.
+
+        Returns:
+            AdbProtocolTCP: The connected client
+        """
+        client = AdbProtocolTCP(port=adbd.port)
+        client.timeout = timeout
+        client.connect()
+        return client
+
+    def test_one_write_is_acknowledged(self):
+        """The device answers a WRTE with an OKAY, the call returns after it"""
+        with FakeAdbd(responder=lambda command, shell_v2: ShellReply(close=False)) as adbd:
+            client = self.make_client(adbd)
+            try:
+                with self.open_cat(client) as stream:
+                    client.sendto_stream(stream, b'hello')
+                assert adbd.writes == [b'hello']
+                assert adbd.violations == []
+            finally:
+                client.disconnect()
+
+    def test_the_payload_of_the_device_is_not_exceeded(self):
+        """A write larger than the max payload of the device is split"""
+        with FakeAdbd(responder=lambda command, shell_v2: ShellReply(close=False), max_payload=4096) as adbd:
+            client = self.make_client(adbd)
+            try:
+                with self.open_cat(client) as stream:
+                    client.sendto_stream(stream, b'x' * 10000)
+                assert adbd.writes == [b'x' * 4096, b'x' * 4096, b'x' * 1808]
+                assert adbd.violations == []
+            finally:
+                client.disconnect()
+
+    def test_an_empty_write_sends_nothing(self):
+        """Writing no data is a no-op, an empty WRTE is not a message"""
+        with FakeAdbd(responder=lambda command, shell_v2: ShellReply(close=False)) as adbd:
+            client = self.make_client(adbd)
+            try:
+                with self.open_cat(client) as stream:
+                    client.sendto_stream(stream, b'')
+                assert adbd.writes == []
+            finally:
+                client.disconnect()
+
+    def test_a_device_that_does_not_acknowledge(self):
+        """A write without an OKAY times out"""
+        with FakeAdbd(responder=lambda command, shell_v2: ShellReply(close=False)) as adbd:
+            adbd.answer_write_okay = False
+            client = self.make_client(adbd, timeout=0.3)
+            try:
+                stream = self.open_cat(client)
+                with pytest.raises(AdbConnectionTimeout):
+                    client.sendto_stream(stream, b'hello')
+                stream.close()
+            finally:
+                client.disconnect()
+
+    def test_a_closed_stream_is_refused(self):
+        """A stream the device closed takes no more data"""
+        protocol = AdbProtocolTCP()
+        protocol._sock = _NullSock()
+        stream = make_stream(state='closed')
+        stream.remote_id = 5
+
+        with pytest.raises(AdbStreamClosed) as e:
+            protocol.sendto_stream(stream, b'hello')
+
+        assert 'state' in str(e.value)
+
+    def test_a_stream_without_a_remote_id_is_refused(self):
+        """The device assigned no id, there is nothing to write to"""
+        protocol = AdbProtocolTCP()
+        protocol._sock = _NullSock()
+        stream = make_stream(state='opened')
+
+        with pytest.raises(AdbStreamClosed) as e:
+            protocol.sendto_stream(stream, b'hello')
+
+        assert 'remote_id' in str(e.value)
+
+    def test_writing_without_a_connection(self):
+        """A write without a connection says so"""
+        protocol = AdbProtocolTCP()
+        stream = make_stream(state='opened')
+        stream.remote_id = 5
+
+        with pytest.raises(AdbConnectionClosed):
+            protocol.sendto_stream(stream, b'hello')
+
+    def test_a_command_that_exits_while_it_is_written_to(self):
+        """A closed stream is reported at once, not waited for until a timeout
+
+        A shell command may exit before the host finished writing: the device
+        answers the next WRTE with a CLSE. The caller has to see a closed
+        stream, not a timeout of the whole connection a few seconds later.
+        """
+        with FakeAdbd(responder=lambda command, shell_v2: ShellReply(close=False)) as adbd:
+            client = AdbProtocolTCP(port=adbd.port)
+            client.connect()
+            try:
+                stream = client.open_stream('shell:cat')
+                adbd.close_after_writes = 1
+
+                start = time.perf_counter()
+                with pytest.raises(AdbStreamClosed) as e:
+                    client.sendto_stream(stream, b'x' * 10)
+                elapsed = time.perf_counter() - start
+
+                assert stream.state == 'closed'
+                assert elapsed < 1
+                assert 'after 0 of 10 bytes' in str(e.value)
+            finally:
+                client.disconnect()
+
+    def test_a_stream_that_closes_between_two_chunks(self):
+        """The bytes acknowledged before the close are reported"""
+        payload = b'0' * 4096 + b'1' * 4096 + b'2' * 1808
+
+        with FakeAdbd(responder=lambda command, shell_v2: ShellReply(close=False), max_payload=4096) as adbd:
+            client = AdbProtocolTCP(port=adbd.port)
+            client.connect()
+            try:
+                stream = client.open_stream('shell:cat')
+                # the first chunk is acknowledged, the second one closes it
+                adbd.close_after_writes = 2
+
+                with pytest.raises(AdbStreamClosed) as e:
+                    client.sendto_stream(stream, payload)
+
+                # the first chunk is acknowledged before the device closes
+                assert 'after 4096 of 10000 bytes' in str(e.value)
+                assert adbd.writes == [payload[:4096], payload[4096:8192]]
+            finally:
+                client.disconnect()
+
+
+class TestCloseStream:
+    """Closing a stream"""
+
+    def test_the_device_is_asked_and_waits_for_the_answer(self):
+        """The CLSE carries the two ids, the close ends on the CLSE of the device"""
+        with FakeAdbd(responder=lambda command, shell_v2: ShellReply(close=False)) as adbd:
+            client = AdbProtocolTCP(port=adbd.port)
+            client.connect()
+            try:
+                stream = client.open_stream('shell:cat')
+                local_id, remote_id = stream.local_id, stream.remote_id
+                stream.close()
+                assert adbd.client_closes == [(local_id, remote_id)]
+                assert stream.state == 'closed'
+                assert client._stream_dict == {}
+            finally:
+                client.disconnect()
+
+    def test_a_device_that_never_confirms(self):
+        """A close the device does not confirm times out"""
+        with FakeAdbd(responder=lambda command, shell_v2: ShellReply(close=False)) as adbd:
+            adbd.answer_close_clse = False
+            client = AdbProtocolTCP(port=adbd.port)
+            client.timeout = 0.3
+            client.connect()
+            try:
+                stream = client.open_stream('shell:cat')
+                with pytest.raises(AdbConnectionTimeout):
+                    stream.close()
+            finally:
+                client.disconnect()
+
+    def test_a_closed_stream_sends_nothing(self):
+        """Closing twice does not send a second CLSE"""
+        protocol = AdbProtocolTCP()
+        sock = _NullSock()
+        protocol._sock = sock
+        stream = make_stream(state='closed')
+
+        protocol.close_stream(stream)
+
+        assert sock.sent == []
+
+    def test_a_stream_without_a_remote_id_is_not_closable(self):
+        """A stream the device never opened is left alone"""
+        protocol = AdbProtocolTCP()
+        sock = _NullSock()
+        protocol._sock = sock
+        stream = make_stream(state='opening')
+
+        with logger.mock_capture_writer() as capture:
+            protocol.close_stream(stream)
+
+        assert sock.sent == []
+        assert capture.fd.any_contains('without remote_id')
+
+    def test_the_error_of_the_block_wins(self):
+        """A close that fails does not replace the error of the with block"""
+        protocol = AdbProtocolTCP()
+        stream = AdbStreamTCP(1, 'shell:cat', protocol=protocol)
+        stream.state = 'closed'
+
+        with pytest.raises(ValueError):
+            with stream:
+                raise ValueError('the real error')
+
+    def test_a_close_that_fails_is_reported(self):
+        """A close of a stream that is not connected is an error"""
+        protocol = AdbProtocolTCP()
+        stream = AdbStreamTCP(1, 'shell:cat', protocol=protocol)
+        stream.state = 'opened'
+        stream.remote_id = 5
+
+        with pytest.raises(AdbConnectionClosed):
+            with stream:
+                pass
+
+
+class TestHalfClose:
+    """A stream ends when both sides sent a CLSE
+
+    adbd keeps the stream of a command that ended until the host answers with a
+    CLSE of its own. A host that never answers leaves a stream on the device,
+    and the device refuses the next OPEN that carries the local id of it.
+    """
+
+    def test_the_close_of_the_device_is_answered(self):
+        """A command that ends on its own is answered, the device frees it"""
+        with FakeAdbd(responder=lambda command, shell_v2: ShellReply(stdout=b'x')) as adbd:
+            client = AdbProtocolTCP(port=adbd.port)
+            client.connect()
+            try:
+                with client.open_stream('shell,v2:x') as stream:
+                    local_id, remote_id = stream.local_id, stream.remote_id
+                    assert stream.recv_until_close(timeout=5)
+
+                adbd.wait_for(lambda: adbd.client_closes == [(local_id, remote_id)])
+            finally:
+                client.disconnect()
+
+    def test_a_refused_service_is_not_answered(self):
+        """A stream the device never created has nothing to close"""
+        with FakeAdbd(refuse=lambda service: service.startswith('bogus')) as adbd:
+            client = AdbProtocolTCP(port=adbd.port)
+            client.connect()
+            try:
+                with pytest.raises(AdbStreamClosed):
+                    client.open_stream('bogus:cmd')
+                with client.open_stream('shell:ok') as stream:
+                    local_id, remote_id = stream.local_id, stream.remote_id
+                    stream.recv_until_close(timeout=5)
+
+                adbd.wait_for(lambda: adbd.client_closes == [(local_id, remote_id)])
+            finally:
+                client.disconnect()
+
+    def test_a_close_is_sent_once(self):
+        """The stream the caller closes is not closed a second time"""
+        with FakeAdbd(responder=lambda command, shell_v2: ShellReply(close=False)) as adbd:
+            client = AdbProtocolTCP(port=adbd.port)
+            client.connect()
+            try:
+                first = client.open_stream('shell:cat')
+                a = (first.local_id, first.remote_id)
+                first.close()
+
+                second = client.open_stream('shell:cat')
+                b = (second.local_id, second.remote_id)
+                second.close()
+
+                adbd.wait_for(lambda: adbd.client_closes == [a, b])
+                # a second CLSE would be recorded as another entry
+                time.sleep(0.1)
+                assert adbd.client_closes == [a, b]
+                assert adbd.violations == []
+            finally:
+                client.disconnect()
+
+
+class TestDisconnect:
+    """The life of a connection"""
+
+    def test_shell_after_disconnect(self):
+        """A call on a closed connection says so"""
+        with FakeAdbd() as adbd:
+            client = AdbProtocolTCP(port=adbd.port)
+            client.connect()
+            client.disconnect()
+
+            with pytest.raises(AdbConnectionClosed) as e:
+                client.open_stream('shell:x')
+
+        assert 'Not connected' in str(e.value)
+
+    def test_disconnect_twice(self):
+        """A second disconnect is a no-op"""
+        with FakeAdbd() as adbd:
+            client = AdbProtocolTCP(port=adbd.port)
+            client.connect()
+            client.disconnect()
+            client.disconnect()
+
+        assert client._sock is None
+
+    def test_connect_twice_opens_one_connection(self):
+        """A connected client does not reconnect"""
+        with FakeAdbd() as adbd:
+            client = AdbProtocolTCP(port=adbd.port)
+            client.connect()
+            client.connect()
+            try:
+                assert adbd.connections == 1
+            finally:
+                client.disconnect()
+
+    def test_disconnect_releases_the_open_streams(self):
+        """The streams of a closed connection are dropped and their ids freed"""
+        with FakeAdbd(responder=lambda command, shell_v2: ShellReply(close=False)) as adbd:
+            client = AdbProtocolTCP(port=adbd.port)
+            client.connect()
+            stream = client.open_stream('shell:cat')
+            client.disconnect()
+
+        assert client._stream_dict == {}
+        # a stream of a dead connection keeps its id out of the new one
+        assert client._stream_id_next > stream.local_id
+
+    def test_disconnect_wakes_the_receive_thread(self):
+        """The thread that reads the socket ends with the connection"""
+        with FakeAdbd() as adbd:
+            client = AdbProtocolTCP(port=adbd.port)
+            client.connect()
+            thread = client._recv_thread
+            client.disconnect()
+
+            assert thread is not None
+            thread.join(timeout=5)
+            assert not thread.is_alive()
+
+    def test_a_disconnect_wakes_a_reader(self):
+        """A reader of a dropped connection does not wait for its timeout
+
+        A stream of a connection that is gone can never be closed by the
+        device, so a read that waits for the close would wait the whole timeout
+        of the call, 20s by default.
+        """
+        with FakeAdbd(responder=lambda command, shell_v2: ShellReply(close=False)) as adbd:
+            client = AdbProtocolTCP(port=adbd.port)
+            client.connect()
+            stream = client.open_stream('shell:cat')
+            errors = []
+
+            def read():
+                try:
+                    stream.recv_until_close(timeout=20)
+                except Exception as e:
+                    errors.append(e)
+
+            thread = threading.Thread(target=read, daemon=True)
+            thread.start()
+            start = time.perf_counter()
+            client.disconnect()
+            thread.join(timeout=5)
+            elapsed = time.perf_counter() - start
+
+        assert thread.is_alive() is False
+        assert len(errors) == 1
+        assert isinstance(errors[0], AdbConnectionClosed)
+        assert 'Connection lost' in str(errors[0])
+        assert elapsed < 2
+
+    def test_a_disconnect_interrupts_an_open(self):
+        """An open that waits for a silent device ends when the link does"""
+        with FakeAdbd() as adbd:
+            adbd.open_fault = 'silent'
+            client = AdbProtocolTCP(port=adbd.port)
+            client.connect()
+            errors = []
+
+            def run():
+                try:
+                    client.open_stream('shell:never')
+                except Exception as e:
+                    errors.append(e)
+
+            thread = threading.Thread(target=run, daemon=True)
+            thread.start()
+            adbd.wait_for(lambda: adbd.opens == ['shell:never'])
+            client.disconnect()
+            thread.join(timeout=5)
+
+        assert thread.is_alive() is False
+        assert len(errors) == 1
+        assert isinstance(errors[0], AdbConnectionClosed)
+        assert 'while opening' in str(errors[0])
+
+    def test_a_dropped_connection_wakes_a_reader(self):
+        """A device that resets the link ends the reads of its streams"""
+        with FakeAdbd(responder=lambda command, shell_v2: ShellReply(close=False)) as adbd:
+            client = AdbProtocolTCP(port=adbd.port)
+            client.connect()
+            stream = client.open_stream('shell:cat')
+            errors = []
+
+            def read():
+                try:
+                    stream.recv_until_close(timeout=20)
+                except Exception as e:
+                    errors.append(e)
+
+            thread = threading.Thread(target=read, daemon=True)
+            thread.start()
+            start = time.perf_counter()
+            adbd.drop_connections()
+            thread.join(timeout=5)
+            elapsed = time.perf_counter() - start
+
+        assert thread.is_alive() is False
+        assert len(errors) == 1
+        assert isinstance(errors[0], AdbConnectionClosed)
+        assert elapsed < 3
+
+    def test_a_connection_the_device_dropped_is_rebuilt(self):
+        """A device that restarts does not leave the client dead forever"""
+        with FakeAdbd() as adbd:
+            client = AdbProtocolTCP(port=adbd.port)
+            client.timeout = 0.3
+            client.connect()
+            try:
+                adbd.drop_connections()
+                assert adbd.wait_for(lambda: client._broken)
+
+                # the first call fails, a connection that is known to be dead is
+                # not used for a request that would only time out
+                with pytest.raises(AdbConnectionClosed):
+                    client.open_stream('shell:x')
+
+                # connect() rebuilds the connection, the next call works
+                client.connect()
+                assert adbd.wait_for(lambda: adbd.connections == 2)
+                with client.open_stream('shell:x') as stream:
+                    assert stream.recv_until_close(timeout=5) == b''
+            finally:
+                client.disconnect()
+
+
+class TestConnectFailure:
+    """The handshake that does not end in a CNXN"""
+
+    def test_a_refused_connect(self, monkeypatch):
+        """A connect the system refuses is reported as refused, not as a timeout
+
+        socket.timeout is an OSError, a handler that catches OSError first would
+        report a refused connection as a slow one. The OS itself is not used to
+        raise it: a firewall that drops the SYN of a dead loopback port answers
+        with a timeout, which is a property of the machine and not of adb.
+        """
+
+        class RefusingSocket:
+            """A socket whose connect is refused, the way a dead port answers"""
+
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def settimeout(self, value):
+                pass
+
+            def setsockopt(self, *args):
+                pass
+
+            def connect(self, address):
+                raise ConnectionRefusedError(10061, 'No connection could be made')
+
+            def close(self):
+                pass
+
+            def shutdown(self, how):
+                pass
+
+        monkeypatch.setattr(tcp_protocol.socket, 'socket', RefusingSocket)
+        client = AdbProtocolTCP(port=5555)
+        client.timeout = 1
+
+        with pytest.raises(ConnectionRefusedError):
+            client.connect()
+
+        assert client._sock is None
+
+    def test_a_device_that_never_answers(self):
+        """A silent device is a timeout, not a closed connection
+
+        socket.timeout is an OSError, a handler that catches OSError first
+        reports a slow device as a closed one.
+        """
+        with FakeAdbd() as adbd:
+            adbd.silent = True
+            client = AdbProtocolTCP(port=adbd.port)
+            client.timeout = 0.3
+
+            with pytest.raises(AdbConnectionTimeout):
+                client.connect()
+
+        assert client._sock is None
+
+    def test_a_connect_that_times_out(self, monkeypatch):
+        """The connect itself is bounded by the timeout of the connection"""
+        calls = []
+
+        class TimeoutSocket:
+            """A socket whose connect times out, the way an unreachable host does"""
+
+            def __init__(self, *args, **kwargs):
+                calls.append('socket')
+
+            def settimeout(self, value):
+                calls.append(value)
+
+            def setsockopt(self, *args):
+                pass
+
+            def connect(self, address):
+                raise socket.timeout('timed out')
+
+            def close(self):
+                pass
+
+            def shutdown(self, how):
+                pass
+
+        monkeypatch.setattr(tcp_protocol.socket, 'socket', TimeoutSocket)
+        client = AdbProtocolTCP(host='192.0.2.1', port=5555)
+        client.timeout = 0.2
+
+        with pytest.raises(AdbConnectionTimeout):
+            client.connect()
+
+        assert client._sock is None
+        # the timeout was set before the connect, which is what bounds it
+        assert calls == ['socket', 0.2]
+
+    def test_a_device_that_requires_authentication(self):
+        """A device with a secure adbd answers AUTH, the client can not sign"""
+        with FakeAdbd() as adbd:
+            adbd.auth_required = True
+            client = AdbProtocolTCP(port=adbd.port)
+            client.timeout = 1
+
+            with pytest.raises(AdbMessageInvalid) as e:
+                client.connect()
+
+        assert 'AUTH' in str(e.value)
+        assert adbd.auth_challenges == 1
+        assert client._sock is None
+
+    def test_a_failed_handshake_leaves_no_state(self):
+        """The features and the payload of a dead handshake are the defaults"""
+        with FakeAdbd() as adbd:
+            adbd.fault_on_reply = 'bad_magic'
+            client = AdbProtocolTCP(port=adbd.port)
+            client.timeout = 1
+            client._max_payload = 42
+            client.features = 'stale'
+
+            with pytest.raises(AdbMessageInvalid):
+                client.connect()
+
+        assert client._max_payload == ADB_MAX_PAYLOAD
+        assert client.features.features == []
+
+    def test_a_device_of_another_protocol_version(self):
+        """The version of the device is not checked, the checksum is"""
+        with FakeAdbd(version=ADB_VERSION_SKIP_CHECKSUM) as adbd:
+            client = AdbProtocolTCP(port=adbd.port)
+            client.connect()
+            try:
+                with client.open_stream('shell:x') as stream:
+                    assert stream.recv_until_close(timeout=5) == b''
+            finally:
+                client.disconnect()
+
+        assert adbd.violations == []
+
+
+class TestRecvExact:
+    """Reading the bytes of a message"""
+
+    @staticmethod
+    def socket_pair():
+        """
+        Build a pair of connected sockets with a short timeout
+
+        Returns:
+            tuple: (reader, writer)
+        """
+        reader, writer = socket.socketpair()
+        reader.settimeout(0.2)
+        return reader, writer
+
+    def test_reads_a_message_in_one_go(self):
+        """The fast path of a header that arrives whole"""
+        reader, writer = self.socket_pair()
+        try:
+            writer.sendall(b'x' * 24)
+            assert AdbProtocolTCP.recv_exact(reader, 24) == b'x' * 24
+        finally:
+            reader.close()
+            writer.close()
+
+    def test_reads_a_message_in_pieces(self):
+        """A header that arrives in pieces is reassembled"""
+        reader, writer = self.socket_pair()
+
+        def write():
+            for piece in (b'abcdefgh', b'ijklmnop', b'qrstuvwx'):
+                writer.sendall(piece)
+                time.sleep(0.01)
+
+        thread = threading.Thread(target=write, daemon=True)
+        thread.start()
+        try:
+            assert AdbProtocolTCP.recv_exact(reader, 24) == b'abcdefghijklmnopqrstuvwx'
+        finally:
+            thread.join(timeout=5)
+            reader.close()
+            writer.close()
+
+    def test_a_closed_peer(self):
+        """A peer that closes the connection is not a timeout"""
+        reader, writer = self.socket_pair()
+        writer.close()
+        try:
+            with pytest.raises(AdbConnectionClosed):
+                AdbProtocolTCP.recv_exact(reader, 24)
+        finally:
+            reader.close()
+
+    def test_a_timeout(self):
+        """A peer that sends nothing is a timeout"""
+        reader, writer = self.socket_pair()
+        try:
+            with pytest.raises(AdbConnectionTimeout):
+                AdbProtocolTCP.recv_exact(reader, 24)
+        finally:
+            reader.close()
+            writer.close()
+
+    def test_a_closed_peer_in_the_middle_of_a_message(self):
+        """A connection that dies inside a message is a closed connection"""
+        reader, writer = self.socket_pair()
+        writer.sendall(b'abc')
+        writer.close()
+        try:
+            with pytest.raises(AdbConnectionClosed) as e:
+                AdbProtocolTCP.recv_exact(reader, 24)
+            assert 'when receiving chunk' in str(e.value)
+        finally:
+            reader.close()
+
+    def test_without_a_header_timeout(self):
+        """The dispatch thread waits through the idle timeouts of the socket"""
+        reader, writer = self.socket_pair()
+
+        def write_late():
+            time.sleep(0.3)
+            writer.sendall(b'z' * 24)
+
+        thread = threading.Thread(target=write_late, daemon=True)
+        thread.start()
+        try:
+            start = time.perf_counter()
+            assert AdbProtocolTCP.recv_exact(reader, 24, header_timeout=False) == b'z' * 24
+            assert time.perf_counter() - start >= 0.25
+        finally:
+            thread.join(timeout=5)
+            reader.close()
+            writer.close()

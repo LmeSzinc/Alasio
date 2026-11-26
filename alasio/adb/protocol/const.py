@@ -11,7 +11,14 @@ CLSE = b'CLSE'
 WRTE = b'WRTE'
 
 ADB_COMMANDS = {SYNC, CNXN, AUTH, OPEN, OKAY, CLSE, WRTE}
-ADB_VERSION = 0x01000000
+# From this version on the checksum of a message is optional: a peer of that
+# version may send 0 instead of the sum of the payload, and a connection of that
+# version verifies nothing
+ADB_VERSION_SKIP_CHECKSUM = 0x01000001
+# Version this client advertises in CNXN, the protocol version of a connection
+# is the lower of the two sides. An old adbd answers with its own version, the
+# connection then uses 0x01000000 and every message is checksummed
+ADB_VERSION = ADB_VERSION_SKIP_CHECKSUM
 ADB_MAX_PAYLOAD = 256 * 1024
 
 
