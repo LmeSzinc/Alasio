@@ -82,9 +82,10 @@ from alasio.ext.cache import cached_property
 from alasio.ext.path import PathStr
 from alasio.ext.path.atomic import atomic_read_bytes
 from alasio.testing.filesystem import fs  # noqa: F401
-from alasio.testing.patch_time import PatchTime
 from alasio.testing.static_file import MockStaticFile
 from tests.deploy_dev.pack.conftest import FakeMirrorTable, MemoryLock, make_repo
+
+from .wall_clock import FrozenWallClock
 
 # =============================================================================
 # The packs and the mock update servers (module level: encoded once)
@@ -849,9 +850,10 @@ def clock():
 
     Before the daily target (03:50), so a crossing is what a test moves the
     clock over; the epoch of the fake clock is what the logs print as
-    ``updated_all_at``.
+    ``updated_all_at``. Only the wall clock is frozen (see FrozenWallClock):
+    the timeouts of the processes a run drives are real waits.
     """
-    with PatchTime(at(*NOW)) as patch:
+    with FrozenWallClock(at(*NOW)) as patch:
         yield patch
 
 
