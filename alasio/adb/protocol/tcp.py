@@ -8,10 +8,22 @@ from alasio.logger import logger
 class AdbTCP(AdbProtocolTCP):
     def shell(self, cmd: str, timeout: "int | float" = 20, shell_v2=True) -> ShellResult:
         """
+        Run a command on the device.
+
         Args:
-            cmd:
-            timeout:
+            cmd: Command line, it is passed to `sh -c` on the device
+            timeout: Seconds to wait for the stream to close. Defaults to 20.
             shell_v2: True to use shell_v2 feature if available, which is faster and have separated stdout/stderr
+
+        Returns:
+            ShellResult: Output of the command. A shell v1 stream has no
+                standard error channel and no exit code, so stderr is empty and
+                the exit code is 0
+
+        Raises:
+            AdbStreamClosed: When the device refuses the shell service
+            AdbStreamTimeout: When the command does not end in time
+            AdbConnectionClosed: When the connection is gone
         """
         shell_v2 = shell_v2 and self.features.shell_v2
         if shell_v2:
@@ -49,8 +61,9 @@ class AdbTCP(AdbProtocolTCP):
 
 
 if __name__ == '__main__':
-    self = AdbTCP(port=16384)
+    self = AdbTCP(host='127.0.0.1', port=16384)
     self.connect()
+    print(self.features)
     s = self.shell('getprop')
     print(s)
     self.disconnect()
