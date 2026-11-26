@@ -129,10 +129,14 @@ async function settle() {
   await flushEffects();
 }
 
-async function mountCard(card: CardData, handleMultiEdit?: (events: any[]) => void) {
+async function mountCard(
+  card: CardData,
+  handleMultiEdit?: (events: any[]) => void,
+  parent: HTMLElement = document.body,
+) {
   const data = $state(card);
   const target = document.createElement("div");
-  document.body.appendChild(target);
+  parent.appendChild(target);
   mounted.push(
     mount(ArgCard, {
       target,
@@ -182,6 +186,49 @@ function dialogArgs(): string[] {
   return [...dialog()!.querySelectorAll<HTMLElement>('[data-slot="dashboard-edit-row"]')].map(
     (row) => row.dataset.arg ?? "",
   );
+}
+
+/**
+ * A scroll port around the card, the way the config page wraps its cards.
+ *
+ * jsdom has no layout and no scrolling: the port keeps the offset written to it,
+ * and the rect of an element is what a test makes of it (see rectTops).
+ */
+function scrollPort(scrollTop: number) {
+  const port = document.createElement("div");
+  port.style.overflowY = "auto";
+  let offset = scrollTop;
+  Object.defineProperty(port, "scrollTop", {
+    configurable: true,
+    get: () => offset,
+    set: (value: number) => (offset = value),
+  });
+  document.body.appendChild(port);
+  return {
+    port,
+    get offset() {
+      return offset;
+    },
+  };
+}
+
+/** Report one rect per read, so a test says where an element travelled */
+function rectTops(element: HTMLElement, tops: number[]) {
+  let read = 0;
+  Object.defineProperty(element, "getBoundingClientRect", {
+    configurable: true,
+    value: () =>
+      ({
+        top: tops[Math.min(read++, tops.length - 1)],
+        bottom: 0,
+        left: 0,
+        right: 0,
+        width: 0,
+        height: 0,
+        x: 0,
+        y: 0,
+      }) as DOMRect,
+  });
 }
 
 async function openDialog(target: HTMLElement) {
@@ -539,5 +586,38 @@ describe("TestArgCardAdvanced", () => {
     // a dashboard group edits its args in a dialog, the card holds no row of its own
     const amount = await mountCard(makeAmountCard());
     expect(advancedToggle(amount)).toBeUndefined();
+  });
+});
+
+/**
+ * Both toggles pin the page while they open or close what they hold: an update
+ * that lands while the list is scrolled must not move the control under the
+ * pointer, and the rows it reveals grow downward from there.
+ */
+describe("TestArgCardScrollAnchor", () => {
+  it("scrolls the page with the advanced toggle when the update moves it", async () => {
+    // jsdom does not lay the card out, so the test says what the toggle reads:
+    // 20px lower after the click, the way rows landing above it would move it
+    const page = scrollPort(1200);
+    const target = await mountCard(makeAdvancedCard(), undefined, page.port);
+    const toggle = advancedToggle(target)!;
+    rectTops(toggle, [40, 60]);
+
+    toggle.click();
+    await settle();
+
+    expect(page.offset).toBe(1220);
+  });
+
+  it("scrolls the page with the question mark when the help opens", async () => {
+    const page = scrollPort(1200);
+    const target = await mountCard(makeAdvancedCard(), undefined, page.port);
+    const toggle = helpToggle(target)!;
+    rectTops(toggle, [40, 60]);
+
+    toggle.click();
+    await settle();
+
+    expect(page.offset).toBe(1220);
   });
 });

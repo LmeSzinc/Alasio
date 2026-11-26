@@ -21,7 +21,12 @@
      * action button (the reset of a card) leaves it false.
      */
     toggle?: boolean;
-    onclick: () => void;
+    /**
+     * Runs on a click, with the element the click landed on. The element is
+     * handed over instead of the event: a header action reads where its button
+     * is on screen (see pinToAnchor), not what the event carried.
+     */
+    onclick: (element: HTMLElement) => void;
     class?: string;
   };
   let { icon: Icon, label, active = false, toggle = false, onclick, class: className }: Props = $props();
@@ -52,7 +57,7 @@
     className,
   )}
   aria-pressed={toggle ? active : undefined}
-  {onclick}
+  onclick={(event) => onclick(event.currentTarget)}
 >
   <span class={cn(contentClass, active ? "after:opacity-100" : "after:opacity-0 group-hover/button:after:opacity-100")}>
     <!-- The icon drops 1px: the row centers the icon box on the line box, while

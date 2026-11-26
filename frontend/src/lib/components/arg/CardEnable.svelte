@@ -5,6 +5,7 @@
   import { Button } from "$lib/components/ui/button";
   import * as Dialog from "$lib/components/ui/dialog";
   import { t } from "$lib/i18n";
+  import { pinToAnchor } from "$lib/use/scroll.svelte";
   import Enable from "../arginput/Enable.svelte";
   import Input from "../arginput/Input.svelte";
   import Static from "../arginput/Static.svelte";
@@ -107,7 +108,7 @@ Z`;
             label={t.Input.Advanced()}
             active={isAdvancedShown}
             toggle
-            onclick={() => (isAdvanced = !isAdvanced)}
+            onclick={(element) => pinToAnchor(element, () => (isAdvanced = !isAdvanced))}
           />
         {/if}
       </div>

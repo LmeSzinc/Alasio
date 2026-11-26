@@ -17,6 +17,44 @@ export function findScrollParent(node: HTMLElement | null) {
 }
 
 /**
+ * Run a state change that grows or shrinks the page under `anchor`, and leave the
+ * anchor where the user sees it.
+ *
+ * A scroll port can not rest past its end, so collapsing rows near the end of a
+ * list pulls the whole page up by the height that disappeared: the browser
+ * clamps `scrollTop` to the shorter content. Chrome also moves the viewport on
+ * its own while such an update lands (scroll anchoring). Either way the moved
+ * position is what the page keeps when the rows are opened again, so the
+ * control the user clicked has jumped away from the pointer.
+ *
+ * Reading the rect of the anchor before the change and again after it, and
+ * moving the port by the distance the anchor travelled on screen, pins that
+ * anchor in place: the rows that appear grow away from it, and the rows that go
+ * away take their space from below. Moving the port is measured against the
+ * offset it has after the update, so a move the browser already made is not
+ * counted twice.
+ *
+ * Writing back the offset recorded before the change would be the same
+ * correction, as long as the anchor keeps its place in the document: the two
+ * only differ when a row lands above the anchor, which moves it down while the
+ * port stays where it was. Measuring the anchor covers both, and it still
+ * degrades to the plain restore where the port really was at its end, because
+ * the offset written back is then clamped to the shorter content anyway.
+ *
+ * @param anchor The element the user clicked, null when there is nothing to pin
+ * @param change The state change that resizes the page
+ */
+export async function pinToAnchor(anchor: HTMLElement | null, change: () => void): Promise<void> {
+  const port = findScrollParent(anchor);
+  const beforeTop = anchor ? anchor.getBoundingClientRect().top : 0;
+  change();
+  if (!anchor || !port) return;
+  await tick();
+  const moved = anchor.getBoundingClientRect().top - beforeTop;
+  if (moved !== 0) port.scrollTop += moved;
+}
+
+/**
  * Bring a scroll port to its end, once the update that grew it is on screen.
  *
  * A row appended by a click is written in the same tick the button was pressed,

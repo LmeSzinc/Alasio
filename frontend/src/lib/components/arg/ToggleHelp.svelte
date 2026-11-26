@@ -2,6 +2,7 @@
   import MessageCircleQuestionMark from "@lucide/svelte/icons/message-circle-question-mark";
   import * as Tooltip from "$lib/components/ui/tooltip";
   import { t } from "$lib/i18n";
+  import { pinToAnchor } from "$lib/use/scroll.svelte";
   import { cn } from "$lib/utils";
 
   let {
@@ -22,7 +23,7 @@
           helpVisible ? "text-primary" : "",
           className,
         )}
-        onclick={() => (helpVisible = !helpVisible)}
+        onclick={(event) => pinToAnchor(event.currentTarget, () => (helpVisible = !helpVisible))}
         aria-label={t.Input.ShowHelp()}
       >
         <MessageCircleQuestionMark size={16} />
