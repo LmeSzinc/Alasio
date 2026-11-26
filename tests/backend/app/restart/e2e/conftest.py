@@ -15,9 +15,9 @@ Every collaborator of the restart package is the real one here:
   encoder over a ``MockGitRepo``);
 - the worker manager (``BackendWorkerManager``): the real state machine --
   its states, its pipe bookkeeping, its recv loop and its disconnect
-  handling are the ones of the process -- over in-process worker *peers*
-  (``MockWorkerProcess``): the peer speaks the real bridge protocol on a real
-  pipe, no OS process is started;
+  handling are the ones of the process -- over worker *processes*: the
+  ``WorkerTest*`` mods of ``tests/backend/worker/worker_mods.py`` started by
+  the real spawn context, crossing a real pipe with the real bridge protocol;
 - the resume file IO (``ResumeFiles``) and the daily bookkeeping
   (``DailyState``);
 - the deploy config (``MockDeployConfig``): the values of the test instead of
@@ -39,14 +39,19 @@ the supervisor pipe is the stand-in of ``tests/backend/conftest.py``.
 
 The runs change no timing constant: the resume queue paces itself by the
 report of each worker (``WorkerManager.worker_wait_started``), and a scenario
-that needs the queue to wait closes the report gate of the peers (see
-``MockWorkerProcess.REPORT_GATE`` and the ``report_gate`` fixture), so no
-scenario has to race a fixed window.
+that needs the queue to wait closes the report gate (see
+``WORKER_REPORT_GATE`` and the ``report_gate`` fixture), so no scenario has to
+race a fixed window. The gate sits in the parent, in front of the event
+dispatch of the manager: the workers are real processes, so nothing of the
+test can reach inside one.
+
+The wall clock is frozen at the instant of the run (``FrozenWallClock``) --
+the daily maintenance is due by ``datetime.now()`` and the resume file records
+``time.time()`` -- while the clock of durations and ``time.sleep`` stay real:
+the manager waits for a worker process by ``time.monotonic``, and a frozen
+clock would expire every timeout of that wait at once.
 """
 import datetime
-import multiprocessing
-import os
-import socket
 import threading
 from types import SimpleNamespace
 
@@ -64,7 +69,6 @@ from alasio.backend.app.restart.update_check import UpdateCheck
 from alasio.backend.topic import worker as topic_worker_module
 from alasio.backend.topic._worker import BackendWorkerManager
 from alasio.backend.topic.scan import ConfigScanSource
-from alasio.backend.worker.event import DECODER_CACHE, ConfigEvent
 from alasio.backend.ws.context import GLOBAL_CONTEXT
 from alasio.config.entry.loader import MOD_LOADER
 from alasio.config.entry.mod import Mod
@@ -260,238 +264,76 @@ class MockUpdateBackend:
         await server.static(scope, receive, send)
 
 
-class ChildConn:
+# =============================================================================
+# The report gate of the runs
+# =============================================================================
+
+# The gate in front of the first report of a worker (open by default, see the
+# report_gate fixture). A closed gate holds the report back, so a scenario that
+# needs the resume queue to wait for a worker that has not reported itself
+# holds that moment from the test instead of racing a fixed window. The worker
+# itself is up and running -- its bridge serves the pipe, the manager stops it
+# and reaps it as usual -- only its announcement has not reached the state
+# machine yet.
+WORKER_REPORT_GATE = threading.Event()
+
+
+def hold_worker_reports(manager, monkeypatch):
     """
-    The child end of a worker pipe as the spawn tail of the manager sees it
+    Put the report gate in front of the event dispatch of a worker manager
 
-    The real spawn tail closes its copy of the child end right after the
-    process started (the worker owns the other copy); the worker peer of the
-    runs lives in this process and keeps using the same connection, so the
-    close of the copy is a no-op here (the peer closes the connection itself
-    when it exits).
+    The report of a worker is the ``WorkerState`` event it sends once it boots.
+    A closed gate holds that event (and the ones after it, in order) until the
+    test opens the gate, so the worker has booted but its entry is still
+    "starting", which is the moment the resume queue waits on.
+
+    The gate is in the parent process on purpose: the workers of the runs are
+    real processes, which see neither the in-memory filesystem nor the objects
+    of the test, so "the manager has not looked at the worker yet" is stated
+    here, without a second protocol between the two processes.
+
+    The recv thread is never parked: it reads on, so the end of the pipe still
+    stops the entry (``_handle_disconnect``) while a report is held. A worker
+    that is held and then stopped would otherwise be waited for until the
+    stop timeout of the flow, which is 10 minutes.
+
+    Args:
+        manager (WorkerManager): The manager of the run
+        monkeypatch: The pytest monkeypatch fixture (the dispatch is restored
+            with the test)
     """
+    dispatch = manager._handle_config_event
+    # serializes the delivery of every event of the worker: the held ones leave
+    # in the order the worker sent them, and the two threads that may deliver
+    # (the recv thread and the one that releases the held events) never overlap
+    deliver = threading.Lock()
+    held = []
 
-    def __init__(self, conn):
-        self.conn = conn
+    def release():
+        """Release the held events in order, when the gate opens"""
+        WORKER_REPORT_GATE.wait()
+        with deliver:
+            while held:
+                data, worker = held.pop(0)
+                dispatch(data, worker)
 
-    def close(self):
-        pass
-
-
-class MockWorkerProcess:
-    """
-    The worker "process" of the runs: an in-process peer on the worker side of
-    the pipe, no OS process is started
-
-    The peer speaks the real wire protocol of the worker bridge
-    (``alasio.backend.worker.event``): it reports the worker "running" once
-    and it exits -- closing its end of the pipe, the manager's own recv loop
-    then finalizes the entry through its real disconnect path -- when the
-    manager sends the scheduler-stop command. A worker mod that ignores the
-    graceful stop (``WorkerTestInfinite``) keeps running instead and only goes
-    down through the kill command of the timeout escalation, like its real
-    counterpart.
-
-    The interface is the slice of ``multiprocessing.Process`` the worker
-    manager uses: start / is_alive / join / terminate / pid / exitcode.
-
-    The peer owns its end of the pipe. A Windows pipe whose handle is used by
-    two threads at once is not defined: a handle closed twice, or closed under
-    a pending overlapped read by a thread that never owned it, can close a
-    handle that is already gone (or already recycled), and the process dies
-    with an access violation instead of a test failure. So every close goes
-    through ``_close_conn()``, which closes once and under a lock, and the peer
-    reads its pipe with a blocking read, like the reader of the manager does.
-    """
-    # worker mods whose scheduler ignores the graceful stop (see
-    # tests/backend/worker/worker_mods.py)
-    IGNORES_GRACEFUL_STOP = ('WorkerTestInfinite',)
-    # The gate of the first report of every peer (open by default, see the
-    # report_gate fixture). A closed gate parks the report of the worker, so a
-    # scenario that needs the resume queue to wait for a worker that has not
-    # reported itself holds that moment from the test instead of racing a fixed
-    # window. The peer keeps serving the pipe while the report is parked, like
-    # a real worker that is still booting when the manager sends it a stop
-    # command
-    REPORT_GATE = threading.Event()
-    # how long the peer takes to go down after the stop command: a real worker
-    # needs about half a second to stop, the peer only a moment -- long enough
-    # that the manager's own logs of the wait land first (its log lines are
-    # written before it starts polling), like they do with a real worker. A
-    # real wait, not time.sleep: the runs freeze time.sleep
-    STOP_DELAY = 0.05
-    # How long terminate() waits for a peer to leave, see terminate()
-    TERMINATE_TIMEOUT = 1.0
-
-    def __init__(self, mod, config, conn, name=''):
-        self.mod = mod
-        self.config = config
-        self.name = name
-        self.conn = conn
-        # serializes the report and the close of the peer: both touch the same
-        # pipe handle, and a close under a pending send is as undefined as a
-        # close under a pending read
-        self._conn_lock = threading.Lock()
-        self.pid = 0
-        self.exitcode = None
-        self._thread = None
-
-    def start(self):
-        """Start the peer threads (the "worker" reports running through the pipe)"""
-        self.pid = os.getpid()
-        if self.REPORT_GATE.is_set():
-            # the plain case: the report goes out before the peer serves the
-            # pipe, like a real worker announces itself while it boots
-            self._report_running()
-        else:
-            # a held report must not park the spawn itself: the queue would
-            # never see the process of the worker it waits for. Its own thread
-            # parks on the gate while the peer keeps serving the pipe
-            report = threading.Thread(target=self._report_running, name=f'{self.name}-report', daemon=True)
-            report.start()
-        self._thread = threading.Thread(target=self._run, name=self.name, daemon=True)
-        self._thread.start()
-
-    def _report_running(self):
-        """Report the state of the worker through the pipe (see REPORT_GATE)"""
-        try:
-            self.REPORT_GATE.wait()
-            with self._conn_lock:
-                conn = self.conn
-                if conn is None:
-                    # the peer was dismissed before the report went out
-                    return
-                conn.send_bytes(msgspec.msgpack.encode(ConfigEvent(t='WorkerState', v='running')))
-        except OSError:
-            # the manager closed the pipe while the report was parked: the
-            # entry was finalized without it
-            pass
-
-    def _run(self):
-        """Play the worker protocol until the manager stops the worker"""
-        try:
-            stopped_by_command = False
-            while True:
-                try:
-                    data = self.conn.recv_bytes()
-                except (EOFError, OSError):
-                    # the manager closed its end of the pipe
-                    break
-                command = DECODER_CACHE.COMMAND_EVENT.decode(data)
-                if command.c not in ('scheduler-stopping', 'kill', 'force-kill'):
-                    continue
-                if command.c == 'scheduler-stopping' and self.mod in self.IGNORES_GRACEFUL_STOP:
-                    continue
-                stopped_by_command = True
-                break
-            # the graceful stop of a worker takes a moment in production (it
-            # finishes its current task first): the short wait keeps the order
-            # of the manager's logs the one of a real run. A peer ended by
-            # terminate() is a killed process, which is gone at once, so the
-            # wait is skipped
-            if stopped_by_command:
-                threading.Event().wait(self.STOP_DELAY)
-        finally:
-            self.exitcode = 0
-            self._close_conn()
-
-    def _close_conn(self):
-        """
-        Close the peer end of the pipe, once and from one thread at a time
-
-        The peer owns its end: the read of ``_run()`` may be parked on it when
-        the manager kills the peer, which is what ``terminate()`` does through
-        this method. The two platforms wake that read differently -- POSIX needs
-        a ``shutdown()`` before the close, Windows ends the pending read on the
-        close itself -- so the shutdown runs first where it exists.
-
-        ``Connection.close()`` is idempotent but not atomic: two threads that
-        pass its closed check together close the same handle twice, and the
-        second close hits whatever the system handed the number to next. Taking
-        the field is one step under the lock, so exactly one caller owns the
-        pipe and closes it, and the other finds nothing of its own to close.
-        """
-        with self._conn_lock:
-            conn, self.conn = self.conn, None
-            if conn is None:
+    def gated(data, worker):
+        if WORKER_REPORT_GATE.is_set():
+            with deliver:
+                dispatch(data, worker)
+            return
+        with deliver:
+            # the gate may have opened while this event was on its way
+            if WORKER_REPORT_GATE.is_set():
+                dispatch(data, worker)
                 return
-            try:
-                sock = socket.socket(fileno=conn.fileno())
-            except (AttributeError, OSError, ValueError):
-                # not a socket (the named pipe of a Windows spawn)
-                pass
-            else:
-                try:
-                    sock.shutdown(socket.SHUT_RDWR)
-                except OSError:
-                    pass
-                finally:
-                    sock.detach()
-            try:
-                conn.close()
-            except OSError:
-                pass
+            held.append((data, worker))
+            if len(held) > 1:
+                # the thread of the first held event is already releasing
+                return
+        threading.Thread(target=release, name=f'report-gate-{worker.config}', daemon=True).start()
 
-    def is_alive(self):
-        return bool(self._thread is not None and self._thread.is_alive())
-
-    def join(self, timeout=None):
-        if self._thread is not None:
-            self._thread.join(timeout)
-
-    def terminate(self):
-        """
-        End the peer, like the manager ends a worker process
-
-        A real worker is a process: terminating it closes its end of the pipe
-        from the outside, and the read of the worker never returns. The peer of
-        the runs is a thread, so the terminating side closes the peer end of the
-        pipe instead: that is the same event the death of a process is, seen
-        from the manager, and it wakes the peer's own parked read.
-
-        A peer dismissed with ``_close_conn()`` reports the kill with the status
-        of a killed process; the peer that left by itself keeps its own status.
-        """
-        if self._thread is None:
-            # no reader owns the pipe, closing it here wakes nobody
-            self._close_conn()
-            self.exitcode = -15
-            return
-        if not self.is_alive():
-            # the peer left by itself, its pipe is closed already
-            return
-        self._close_conn()
-        self.join(self.TERMINATE_TIMEOUT)
-        if self.exitcode is None:
-            self.exitcode = -15
-
-    def process_graceful_kill(self):
-        self.terminate()
-
-
-class MockProcessContext:
-    """
-    The process factory of the runs: ``Process()`` / ``Pipe()`` of a spawn
-    context, the "process" is MockWorkerProcess
-
-    The worker manager is the real class: it drives the real state machine
-    (starting / running / scheduler-stopping / restarting / resuming), the
-    real pipe bookkeeping and its real recv loop and disconnect handling; only
-    the OS process behind an entry is an in-process peer.
-    """
-
-    def Process(self, target=None, args=(), name='', daemon=True):
-        # the manager calls this with the test-mod shape (mod, config, conn) and
-        # with the real-mod shape (mod, config, conn, project_root, mod_root,
-        # path_main): the peer only needs the first three
-        mod, config, child_conn = args[0], args[1], args[2]
-        conn = child_conn.conn if isinstance(child_conn, ChildConn) else child_conn
-        return MockWorkerProcess(mod, config, conn, name=name)
-
-    @staticmethod
-    def Pipe(duplex=True):
-        parent_conn, child_conn = multiprocessing.Pipe(duplex=duplex)
-        return parent_conn, ChildConn(child_conn)
+    monkeypatch.setattr(manager, '_handle_config_event', gated)
 
 
 class InMemoryConfigScan(ConfigScanSource):
@@ -622,7 +464,8 @@ class Backend:
                 ModEntry.pack_deps. Defaults to None, every mod
                 declares none
             monkeypatch: The pytest monkeypatch fixture (the manager spawn is
-                watched through it)
+                watched through it, and the report gate of the workers is put in
+                front of its event dispatch)
         """
         self.project = project
         self.servers = servers
@@ -656,7 +499,6 @@ class Backend:
         # the in-process worker peers of the runs (no OS process is started)
         BackendWorkerManager.singleton_clear()
         self.worker_manager = BackendWorkerManager()
-        self.worker_manager._ctx = MockProcessContext()
         self.daily = DailyState()
         self.files = project.files
         self.restart = RestartRequest(restart_error)
@@ -693,6 +535,7 @@ class Backend:
 
         if monkeypatch is not None:
             monkeypatch.setattr(self.manager, 'spawn', watched_spawn)
+            hold_worker_reports(self.worker_manager, monkeypatch)
 
     async def install(self, mod_name, pack=FULL_V1):
         """
@@ -832,15 +675,16 @@ def at(hour, minute=0, day=13, second=0):
 @pytest.fixture(autouse=True)
 def report_gate():
     """
-    Open the report gate of the peers (see MockWorkerProcess.REPORT_GATE)
+    Open the report gate of the workers (see WORKER_REPORT_GATE)
 
     A test that wants the resume queue to wait for a worker closes the gate
-    before the backend runs: the report of that worker then arrives when the
-    test wants it, so no scenario needs a timing window to hit its race.
+    before the backend runs: the report of that worker then reaches the state
+    machine when the test wants it, so no scenario needs a timing window to hit
+    its race.
     """
-    MockWorkerProcess.REPORT_GATE.set()
+    WORKER_REPORT_GATE.set()
     yield
-    MockWorkerProcess.REPORT_GATE.set()
+    WORKER_REPORT_GATE.set()
 
 
 @pytest.fixture(autouse=True)

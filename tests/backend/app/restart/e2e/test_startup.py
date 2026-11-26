@@ -25,7 +25,7 @@ from alasio.backend.topic import worker as worker_module
 from alasio.logger import logger
 
 from .conftest import (
-    MockWorkerProcess, assert_logs, at, credential_of, read_record, rendered, wait_log, wait_until, write_resume
+    WORKER_REPORT_GATE, assert_logs, at, credential_of, read_record, rendered, wait_log, wait_until, write_resume
 )
 
 
@@ -450,10 +450,10 @@ async def test_the_queue_waits_for_each_worker_to_report_itself(make_backend, mo
     await backend.install('WorkerTestScheduler')
     credential = await write_resume(backend, ['cfg_a', 'cfg_b'], updated_all_at=at(2, 0))
     monkeypatch.setenv(RESUME_TOKEN_ENV, credential)
-    # the test holds the report of the first worker (see REPORT_GATE): the queue
+    # the test holds the report of the first worker (see WORKER_REPORT_GATE): the queue
     # parks in the wait of the start of "cfg_a" and the moment the report
     # arrives is the test's to choose
-    MockWorkerProcess.REPORT_GATE.clear()
+    WORKER_REPORT_GATE.clear()
     try:
         with logger.mock_capture_writer() as capture:
             async with trio.open_nursery() as nursery:
@@ -464,7 +464,7 @@ async def test_the_queue_waits_for_each_worker_to_report_itself(make_backend, mo
                 # of the queue did not start while the report was missing
                 await wait_until(lambda: backend.worker_manager.state['cfg_a'].state == 'starting')
                 assert 'Resuming worker: cfg_b' not in rendered(capture)
-                MockWorkerProcess.REPORT_GATE.set()
+                WORKER_REPORT_GATE.set()
                 await wait_log(capture, 'Resuming worker: cfg_b')
                 await backend.wait_quiet()
                 assert_logs(capture, f"""\
@@ -484,7 +484,7 @@ INFO | [Restart] Worker resumed: cfg_b
     finally:
         # a report the test never released must not leave the queue waiting for
         # it: the run would pay the whole RESUME_REPORT_TIMEOUT before it ends
-        MockWorkerProcess.REPORT_GATE.set()
+        WORKER_REPORT_GATE.set()
 
 
 @pytest.mark.trio
@@ -501,7 +501,7 @@ async def test_the_queue_wakes_the_moment_its_worker_is_taken_over(make_backend,
     monkeypatch.setenv(RESUME_TOKEN_ENV, credential)
     # the first worker never reports (its report is held): the queue is parked in
     # the wait of the start of "cfg_a" when the flow takes the backend over
-    MockWorkerProcess.REPORT_GATE.clear()
+    WORKER_REPORT_GATE.clear()
     try:
         with logger.mock_capture_writer() as capture:
             async with trio.open_nursery() as nursery:
@@ -522,5 +522,5 @@ async def test_the_queue_wakes_the_moment_its_worker_is_taken_over(make_backend,
                 assert read_record(backend).configs == ['cfg_a', 'cfg_b']
                 nursery.cancel_scope.cancel()
     finally:
-        # the report the test held leaves no peer of the run parked on the gate
-        MockWorkerProcess.REPORT_GATE.set()
+        # the report the test held leaves no worker of the run parked on the gate
+        WORKER_REPORT_GATE.set()
