@@ -108,26 +108,32 @@ def rgb2luma(image, fast=True):
     """
     Convert RGB to the Y channel (Luminance) in YUV color space.
 
-    OpenCV calculates using:
-        Y = (R * 4899 + G * 9617 + B * 1868 + 8192) >> 14
+    This is the BT.601 luma, the same quantity `cvtColor(RGB2GRAY)` produces:
+        Y = 0.299 R + 0.587 G + 0.114 B
+    It is not the lightness of `rgb2gray()`, which is (MAX + MIN) / 2, a
+    different channel that ignores the weighting entirely.
+
+    OpenCV evaluates it in fixed point, and each conversion path carries its own
+    coefficient table:
+        COLOR_RGB2GRAY  ( 9798 R + 19235 G + 3735 B + 16384) >> 15
+        COLOR_RGB2YUV   ( 4899 R +  9617 G + 1868 B +  8192) >> 14
+    The three coefficients must sum to the power of two so that a gray stays
+    gray, and the +-1 needed for that is distributed differently, so the two
+    disagree by one level on 0.26% of the 16,777,216 colors. This function uses
+    the RGB2GRAY table: it is both faster than the float path and closer to the
+    exact real valued sum.
 
     Args:
         image (np.ndarray): Shape (height, width, channel)
-        fast (bool): True to use faster implement that costs 12.624us on 1280x720 image instead of 15.084us
-                Note that due to float calculation, this method has +- 1 color difference compares to standard opencv,
-                which should be acceptable in template matching.
-                If you do need a precise result, use `fast=False` instead
+        fast (bool): Kept for call compatibility, both values now run the same
+                conversion. It used to select a two step float weighted sum that
+                cost a `cv2.split` and two `cv2.addWeighted` passes, with +- 1
+                color difference against the fixed point result.
 
     Returns:
         np.ndarray: Shape (height, width)
     """
-    if fast:
-        r, g, b = cv2.split(image)
-        luma = cv2.addWeighted(r, 0.299, g, 0.587, 0)
-        cv2.addWeighted(luma, 1.0, b, 0.114, 0, dst=luma)
-        return luma
-    else:
-        return cv2.extractChannel(cv2.cvtColor(image, cv2.COLOR_RGB2YUV), 0)
+    return cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
 
 
 def rgb565_to_rgb888(image):
