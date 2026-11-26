@@ -1,13 +1,14 @@
 <script lang="ts">
+  import Cog from "@lucide/svelte/icons/cog";
   import LockKeyhole from "@lucide/svelte/icons/lock-keyhole";
   import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
   import { Button } from "$lib/components/ui/button";
   import * as Dialog from "$lib/components/ui/dialog";
   import { t } from "$lib/i18n";
-  import { cn } from "$lib/utils";
   import Enable from "../arginput/Enable.svelte";
   import Input from "../arginput/Input.svelte";
   import Static from "../arginput/Static.svelte";
+  import CardHeaderButton from "./CardHeaderButton.svelte";
   import { type CardData, type InfoData, type InputProps, i18nTextToOneLine } from "./utils.svelte";
 
   type Props = {
@@ -15,9 +16,29 @@
     handleEdit: InputProps["handleEdit"];
     handleReset: InputProps["handleReset"];
     handleCardReset?: (data: InfoData) => void;
+    /**
+     * True when the card holds an arg behind the advanced toggle: without one
+     * the toggle is not rendered at all.
+     */
+    hasAdvanced?: boolean;
+    /** Open state of the advanced settings of the card */
+    isAdvanced?: boolean;
     class?: string;
   };
-  let { cardData = $bindable(), handleEdit, handleReset, handleCardReset, class: className }: Props = $props();
+  let {
+    cardData = $bindable(),
+    handleEdit,
+    handleReset,
+    handleCardReset,
+    hasAdvanced = false,
+    isAdvanced = $bindable(false),
+    class: className,
+  }: Props = $props();
+
+  // The open toggle stays visible on its own: the card then shows rows the
+  // user has to be able to hide again. Without an advanced arg there is no
+  // toggle, so nothing keeps the card in the opened state either.
+  const isAdvancedShown = $derived(isAdvanced && hasAdvanced);
 
   const SchedulerEnable = $derived(cardData?.Scheduler?.Enable);
   const SchedulerNextRun = $derived(cardData?.Scheduler?.NextRun);
@@ -64,23 +85,31 @@ Z`;
   {/if}
   <div class="absolute top-0 right-0 flex flex-col items-end gap-1">
     <!-- Enable button row -->
-    <div class="flex h-8 items-center justify-center gap-x-1">
-      <!-- Card-level buttons - visible on card hover -->
-      <div
-        class={cn(
-          "flex items-center gap-x-1",
-          "pointer-events-none opacity-0 transition-opacity duration-200 group-hover/card:pointer-events-auto group-hover/card:opacity-100",
-        )}
-      >
+    <div class="flex h-8 items-center justify-center gap-x-2">
+      <!-- Card-level buttons - visible on card hover, and always while the
+           advanced settings are open -->
+      <!-- Reset and Advanced sit right next to each other, so only their own
+           paddings separate them; the gap to the Enable badge is wider on
+           purpose. The header buttons carry 4px less padding per side than a
+           plain button, and this row gives back the same 4px here, so the
+           rightmost label keeps its distance to the badge. -->
+      <div class="flex items-center">
         <!-- Reset button, visible on card hover -->
-        <Button
-          variant="ghost"
-          class="pointer-events-auto gap-x-1 text-muted-foreground hover:bg-transparent dark:hover:bg-transparent"
-          onclick={() => (dialogOpen = true)}
-        >
-          <RotateCcw class="size-3.5" />
-          <p>{t.Input.GroupResetTitle()}</p>
-        </Button>
+        <CardHeaderButton icon={RotateCcw} label={t.Input.GroupResetTitle()} onclick={() => (dialogOpen = true)} />
+        {#if hasAdvanced}
+          <!-- Advanced settings: appears on card hover, and stays on screen
+               once opened so the rows it reveals can be closed again. The open
+               state is primary text with a standing rule instead of a filled
+               pill: the Enable badge next to it already owns that fill, and two
+               primary blocks on one header would compete for weight. -->
+          <CardHeaderButton
+            icon={Cog}
+            label={t.Input.Advanced()}
+            active={isAdvancedShown}
+            toggle
+            onclick={() => (isAdvanced = !isAdvanced)}
+          />
+        {/if}
       </div>
       {#if SchedulerEnable}
         <div class="flex h-8 w-32 items-center justify-center">

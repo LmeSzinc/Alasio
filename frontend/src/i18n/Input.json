@@ -1,4 +1,11 @@
 {
+  "Advanced": {
+    "en-US": "Advanced",
+    "zh-CN": "高级设置",
+    "ja-JP": "詳細設定",
+    "zh-TW": "進階設定",
+    "es-ES": "Avanzado"
+  },
   "GroupResetTitle": {
     "en-US": "Reset",
     "zh-CN": "重置",

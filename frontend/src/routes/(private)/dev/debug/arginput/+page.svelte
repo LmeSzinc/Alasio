@@ -46,6 +46,66 @@
     );
   }
 
+  /**
+   * A card of the advanced settings demo. `Tuning` holds nothing but advanced
+   * args, so the whole group (with its separator) stays out of the card until
+   * the cog of the card header is opened, while `Basic` keeps a row of its own.
+   *
+   * `withScheduler` adds the Scheduler group of a real config, which puts the
+   * Enable badge right of the card title: the cog sits beside it, and without a
+   * scheduler it sits alone in the same header row.
+   */
+  function advancedCard(card: string, name: string, help: string, withScheduler: boolean): CardData {
+    const scheduler: Record<string, Record<string, ArgData>> = withScheduler
+      ? {
+          Scheduler: {
+            Enable: arg("Scheduler", "Enable", "enable", true, {
+              option: ["true", "false"],
+              option_i18n: { true: "ENABLED", false: "DISABLED" },
+            }),
+            NextRun: arg("Scheduler", "NextRun", "datetime", "2026-01-02T03:04:05Z"),
+            // A scheduler arg behind the toggle as well, so both kinds of row
+            // can be checked in one card
+            Delay: arg("Scheduler", "Delay", "input-int", 15, {
+              name: "scheduler arg (advanced)",
+              help: "The scheduler args other than Enable and NextRun are hidden and shown by the same toggle",
+              advanced: true,
+            }),
+          },
+        }
+      : {};
+
+    return makeCard(
+      { group: "Basic", arg: "_info", card, name, help },
+      {
+        ...scheduler,
+        Basic: {
+          Mode: arg("Basic", "Mode", "select", "normal", {
+            name: "select (always shown)",
+            option: ["normal", "hard"],
+            // A folded help is expanded by the toggle as well: while the advanced
+            // settings are closed this row keeps its question mark
+            fold_help: true,
+            help: "Folded help: the question mark expands it, and so does opening the advanced settings",
+          }),
+          Threshold: arg("Basic", "Threshold", "input-int", 3, {
+            name: "input-int (advanced)",
+            help: "An advanced row right below the plain ones, marked by the gray pill",
+            advanced: true,
+          }),
+        },
+        Tuning: {
+          Retry: arg("Tuning", "Retry", "input-int", 3, { name: "input-int (advanced)", advanced: true }),
+          Timeout: arg("Tuning", "Timeout", "input-float", 0.85, {
+            name: "input-float (advanced)",
+            help: "This group holds advanced args only, so it and its separator are gone while the toggle is closed",
+            advanced: true,
+          }),
+        },
+      },
+    );
+  }
+
   // --- Mock data: one card per arginput component ---
   const mockData: Record<string, CardData> = {
     // dt=input / input-line / input-int / input-float / datetime all render as Input.svelte
@@ -474,6 +534,22 @@
       "dt=enable · card badge, click to toggle",
       false,
     ),
+    // Advanced settings: an arg marked `advanced` stays hidden until the cog of
+    // the card header is opened (see $lib/components/arg/ArgCard.svelte). The
+    // cards below differ by their scheduler only, so the position of the cog in
+    // both header shapes can be compared
+    AdvancedScheduler: advancedCard(
+      "card-ArgInput-AdvancedScheduler",
+      "Advanced · With Scheduler",
+      "cog in the card header · scheduler args can be advanced too",
+      true,
+    ),
+    AdvancedPlain: advancedCard(
+      "card-ArgInput-AdvancedPlain",
+      "Advanced · No Scheduler",
+      "cog in the card header · no Enable badge, the toggle stands alone",
+      false,
+    ),
   };
 
   // --- Reset support ---
@@ -553,6 +629,11 @@
       <code class="rounded bg-muted px-1">ArgCardList</code>. The values are mock data: an edit only updates the page
       state (the payload is logged to console) and the reset button restores the initial values, no backend request is
       made.
+    </p>
+    <p class="text-sm text-muted-foreground">
+      The last two cards demo the advanced settings: an arg marked
+      <code class="rounded bg-muted px-1">advanced</code> stays out of the card until the cog of the card header is opened,
+      a row it reveals carries a gray pill, and a card without an advanced arg has no cog at all.
     </p>
   </div>
 

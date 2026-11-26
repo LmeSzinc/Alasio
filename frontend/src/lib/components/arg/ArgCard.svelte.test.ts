@@ -6,6 +6,9 @@
  * editable arg of the group (the Value and Total of a record, the pairs of a
  * Planner, the settings of the group) lives in the dialog of that button, not in
  * extra rows of the card.
+ *
+ * A normal group keeps showing its rows in the card, where an arg marked as an
+ * advanced setting stays hidden until the toggle of the card header is opened.
  */
 import { mount, unmount } from "svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -81,6 +84,28 @@ function makeAmountCard(): CardData {
   } as unknown as CardData;
 }
 
+/**
+ * A card of the plain settings page: a scheduler, one group of ordinary rows
+ * and one group whose only row is an advanced setting
+ */
+function makeAdvancedCard(): CardData {
+  return {
+    _info: { group: "Card", arg: "_info", card: "card-Main-Main", name: "Card" },
+    Scheduler: {
+      Enable: arg("Main", "Enable", "enable", true, { name: "Scheduler" }),
+      NextRun: arg("Main", "NextRun", "input", "2026-11-26 08:00:00", { name: "Next Run" }),
+      Server: arg("Main", "Server", "select", "cn", { name: "Server", option: ["cn", "en"], advanced: true }),
+    },
+    Settings: {
+      EnableTask: arg("Main", "EnableTask", "checkbox", true, { name: "Enable Task" }),
+      AmbushEvade: arg("Main", "AmbushEvade", "checkbox", true, { name: "Ambush Evade", advanced: true }),
+    },
+    Tuning: {
+      Threshold: arg("Main", "Threshold", "input-int", 3, { name: "Threshold", advanced: true }),
+    },
+  } as unknown as CardData;
+}
+
 let mounted: any[] = [];
 
 async function settle() {
@@ -111,6 +136,25 @@ function editButton(target: HTMLElement): HTMLButtonElement | null {
 
 function dialog(): HTMLElement | null {
   return document.querySelector<HTMLElement>('[data-slot="dialog-content"]');
+}
+
+/** The advanced settings toggle of the card header */
+function advancedToggle(target: HTMLElement): HTMLButtonElement | undefined {
+  return [...target.querySelectorAll<HTMLButtonElement>("button")].find((button) =>
+    button.textContent?.includes(t.Input.Advanced()),
+  );
+}
+
+/** The wrapper of the toggle whose ::after draws the underline */
+function underlineOf(button: HTMLButtonElement): HTMLElement {
+  return button.querySelector("span")!;
+}
+
+/** The reset button of the card header, the other hover action beside the toggle */
+function resetButton(target: HTMLElement): HTMLButtonElement {
+  return [...target.querySelectorAll<HTMLButtonElement>("button")].find((button) =>
+    button.textContent?.includes(t.Input.GroupResetTitle()),
+  )!;
 }
 
 /** The arg of every row of the opened dialog, in order */
@@ -245,5 +289,182 @@ describe("TestArgCardDashboardEdit", () => {
     const target = await mountCard(card);
 
     expect(editButton(target)).toBeNull();
+  });
+});
+
+describe("TestArgCardAdvanced", () => {
+  it("keeps the advanced rows out of the card until the toggle is opened", async () => {
+    const target = await mountCard(makeAdvancedCard());
+
+    expect(target.textContent).toContain("Enable Task");
+    expect(target.textContent).not.toContain("Ambush Evade");
+    expect(target.textContent).not.toContain("Threshold");
+    // scheduler args are hidden by the same toggle
+    expect(target.textContent).not.toContain("Server");
+  });
+
+  it("reveals them on a click, each with a pill of its own", async () => {
+    const target = await mountCard(makeAdvancedCard());
+    advancedToggle(target)!.click();
+    await settle();
+
+    expect(target.textContent).toContain("Ambush Evade");
+    expect(target.textContent).toContain("Threshold");
+    expect(target.textContent).toContain("Server");
+    const badges = [...target.querySelectorAll('[data-slot="badge"]')];
+    expect(badges.map((badge) => badge.textContent?.trim())).toEqual([
+      t.Input.Advanced(),
+      t.Input.Advanced(),
+      t.Input.Advanced(),
+    ]);
+  });
+
+  it("hides them again on a second click", async () => {
+    const target = await mountCard(makeAdvancedCard());
+    advancedToggle(target)!.click();
+    await settle();
+    advancedToggle(target)!.click();
+    await settle();
+
+    expect(target.textContent).toContain("Enable Task");
+    expect(target.textContent).not.toContain("Ambush Evade");
+    expect(target.querySelector('[data-slot="badge"]')).toBeNull();
+  });
+
+  it("marks the toggle as open with primary text and an underline under the icon", async () => {
+    const target = await mountCard(makeAdvancedCard());
+    const closed = advancedToggle(target)!;
+    // outside a card hover the toggle is transparent and out of the way
+    expect(closed.classList.contains("opacity-0")).toBe(true);
+    expect(closed.classList.contains("pointer-events-none")).toBe(true);
+    expect(underlineOf(closed).classList.contains("after:opacity-100")).toBe(false);
+
+    closed.click();
+    await settle();
+
+    const opened = advancedToggle(target)!;
+    expect(opened.getAttribute("aria-pressed")).toBe("true");
+    expect(opened.classList.contains("text-primary")).toBe(true);
+    // the fill belongs to the Enable badge, the toggle never competes with it
+    expect(opened.classList.contains("bg-primary")).toBe(false);
+    expect(opened.classList.contains("rounded-full")).toBe(false);
+    expect(opened.classList.contains("opacity-100")).toBe(true);
+    expect(opened.classList.contains("opacity-0")).toBe(false);
+    expect(opened.classList.contains("pointer-events-none")).toBe(false);
+    // the rule is drawn by the wrapper of icon and label, so it runs under both
+    expect(underlineOf(opened).classList.contains("after:opacity-100")).toBe(true);
+  });
+
+  it("shifts the header icons down, off the line box centre", async () => {
+    // the label ink of a 14px text sits below the line box centre, so an icon
+    // centred on that box reads as too high next to it
+    const target = await mountCard(makeAdvancedCard());
+    const reset = resetButton(target);
+
+    expect(reset.querySelector("svg")!.classList.contains("translate-y-px")).toBe(true);
+    expect(advancedToggle(target)!.querySelector("svg")!.classList.contains("translate-y-px")).toBe(true);
+  });
+
+  it("keeps the label of the advanced pill next to the cog it belongs to", async () => {
+    const target = await mountCard(makeAdvancedCard());
+    advancedToggle(target)!.click();
+    await settle();
+
+    for (const badge of target.querySelectorAll('[data-slot="badge"]')) {
+      expect(badge.querySelector("svg")).not.toBeNull();
+      expect(badge.textContent?.trim()).toBe(t.Input.Advanced());
+    }
+  });
+
+  it("keeps the open label responsive to hover", async () => {
+    const target = await mountCard(makeAdvancedCard());
+    const closed = advancedToggle(target)!;
+    expect(closed.classList.contains("hover:text-primary/80")).toBe(false);
+
+    closed.click();
+    await settle();
+
+    // an open toggle must still answer the pointer: the ghost variant would
+    // either repaint the label as foreground text or leave it inert
+    const opened = advancedToggle(target)!;
+    expect(opened.classList.contains("hover:text-primary/80")).toBe(true);
+    expect(opened.classList.contains("text-primary")).toBe(true);
+  });
+
+  it("gives the reset button the same rule, revealed on its own hover", async () => {
+    const target = await mountCard(makeAdvancedCard());
+    const reset = resetButton(target);
+    const rule = underlineOf(reset);
+
+    // the rule wraps icon and label, so it can run under both
+    expect(rule.querySelector("svg")).not.toBeNull();
+    expect(rule.classList.contains("after:absolute")).toBe(true);
+    // hidden until the button itself is hovered, not when the card is
+    expect(rule.classList.contains("after:opacity-0")).toBe(true);
+    expect(rule.classList.contains("group-hover/button:after:opacity-100")).toBe(true);
+    expect(rule.classList.contains("after:opacity-100")).toBe(false);
+  });
+
+  it("keeps the two hover buttons close, and their distance to the badge", async () => {
+    const target = await mountCard(makeAdvancedCard());
+    const toggle = advancedToggle(target)!;
+
+    // Nothing sits between the two hover buttons, so only their own paddings
+    // separate them: the narrower padding of the pair is what closes the gap.
+    const pair = toggle.parentElement!;
+    expect(pair.classList.contains("gap-x-1")).toBe(false);
+    expect(pair.classList.contains("gap-x-0")).toBe(false);
+    for (const button of [toggle, resetButton(target)]) {
+      expect(button.classList.contains("px-1.5")).toBe(true);
+      // the shadcn default of this size, which would widen the gap again
+      expect(button.classList.contains("px-2.5")).toBe(false);
+    }
+
+    // The row gives that padding back on its other side, so the rightmost label
+    // keeps the distance it had to the Enable badge.
+    expect(pair.parentElement!.classList.contains("gap-x-2")).toBe(true);
+  });
+
+  it("keeps the other header buttons of the card on hover", async () => {
+    const target = await mountCard(makeAdvancedCard());
+    advancedToggle(target)!.click();
+    await settle();
+
+    // reset shares the header row but stays a hover action of its own
+    const reset = resetButton(target);
+    expect(reset.classList.contains("opacity-0")).toBe(true);
+    expect(reset.classList.contains("group-hover/card:opacity-100")).toBe(true);
+  });
+
+  it("draws both header buttons with the same behaviour", async () => {
+    const target = await mountCard(makeAdvancedCard());
+
+    // one rule for the two of them: same wrapper, same hover reveal
+    const rule = underlineOf(resetButton(target));
+    const toggleRule = underlineOf(advancedToggle(target)!);
+    expect([...rule.classList].sort()).toEqual([...toggleRule.classList].sort());
+
+    // only the toggle carries a state of its own
+    expect(resetButton(target).hasAttribute("aria-pressed")).toBe(false);
+    expect(advancedToggle(target)!.getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("keeps the separator of a group of advanced rows only out of sight", async () => {
+    const target = await mountCard(makeAdvancedCard());
+    expect(target.querySelectorAll("hr")).toHaveLength(1);
+
+    advancedToggle(target)!.click();
+    await settle();
+
+    expect(target.querySelectorAll("hr")).toHaveLength(2);
+  });
+
+  it("offers no toggle on a card without an advanced arg", async () => {
+    const planner = await mountCard(makeCard());
+    expect(advancedToggle(planner)).toBeUndefined();
+
+    // a dashboard group edits its args in a dialog, the card holds no row of its own
+    const amount = await mountCard(makeAmountCard());
+    expect(advancedToggle(amount)).toBeUndefined();
   });
 });

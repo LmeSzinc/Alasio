@@ -1,5 +1,6 @@
 <script lang="ts">
   import { cn } from "$lib/utils";
+  import AdvancedBadge from "./AdvancedBadge.svelte";
   import I18nText from "./I18nText.svelte";
   import ToggleHelp from "./ToggleHelp.svelte";
   import { type LayoutProps, getArgName } from "./utils.svelte";
@@ -29,6 +30,9 @@
     <!-- Top-left: name -->
     <div class="flex min-w-0 flex-1 flex-row items-center gap-x-1 overflow-hidden">
       <I18nText text={displayName} class="font-medium" />
+      {#if data.advanced}
+        <AdvancedBadge />
+      {/if}
       {#if shouldFoldHelp}
         <ToggleHelp bind:helpVisible />
       {/if}
