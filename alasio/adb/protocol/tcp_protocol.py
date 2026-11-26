@@ -284,6 +284,11 @@ class AdbProtocolTCP:
         """
         Connect to the device and read its CNXN.
 
+        The call is what a long lived owner runs before an operation: it is a
+        no-op on a healthy connection and rebuilds the one the device dropped.
+        A caller that wants a new connection while the current one is still
+        healthy calls disconnect() and then connect().
+
         Raises:
             ConnectionRefusedError: When nothing listens on the address
             AdbConnectionTimeout: When the device does not answer in time
@@ -352,6 +357,12 @@ class AdbProtocolTCP:
             self._recv_thread.start()
 
     def disconnect(self):
+        """
+        Close the connection and release everything it holds.
+
+        The socket is closed and the dispatch thread is woken and joined, so
+        the object holds nothing after this call. A second call is a no-op.
+        """
         with self._connect_lock:
             # check if already disconnected
             if self._sock is None:
@@ -366,6 +377,21 @@ class AdbProtocolTCP:
             thread.join(timeout=2)
 
         logger.info(f'Disconnected to {addr}')
+
+    @property
+    def is_connected(self) -> bool:
+        """
+        Whether the client has a connection it can use.
+
+        A caller that owns the client for a long time checks this to decide
+        whether a call needs a connect, the call itself raises
+        AdbConnectionClosed when the connection is gone.
+
+        Returns:
+            bool: True while the socket is open and the dispatch thread did not
+                give up on it
+        """
+        return self._sock is not None and not self._broken
 
     def message_send(self, sock: socket.socket, command: bytes, arg0, arg1, data=b''):
         """

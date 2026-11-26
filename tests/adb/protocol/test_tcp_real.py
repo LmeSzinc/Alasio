@@ -275,3 +275,60 @@ class TestRealProps:
         """A property the device does not have is None, not an empty string"""
         assert device.props.get_str('alasio.no.such.property') is None
         assert device.props.get('alasio.no.such.property') == []
+
+
+class TestRealLifecycle:
+    """The calls a long lived owner of the client makes"""
+
+    def test_connect_of_a_healthy_connection_is_free(self, address):
+        """The ensure step of an owner does not open a second connection"""
+        client = AdbTCP(*address)
+        client.timeout = 10
+        client.connect()
+        try:
+            sock = client._sock
+            for _ in range(3):
+                client.connect()
+
+            assert client._sock is sock
+            assert client.is_connected
+            assert client.shell('echo once').stdout.strip() == b'once'
+        finally:
+            client.disconnect()
+
+    def test_disconnect_then_connect_keeps_the_device_usable(self, address):
+        """The retry step of an owner rebuilds the connection and its state"""
+        client = AdbTCP(*address)
+        client.timeout = 10
+        client.connect()
+        try:
+            first_sock = client._sock
+            assert client.shell('echo before').stdout.strip() == b'before'
+
+            client.disconnect()
+            client.connect()
+
+            assert client._sock is not first_sock
+            assert client.is_connected
+            assert client.shell('echo after').stdout.strip() == b'after'
+            # the banner of the new connection is read again
+            assert client.features.features
+            assert 0 < client._max_payload <= ADB_MAX_PAYLOAD
+        finally:
+            client.disconnect()
+
+    def test_disconnect_leaves_nothing_behind(self, address):
+        """The release at the end of a worker closes the socket and the thread"""
+        client = AdbTCP(*address)
+        client.timeout = 10
+        client.connect()
+        sock = client._sock
+        thread = client._recv_thread
+
+        client.disconnect()
+
+        assert client.is_connected is False
+        assert client._sock is None
+        assert sock.fileno() == -1
+        thread.join(timeout=5)
+        assert not thread.is_alive()

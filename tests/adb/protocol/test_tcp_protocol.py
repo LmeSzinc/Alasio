@@ -1493,6 +1493,200 @@ class TestConnectionRelease:
         assert client._sock is None
 
 
+class TestConnectionLifecycle:
+    """A client owned for a long time: ensure, retry, release
+
+    A game script owns one client for the life of a worker and runs a command
+    when it needs one; it has no place for a `with` block around the business
+    code. The client supports that shape with three calls: connect() is the
+    ensure step, disconnect() then connect() is the retry step of a call that
+    lost the link, and disconnect() is the release at the end of the worker.
+    """
+
+    @staticmethod
+    def retrying_command(client, service, tries=3):
+        """
+        Run one command the way a device module does.
+
+        Args:
+            client (AdbProtocolTCP): Client owned by the caller
+            service (str): Service name to open
+            tries (int): Attempts before the error is given to the caller
+
+        Returns:
+            bytes: Everything the stream received
+        """
+        for attempt in range(tries):
+            try:
+                # free on a healthy connection, rebuilds a dead one
+                client.connect()
+                with client.open_stream(service) as stream:
+                    return stream.recv_until_close(timeout=5)
+            except (AdbConnectionClosed, AdbConnectionTimeout):
+                if attempt + 1 == tries:
+                    raise
+                client.disconnect()
+                client.connect()
+
+    def test_is_connected_follows_the_socket(self):
+        """The flag a retry loop reads before a call"""
+        with FakeAdbd() as adbd:
+            client = AdbProtocolTCP(port=adbd.port)
+            assert client.is_connected is False
+
+            client.connect()
+            assert client.is_connected is True
+
+            client.disconnect()
+            assert client.is_connected is False
+
+    def test_is_connected_after_the_device_dropped_the_link(self):
+        """A link the device dropped is not a connection"""
+        with FakeAdbd() as adbd:
+            client = AdbProtocolTCP(port=adbd.port)
+            client.connect()
+            try:
+                adbd.drop_connections()
+                assert adbd.wait_for(lambda: not client.is_connected, message='still connected')
+            finally:
+                client.disconnect()
+
+    def test_disconnect_then_connect_replaces_the_connection(self):
+        """The two calls a retry loop makes open a second connection"""
+        with FakeAdbd(responder=lambda command, shell_v2: ShellReply(stdout=b'again\n')) as adbd:
+            client = AdbProtocolTCP(port=adbd.port)
+            client.connect()
+            try:
+                first_sock = client._sock
+                first_thread = client._recv_thread
+
+                client.disconnect()
+                client.connect()
+
+                assert client.is_connected is True
+                assert client._sock is not first_sock
+                assert client._recv_thread is not first_thread
+                first_thread.join(timeout=5)
+                assert not first_thread.is_alive()
+                assert adbd.connections == 2
+                with client.open_stream('shell:echo again') as stream:
+                    assert stream.recv_until_close(timeout=5) == b'again\n'
+            finally:
+                client.disconnect()
+
+    def test_connect_after_the_device_restarted(self):
+        """The ensure step brings a client whose link died back to a device"""
+        with FakeAdbd(responder=lambda command, shell_v2: ShellReply(stdout=b'back\n')) as adbd:
+            client = AdbProtocolTCP(port=adbd.port)
+            client.connect()
+            try:
+                adbd.drop_connections()
+                adbd.wait_for(lambda: not client.is_connected, message='still connected')
+
+                client.connect()
+
+                assert client.is_connected is True
+                with client.open_stream('shell:echo back') as stream:
+                    assert stream.recv_until_close(timeout=5) == b'back\n'
+            finally:
+                client.disconnect()
+
+    def test_a_new_connection_does_not_rewind_the_stream_ids(self):
+        """A message of the old connection can not reach a stream of the new one"""
+        with FakeAdbd() as adbd:
+            client = AdbProtocolTCP(port=adbd.port)
+            client.connect()
+            try:
+                with client.open_stream('shell:echo hi') as stream:
+                    used = stream.local_id
+
+                client.disconnect()
+                client.connect()
+
+                with client.open_stream('shell:echo hi') as stream:
+                    assert stream.local_id > used
+            finally:
+                client.disconnect()
+
+    def test_concurrent_connect_opens_one_connection(self):
+        """Many callers of the ensure step share the one connection"""
+        with FakeAdbd() as adbd:
+            client = AdbProtocolTCP(port=adbd.port)
+            start = threading.Event()
+            errors = []
+
+            def connect():
+                start.wait()
+                try:
+                    client.connect()
+                except Exception as e:
+                    errors.append(e)
+
+            threads = [threading.Thread(target=connect, daemon=True) for _ in range(8)]
+            for thread in threads:
+                thread.start()
+            start.set()
+            for thread in threads:
+                thread.join(timeout=10)
+            try:
+                assert errors == []
+                assert adbd.connections == 1
+                assert client.is_connected is True
+            finally:
+                client.disconnect()
+
+    def test_the_owner_pattern_survives_a_dropped_link(self):
+        """The ensure step repairs the link before the command is sent"""
+        with FakeAdbd(responder=lambda command, shell_v2: ShellReply(stdout=b'ok\n')) as adbd:
+            client = AdbProtocolTCP(port=adbd.port)
+            client.connect()
+            try:
+                assert self.retrying_command(client, 'shell:echo 1') == b'ok\n'
+
+                adbd.drop_connections()
+                adbd.wait_for(lambda: not client.is_connected, message='still connected')
+
+                # the caller never sees the failure of the link
+                assert self.retrying_command(client, 'shell:echo 2') == b'ok\n'
+                assert adbd.connections == 2
+            finally:
+                client.disconnect()
+
+    def test_the_owner_pattern_retries_after_a_lost_link(self):
+        """A command that lost the link midway is repeated on a new one
+
+        A device that restarts while an OPEN waits is the case the retry step
+        exists for: the ensure step was already done, and only the call itself
+        can report that the link died.
+        """
+        with FakeAdbd(responder=lambda command, shell_v2: ShellReply(stdout=b'hi\n')) as adbd:
+            client = AdbProtocolTCP(port=adbd.port)
+            client.connect()
+            results, errors = [], []
+
+            def run():
+                try:
+                    results.append(self.retrying_command(client, 'shell:echo hi'))
+                except Exception as e:
+                    errors.append(e)
+
+            adbd.open_fault = 'silent'
+            thread = threading.Thread(target=run, daemon=True)
+            thread.start()
+            try:
+                adbd.wait_for(lambda: adbd.opens == ['shell:echo hi'])
+                adbd.open_fault = ''
+                adbd.drop_connections()
+                thread.join(timeout=10)
+
+                assert thread.is_alive() is False
+                assert errors == []
+                assert results == [b'hi\n']
+                assert adbd.connections == 2
+            finally:
+                client.disconnect()
+
+
 class TestConnectFailure:
     """The handshake that does not end in a CNXN"""
 
