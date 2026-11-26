@@ -28,6 +28,10 @@ import pytest
 from alasio.adb.protocol.const import ADB_MAX_PAYLOAD, AdbStreamClosed, AdbStreamTimeout
 from alasio.adb.protocol.tcp import AdbTCP
 
+pytestmark = [
+    pytest.mark.parallel,
+]
+
 # Environment variable that names the device to test against
 SERIAL_ENV = 'ALASIO_ADB_REAL_SERIAL'
 # Port adbd listens on when the serial names no port

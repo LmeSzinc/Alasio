@@ -2,6 +2,10 @@ import pytest
 
 from alasio.adb.protocol.cnxn import DeviceFeatures
 
+pytestmark = [
+    pytest.mark.parallel,
+]
+
 
 class TestDeviceFeatures:
     """Test DeviceFeatures class"""

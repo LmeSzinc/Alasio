@@ -9,6 +9,10 @@ from alasio.adb.protocol.const import (
     AdbConnectionClosed, AdbConnectionTimeout, AdbMessageInvalid, AdbStreamClosed, AdbStreamTimeout, ShellResult
 )
 
+pytestmark = [
+    pytest.mark.parallel,
+]
+
 STDOUT = 1
 STDERR = 2
 EXIT = 3

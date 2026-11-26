@@ -2,6 +2,10 @@ import pytest
 
 from alasio.adb.protocol.props import Props, remove_quote
 
+pytestmark = [
+    pytest.mark.parallel,
+]
+
 # Real getprop output from Android device
 REAL_GETPROP_OUTPUT = """> adb -s 127.0.0.1:16480 shell getprop
 [adb_drop_privileges]: [1]

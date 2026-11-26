@@ -21,6 +21,10 @@ from alasio.adb.protocol.tcp_protocol import AdbProtocolTCP, AdbStreamTCP
 from alasio.logger import logger
 from tests.adb.protocol.fake_adbd import FakeAdbd, ShellReply, encode_message
 
+pytestmark = [
+    pytest.mark.parallel,
+]
+
 _MESSAGE = Struct('<6I')
 # The builtin the module under test calls for the checksum of a payload, kept
 # before a test replaces the name inside the module
@@ -1685,6 +1689,106 @@ class TestConnectionLifecycle:
                 assert adbd.connections == 2
             finally:
                 client.disconnect()
+
+
+class TestLogging:
+    """The lines the transport writes, read with the logger capture
+
+    The dispatch thread writes as well, so a line produced by it is awaited in
+    the capture rather than checked after a sleep.
+    """
+
+    @staticmethod
+    def wait_for_line(capture, text, timeout=5):
+        """
+        Wait until a line appears in the capture
+
+        Args:
+            capture (CaptureWriter): Writer of `logger.mock_capture_writer()`
+            text (str): Line or part of a line to wait for
+            timeout (float): Seconds to wait. Defaults to 5.
+
+        Returns:
+            str: The whole captured text
+        """
+        timeout = time.monotonic() + timeout
+        while time.monotonic() < timeout:
+            text_now = capture.concat()
+            if text in text_now:
+                return text_now
+            time.sleep(0.01)
+        raise AssertionError(f'{text!r} was not logged, the capture holds {capture.concat()!r}')
+
+    def test_the_lines_of_a_connection(self):
+        """A connect and a disconnect write one line each, in order"""
+        with FakeAdbd() as adbd:
+            addr = f'127.0.0.1:{adbd.port}'
+            client = AdbProtocolTCP(port=adbd.port)
+            with logger.mock_capture_writer() as capture:
+                client.connect()
+                client.disconnect()
+
+        assert capture.concat() == f"""\
+INFO | Connecting to {addr}
+INFO | Connected to {addr}
+INFO | Disconnecting to {addr}
+INFO | Disconnected to {addr}
+"""
+
+    def test_a_second_connect_writes_nothing(self):
+        """The ensure step of a healthy connection is silent"""
+        with FakeAdbd() as adbd:
+            client = AdbProtocolTCP(port=adbd.port)
+            client.connect()
+            try:
+                with logger.mock_capture_writer() as capture:
+                    client.connect()
+
+                assert capture.concat() == ''
+            finally:
+                client.disconnect()
+
+    def test_a_second_disconnect_writes_nothing(self):
+        """Releasing a released client is silent"""
+        with FakeAdbd() as adbd:
+            client = AdbProtocolTCP(port=adbd.port)
+            client.connect()
+            client.disconnect()
+
+            with logger.mock_capture_writer() as capture:
+                client.disconnect()
+
+            assert capture.concat() == ''
+
+    def test_the_line_of_a_broken_connection(self):
+        """The dispatch thread names the address and the reason of the end"""
+        with FakeAdbd() as adbd:
+            addr = f'127.0.0.1:{adbd.port}'
+            client = AdbProtocolTCP(port=adbd.port)
+            client.connect()
+            try:
+                with logger.mock_capture_writer() as capture:
+                    adbd.drop_connections()
+                    text = self.wait_for_line(capture, 'is broken')
+
+                # the thread was waiting for the header of the next message
+                prefix = f'WARNING | Connection to {addr} is broken, receiving ended: AdbConnectionClosed: '
+                assert text.startswith(prefix)
+                assert 'receiving header' in text[len(prefix):]
+                assert text.count('\n') == 1
+            finally:
+                client.disconnect()
+
+    def test_the_line_of_a_stream_closed_without_a_remote_id(self):
+        """A stream the device never opened says why it is not closable"""
+        protocol = AdbProtocolTCP()
+        protocol._sock = _NullSock()
+        stream = make_stream(state='opening')
+
+        with logger.mock_capture_writer() as capture:
+            protocol.close_stream(stream)
+
+        assert capture.concat() == f'WARNING | Cannot close stream without remote_id: {stream}\n'
 
 
 class TestConnectFailure:

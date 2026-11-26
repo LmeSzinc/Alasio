@@ -13,6 +13,10 @@ from alasio.adb.protocol.tcp import AdbTCP
 from alasio.logger import logger
 from tests.adb.protocol.fake_adbd import LEGACY_BANNER, FakeAdbd, ShellReply, shell_v2_stream
 
+pytestmark = [
+    pytest.mark.parallel,
+]
+
 GETPROP = b"""\
 [ro.build.version.sdk]: [32]
 [ro.product.brand]: [HUAWEI]
@@ -287,7 +291,7 @@ class TestSdkVer:
                 client.disconnect()
 
         assert sdk == 32
-        assert capture.fd.any_contains('[sdk_ver]: 32')
+        assert capture.concat() == 'INFO | [sdk_ver]: 32\n'
 
     def test_a_missing_level(self):
         """A device that does not report a level is logged and reported as 0"""
@@ -300,7 +304,7 @@ class TestSdkVer:
                 client.disconnect()
 
         assert sdk == 0
-        assert capture.fd.any_contains('SDK version invalid')
+        assert capture.concat() == 'ERROR | SDK version invalid: None\n'
 
     def test_a_level_of_zero(self):
         """A reported level of 0 is invalid as well, it is not silently kept"""
@@ -313,18 +317,20 @@ class TestSdkVer:
                 client.disconnect()
 
         assert sdk == 0
-        assert capture.fd.any_contains('SDK version invalid')
+        assert capture.concat() == 'ERROR | SDK version invalid: 0\n'
 
     def test_a_level_that_is_not_a_number(self):
         """A garbage level is reported as 0"""
         with FakeAdbd(responder=lambda command, shell_v2: ShellReply(stdout=b'[ro.build.version.sdk]: [abc]\n')) as adbd:
             client = connect(adbd)
             try:
-                sdk = client.sdk_ver
+                with logger.mock_capture_writer() as capture:
+                    sdk = client.sdk_ver
             finally:
                 client.disconnect()
 
         assert sdk == 0
+        assert capture.concat() == 'ERROR | SDK version invalid: None\n'
 
     def test_a_recent_level(self):
         """A high level of a new android is not truncated"""
