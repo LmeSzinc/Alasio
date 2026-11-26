@@ -1,5 +1,4 @@
 import multiprocessing
-import socket
 import threading
 import time
 from multiprocessing.connection import Connection
@@ -106,6 +105,15 @@ class WorkerState(msgspec.Struct):
 
     process: Optional[multiprocessing.Process] = None
     conn: Optional[Connection] = None
+    # Serializes taking the pipe: the field is the single owner of the pipe, and
+    # whoever takes it closes it (see conn_close)
+    conn_lock: threading.Lock = msgspec.field(default_factory=threading.Lock)
+    # Set by the manager when it stops the reader of the entry, so a loop that is
+    # between two messages leaves instead of blocking again. A read that is
+    # already blocked is ended by the close of the pipe (see conn_close). Cleared
+    # with the rest of the run by reset_runtime(): a parked entry that comes back
+    # for a resume must not stop the reader of its next run
+    closing: bool = False
     running_event: threading.Event = msgspec.field(default_factory=threading.Event)
     stopped_event: threading.Event = msgspec.field(default_factory=threading.Event)
     # Set by every state this entry goes through (see set_state), whatever the
@@ -128,6 +136,28 @@ class WorkerState(msgspec.Struct):
         else:
             self.running_event.clear()
             self.stopped_event.clear()
+
+    def reset_runtime(self):
+        """
+        Forget the resources of the run of this entry
+
+        Every field that points at a run is cleared together, so an entry that
+        outlives its run -- parked for a resume, or left in the dict of the
+        manager -- holds nothing of it: the next run gets its own pipe, process
+        and reader. ``closing`` belongs to the run as well: a stop requested for
+        the run that ended must not end the reader of the next one.
+
+        The pipe is closed before this (see conn_close), the entry only forgets
+        it: a field left set here would be a handle of a closed pipe, or one
+        nobody would ever close.
+
+        Returns:
+            None
+        """
+        self.conn = None
+        self.process = None
+        self.recv_thread = None
+        self.closing = False
 
     def send_command(self, command: CommandEvent):
         data = encode(command)
@@ -162,33 +192,30 @@ class WorkerState(msgspec.Struct):
 
     def conn_close(self):
         """
-        Close pipe if pipe opened
+        Close the pipe of the entry, once
+
+        The pipe has several potential closers -- the recv thread when its read
+        ends on its own, and whoever stops the worker, which has to end the read
+        itself (a worker killed before it received its end leaves that read
+        pending, so waiting for the peer to die is not enough).
+        ``Connection.close()`` is idempotent but not atomic: two threads that
+        pass its closed check together close the same handle twice, and the
+        second close hits whatever the number was handed to next. Taking the
+        field is one step under the lock, so exactly one of them owns the pipe
+        and closes it, and the others find nothing of their own to close.
+
+        A close while a read of the same pipe is in flight is what ends that
+        read on Windows, and the entry cannot be reset without it. It happens
+        after the worker process is stopped, so the read is the only operation
+        left on the pipe and its peer is gone.
         """
-        conn = self.conn
-        if not conn:
+        with self.conn_lock:
+            conn, self.conn = self.conn, None
+        if conn is None:
             return
-        if isinstance(conn, Connection):
-            # On POSIX the pipe of a duplex Pipe() is a socketpair and the recv thread
-            # reads it with a blocking os.read(): closing the fd does not wake a read
-            # blocked in another thread, only data, EOF or shutdown() do. Without the
-            # shutdown the thread survives until the worker process closes its end
-            # (a worker that is gone already does not, e.g. a failed spawn), so the
-            # thread would leak past close() / force-kill.
-            try:
-                sock = socket.socket(fileno=conn.fileno())
-            except (OSError, ValueError):
-                pass
-            else:
-                try:
-                    sock.shutdown(socket.SHUT_RDWR)
-                except OSError:
-                    # not a socket (a pipe built with os.pipe), close() still applies
-                    pass
-                finally:
-                    sock.detach()
         try:
             conn.close()
-        except Exception:
+        except OSError:
             pass
 
     def process_wait_exit(self, timeout=0):
@@ -457,9 +484,7 @@ class WorkerManager(metaclass=Singleton):
                            f'alive={bool(process and process.is_alive())}, state={state_before}')
 
         with self._lock:
-            state.conn = None
-            state.process = None
-            state.recv_thread = None
+            state.reset_runtime()
             if not publish:
                 return
             if state.pending_restart:
@@ -572,13 +597,19 @@ class WorkerManager(metaclass=Singleton):
         多线程recv_bytes() 的问题是同时接收多个pipe的时候会有频繁GIL切换导致性能远不如 wait(list_pipe)
         但因为log是稀疏产生的，每个worker的高频时段通常不会集中，所以在我们的运行情景下
         使用 多线程recv_bytes() 的性能就是单线程 recv_bytes()
+
+        The read of the pipe blocks. It ends on the end of the pipe -- the death
+        of the worker process closes its end, and the close of this end by a stop
+        wakes it too (see WorkerState.conn_close) -- and on nothing else, so a
+        loop that is between two messages checks ``closing`` before it blocks
+        again.
         """
         conn = state.conn
         config = state.config
         try:
             while True:
-                # check if pipe closed
-                if not state.conn:
+                # a stop requested after the last message: nothing is coming
+                if state.closing or not state.conn:
                     break
                 try:
                     data = conn.recv_bytes()
@@ -707,6 +738,28 @@ class WorkerManager(metaclass=Singleton):
         """
         return f'WorkerRecv-{config}'
 
+    def _request_recv_stop(self, state: WorkerState, timeout=1):
+        """
+        Wait for the recv thread of an entry to leave, and stop it if it does not
+
+        The caller closes the pipe first (see conn_close), which is what ends a
+        read that is already blocked, and sets ``closing`` for a loop that is
+        between two messages and would otherwise block again. This waits for the
+        thread to come back from the read.
+
+        Args:
+            state (WorkerState): The entry of the worker
+            timeout (float): Seconds to wait for the thread
+        """
+        state.closing = True
+        thread = state.recv_thread
+        if thread is None or thread is threading.current_thread():
+            # no reader (a failed spawn, a manager close without a thread) or
+            # the caller is the reader itself
+            return
+        if thread.is_alive():
+            thread.join(timeout=timeout)
+
     def _worker_start_process(self, state: WorkerState, mod: str, config: str, child_conn,
                               project_root='', mod_root='', path_main='') -> "tuple[bool, str]":
         """
@@ -733,7 +786,7 @@ class WorkerManager(metaclass=Singleton):
             # finalized as usual (error / restarting).
             state.conn_close()
             with self._lock:
-                state.conn = None
+                state.reset_runtime()
                 # a marked worker is parked like a crashed startup (the new
                 # backend retries it), an unmarked one returns to error
                 self._set_state(state, self.park_state if state.pending_restart else 'error')
@@ -746,15 +799,18 @@ class WorkerManager(metaclass=Singleton):
             state.process = process
             # status will become "running" when worker process initialize BackendBridge
 
-            # start recv thread
+            # Start recv thread. The thread is registered before it starts, so
+            # an entry of the manager always has its reader once it has a pipe:
+            # a stop sees the thread and waits for it instead of starting a new
+            # run on top of a read that is still in flight
             thread = threading.Thread(
                 target=self._worker_recv_loop,
                 args=(state,),
                 name=self._recv_thread_name(config),
                 daemon=True
             )
-            thread.start()
             state.recv_thread = thread
+            thread.start()
 
         return True, 'Success'
 
@@ -970,14 +1026,16 @@ class WorkerManager(metaclass=Singleton):
         # cleanup
         state.process_graceful_kill(terminate_timeout=KILL_TERMINATE_TIMEOUT,
                                     kill_timeout=KILL_FORCE_TIMEOUT)
+        # Closing the pipe is what wakes the read of the recv thread: a read of
+        # the pipe is not ended by the death of the peer on every platform (a
+        # worker killed before it received its end leaves the read pending), so
+        # the entry stops its own reader instead of waiting for it to notice.
+        # conn_close() takes the pipe, so this is the only close of it
         state.conn_close()
-        if state.recv_thread and state.recv_thread.is_alive():
-            state.recv_thread.join(timeout=1)
+        self._request_recv_stop(state)
 
         with self._lock:
-            state.process = None
-            state.conn = None
-            state.recv_thread = None
+            state.reset_runtime()
             if state.pending_restart:
                 # stopped for the maintenance flow: park in "updating" /
                 # "restarting" so restart_wait() collects the config into the
@@ -1557,19 +1615,20 @@ class WorkerManager(metaclass=Singleton):
                 state.process_wait_exit(timeout=EXIT_WAIT_TIMEOUT)
                 state.process_kill(timeout=KILL_FORCE_TIMEOUT)
 
-            # Close connections
+            # Closing the pipes is what wakes the readers: a read of the pipe is
+            # not ended by the death of the peer on every platform (a worker
+            # killed before it received its end leaves the read pending), so the
+            # entries stop their own readers instead of waiting for them to
+            # notice. conn_close() takes the pipe, so each one is closed once,
+            # and the request goes to every entry before the waits start
             for state in states:
                 state.conn_close()
-
-            # Wait for threads
             for state in states:
-                if state.recv_thread is not None and state.recv_thread.is_alive():
-                    state.recv_thread.join(timeout=1)
+                self._request_recv_stop(state)
 
             with self._lock:
                 for state in states:
-                    state.process = None
-                    state.recv_thread = None
+                    state.reset_runtime()
                     self._set_state(state, 'idle')
             # maybe new worker started while we are killing existing workers
 

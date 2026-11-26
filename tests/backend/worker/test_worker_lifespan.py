@@ -468,43 +468,176 @@ class TestResourceManagement:
         # Verify thread gone
         assert_recv_thread_gone([config])
 
-    def test_conn_close_unblocks_the_recv_thread(self):
+    def test_manager_close_wakes_a_parked_reader_and_resets_the_entry(self, manager):
         """
-        Closing the pipe of a worker must wake its recv thread
+        close() ends a read that the death of the peer does not end
 
-        The manager closes the pipe of an entry while its recv thread is blocked in
-        recv_bytes() (a failed spawn, a worker killed before its disconnect was
-        handled): on POSIX closing the fd does not interrupt a read blocked in another
-        thread, so conn_close() shuts the socket down first. Windows wakes the reader on
-        close alone, the thread must end on both.
+        A read of the pipe is not reliable to end by killing the worker: a worker
+        killed before it received its end leaves the read pending (observed on
+        Windows). So close() closes the pipe itself, which is what wakes the
+        reader, and the entry is reset afterwards.
+
+        The reader of the test is parked on purpose: a worker process is killed
+        before close(), so its own read would end on its own and there would be
+        no parked read left to test.
         """
-        import socket
-        from multiprocessing.connection import Connection
 
-        state = WorkerState(mod='WorkerTestScheduler', config='cfg_conn_close', state='idle')
-        left, right = socket.socketpair()
-        state.conn = Connection(left.detach())
-        peer = Connection(right.detach())
-        result = []
+        class RecordingConn:
+            """The pipe of the entry, recording which thread closed it"""
+
+            def __init__(self, conn):
+                self.conn = conn
+                self.closers = []
+
+            def __getattr__(self, name):
+                return getattr(self.conn, name)
+
+            def close(self):
+                self.closers.append(threading.current_thread().name)
+                self.conn.close()
+
+        state = WorkerState(mod='WorkerTestScheduler', config='cfg_parked', state='running')
+        parent, peer = multiprocessing.Pipe(duplex=True)
+        recording = RecordingConn(parent)
+        state.conn = recording
+        reader_left = threading.Event()
 
         def read():
             try:
-                result.append(state.conn.recv_bytes())
+                state.conn.recv_bytes()
             except (EOFError, OSError):
-                result.append(None)
+                pass
+            reader_left.set()
+
+        thread = threading.Thread(target=read, name='WorkerRecv-cfg_parked', daemon=True)
+        thread.start()
+        # let the reader park in recv_bytes()
+        time.sleep(0.1)
+        state.recv_thread = thread
+        manager.state[state.config] = state
 
         try:
-            thread = threading.Thread(target=read, daemon=True)
-            thread.start()
-            # let the reader block in recv_bytes()
-            time.sleep(0.1)
+            manager.close()
 
-            state.conn_close()
-            thread.join(timeout=1)
-
-            assert not thread.is_alive(), 'conn_close() did not wake the recv thread'
+            assert recording.closers == ['MainThread'], recording.closers
+            assert reader_left.is_set(), 'close() left the recv thread parked'
+            assert not thread.is_alive()
+            # the entry holds nothing of the run that ended
+            assert state.conn is None
+            assert state.process is None
+            assert state.recv_thread is None
         finally:
             peer.close()
+
+    def test_the_entry_is_closed_once_after_its_reader_left(self, manager):
+        """
+        The pipe is closed once: taking it is one step, so only one caller can
+
+        The pipe has one owner at a time and taking it is a single step under the
+        lock, so a second caller finds nothing to close whatever its timing was
+        -- a handle closed twice hits whatever the number was handed to next.
+        """
+        state = WorkerState(mod='WorkerTestScheduler', config='cfg_once', state='idle')
+        parent, peer = multiprocessing.Pipe(duplex=True)
+        state.conn = parent
+        peer.close()
+
+        state.conn_close()
+        assert state.conn is None
+        # the pipe was taken, a second close has nothing of its own to close
+        state.conn_close()
+        assert state.conn is None
+
+    def test_a_force_kill_closes_the_pipe_once_and_resets_the_entry(self, manager, monkeypatch):
+        """
+        A stopped worker closes its pipe once and leaves no field behind
+
+        The manager stops the reader of a worker it stops, and the reader of the
+        pipe may reach the close too when its read ends on its own. Both go
+        through ``conn_close()``, which takes the pipe: whichever runs first
+        closes it and the other finds nothing. The entry then holds no resource
+        of the run that ended -- the next run gets its own pipe, process and
+        reader.
+        """
+        closers = []
+        original = WorkerState.conn_close
+
+        def tracked(self):
+            had_pipe = self.conn is not None
+            original(self)
+            if had_pipe:
+                closers.append(self.config)
+
+        monkeypatch.setattr(WorkerState, 'conn_close', tracked)
+        config = 'cfg_owner'
+        success, msg = manager.worker_start('WorkerTestInfinite', config)
+        assert success, msg
+        state = manager.state[config]
+        state.wait_running(timeout=WORKER_STARTUP_TIMEOUT)
+
+        manager.worker_force_kill(config)
+
+        assert closers == [config], f'the pipe was closed {len(closers)} times'
+        assert state.conn is None
+        assert state.process is None
+        assert state.recv_thread is None
+
+    def test_reset_runtime_forgets_the_run(self):
+        """
+        reset_runtime() clears every field of the run, the stop request included
+
+        ``closing`` is requested by the stop of a run and the entry outlives that
+        run (an "error" entry is reused by the next start, a parked entry comes
+        back for a resume), so the flag must be forgotten with the pipe, the
+        process and the reader.
+        """
+        state = WorkerState(mod='WorkerTestScheduler', config='cfg_reset', state='error')
+        state.conn = object()
+        state.process = object()
+        state.recv_thread = object()
+        state.closing = True
+
+        state.reset_runtime()
+
+        assert state.conn is None
+        assert state.process is None
+        assert state.recv_thread is None
+        assert state.closing is False
+
+    def test_a_stop_does_not_leak_into_the_next_run(self, manager):
+        """
+        The next run of a reused entry reads its pipe from the first message
+
+        A worker that was stopped and then exited with a failure leaves its entry
+        in the dict as "error", so the next start of the same config reuses it.
+        The stop request belongs to the run that ended: a reader started for the
+        next run must not see it and leave at its first check, which would
+        finalize a running worker as a disconnect.
+        """
+        config = 'test_reused_entry'
+        state = WorkerState(mod='WorkerTestScheduler', config=config, state='scheduler-stopping')
+        manager.state[config] = state
+        # the stop of the run requests the end of its reader
+        manager._request_recv_stop(state)
+        assert state.closing is True
+
+        # the stopped worker then exits with a failure: the entry stays in the
+        # dict, the next start of the config reuses it
+        state.process = _ExitedProcess(1)
+        manager._handle_disconnect(state)
+        assert state.state == 'error'
+        assert state.closing is False, 'the stop of the previous run was kept'
+
+        success, msg = manager.worker_start('WorkerTestInfinite', config)
+        assert success, msg
+        assert state is manager.state[config], 'the entry was not reused'
+        assert state.wait_running(timeout=WORKER_STARTUP_TIMEOUT)
+        # A stale stop request would have made the reader leave at once, which
+        # finalizes the entry through the disconnect handler
+        assert state.state == 'running'
+        assert state.recv_thread is not None and state.recv_thread.is_alive()
+
+        manager.worker_force_kill(config)
 
     def test_repeated_start_stop_no_leak(self, manager):
         """测试重复启停不泄漏"""
