@@ -12,9 +12,12 @@ and the view push by test_config_event.py / test_viewport_subclasses.py.
 """
 
 import pytest
+from msgspec import ValidationError
+from msgspecerror import ErrorInfo, ErrorType
 
+from alasio.backend.reactive.event import ResponseEvent
 from alasio.backend.topic import _config_event
-from alasio.backend.topic.config import ConfigArg
+from alasio.backend.topic.config import ConfigArg, ConfigArgSource
 from alasio.backend.topic.state import ConnState
 from alasio.config.entry.loader import MOD_LOADER
 from alasio.config.entry.model import ConfigSetEvent
@@ -142,3 +145,151 @@ class TestGroupResetRpc:
 
         assert loader.calls == [(MOD_NAME, CONFIG, 'NoTask', 'NoGroup')]
         assert broadcast == []
+
+
+class FakeBatchSet:
+    """Stand-in of MOD_LOADER.gui_config_batch_set: records its calls"""
+
+    def __init__(self, success=True, responses=None):
+        """
+        Args:
+            success (bool): Result of the batch set
+            responses (list[ConfigSetEvent]): Events the batch returns
+        """
+        if responses is None:
+            responses = [ConfigSetEvent(task='TaskA', group='group_a', arg='arg_a', value=0)]
+        self.success = success
+        self.responses = responses
+        self.calls = []
+
+    def __call__(self, mod_name, config_name, events):
+        self.calls.append((mod_name, config_name, events))
+        return self.success, self.responses
+
+
+class FakeServer:
+    """Stand-in of the websocket server of one connection"""
+
+    def __init__(self):
+        self.sent = []
+
+    async def send(self, event):
+        self.sent.append(event)
+
+
+class FakeArgSource:
+    """Stand-in of ConfigArgSource: only the event mapping is read"""
+
+    def __init__(self, mapping):
+        self.dict_config_to_topic = mapping
+
+
+async def call_batch_set(payload, server=None):
+    """
+    Call the rpc the way the ws server does: by name, with the decoded payload.
+
+    Args:
+        payload (dict): Rpc input
+        server (FakeServer): Server of the calling connection
+    """
+    topic = ConfigArg(CONN_ID, server)
+    await ConfigArg.rpc_methods['batch_set'].call_async(topic, payload)
+
+
+class TestBatchSetRpc:
+    """batch_set(events): save several args of the opened config atomically"""
+
+    @pytest.mark.trio
+    async def test_batch_set_delegates_and_broadcasts(self, broadcast, monkeypatch):
+        """The loader gets (mod, config, events), its events are broadcast"""
+        loader = FakeBatchSet()
+        monkeypatch.setattr(MOD_LOADER, 'gui_config_batch_set', loader)
+        await set_nav()
+
+        await call_batch_set({'events': [
+            {'task': 'TaskA', 'group': 'group_a', 'arg': 'Value', 'value': 119},
+            {'task': 'TaskA', 'group': 'group_a', 'arg': 'Time', 'value': '2026-11-26T12:00:00Z'},
+        ]})
+
+        assert len(loader.calls) == 1
+        mod_name, config_name, events = loader.calls[0]
+        assert (mod_name, config_name) == (MOD_NAME, CONFIG)
+        assert events == [
+            ConfigSetEvent(task='TaskA', group='group_a', arg='Value', value=119),
+            ConfigSetEvent(task='TaskA', group='group_a', arg='Time', value='2026-11-26T12:00:00Z'),
+        ]
+        assert len(broadcast) == 1
+        broadcast_config, broadcast_events = broadcast[0]
+        assert broadcast_config == CONFIG
+        assert broadcast_events is loader.responses
+
+    @pytest.mark.trio
+    async def test_batch_set_ignores_an_empty_batch(self, broadcast, monkeypatch):
+        """An empty event list is a silent no-op"""
+        loader = FakeBatchSet()
+        monkeypatch.setattr(MOD_LOADER, 'gui_config_batch_set', loader)
+        await set_nav()
+
+        await call_batch_set({'events': []})
+
+        assert loader.calls == []
+        assert broadcast == []
+
+    @pytest.mark.trio
+    async def test_batch_set_ignores_an_incomplete_event(self, broadcast, monkeypatch):
+        """A batch with an incomplete event is dropped as a whole"""
+        loader = FakeBatchSet()
+        monkeypatch.setattr(MOD_LOADER, 'gui_config_batch_set', loader)
+        await set_nav()
+
+        await call_batch_set({'events': [
+            {'task': 'TaskA', 'group': 'group_a', 'arg': 'Value', 'value': 119},
+            {'task': 'TaskA', 'group': 'group_a', 'arg': '', 'value': 0},
+        ]})
+
+        assert loader.calls == []
+        assert broadcast == []
+
+    @pytest.mark.trio
+    async def test_batch_set_requires_config(self, broadcast, monkeypatch):
+        """A connection without an opened config is a silent no-op"""
+        loader = FakeBatchSet()
+        monkeypatch.setattr(MOD_LOADER, 'gui_config_batch_set', loader)
+        await set_nav(config_name='')
+
+        await call_batch_set({'events': [
+            {'task': 'TaskA', 'group': 'group_a', 'arg': 'Value', 'value': 119},
+        ]})
+
+        assert loader.calls == []
+        assert broadcast == []
+
+    @pytest.mark.trio
+    async def test_batch_set_failure_sends_every_rollback_to_the_caller(self, broadcast, monkeypatch):
+        """A failed batch restores the optimistic values of the caller only"""
+        error = ErrorInfo(msg='Value must be at most 150', type=ErrorType.INPUT_REJECTED, loc=('Value',))
+        loader = FakeBatchSet(success=False, responses=[
+            ConfigSetEvent(task='TaskA', group='group_a', arg='Value', value=119, error=error),
+            ConfigSetEvent(task='TaskA', group='group_a', arg='Time', value='2020-01-01T00:00:00Z'),
+        ])
+        monkeypatch.setattr(MOD_LOADER, 'gui_config_batch_set', loader)
+        monkeypatch.setattr(ConfigArgSource, 'get', staticmethod(lambda *args: FakeArgSource({
+            ('TaskA', 'group_a', 'Value'): ('card_a', 'group_a', 'Value'),
+            ('TaskA', 'group_a', 'Time'): ('card_a', 'group_a', 'Time'),
+        })))
+        await set_nav()
+        server = FakeServer()
+
+        with pytest.raises(ValidationError, match='Value must be at most 150'):
+            await call_batch_set({'events': [
+                {'task': 'TaskA', 'group': 'group_a', 'arg': 'Value', 'value': 999},
+                {'task': 'TaskA', 'group': 'group_a', 'arg': 'Time', 'value': '2026-11-26T12:00:00Z'},
+            ]}, server=server)
+
+        # Nothing is broadcast: the store was not modified
+        assert broadcast == []
+        assert server.sent == [
+            ResponseEvent(t='ConfigArg', o='set', k=('card_a', 'group_a', 'Value', 'value'), v=119),
+            ResponseEvent(t='ConfigArg', o='set', k=('card_a', 'group_a', 'Time', 'value'),
+                          v='2020-01-01T00:00:00Z'),
+        ]

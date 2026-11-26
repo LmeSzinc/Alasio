@@ -1,8 +1,8 @@
 from collections import deque
-from typing import Any
+from typing import Any, List
 
 import trio.to_thread
-from msgspec import ValidationError
+from msgspec import Struct, ValidationError
 from msgspecerror import ErrorInfo
 
 from alasio.backend.reactive.base_rpc import rpc
@@ -14,6 +14,20 @@ from alasio.backend.topic.state import ConnState, NavState
 from alasio.backend.ws.ws_topic import BaseTopic
 from alasio.config.entry.loader import MOD_LOADER
 from alasio.config.entry.model import ConfigSetEvent
+
+
+class ConfigBatchSetEvent(Struct):
+    """
+    One arg edit of the ConfigArg.batch_set rpc.
+
+    The wire shape of an edit, kept apart from ConfigSetEvent: the latter
+    carries the `error` of a validation result, whose type union msgspec can
+    not decode an input into.
+    """
+    task: str
+    group: str
+    arg: str
+    value: Any
 
 
 class ConfigNavSource(KeyedSource, DiskCache):
@@ -149,6 +163,80 @@ class ConfigArg(BaseTopic):
             else:
                 msg = 'Unknown validation error'
             raise ValidationError(msg)
+
+    @rpc
+    async def batch_set(self, events: List[ConfigBatchSetEvent]):
+        """
+        Set multiple config values atomically: all of them, or none.
+
+        A dashboard record is a value and the time it was recorded at, so its
+        edit dialog has to save both args at once: a Value saved on its own is
+        recovered from the old Time by post_edit(), and a Time saved on its own
+        would make the value recover from the new time.
+
+        Args:
+            events (List[ConfigBatchSetEvent]): Arg edits of one batch
+        """
+        if not events:
+            return
+        # an incomplete event can never be applied, and the batch is atomic:
+        # drop the whole call instead of saving a part of it
+        if any(not (e.task and e.group and e.arg) for e in events):
+            return
+
+        # get config_name
+        state = ConnState(self.conn_id, self.server)
+        nav: NavState = await state.nav_state
+        mod_name = nav.mod_name
+        config_name = nav.config_name
+        nav_name = nav.nav_name
+        lang = await state.content_lang
+        if not config_name:
+            return
+
+        config_events = [
+            ConfigSetEvent(task=e.task, group=e.group, arg=e.arg, value=e.value)
+            for e in events
+        ]
+        success, responses = await trio.to_thread.run_sync(
+            MOD_LOADER.gui_config_batch_set,
+            mod_name, config_name, config_events
+        )
+        responses: "list[ConfigSetEvent]"
+        if success:
+            # unified event entry: viewport sources of every nav + Dashboard
+            # + TaskQueue linkage (sync, thread safe)
+            _config_event.on_config_event(config_name, responses)
+            return
+
+        # nothing was written: the caller may already show the draft, so the
+        # actual current values are sent back to it alone (other connections
+        # never saw the failed batch)
+        source = ConfigArgSource.get(mod_name, config_name, nav_name, lang)
+        if source is None:
+            # config deleted: nothing to roll back on screen
+            return
+        if not responses:
+            return
+        for resp in responses:
+            key = source.dict_config_to_topic.get((resp.task, resp.group, resp.arg))
+            if key is None:
+                continue
+            key = (*key, 'value')
+            resp_event = ResponseEvent(t=self.TOPIC_NAME, o='set', k=key, v=resp.value)
+            await self.server.send(resp_event)
+
+        # re-raise the first validation error, so server will treat as RPC
+        # call failed and every rollback value is already on screen
+        error = next((e.error for e in responses if e.error is not None), None)
+        if error is not None:
+            if isinstance(error, ErrorInfo):
+                msg = error.msg
+            else:
+                msg = str(error)
+        else:
+            msg = 'Unknown validation error'
+        raise ValidationError(msg)
 
     @rpc
     async def reset(self, task: str, group: str, arg: str):

@@ -276,6 +276,26 @@ class ModLoader:
         success, responses = mod.config_set(config_name, event, post_edit=True)
         return success, responses
 
+    def gui_config_batch_set(self, mod_name, config_name, events):
+        """
+        Set multiple config values in one atomic batch.
+        See ModConfig.config_batch_set()
+
+        Args:
+            mod_name (str):
+            config_name (str):
+            events (list[ConfigSetEvent]):
+
+        Returns:
+            tuple[bool, list[ConfigSetEvent]]:
+        """
+        try:
+            mod = self.dict_mod[mod_name]
+        except KeyError:
+            raise ValidationError(f'No such mod: "{mod_name}"') from None
+
+        return mod.config_batch_set(config_name, events, post_edit=True)
+
     def gui_config_reset(self, mod_name, config_name, task_name, group_name, arg_name):
         """
         Reset config arg to default value.

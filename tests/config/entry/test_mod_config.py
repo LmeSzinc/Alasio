@@ -660,6 +660,50 @@ class TestConfigBatchSet(ModConfigTestBase):
         assert data['Enable'] is True
 
 
+class TestDashboardRecordBatchSet(ModConfigTestBase):
+    """
+    Saving a dashboard record as one batch (the ConfigArg.batch_set path)
+
+    A record is a value and the time it was recorded at. Saving the value alone
+    would let post_edit recover it from the old time, and saving the time alone
+    would recover the value from the new one, so the edit dialog saves both in
+    one batch.
+    """
+
+    # the moment the post_edit callbacks see as "now"
+    FIXED_NOW = d.datetime(2026, 9, 25, 12, 0, 0, tzinfo=d.timezone(d.timedelta(hours=8)))
+
+    @pytest.fixture
+    def frozen_now(self, monkeypatch):
+        """Freeze the clock of the post_edit callbacks"""
+        def getnow(tz=True, ms=False):
+            return self.FIXED_NOW
+
+        monkeypatch.setattr(timer, 'getnow', getnow)
+        monkeypatch.setattr(group_export, 'getnow', getnow)
+        return self.FIXED_NOW
+
+    def test_value_and_time_saved_together_is_not_recovered(self, example_mod, task_index_data, frozen_now):
+        """
+        The value the user typed is stored as is: with the Time set to now in
+        the same batch, post_edit has no elapsed time to recover from
+        """
+        success, responses = example_mod.config_batch_set(self.TEST_CONFIG_NAME, [
+            ConfigSetEvent(task='Main', group='Emotion1', arg='Value', value=100),
+            ConfigSetEvent(task='Main', group='Emotion1', arg='Time', value=frozen_now),
+        ], post_edit=True)
+
+        assert success is True
+        assert responses == [
+            ConfigSetEvent(task='Main', group='Emotion1', arg='Value', value=100),
+            ConfigSetEvent(task='Main', group='Emotion1', arg='Time', value=frozen_now),
+        ]
+
+        config = example_mod.config_read(self.TEST_CONFIG_NAME, task_index_data['Main'].config)
+        assert config['Main']['Emotion1']['Value'] == 100
+        assert config['Main']['Emotion1']['Time'] == frozen_now
+
+
 class TestConfigBatchReset(ModConfigTestBase):
     """Tests for config_batch_reset"""
 
