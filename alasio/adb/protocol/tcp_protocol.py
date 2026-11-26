@@ -154,6 +154,43 @@ class AdbProtocolTCP:
         # device features
         self.features = DeviceFeatures([])
 
+    def __enter__(self):
+        """
+        Connect to the device, for a `with` block.
+
+        Returns:
+            AdbProtocolTCP: This client, connected
+
+        Raises:
+            ConnectionRefusedError: When nothing listens on the address
+            AdbConnectionTimeout: When the device does not answer in time
+            AdbConnectionClosed: When the device closes the connection during
+                the handshake
+            AdbMessageInvalid: When the device does not answer with a CNXN
+        """
+        self.connect()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """
+        Disconnect from the device, for a `with` block.
+
+        A client can not release itself when it is garbage collected: the
+        dispatch thread holds this object for as long as the connection is open
+        (`Thread(target=self._task_dispatch_message)` keeps a bound method), so
+        a `__del__` would only run after the connection already ended, and
+        never for the connection a caller forgot. The `with` block is what
+        releases the socket and joins the thread at a known point.
+        """
+        try:
+            self.disconnect()
+        except Exception as e:
+            # a disconnect that fails must not replace the error of the block,
+            # that error is what the caller has to see
+            if exc_type is None:
+                raise
+            logger.warning(f'Failed to disconnect after an error: {e}')
+
     def _stream_id_allocate(self) -> int:
         local_id = self._stream_id_next
         self._stream_id_next += 1

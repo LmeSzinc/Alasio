@@ -1435,13 +1435,37 @@ class TestDisconnect:
 
 
 class TestConnectionRelease:
-    """A connection the device dropped releases its resources itself
+    """A connection is released at a known point, not by the garbage collector
 
     The dispatch thread holds the client object for as long as the connection
-    is open, so a client a caller forgot is never collected and its release can
-    not be left to the garbage collector. The thread that notices the end of
-    the link is what closes the socket.
+    is open, so an unreferenced client is not collected and a `__del__` would
+    never run for the connection a caller forgot. The `with` block is the
+    release point, and a connection that died releases its descriptor itself.
     """
+
+    def test_with_connects_and_disconnects(self):
+        """The block runs on a live connection, the block end closes it"""
+        with FakeAdbd() as adbd:
+            with AdbProtocolTCP(port=adbd.port) as client:
+                thread = client._recv_thread
+                assert client._sock is not None
+                assert client.features.shell_v2 is True
+                assert thread is not None and thread.is_alive()
+
+            assert client._sock is None
+            assert client._recv_thread is None
+            thread.join(timeout=5)
+            assert not thread.is_alive()
+
+    def test_with_releases_on_an_error(self):
+        """An error in the block closes the connection and keeps propagating"""
+        with FakeAdbd() as adbd:
+            with pytest.raises(ValueError) as e:
+                with AdbProtocolTCP(port=adbd.port) as client:
+                    raise ValueError('of the block')
+
+            assert str(e.value) == 'of the block'
+            assert client._sock is None
 
     def test_a_broken_connection_releases_its_descriptor(self):
         """A connection the device dropped does not keep its socket open"""
