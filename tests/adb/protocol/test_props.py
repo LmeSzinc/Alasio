@@ -181,11 +181,15 @@ class TestPropsGetStr:
         assert props.get_str('ro.build.version.sdk') == '32'
         assert props.get_str('ro.sf.lcd_density') == '240'
 
-    def test_get_str_list_value_returns_first(self, props):
-        """Test getting list value returns first element"""
-        # Should return first element from comma-separated list
+    def test_get_str_list_value_returns_the_whole_value(self, props):
+        """Test getting a comma separated value keeps the commas
+
+        A property is a string on the device, a comma is not a separator of the
+        protocol: `zh-CN,en-US` is one value of a locale, and the cpu abilist is
+        only a list by convention. get() is what splits a value on commas.
+        """
         result = props.get_str('ro.product.cpu.abilist')
-        assert result == 'x86_64'
+        assert result == 'x86_64,arm64-v8a,x86,armeabi-v7a,armeabi'
 
     def test_get_str_empty_value(self, props):
         """Test getting empty value returns empty string"""
@@ -360,6 +364,174 @@ class TestPropsRealWorldScenarios:
         """Test checking if device boot is complete"""
         boot_complete = props.get_int('dev.bootcomplete')
         assert boot_complete == 1
+
+
+class TestPropsCommaValues:
+    """A comma inside a property value is data, not a separator"""
+
+    def test_get_str_keeps_the_commas(self):
+        """The raw value is what getprop printed between the brackets"""
+        props = Props.from_getprop('[persist.sys.locale]: [zh-CN,en-US]')
+
+        assert props.get_str('persist.sys.locale') == 'zh-CN,en-US'
+
+    def test_get_splits_the_commas(self):
+        """get() is the list view of the same value"""
+        props = Props.from_getprop('[persist.sys.locale]: [zh-CN,en-US]')
+
+        assert props.get('persist.sys.locale') == ['zh-CN', 'en-US']
+
+    def test_single_value_list(self):
+        """A value without a comma is a list of one element"""
+        props = Props.from_getprop('[ro.product.brand]: [HUAWEI]')
+
+        assert props.get('ro.product.brand') == ['HUAWEI']
+        assert props.get_str('ro.product.brand') == 'HUAWEI'
+
+    def test_empty_value_list(self):
+        """An empty value splits to a list with the empty string"""
+        props = Props.from_getprop('[ro.hwui.use_vulkan]: []')
+
+        assert props.get('ro.hwui.use_vulkan') == ['']
+        assert props.get_str('ro.hwui.use_vulkan') == ''
+
+    def test_props_dict_holds_the_raw_value(self):
+        """The parsed property map is the raw value of every property"""
+        props = Props.from_getprop('[ro.product.cpu.abilist]: [x86_64,arm64-v8a]')
+
+        assert props.props == {'ro.product.cpu.abilist': 'x86_64,arm64-v8a'}
+
+    def test_very_long_comma_list(self):
+        """A device with many abis is not truncated"""
+        value = ','.join(['abi%d' % i for i in range(64)])
+        props = Props.from_getprop('[ro.product.cpu.abilist]: [%s]' % value)
+
+        assert props.get_str('ro.product.cpu.abilist') == value
+        assert props.get('ro.product.cpu.abilist') == value.split(',')
+
+
+class TestPropsValueShape:
+    """Values that are not a bare word"""
+
+    def test_value_with_a_colon(self):
+        """A colon after the separator belongs to the value"""
+        props = Props.from_getprop('[ro.build.date]: [Thu Feb 20 10:17:10 HKT 2025]')
+
+        assert props.get_str('ro.build.date') == 'Thu Feb 20 10:17:10 HKT 2025'
+
+    def test_value_with_an_equal_sign(self):
+        """An equal sign in the value is not a separator either"""
+        props = Props.from_getprop('[ro.test.equal]: [a=b;c=d]')
+
+        assert props.get_str('ro.test.equal') == 'a=b;c=d'
+
+    def test_value_with_brackets_inside(self):
+        """Only the outer brackets are removed, the rest is data"""
+        props = Props.from_getprop('[ro.test.brackets]: [[abc]]')
+
+        assert props.get_str('ro.test.brackets') == '[abc]'
+
+    def test_nested_bracket_of_a_serialized_value(self):
+        """A serialized list keeps its own brackets"""
+        props = Props.from_getprop('[ro.test.list]: [[1, 2]]')
+
+        assert props.get_str('ro.test.list') == '[1, 2]'
+
+    def test_duplicate_key(self):
+        """The last line of a key wins, the way a shell would read it"""
+        props = Props.from_getprop('[ro.test.key]: [old]\n[ro.test.key]: [new]')
+
+        assert props.get_str('ro.test.key') == 'new'
+
+    def test_line_without_colon_is_skipped(self):
+        """A line of noise does not become a property"""
+        props = Props.from_getprop('no separator on this line')
+
+        assert props.props == {}
+
+    def test_empty_property_name(self):
+        """A colon at the start of the line makes a property with no name"""
+        props = Props.from_getprop(': [value]')
+
+        assert props.get_str('') == 'value'
+
+    def test_windows_line_endings(self):
+        """A shell v1 stream of a pty may send CRLF, splitlines reads both"""
+        props = Props.from_getprop(b'[ro.a]: [1]\r\n[ro.b]: [2]\r\n')
+
+        assert props.props == {'ro.a': '1', 'ro.b': '2'}
+
+    def test_carriage_return_only(self):
+        """The old shells end a line with a bare CR"""
+        props = Props.from_getprop('[ro.a]: [1]\r[ro.b]: [2]\r')
+
+        assert props.props == {'ro.a': '1', 'ro.b': '2'}
+
+    def test_last_line_without_newline(self):
+        """The last line of the output has no line ending"""
+        props = Props.from_getprop('[ro.a]: [1]\n[ro.b]: [2]')
+
+        assert props.get_str('ro.b') == '2'
+
+    def test_invalid_utf8_is_replaced(self):
+        """A property with a broken byte does not lose the rest of the output"""
+        props = Props.from_getprop(b'[ro.a]: [\xff]\n[ro.b]: [2]')
+
+        assert props.get_str('ro.b') == '2'
+        assert props.get_str('ro.a') == '\ufffd'
+
+
+class TestPropsNumericEdges:
+    """Numbers that a device may print"""
+
+    @pytest.mark.parametrize('value, expected', [
+        ('0', 0),
+        ('32', 32),
+        ('-1', -1),
+        ('-784056623492961046', -784056623492961046),
+        # a float is truncated, the way a cast does it in C
+        ('32.9', 32),
+        ('0.05', 0),
+        ('1e3', 1000),
+    ])
+    def test_int_values(self, value, expected):
+        """get_int parses what an integer property holds"""
+        props = Props.from_getprop('[ro.test.value]: [%s]' % value)
+
+        assert props.get_int('ro.test.value') == expected
+
+    @pytest.mark.parametrize('value', [
+        '',
+        'abc',
+        # python does not read the hex prefix int() would refuse as well
+        '0x10',
+        '32m',
+        '1 2',
+    ])
+    def test_int_values_that_are_not_numbers(self, value):
+        """A value that is not a number gives the default"""
+        props = Props.from_getprop('[ro.test.value]: [%s]' % value)
+
+        assert props.get_int('ro.test.value') is None
+        assert props.get_int('ro.test.value', 7) == 7
+
+    @pytest.mark.parametrize('value, expected', [
+        ('0.05', 0.05),
+        ('32', 32.0),
+        ('-1.5', -1.5),
+    ])
+    def test_float_values(self, value, expected):
+        """get_float parses a float property"""
+        props = Props.from_getprop('[ro.test.value]: [%s]' % value)
+
+        assert props.get_float('ro.test.value') == expected
+
+    def test_str_of_a_property_map(self):
+        """The representation is short, a props map has thousands of keys"""
+        props = Props.from_getprop('[a]: [1]\n[b]: [2]')
+
+        assert str(props) == '<Props count=2>'
+        assert repr(props) == '<Props count=2>'
 
 
 class TestPropsEdgeCases:
