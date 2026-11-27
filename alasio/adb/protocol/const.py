@@ -59,6 +59,13 @@ ADB_STREAM_CHUNK_SIZE = 4096
 # paid back in object headers. Only writes below the chunk size are counted
 # here, so this never combines a write that was worth an object already
 ADB_STREAM_CHUNK_LIMIT = 32
+# Consecutive OPENs a device may leave unanswered before its connection is
+# dropped. Opening a service is a local operation of the device and adbd
+# answers it in milliseconds, so a peer that misses the whole timeout of one
+# request is not a device that is slow, and one that misses this many in a row
+# is not an adbd. Dropping the connection is what lets the next connect()
+# rebuild it, instead of every command paying the timeout forever
+ADB_OPEN_TIMEOUT_LIMIT = 3
 
 
 class AdbConnectionClosed(Exception):

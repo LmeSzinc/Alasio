@@ -267,6 +267,8 @@ class FakeAdbd:
         refuse (callable): service -> True to answer OPEN with CLSE
         auth_required (bool): Answer the CNXN with AUTH instead of CNXN
         silent (bool): Never answer anything, the connection stays open
+        echo_handshake (bool): Answer the CNXN with the CNXN of the host, the
+            way a port that is not adb but reflects what it reads does
         open_fault (str): Fault injected in the answer of OPEN, one of
             'refuse', 'silent', 'close', 'bad_magic', 'bad_checksum',
             'unknown_command', 'oversize_length'
@@ -352,6 +354,7 @@ class FakeAdbd:
         self.auth_delay = 0.0
         self.auth_arg0 = ADB_AUTH_TOKEN
         self.silent = False
+        self.echo_handshake = False
         self.open_fault = ''
         self.open_delay = 0.0
         self.fault_on_reply = ''
@@ -541,6 +544,13 @@ class FakeAdbd:
                 self.client_max_payload = arg1
             if command != CNXN:
                 self._violation(f'first message is not CNXN but {command}', message)
+                return
+
+            if self.echo_handshake:
+                # a peer that is not adbd but reflects what it reads, like a
+                # local echo service of the port or a proxy forwarded to itself
+                self._send(sock, CNXN, arg0, arg1, data)
+                self._drain(sock)
                 return
 
             if self.silent:

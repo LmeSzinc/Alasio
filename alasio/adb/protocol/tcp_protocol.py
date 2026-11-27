@@ -9,9 +9,10 @@ from alasio.adb.protocol import keygen
 from alasio.adb.protocol.cnxn import DeviceFeatures
 from alasio.adb.protocol.const import (
     ADB_AUTH_CONFIRM_TIMEOUT, ADB_AUTH_RSAPUBLICKEY, ADB_AUTH_SIGNATURE, ADB_AUTH_TOKEN, ADB_COMMANDS, ADB_MAX_PAYLOAD,
-    ADB_MAX_PAYLOAD_V1, ADB_STREAM_CHUNK_LIMIT, ADB_STREAM_CHUNK_SIZE, ADB_STREAM_RECV_BUFFER_SIZE, ADB_VERSION,
-    ADB_VERSION_SKIP_CHECKSUM, AUTH, AUTH_TOKEN_SIZE, CLSE, CNXN, OKAY, OPEN, WRTE, AdbAuthRejected,
-    AdbConnectionClosed, AdbConnectionTimeout, AdbMessageInvalid, AdbStreamClosed, AdbStreamTimeout
+    ADB_MAX_PAYLOAD_V1, ADB_OPEN_TIMEOUT_LIMIT, ADB_STREAM_CHUNK_LIMIT, ADB_STREAM_CHUNK_SIZE,
+    ADB_STREAM_RECV_BUFFER_SIZE, ADB_VERSION, ADB_VERSION_SKIP_CHECKSUM, AUTH, AUTH_TOKEN_SIZE, CLSE, CNXN, OKAY, OPEN,
+    WRTE, AdbAuthRejected, AdbConnectionClosed, AdbConnectionTimeout, AdbMessageInvalid, AdbStreamClosed,
+    AdbStreamTimeout
 )
 from alasio.logger import logger
 
@@ -351,6 +352,10 @@ class AdbProtocolTCP:
         # put that message on the stream of an unrelated caller
         self._stream_id_next = 1
         self._stream_dict: "dict[int, AdbStreamTCP]" = {}
+        # Consecutive OPENs the device left unanswered, dropped after
+        # ADB_OPEN_TIMEOUT_LIMIT: a peer that answers the handshake but not an
+        # OPEN is not a device to keep waiting for
+        self._open_timeouts = 0
 
         # device features
         self.features = DeviceFeatures([])
@@ -600,6 +605,13 @@ class AdbProtocolTCP:
 
                 # recv CNXN from device, signing the token when its adbd is secure
                 arg0, arg1, data = self._recv_cnxn(sock)
+
+                if data == cnxn:
+                    # a peer that reflects the bytes of the host, like a local
+                    # echo service or a proxy that forwards the port to itself,
+                    # passes a handshake that only reads the command. Its CNXN
+                    # is the one of the host, which no adbd ever answers with
+                    raise AdbMessageInvalid('Device answered with the CNXN of the host, the peer is not an adbd')
             except Exception:
                 # cleanup on error
                 self._close_socket(sock)
@@ -607,11 +619,13 @@ class AdbProtocolTCP:
                 self._max_payload = ADB_MAX_PAYLOAD
                 self._protocol_version = ADB_VERSION
                 self._send_checksum = True
+                self._open_timeouts = 0
                 raise
 
             logger.info(f'Connected to {addr}')
             self._sock = sock
             self._broken = False
+            self._open_timeouts = 0
             self._protocol_version = min(arg0, ADB_VERSION)
             # a device of that version reads nothing in the field, the sum of
             # every payload of the connection is a pass that proves nothing
@@ -720,6 +734,28 @@ class AdbProtocolTCP:
         self._graceful_close(sock, thread)
 
         logger.info(f'Disconnected to {addr}')
+
+    def _drop_connection(self, reason: str):
+        """
+        Drop the connection after a request the device left unanswered.
+
+        The caller is the thread that waited. The socket and the dispatch
+        thread are detached under the lock and released the way disconnect()
+        does, then the next connect() rebuilds the connection. Only an answer
+        of the device is allowed to end a wait, so a caller must not keep using
+        a peer that ignored a request it answers in milliseconds.
+
+        Args:
+            reason (str): Why the connection is dropped, for the log
+        """
+        addr = f'{self.host}:{self.port}'
+        with self._connect_lock:
+            sock, thread = self._detach_connection()
+        if sock is None:
+            return
+        # release outside of the lock, the dispatch thread takes it as well
+        self._graceful_close(sock, thread)
+        logger.warning(f'Dropped the connection to {addr}: {reason}, call connect() to rebuild it')
 
     @property
     def is_connected(self) -> bool:
@@ -924,7 +960,9 @@ class AdbProtocolTCP:
         Raises:
             ValueError: When the buffer size is not positive
             AdbConnectionClosed: When there is no connection
-            AdbConnectionTimeout: When the device does not answer in time
+            AdbConnectionTimeout: When the device does not answer in time. The
+                connection is dropped after `ADB_OPEN_TIMEOUT_LIMIT` of them in
+                a row, connect() then rebuilds it
             AdbStreamClosed: When the device refuses the service
         """
         if recv_buffer_size <= 0:
@@ -948,16 +986,7 @@ class AdbProtocolTCP:
             self.message_send(sock, OPEN, stream.local_id, 0, service_data)
 
             # wait until opened
-            # use connection-level timeout as this should be fast and not related to stream
-            timeout = self.timeout
-            while stream.state != 'opened' and stream.state != 'closed':
-                # the clock must not move under the accounting: a wall clock
-                # correction would stretch the timeout or cut it short
-                if timeout < 0.001:
-                    raise AdbConnectionTimeout(f'Timeout when opening stream {stream}')
-                start = perf_counter()
-                stream.send_event.acquire(timeout=timeout)
-                timeout -= perf_counter() - start
+            self._wait_opened(stream)
         except Exception:
             # the device may still answer this id, the stream is dropped and the
             # id is never handed out again, so a late answer can not open or
@@ -965,6 +994,10 @@ class AdbProtocolTCP:
             with self._connect_lock:
                 self._stream_dict.pop(local_id, None)
             raise
+
+        # the device answered this OPEN, whatever the answer was: only a
+        # connection that answers nothing is what the count of timeouts is about
+        self._open_timeouts = 0
 
         if stream.aborted:
             # the connection was dropped while this open was waiting
@@ -978,6 +1011,38 @@ class AdbProtocolTCP:
 
         # opened
         return stream
+
+    def _wait_opened(self, stream: AdbStreamTCP):
+        """
+        Wait until the device answers the OPEN of a stream.
+
+        The connection-level timeout is used: opening a service is a local
+        operation of the device and is answered in milliseconds.
+
+        A device that answers the handshake but leaves OPENs unanswered is not
+        a slow adbd, so `ADB_OPEN_TIMEOUT_LIMIT` of them in a row drop the
+        connection. That is what lets the next connect() rebuild it, instead of
+        every command of the caller paying the timeout on a peer that will
+        never answer while `is_connected` keeps saying True.
+
+        Args:
+            stream (AdbStreamTCP): Stream whose OKAY is awaited
+
+        Raises:
+            AdbConnectionTimeout: When the device does not answer in time
+        """
+        timeout = self.timeout
+        while stream.state != 'opened' and stream.state != 'closed':
+            # the clock must not move under the accounting: a wall clock
+            # correction would stretch the timeout or cut it short
+            if timeout < 0.001:
+                self._open_timeouts += 1
+                if self._open_timeouts >= ADB_OPEN_TIMEOUT_LIMIT:
+                    self._drop_connection(f'{self._open_timeouts} OPENs in a row timed out')
+                raise AdbConnectionTimeout(f'Timeout when opening stream {stream}')
+            start = perf_counter()
+            stream.send_event.acquire(timeout=timeout)
+            timeout -= perf_counter() - start
 
     def close_stream(self, stream: AdbStreamTCP):
         """

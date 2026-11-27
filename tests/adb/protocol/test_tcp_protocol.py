@@ -14,9 +14,10 @@ import pytest
 import alasio.adb.protocol.tcp_protocol as tcp_protocol
 from alasio.adb.protocol import keygen
 from alasio.adb.protocol.const import (
-    ADB_MAX_PAYLOAD, ADB_MAX_PAYLOAD_V1, ADB_STREAM_CHUNK_LIMIT, ADB_STREAM_CHUNK_SIZE, ADB_STREAM_RECV_BUFFER_SIZE,
-    ADB_VERSION, ADB_VERSION_SKIP_CHECKSUM, CLSE, CNXN, OKAY, OPEN, WRTE, AdbAuthKeyMissing, AdbConnectionClosed,
-    AdbConnectionTimeout, AdbMessageInvalid, AdbStreamClosed, AdbStreamTimeout, ShellResult
+    ADB_MAX_PAYLOAD, ADB_MAX_PAYLOAD_V1, ADB_OPEN_TIMEOUT_LIMIT, ADB_STREAM_CHUNK_LIMIT, ADB_STREAM_CHUNK_SIZE,
+    ADB_STREAM_RECV_BUFFER_SIZE, ADB_VERSION, ADB_VERSION_SKIP_CHECKSUM, CLSE, CNXN, OKAY, OPEN, WRTE,
+    AdbAuthKeyMissing, AdbConnectionClosed, AdbConnectionTimeout, AdbMessageInvalid, AdbStreamClosed, AdbStreamTimeout,
+    ShellResult
 )
 from alasio.adb.protocol.tcp_protocol import MESSAGE_STRUCT, AdbProtocolTCP, AdbStreamTCP
 from alasio.logger import logger
@@ -888,6 +889,113 @@ class TestOpenStream:
             protocol.open_stream('shell:echo')
 
         assert 'broken' in str(e.value)
+
+
+class TestUnansweredOpen:
+    """A device that answers the handshake but leaves OPENs unanswered
+
+    Such a peer is not a slow adbd: opening a service is a local operation of
+    the device and is answered in milliseconds. Without a limit the connection
+    stays "healthy" for as long as the caller keeps the object, every command
+    pays the whole timeout, and the reconnect logic of the caller, which looks
+    at `is_connected`, never runs.
+    """
+
+    def test_an_unanswered_open_keeps_the_connection(self):
+        """One timeout is not enough to drop a device that may be busy"""
+        with FakeAdbd() as adbd:
+            adbd.open_fault = 'silent'
+            client = AdbProtocolTCP(port=adbd.port)
+            client.timeout = 0.1
+            client.connect()
+            try:
+                with pytest.raises(AdbConnectionTimeout):
+                    client.open_stream('shell:x')
+                assert client.is_connected is True
+                assert client._open_timeouts == 1
+            finally:
+                client.disconnect()
+
+    def test_the_connection_is_dropped_after_the_limit(self):
+        """The timeout of the last OPEN drops the connection, connect() rebuilds it"""
+        with FakeAdbd() as adbd:
+            adbd.open_fault = 'silent'
+            client = AdbProtocolTCP(port=adbd.port)
+            client.timeout = 0.1
+            client.connect()
+            try:
+                for _ in range(ADB_OPEN_TIMEOUT_LIMIT - 1):
+                    with pytest.raises(AdbConnectionTimeout):
+                        client.open_stream('shell:x')
+                    assert client.is_connected is True
+
+                with pytest.raises(AdbConnectionTimeout):
+                    client.open_stream('shell:x')
+
+                # the peer is still there, the client is the one that gave up
+                assert client.is_connected is False
+                assert client._sock is None
+                with pytest.raises(AdbConnectionClosed) as e:
+                    client.open_stream('shell:x')
+                assert 'Not connected' in str(e.value)
+
+                # a device that answers again is served by a new connection
+                adbd.open_fault = ''
+                client.connect()
+                assert client.is_connected is True
+                assert client._open_timeouts == 0
+                with client.open_stream('shell:x') as stream:
+                    assert stream.recv_until_close(timeout=5) == b''
+            finally:
+                client.disconnect()
+
+        assert adbd.connections == 2
+        assert adbd.violations == []
+
+    def test_an_answered_open_resets_the_count(self):
+        """A peer that answers an OPEN is alive, the next timeout starts over"""
+        with FakeAdbd() as adbd:
+            adbd.open_fault = 'silent'
+            client = AdbProtocolTCP(port=adbd.port)
+            client.timeout = 0.1
+            client.connect()
+            try:
+                for _ in range(ADB_OPEN_TIMEOUT_LIMIT - 1):
+                    with pytest.raises(AdbConnectionTimeout):
+                        client.open_stream('shell:x')
+
+                adbd.open_fault = ''
+                with client.open_stream('shell:x') as stream:
+                    assert stream.recv_until_close(timeout=5) == b''
+                assert client._open_timeouts == 0
+
+                adbd.open_fault = 'silent'
+                for _ in range(ADB_OPEN_TIMEOUT_LIMIT - 1):
+                    with pytest.raises(AdbConnectionTimeout):
+                        client.open_stream('shell:x')
+                assert client.is_connected is True
+            finally:
+                client.disconnect()
+
+    def test_a_refused_service_resets_the_count(self):
+        """A CLSE is an answer: the device read the OPEN and refused it"""
+        with FakeAdbd(refuse=lambda service: True) as adbd:
+            adbd.open_fault = 'silent'
+            client = AdbProtocolTCP(port=adbd.port)
+            client.timeout = 0.1
+            client.connect()
+            try:
+                with pytest.raises(AdbConnectionTimeout):
+                    client.open_stream('shell:x')
+                assert client._open_timeouts == 1
+
+                adbd.open_fault = ''
+                with pytest.raises(AdbStreamClosed):
+                    client.open_stream('shell:x')
+                assert client._open_timeouts == 0
+                assert client.is_connected is True
+            finally:
+                client.disconnect()
 
 
 class TestProtocolRoundTrip:
@@ -2650,6 +2758,28 @@ class TestConnectFailure:
             client.connect()
 
         assert client._sock is None
+
+    def test_a_device_that_echoes_the_handshake(self):
+        """A port that reflects what it reads is not an adbd behind a CNXN
+
+        A local echo service, or a proxy forwarded to itself, sends the CNXN of
+        the host back. A handshake that only reads the command word accepts it,
+        and every command behind it times out on a connection that reports
+        itself as healthy.
+        """
+        with FakeAdbd() as adbd:
+            adbd.echo_handshake = True
+            client = AdbProtocolTCP(port=adbd.port)
+            client.timeout = 1
+
+            with pytest.raises(AdbMessageInvalid) as e:
+                client.connect()
+
+        assert 'CNXN of the host' in str(e.value)
+        assert client.is_connected is False
+        assert client._sock is None
+        assert client.features.features == []
+        assert adbd.connections == 1
 
     def test_a_device_that_never_answers(self):
         """A silent device is a timeout, not a closed connection
