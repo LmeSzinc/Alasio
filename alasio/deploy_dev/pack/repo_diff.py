@@ -32,8 +32,8 @@ from alasio.deploy.pack.pack_model import FileInfo, RefInfo
 from alasio.deploy_dev.pack import _pack_cache
 from alasio.deploy_dev.pack._pack_cache import PatchCache, PlainCache
 from alasio.deploy_dev.pack.pack_full import PackFull, _dfs_path_key, apply_encoding
+from alasio.deploy_dev.pack.rename_detect import RenameDetect
 from alasio.ext.cache import cached_property
-from alasio.ext.compress.algo_zstd import zstd_compress
 
 
 class UpdateInfo(FileInfo):
@@ -69,18 +69,14 @@ class RepoDiff:
 
     # Rename detection policy of the pack format, like PackFull.ZSTD_LEVEL: it
     # follows the version of the encoder, not the call, a changed value changes
-    # the produced records and has to come with a PACK_VERSION bump.
+    # the produced records and has to come with a PACK_VERSION bump. The
+    # matching itself is RenameDetect, shared with the dist pipeline (WheelDiff).
+    MIN_SIMILARITY = RenameDetect.MIN_SIMILARITY
+    MAX_SIZE_RATIO = RenameDetect.MAX_SIZE_RATIO
+    SIMILARITY_LEVEL = RenameDetect.SIMILARITY_LEVEL
 
-    # Minimum similarity of a rename pair, 0~1, like git's default 50%
-    # rename threshold.
-    MIN_SIMILARITY = 0.5
-
-    # Maximum size ratio of rename candidates, pairs outside
-    # [1 / ratio, ratio] are never matched.
-    MAX_SIZE_RATIO = 4.0
-
-    # Zstd level of the rename similarity score, a fast level is enough.
-    SIMILARITY_LEVEL = 3
+    # the score of two contents, the formula of the matching, see RenameDetect
+    similarity = staticmethod(RenameDetect.similarity)
 
     def __init__(self, old, new):
         """
@@ -502,12 +498,12 @@ class RepoDiff:
         """
         Match files only in the old version with files only in the new version.
 
-        Pairs with the same blob sha1 are exact renames, their
-        similarity is 1. Other pairs are filtered by size ratio and
-        scored by zstd dictionary compression (see similarity).
-        Candidates above the RepoDiff.MIN_SIMILARITY bar are matched greedily one-to-one
-        by descending similarity: every old file is the source of at
-        most one rename, because an R / RM record moves the old file.
+        Pairs with the same blob sha1 are exact renames, their similarity is 1.
+        Other pairs are filtered by size ratio and scored by zstd dictionary
+        compression (see similarity). The matching itself is RenameDetect, the
+        one the dist pipeline uses (WheelDiff): candidates above the
+        RepoDiff.MIN_SIMILARITY bar are matched greedily one-to-one by
+        descending similarity.
 
         Args:
             real_old (dict[str, IdxInfo]): Old files that exist
@@ -521,101 +517,22 @@ class RepoDiff:
         # content is not a revision of the repo, so it never pairs with a
         # deleted file
         deleted = [
-            path for path, info in real_old.items()
+            info for path, info in real_old.items()
             if path not in real_new and info.sha1 and path in self.old.filelist
         ]
         added = [
-            path for path, info in real_new.items()
+            info for path, info in real_new.items()
             if path not in real_old and info.sha1 and path in self.new.filelist
         ]
-
-        candidates = []
-        for new_path in added:
-            new_info = real_new[new_path]
-            for old_path in deleted:
-                old_info = real_old[old_path]
-                if old_info.sha1 == new_info.sha1:
-                    # exact content match, similarity is 1
-                    sim = 1.0
-                else:
-                    # size pre-filter before compressing the pair
-                    ratio = new_info.size / old_info.size
-                    if not (1 / RepoDiff.MAX_SIZE_RATIO <= ratio <= RepoDiff.MAX_SIZE_RATIO):
-                        continue
-                    sim = self._similarity(old_info, new_info)
-                if sim >= RepoDiff.MIN_SIMILARITY:
-                    candidates.append((sim, new_path, old_path))
-
-        # greedy one-to-one matching by descending similarity
-        candidates.sort(key=lambda item: (-item[0], item[1], item[2]))
-        renames = {}
-        matched_old = set()
-        for sim, new_path, old_path in candidates:
-            if new_path in renames or old_path in matched_old:
-                continue
-            renames[new_path] = old_path
-            matched_old.add(old_path)
-        return renames
-
-    def _similarity(self, old_info, new_info):
-        """
-        Similarity of a rename candidate, cached by the content pair
-
-        The score is a pure function of the two revisions, so the zstd patch
-        length it is derived from is stored in the cache, keyed by the git blob
-        sha1 pair of the deleted and the added revision: every version of the
-        window that pairs the same two revisions takes the score instead of
-        compressing again, and a hit needs no blob read at all, the size of the
-        new content comes from the record. See PackCache.rename.
-
-        Args:
-            old_info (IdxInfo): Deleted file record, the patch dictionary
-            new_info (IdxInfo): Added file record
-
-        Returns:
-            float: Similarity in [0, 1], see similarity
-        """
-        cache = _pack_cache.PACK_CACHE
-        old_entry = self.old.filelist.get(old_info.path)
-        new_entry = self.new.filelist.get(new_info.path)
-        if old_entry is None or new_entry is None:
-            # a generated extra file has no git blob, it is never a rename
-            # candidate (see _find_renames), a foreign caller gets no match
-            return 0.0
-        key = (old_entry.sha1, new_entry.sha1)
-        length = cache.get(cache.rename, key)
-        if length is None:
-            length = len(zstd_compress(
-                self._read_new_blob(new_info), source=self._read_old_blob(old_info),
-                level=RepoDiff.SIMILARITY_LEVEL))
-            cache.rename[key] = length
-            cache.rename.miss += 1
-        return 1 - length / new_info.size
-
-    @staticmethod
-    def similarity(old_content, new_content, level=SIMILARITY_LEVEL):
-        """
-        Estimate the similarity of two file contents with zstd dict compression.
-
-        The new content is compressed with the old content as the zstd
-        dictionary, the smaller the patch the more similar the contents.
-        similarity = 1 - len(patch) / len(new_content), so identical
-        contents score ~1 and unrelated contents score ~0. This is not
-        a real git diff, but zstd patch-from is fast in Python and the
-        ratio is a good proxy of the fraction of content that stays the
-        same.
-
-        Args:
-            old_content (bytes): Old file content, as the zstd dictionary
-            new_content (bytes): New file content, must not be empty
-            level (int): Zstd compression level for the score. Defaults
-                to SIMILARITY_LEVEL (3), a fast level is enough for a score.
-
-        Returns:
-            float: Similarity in [0, 1], higher is more similar
-        """
-        patch = zstd_compress(new_content, source=old_content, level=level)
-        return 1 - len(patch) / len(new_content)
+        detect = RenameDetect(
+            cache=_pack_cache.PACK_CACHE,
+            read_old=self._read_old_blob,
+            read_new=self._read_new_blob,
+            min_similarity=self.MIN_SIMILARITY,
+            max_size_ratio=self.MAX_SIZE_RATIO,
+            similarity_level=self.SIMILARITY_LEVEL,
+        )
+        return detect.find(deleted, added)
 
     def _try_copy(self, info, source_map):
         """

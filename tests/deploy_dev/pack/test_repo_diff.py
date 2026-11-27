@@ -494,16 +494,16 @@ class TestRenameScoreCache:
 
     def test_the_second_run_takes_the_cached_score(self, monkeypatch, cache):
         """The same pair is scored once, the next diff takes the entry"""
-        import alasio.deploy_dev.pack.repo_diff as repo_diff
+        import alasio.deploy_dev.pack.rename_detect as rename_detect
 
         calls = []
-        original = repo_diff.zstd_compress
+        original = rename_detect.zstd_compress
 
         def counting(*args, **kwargs):
             calls.append(kwargs.get('source') is not None)
             return original(*args, **kwargs)
 
-        monkeypatch.setattr(repo_diff, 'zstd_compress', counting)
+        monkeypatch.setattr(rename_detect, 'zstd_compress', counting)
         first = make_diff(self.OLD, self._new()).diff_info
         assert calls == [True]
         second = make_diff(self.OLD, self._new()).diff_info

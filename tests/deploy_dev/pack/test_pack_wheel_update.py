@@ -4,8 +4,12 @@ Tests for the wheel update pack (PackWheelUpdate).
 The scenario is two versions of the demo wheel with every kind of change:
 an unchanged file, a modified file (a zstd patch from the old content), a
 deleted file, an added file, a copy of an unchanged old file, and the
-.dist-info folder of the version (the files of the old folder are deleted,
-the ones of the new folder are added, no rename is guessed).
+.dist-info folder of the version (its files are paired by the path under the
+folder, the folder name carries the version).
+
+The renamed files have a class of their own (TestWheelDiffRename): a rebuilt
+artifact names its files by the hash of their content, so a build renames a
+whole import graph at once.
 
 The pack is applied with the client jobs (UnpackJob / UpdateJob) on the
 in-memory filesystem: the old version is unpacked into a named target of a
@@ -14,6 +18,7 @@ the tree, the ledger and the deleted files are compared against the new
 version.
 """
 import os
+import random
 from hashlib import sha1
 
 import pytest
@@ -37,6 +42,33 @@ from tests.deploy_dev.pack.conftest import MockServerFile
 CORE_V1 = b''.join(b'VALUE_%d = %d\n' % (index, index) for index in range(80))
 CORE_V2 = CORE_V1 + b'VALUE_NEW = 99\n'
 KEEP = b'keep me\n'
+
+# the chunks of a built artifact: a file is named by the hash of its content,
+# so a rebuild writes the unchanged content under another name (a rename) and
+# the changed chunk under another name again (a rename + modify)
+CHUNK_V1 = b''.join(b'CHUNK_%d = %d\n' % (index, index) for index in range(120))
+CHUNK_V2 = CHUNK_V1 + b'CHUNK_NEW = 99\n'
+
+
+def _noise(count, seed):
+    """
+    A deterministic pseudo random content of a size.
+
+    Args:
+        count (int): Number of bytes
+        seed (int): Seed of the generator
+
+    Returns:
+        bytes: The content
+    """
+    generator = random.Random(seed)
+    return bytes(generator.getrandbits(8) for _ in range(count))
+
+
+# incompressible contents, unrelated to each other: a pair below the similarity
+# bar whatever zstd makes of the bytes themselves
+NOISE_A = _noise(4000, 1)
+NOISE_B = _noise(4000, 2)
 
 
 @pytest.fixture(autouse=True)
@@ -305,6 +337,134 @@ class TestWheelDiff:
         assert WheelDiff(old, new).cache is new.cache
 
 
+class TestWheelDiffRename:
+    """A file the build renamed is moved by the client, not shipped again."""
+
+    @staticmethod
+    def _packs(old_files, new_files):
+        """
+        Build two versions of the demo wheel.
+
+        Args:
+            old_files (dict[str, bytes]): Members of the old wheel
+            new_files (dict[str, bytes]): Members of the new wheel
+
+        Returns:
+            tuple[PackWheel, PackWheel]: The two versions
+        """
+        old = PackWheel(build_wheel(
+            '/w/demo-1.0-py3-none-any.whl', old_files, name='demo', version='1.0'))
+        new = PackWheel(build_wheel(
+            '/w/demo-2.0-py3-none-any.whl', new_files, name='demo', version='2.0'))
+        return old, new
+
+    def test_renames(self, fs):
+        """The unchanged and the modified content are both matched."""
+        old, new = self._packs(
+            {'demo/__init__.py': b'', 'demo/a.txt': KEEP, 'demo/chunk-A.js': CHUNK_V1},
+            {'demo/__init__.py': b'', 'demo/b.txt': KEEP, 'demo/chunk-B.js': CHUNK_V2},
+        )
+        assert WheelDiff(old, new).renames == {
+            'demo/b.txt': 'demo/a.txt',
+            'demo/chunk-B.js': 'demo/chunk-A.js',
+        }
+
+    def test_identical_content_is_moved(self, fs):
+        """R: no data at all, the old file gets no D record of its own."""
+        old, new = self._packs(
+            {'demo/__init__.py': b'', 'demo/a.txt': KEEP},
+            {'demo/__init__.py': b'', 'demo/b.txt': KEEP},
+        )
+        diff = WheelDiff(old, new)
+        info = diff.diff_info
+        assert info['demo/b.txt'].edit == 3
+        assert info['demo/b.txt'].source_path == 'demo/a.txt'
+        assert info['demo/b.txt'].size == len(KEEP)
+        assert info['demo/b.txt'].data_size == 0
+        # the move is one record: the old path is not deleted by a D record
+        assert 'demo/a.txt' not in info
+        # the source is a record of the refinfo, the pack carries no data of it
+        assert 'demo/a.txt' in diff.refinfo
+        assert diff.refinfo['demo/a.txt'].sha1 == old.tree['demo/a.txt'].sha1
+
+    def test_modified_content_is_patched(self, fs):
+        """RM: a zstd patch from the old file, the old file is not deleted."""
+        old, new = self._packs(
+            {'demo/__init__.py': b'', 'demo/chunk-A.js': CHUNK_V1},
+            {'demo/__init__.py': b'', 'demo/chunk-B.js': CHUNK_V2},
+        )
+        diff = WheelDiff(old, new)
+        info = diff.diff_info
+        record = info['demo/chunk-B.js']
+        assert record.edit == 3
+        assert record.source_path == 'demo/chunk-A.js'
+        assert record.algo == 2
+        assert 0 < record.data_size < record.size
+        assert 'demo/chunk-A.js' not in info
+        assert 'demo/chunk-A.js' in diff.refinfo
+        assert diff.refinfo['demo/chunk-A.js'].size == len(CHUNK_V1)
+
+    def test_unrelated_content_is_added(self, fs):
+        """A pair below the similarity bar stays an A + D pair."""
+        old, new = self._packs(
+            {'demo/__init__.py': b'', 'demo/chunk-A.js': NOISE_A},
+            {'demo/__init__.py': b'', 'demo/chunk-B.js': NOISE_B},
+        )
+        diff = WheelDiff(old, new)
+        assert diff.renames == {}
+        info = diff.diff_info
+        assert info['demo/chunk-B.js'].edit == 0
+        assert info['demo/chunk-A.js'].edit == 2
+
+    def test_the_source_of_a_rename_is_a_copy_source(self, fs):
+        """A new file that carries the content of a rename source is copied."""
+        payload = b'payload\n' * 40
+        old, new = self._packs(
+            {'demo/__init__.py': b'', 'demo/a.txt': payload},
+            {'demo/__init__.py': b'', 'demo/b.txt': payload, 'demo/c.txt': payload},
+        )
+        info = WheelDiff(old, new).diff_info
+        # b.txt is the rename of a.txt, c.txt copies the content of the source
+        # (the client removes the source only after every write)
+        assert info['demo/b.txt'].edit == 3
+        assert info['demo/b.txt'].source_path == 'demo/a.txt'
+        assert info['demo/c.txt'].edit == 0
+        assert info['demo/c.txt'].source_path == 'demo/a.txt'
+        assert info['demo/c.txt'].data_size == 0
+
+    def test_empty_files_are_never_renamed(self, fs):
+        """An empty file is cheaper as an A + D pair than as a rename."""
+        old, new = self._packs(
+            {'demo/__init__.py': b'', 'demo/a.txt': b''},
+            {'demo/__init__.py': b'', 'demo/b.txt': b''},
+        )
+        diff = WheelDiff(old, new)
+        assert diff.renames == {}
+        info = diff.diff_info
+        assert info['demo/b.txt'].edit == 0
+        assert info['demo/a.txt'].edit == 2
+
+    def test_min_similarity(self, fs, monkeypatch):
+        """The bar of the matching is a policy of the encoder, not of the call."""
+        old, new = self._packs(
+            {'demo/__init__.py': b'', 'demo/chunk-A.js': CHUNK_V1},
+            {'demo/__init__.py': b'', 'demo/chunk-B.js': CHUNK_V2},
+        )
+        assert WheelDiff(old, new).renames == {'demo/chunk-B.js': 'demo/chunk-A.js'}
+        # above the similarity of the pair the pair is not matched, the file
+        # is shipped again
+        monkeypatch.setattr(WheelDiff, 'MIN_SIMILARITY', 1.0)
+        assert WheelDiff(old, new).renames == {}
+
+    def test_the_policy_is_the_one_of_the_git_pipeline(self, fs):
+        """The matching reads the policy of RepoDiff, not a copy of it."""
+        import alasio.deploy_dev.pack.repo_diff as repo_diff
+
+        assert WheelDiff.MIN_SIMILARITY == repo_diff.RepoDiff.MIN_SIMILARITY
+        assert WheelDiff.MAX_SIZE_RATIO == repo_diff.RepoDiff.MAX_SIZE_RATIO
+        assert WheelDiff.SIMILARITY_LEVEL == repo_diff.RepoDiff.SIMILARITY_LEVEL
+
+
 class TestUpdatePack:
     """The encoded update pack."""
 
@@ -466,6 +626,67 @@ class TestClientRoundTrip:
         # of the pack landed in the flat pack area of the site-packages
         assert not os.path.exists(f'{site}/demo-1.0.dist-info')
         assert not os.path.exists(f'{site}/.pack/index.pack')
+
+    @pytest.mark.trio
+    async def test_rename_update(self, app_folder, fs, monkeypatch):
+        """The client moves the renamed files, the old paths are gone."""
+        old = PackWheel(build_wheel(
+            '/w/demo-1.0-py3-none-any.whl',
+            {'demo/__init__.py': b'', 'demo/a.txt': KEEP, 'demo/chunk-A.js': CHUNK_V1},
+            name='demo', version='1.0'))
+        new = PackWheel(build_wheel(
+            '/w/demo-2.0-py3-none-any.whl',
+            {
+                'demo/__init__.py': b'',
+                'demo/b.txt': KEEP,
+                # a file that copies the content of the rename source: the
+                # source is still readable when the record is applied, it is
+                # removed only after every write of the update
+                'demo/c.txt': KEEP,
+                'demo/chunk-B.js': CHUNK_V2,
+            },
+            name='demo', version='2.0'))
+        update_data = b''.join(PackWheelUpdate(new, old).iter_pack_data())
+        # the pack moves two files: the unchanged one (R) and the changed one
+        # (RM), neither of them carries its content
+        fileinfo = PackDecodeBase(update_data).fileinfo
+        assert fileinfo['demo/b.txt'].edit == 3
+        assert fileinfo['demo/b.txt'].data_size == 0
+        assert fileinfo['demo/chunk-B.js'].edit == 3
+        assert fileinfo['demo/chunk-B.js'].data_size < fileinfo['demo/chunk-B.js'].size
+        # the copy references the rename source, it carries no data either
+        assert fileinfo['demo/c.txt'].edit == 0
+        assert fileinfo['demo/c.txt'].source_path == 'demo/a.txt'
+        assert fileinfo['demo/c.txt'].data_size == 0
+
+        old_full = b''.join(old.iter_pack_data())
+        new_full = b''.join(new.iter_pack_data())
+        site = site_packages(fs)
+        server = MockServerFile()
+        server.register_version('1.0', old_full, old.index_pack)
+        server.register_version('2.0', new_full, new.index_pack)
+        server.register_update('1.0', '2.0', update_data)
+
+        with logger.mock_capture_writer():
+            assert await UnpackJob(old_full, root=site, name='demo').run()
+
+        async def _fail(*args, **kwargs):
+            raise AssertionError('no download expected, every source is local')
+
+        monkeypatch.setattr(server, 'get_file_data', _fail)
+        monkeypatch.setattr(server, 'get_index_pack', _fail)
+
+        with logger.mock_capture_writer():
+            job = UpdateJob(update_data, server=server, root=site, name='demo')
+            assert await job.run()
+        assert job.error == []
+
+        for path, file in new.tree.items():
+            assert file_read_bytes(f'{site}/{path}') == file.content, path
+        # the sources of the renames are moved away, not left behind
+        assert not os.path.exists(f'{site}/demo/a.txt')
+        assert not os.path.exists(f'{site}/demo/chunk-A.js')
+        assert file_read_bytes(f'{site}/.pack/demo/index.pack') == new.index_pack
 
     @pytest.mark.trio
     async def test_unpack_new(self, app_folder, fs):

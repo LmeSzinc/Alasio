@@ -28,12 +28,19 @@ paths stay the canonical .pack namespace of the pack format: the client maps
 them into the ledger folder of its target (see JobBase.local_path), the pack
 carries no dist-key.
 
-The diff does not detect renames, see WheelDiff: the files of a .dist-info
-folder change their name with the version of the folder, and the files below
-the folder are matched by the path under it (WheelDiff.dist_info_pair), so a
+The diff detects renames (see WheelDiff.renames): a file the new version does
+not have at the path of an old file is matched with a file the old version did
+not have by content similarity, the matching of the git pipeline (RenameDetect),
+and the record becomes R (the content is identical) or RM (a zstd patch from the
+old file), so the client moves the old file instead of downloading the new one.
+The dist pipeline needs it most: a built frontend names its files by the hash of
+their content, so a rebuild that changes one chunk renames the whole import graph
+of the bundle, and every file of it would otherwise ship again as an A + D pair.
+The files of a .dist-info folder are paired by the path under the folder instead
+(WheelDiff.dist_info_pair): the folder carries the version in its name, so a
 version bump patches them from the old file (M) or copies the ones that did not
-change (C, e.g. a license) and only the folder name moves; the folders of the
-other files are never matched, a renamed module stays an A + D pair.
+change (C, e.g. a license) and only the folder name moves; they are never rename
+candidates.
 
 Usage:
     from alasio.deploy_dev.pack.pack_wheel import PackWheel
@@ -52,6 +59,7 @@ from alasio.deploy_dev.pack.encode_base import PackEncodeBase
 from alasio.deploy_dev.pack.pack_full import PackFull, _dfs_path_key, apply_encoding
 from alasio.deploy_dev.pack.pack_update import PackUpdate
 from alasio.deploy_dev.pack.pack_wheel import PackWheel
+from alasio.deploy_dev.pack.rename_detect import RenameDetect
 from alasio.deploy_dev.pack.repo_diff import UpdateInfo
 from alasio.ext.cache import cached_property
 
@@ -62,10 +70,13 @@ class WheelDiff:
 
     The records are the ones an update pack carries (see pack_update):
 
-    - a file the new version does not have becomes a D (deleted) record
-    - a file only the new version has becomes an A (added) record, or a C
+    - a file the new version does not have becomes a D (deleted) record, or
+      nothing when the file is matched as the source of a rename (see renames)
+    - a file only the new version has becomes an A (added) record, a C
       (copied) record when its content already exists in an unchanged old
-      file or in an earlier record of the new version
+      file or in an earlier record of the new version, or an R / RM (renamed)
+      record when it is matched with a file of the old version: R when the
+      content is identical, RM with a zstd patch from the old file otherwise
     - a file both versions have, with another content or mode, becomes an
       M (modified) record: the best of raw / lzma / zstd patch-from / plain
       zstd is stored, and the record references the old file when the zstd
@@ -85,13 +96,11 @@ class WheelDiff:
     the client gets them from the new ledger the update installs, and the
     validation that follows the update enforces them.
 
-    Unlike RepoDiff there is no rename detection: the name of every file of
-    a .dist-info folder changes with the version of the folder, the design
-    accepts the A + D records that come out of it (see the module
-    docstring), and the zstd similarity score of the git diff has no
-    consumer here: the package files of a distribution rarely move between
-    two versions, and when one does, the A + D pair is the honest record of
-    it (no guessed rename can be wrong).
+    The rename detection is the one of the git pipeline (RenameDetect): the
+    files of the two .dist-info folders are paired by their path under the
+    folder before it runs (see dist_info_pair), so they are never rename
+    candidates, and the empty files are left out of the candidates: an empty
+    file is cheaper as an A + D pair than as a rename with a source record.
 
     The encodings are reused across the builds of a run through the cache of
     the new version (WHEEL_CACHE by default): an A record is keyed by the
@@ -105,6 +114,13 @@ class WheelDiff:
         new (PackWheel): New version
         cache (PackCache): Cache of the encodings, the one of the new version
     """
+
+    # Rename detection policy of the pack format, shared with the git pipeline
+    # (RepoDiff): a changed value changes the produced records and has to come
+    # with a PACK_VERSION bump like any other encoding change.
+    MIN_SIMILARITY = RenameDetect.MIN_SIMILARITY
+    MAX_SIZE_RATIO = RenameDetect.MAX_SIZE_RATIO
+    SIMILARITY_LEVEL = RenameDetect.SIMILARITY_LEVEL
 
     def __init__(self, old, new):
         """
@@ -174,19 +190,82 @@ class WheelDiff:
         return out
 
     @cached_property
+    def renames(self) -> "dict[str, str]":
+        """
+        {new path: old path} of the files matched as renamed.
+
+        The candidates are the files the new version does not have at the same
+        path and the files the old version did not have, without the files of
+        the .dist-info folders (a folder name carries the version and the files
+        of one distribution are not the files of another, see dist_info_pair)
+        and without the empty files (an empty file is not a content to match).
+        The matching is RenameDetect, the one of the git pipeline: a file the
+        build renamed, e.g. a chunk of a frontend named by the hash of its
+        content, is moved by the client instead of being shipped again.
+
+        Returns:
+            dict[str, str]: {path in the new version: path in the old version}
+        """
+        old_files = self.old.tree
+        new_files = self.new.tree
+        deleted = [
+            RefInfo(path=path, size=len(file.content), sha1=file.sha1)
+            for path, file in old_files.items()
+            if path not in new_files and file.content and not self._is_dist_info(path)
+        ]
+        added = [
+            RefInfo(path=path, size=len(file.content), sha1=file.sha1)
+            for path, file in new_files.items()
+            if path not in old_files and file.content and not self._is_dist_info(path)
+        ]
+        if not deleted or not added:
+            return {}
+        detect = RenameDetect(
+            cache=self.cache,
+            read_old=lambda record: old_files[record.path].content,
+            read_new=lambda record: new_files[record.path].content,
+            min_similarity=self.MIN_SIMILARITY,
+            max_size_ratio=self.MAX_SIZE_RATIO,
+            similarity_level=self.SIMILARITY_LEVEL,
+        )
+        return detect.find(deleted, added)
+
+    @staticmethod
+    def _is_dist_info(path):
+        """
+        Check whether a path lies in a .dist-info folder of the install tree.
+
+        A .dist-info folder carries the name and the version of the
+        distribution in the folder name, its files are the files of one
+        version of one distribution: they are paired across the two versions
+        (see dist_info_pair), never matched by content similarity, a METADATA
+        of another distribution is not an old revision of this one.
+
+        Args:
+            path (str): Path of the install tree
+
+        Returns:
+            bool: True if a folder of the path is a .dist-info folder
+        """
+        return any(part.endswith('.dist-info') for part in path.split('/')[:-1])
+
+    @cached_property
     def diff_info(self) -> "dict[str, UpdateInfo]":
         """
         File changes from the old version to the new version, keyed by path.
 
         source_path points to the old file the record references: the old
-        file of the same path for an M record with patch data, the copied
-        file for a C record. It is empty for an A / D record and for an M
-        record with plain data.
+        file of the same path for an M record with patch data, the rename
+        source for an R / RM record, the copied file for a C record. It is
+        empty for an A / D record and for an M record with plain data.
 
         A record whose content an unchanged old file or an earlier record of
         the new version already carries is decided to be a C (copied) record
         before the encoding, so no candidate of it is ever compressed (see
-        _try_copy).
+        _try_copy). A file matched as a rename (see renames) is moved by the
+        client: its record is R or RM and the old file gets no D record of
+        its own, unless the plain encoding of the new content wins the patch
+        and the pair is recorded as add + delete after all.
 
         Returns:
             dict[str, UpdateInfo]: {path: UpdateInfo}
@@ -205,11 +284,57 @@ class WheelDiff:
         for path, file in old_files.items():
             if path in unchanged:
                 source_map.setdefault(file.sha1, path)
+        pair = self.dist_info_pair
+        renamed_old = set(self.renames.values())
+        # a rename source is still readable in the working tree when a copied
+        # record references it (the client removes the source only after every
+        # write of the update), so it serves as a copy source too. A source
+        # that is downgraded to add + delete later is dropped from the map
+        # again, see the rename branch
+        for old_path in renamed_old:
+            file = old_files[old_path]
+            if file.content:
+                source_map.setdefault(file.sha1, old_path)
 
         out = {}
-        pair = self.dist_info_pair
+        downgraded_old = set()
         for path, new_file in new_files.items():
             if path in unchanged:
+                continue
+            # a content that already exists (an unchanged old file, or an
+            # earlier record of the new version) makes the record a C (copied)
+            # record, and a copy carries no data at all: the check runs before
+            # the encoding, so the content of a copy is never compressed. An
+            # empty file is never a copy, only a non-empty content is shared
+            # (the same rule the full pack and the git diff keep)
+            content_sha1 = new_file.sha1 if new_file.content else b''
+            renamed = self.renames.get(path)
+            if renamed is not None:
+                # renamed: the client moves the old file, the content is
+                # identical (R, no data) or a zstd patch from the old file
+                # (RM, when the patch wins the encoding)
+                old_file = old_files[renamed]
+                record = UpdateInfo(path=path, edit=3, eol=2, mode=new_file.mode)
+                record.source_path = renamed
+                if old_file.sha1 == new_file.sha1:
+                    record.size = len(new_file.content)
+                    record.sha1 = content_sha1
+                elif self._load_modified(record, old_file, new_file):
+                    # the target of the rename serves as a copy source for the
+                    # later records (the client writes it before the deletions)
+                    source_map[record.sha1] = path
+                else:
+                    # plain data beats the patch: the file is added and the
+                    # old one deleted instead
+                    record.edit = 0
+                    record.source_path = ''
+                    downgraded_old.add(renamed)
+                    # the source becomes a deleted file: a copied record must
+                    # not reference it from now on
+                    if source_map.get(old_file.sha1) == renamed:
+                        del source_map[old_file.sha1]
+                    self._try_copy(record, source_map, content_sha1)
+                out[path] = record
                 continue
             # the file of the old version this record comes from: the same
             # path, or the same path under the .dist-info folder of the old
@@ -218,13 +343,6 @@ class WheelDiff:
             old_file = old_files.get(old_path) if old_path else None
             record = UpdateInfo(
                 path=path, edit=1 if old_file is not None else 0, eol=2, mode=new_file.mode)
-            # a content that already exists (an unchanged old file, or an
-            # earlier record of the new version) makes the record a C (copied)
-            # record, and a copy carries no data at all: the check runs before
-            # the encoding, so the content of a copy is never compressed. An
-            # empty file is never a copy, only a non-empty content is shared
-            # (the same rule the full pack and the git diff keep)
-            content_sha1 = new_file.sha1 if new_file.content else b''
             copied = self._try_copy(record, source_map, content_sha1)
             if not copied and content_sha1 and old_file is not None and old_file.sha1 == content_sha1:
                 # the content is the same and only the path moved (the folder
@@ -246,11 +364,16 @@ class WheelDiff:
                 source_map[content_sha1] = path
             out[path] = record
 
-        # 2. deleted: the files the new version does not have, in the DFS
-        # path order of the old version, like RepoDiff emits them
+        # 2. deleted: the files the new version does not have and no rename
+        # moved, in the DFS path order of the old version, like RepoDiff emits
+        # them. The source of a rename is removed by the client with the record
+        # that moves it, a source downgraded to add + delete is deleted
         for path in old_files:
-            if path not in new_files:
-                out[path] = self._new_deleted(path)
+            if path in new_files:
+                continue
+            if path in renamed_old and path not in downgraded_old:
+                continue
+            out[path] = self._new_deleted(path)
         return out
 
     @cached_property
@@ -259,9 +382,9 @@ class WheelDiff:
         Old file records referenced by the diff records.
 
         These records must appear in the refinfo of the update pack: the
-        sources of the M (patch) records and the unchanged old files the C
-        records copy. A copied record whose source is a new file (an earlier
-        record of the new version) is not a ref record.
+        sources of the R / RM records, the sources of the M (patch) records
+        and the old files the C records copy. A copied record whose source is a
+        new file (an earlier record of the new version) is not a ref record.
 
         The order is the DFS path sort of the pack, the convention shared
         with the client's local old index (see PackUpdate.refinfo).
@@ -271,20 +394,24 @@ class WheelDiff:
         """
         diff = self.diff_info
         unchanged = set(self.old.tree) & set(self.new.tree) - set(diff)
-        # the sources of the C records: an unchanged old file, or the file of
-        # the old version under the .dist-info folder that moved
+        # the sources of the C records: an unchanged old file, the file of the
+        # old version under the .dist-info folder that moved, or the source of
+        # a rename (a file the update deletes, but only after every write)
         moved = set(self.dist_info_pair.values())
+        renamed = {info.source_path for info in diff.values() if info.edit == 3}
         ref_paths = set()
         for info in diff.values():
             if not info.source_path:
                 continue
-            if info.edit == 1:
+            if info.edit == 1 or info.edit == 3:
                 # an M record only references the old file when patch data is
-                # used, source_path is empty otherwise
+                # used, source_path is empty otherwise; an R / RM record always
+                # references the file it moves
                 ref_paths.add(info.source_path)
-            elif info.source_path in unchanged or info.source_path in moved:
-                # copied from an unchanged old file, or from the file of the
-                # old version under the folder that moved (dist-info)
+            elif info.source_path in unchanged or info.source_path in moved or info.source_path in renamed:
+                # copied from an unchanged old file, from the file of the old
+                # version under the folder that moved (dist-info), or from the
+                # source of a rename
                 ref_paths.add(info.source_path)
         out = {}
         for path in sorted(ref_paths, key=_dfs_path_key):
