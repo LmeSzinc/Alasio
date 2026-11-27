@@ -1343,7 +1343,7 @@ class TestMessageRecvValidation:
             with pytest.raises(AdbMessageInvalid) as e:
                 client.connect()
 
-        assert 'Invalid command' in str(e.value)
+        assert 'Invalid message' in str(e.value)
 
     def test_a_garbage_banner(self):
         """A peer that does not speak adb fails the handshake, not a read"""
@@ -3036,6 +3036,62 @@ class TestAddress:
         assert 'unreachable' in str(e.value)
         assert client.is_connected is False
         assert client._sock is None
+
+
+class TestInvalidMessageText:
+    """The text of an error about a peer that is not adb
+
+    A port that answers HTTP or a database protocol is a common mistake, and
+    the answer is what tells the operator which service is there. The bytes of
+    the peer are shown as the bytes literal Python writes: the printable ASCII
+    as itself and every other byte escaped, so a binary answer is still
+    recognizable and its text is still guessable.
+    """
+
+    @staticmethod
+    def recv_wrong_header(header):
+        """
+        Read a header that is not a message of the transport.
+
+        Args:
+            header (bytes): Bytes the peer answers with
+
+        Returns:
+            str: Message of the AdbMessageInvalid the read raised
+        """
+        reader, writer = socket.socketpair()
+        # the reader of a socketpair has no timeout, and message_recv waits on
+        # the timeout of the socket: a test that sends a header of the wrong
+        # length would hang the suite instead of failing it
+        reader.settimeout(1)
+        try:
+            writer.sendall(header)
+            with pytest.raises(AdbMessageInvalid) as e:
+                AdbProtocolTCP().message_recv(reader)
+            return str(e.value)
+        finally:
+            reader.close()
+            writer.close()
+
+    def test_an_http_answer(self):
+        """A text answer is readable as it arrived"""
+        message = self.recv_wrong_header(b'HTTP/1.0 400 Bad Request')
+
+        assert message == "Invalid message b'HTTP/1.0 400 Bad Request'"
+
+    def test_a_binary_answer_keeps_its_escapes(self):
+        """A binary answer shows its text and escapes the bytes around it
+
+        A MySQL server answers the connect with its version inside its own
+        binary protocol. The version stays readable and the parts that are not
+        text stay escaped, which is what tells a binary greeting apart from a
+        text one.
+        """
+        message = self.recv_wrong_header(b'N\x00\x00\x00\n5.6.50-log\x00\x01\x00\x00\x00n_\x00\x00')
+
+        assert message == (
+            "Invalid message b'N\\x00\\x00\\x00\\n5.6.50-log\\x00\\x01\\x00\\x00\\x00n_\\x00\\x00'"
+        )
 
 
 class TestRecvExact:

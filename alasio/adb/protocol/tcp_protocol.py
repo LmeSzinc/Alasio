@@ -968,7 +968,10 @@ class AdbProtocolTCP:
         # check command
         command_name = header[:4]
         if command_name not in ADB_COMMANDS:
-            raise AdbMessageInvalid(f'Invalid command {command_name}, header={header}')
+            # the header is the bytes of the peer as they arrived: printable
+            # ASCII stays readable, the rest is escaped, so a port that answers
+            # HTTP or a database protocol tells what it is
+            raise AdbMessageInvalid(f'Invalid message {header!r}')
 
         # validate magic
         expected_magic = command ^ 0xFFFFFFFF
