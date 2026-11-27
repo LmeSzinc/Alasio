@@ -14,8 +14,8 @@ import pytest
 import alasio.adb.protocol.tcp_protocol as tcp_protocol
 from alasio.adb.protocol import keygen
 from alasio.adb.protocol.const import (
-    ADB_MAX_PAYLOAD, ADB_MAX_PAYLOAD_V1, ADB_STREAM_CHUNK_LIMIT, ADB_STREAM_RECV_BUFFER_SIZE, ADB_VERSION,
-    ADB_VERSION_SKIP_CHECKSUM, CLSE, CNXN, OKAY, OPEN, WRTE, AdbAuthKeyMissing, AdbConnectionClosed,
+    ADB_MAX_PAYLOAD, ADB_MAX_PAYLOAD_V1, ADB_STREAM_CHUNK_LIMIT, ADB_STREAM_CHUNK_SIZE, ADB_STREAM_RECV_BUFFER_SIZE,
+    ADB_VERSION, ADB_VERSION_SKIP_CHECKSUM, CLSE, CNXN, OKAY, OPEN, WRTE, AdbAuthKeyMissing, AdbConnectionClosed,
     AdbConnectionTimeout, AdbMessageInvalid, AdbStreamClosed, AdbStreamTimeout, ShellResult
 )
 from alasio.adb.protocol.tcp_protocol import MESSAGE_STRUCT, AdbProtocolTCP, AdbStreamTCP
@@ -191,7 +191,7 @@ def buffered(stream):
     Returns:
         bytes: Buffered output, in order
     """
-    return b''.join(stream._data_chunks)
+    return b''.join(stream._chunks) + b''.join(stream._run)
 
 
 def acknowledged(stream):
@@ -339,7 +339,7 @@ class TestReceiveBuffer:
 
         assert stream.add_data(b'1234') is True
         assert buffered(stream) == b'1234'
-        assert stream._data_size == 4
+        assert stream._pending_size == 4
         assert stream._okay_debt == 0
 
     def test_the_write_that_fills_the_buffer_is_held_back(self):
@@ -350,7 +350,7 @@ class TestReceiveBuffer:
         assert stream.add_data(b'5678') is True
         assert stream.add_data(b'90') is False
         assert buffered(stream) == b'1234567890'
-        assert stream._data_size == 10
+        assert stream._pending_size == 10
         assert stream._okay_debt == 1
 
     def test_a_write_larger_than_the_buffer_is_held_back(self):
@@ -358,8 +358,9 @@ class TestReceiveBuffer:
         stream = make_stream(recv_buffer_size=10)
 
         assert stream.add_data(b'x' * 100) is False
-        # the write is kept as one chunk, not cut to fit the buffer
-        assert stream._data_chunks == [b'x' * 100]
+        # the write is kept as one piece, not cut to fit the buffer
+        assert buffered(stream) == b'x' * 100
+        assert stream._pending_size == 100
 
     def test_a_stored_write_is_not_copied(self):
         """A write goes into the buffer as the object the connection built
@@ -373,28 +374,66 @@ class TestReceiveBuffer:
 
         stream.add_data(payload)
 
-        assert stream._data_chunks[0] is payload
+        assert stream._chunks[0] is payload
+        assert stream._run == []
 
-    def test_small_writes_are_joined_once_the_list_grows_long(self):
-        """Many small writes do not become one object each in the buffer
+    def test_small_writes_are_held_back_until_they_are_worth_an_object(self):
+        """Small writes wait in the tail instead of taking an object each"""
+        stream = make_stream()
+        write = b'x' * 512
 
-        A device can split its output into writes of a few dozen bytes. Keeping
-        one object per write would cost more in object headers and list slots
-        than the output itself, so the buffer is joined once the list grows long.
+        for _ in range(ADB_STREAM_CHUNK_SIZE // len(write) - 1):
+            stream.add_data(write)
+
+        assert stream._chunks == []
+        assert stream._run_size == ADB_STREAM_CHUNK_SIZE - len(write)
+
+        stream.add_data(write)
+
+        assert len(stream._chunks) == 1
+        assert len(stream._chunks[0]) == ADB_STREAM_CHUNK_SIZE
+        assert stream._run == []
+        assert stream._run_size == 0
+        assert buffered(stream) == write * (ADB_STREAM_CHUNK_SIZE // len(write))
+
+    def test_a_write_that_is_worth_an_object_is_never_combined(self):
+        """A large transfer is not copied into a second object
+
+        Combining the writes of a large transfer would copy the whole of it once
+        more for nothing: a write of a chunk size or more already holds far more
+        than the object header it costs.
         """
-        stream = make_stream(recv_buffer_size=1024)
+        stream = make_stream()
+        payload = b'x' * ADB_STREAM_CHUNK_SIZE
+        writes = ADB_STREAM_CHUNK_LIMIT * 2
 
-        for _ in range(ADB_STREAM_CHUNK_LIMIT + 1):
-            stream.add_data(b'x' * 10)
+        stream.add_data(b'small')
+        for _ in range(writes):
+            stream.add_data(payload)
 
-        assert len(stream._data_chunks) == 1
-        assert stream._data_size == (ADB_STREAM_CHUNK_LIMIT + 1) * 10
-        assert buffered(stream) == b'x' * ((ADB_STREAM_CHUNK_LIMIT + 1) * 10)
+        # the small write is combined out of the tail, and every large write is
+        # the very object the connection built
+        assert stream._run == []
+        assert stream._chunks[0] == b'small'
+        assert len(stream._chunks) == writes + 1
+        assert all(chunk is payload for chunk in stream._chunks[1:])
 
-    def test_the_joined_buffer_still_takes_every_byte(self):
-        """The join keeps the order and hands the output back in one piece"""
-        stream = make_stream(recv_buffer_size=1024)
-        writes = [b'a', b'bb', b'ccc'] * (ADB_STREAM_CHUNK_LIMIT)
+    def test_a_device_that_writes_a_byte_at_a_time_is_still_bounded(self):
+        """Byte by byte writes do not hold one object per byte"""
+        stream = make_stream()
+
+        for _ in range(ADB_STREAM_CHUNK_LIMIT):
+            stream.add_data(b'x')
+
+        assert len(stream._chunks) == 1
+        assert stream._chunks[0] == b'x' * ADB_STREAM_CHUNK_LIMIT
+        assert stream._run == []
+        assert buffered(stream) == b'x' * ADB_STREAM_CHUNK_LIMIT
+
+    def test_the_combined_writes_still_take_every_byte(self):
+        """Combining keeps the order and hands the output back in one piece"""
+        stream = make_stream()
+        writes = [b'a', b'bb', b'ccc'] * ADB_STREAM_CHUNK_LIMIT
 
         for write in writes:
             stream.add_data(write)
@@ -402,14 +441,43 @@ class TestReceiveBuffer:
 
         assert stream.recv_until_close(timeout=0) == b''.join(writes)
 
-    def test_the_list_is_left_alone_below_the_limit(self):
-        """The output that fits in a few writes is never copied"""
-        stream = make_stream(recv_buffer_size=1024)
+    def test_a_long_read_does_not_hold_one_object_per_write(self):
+        """The objects of the output are bounded by its size, not its writes
 
-        for _ in range(ADB_STREAM_CHUNK_LIMIT):
-            stream.add_data(b'x')
+        The output stays in the stream until the read sees the close, so without
+        combining a command that writes in small pieces would be held as one
+        object per write however long the read runs.
+        """
+        stream = make_stream()
+        writes = 1000
 
-        assert len(stream._data_chunks) == ADB_STREAM_CHUNK_LIMIT
+        for _ in range(writes):
+            stream.add_data(b'x' * 10)
+            stream._consume()
+
+        assert len(stream._chunks) + len(stream._run) <= writes // ADB_STREAM_CHUNK_LIMIT + ADB_STREAM_CHUNK_LIMIT
+        assert buffered(stream) == b'x' * (writes * 10)
+
+    def test_a_combined_object_is_never_combined_again(self):
+        """The bytes of a small write are copied once, not once per run
+
+        A run that is combined into an object is finished with: a second pass
+        over it would copy the output again for every run of the command.
+        """
+        stream = make_stream()
+        write = b'x' * 512
+        run = ADB_STREAM_CHUNK_SIZE // len(write)
+
+        for _ in range(run):
+            stream.add_data(write)
+        combined = stream._chunks[0]
+
+        for _ in range(run):
+            stream.add_data(write)
+
+        assert stream._chunks[0] is combined
+        assert len(stream._chunks) == 2
+        assert buffered(stream) == write * (run * 2)
 
     def test_the_reader_releases_the_write_it_made_room_for(self):
         """Taking the output acknowledges the write that was held back"""
@@ -436,22 +504,23 @@ class TestReceiveBuffer:
         assert stream.take_data() == b''
         assert stream.protocol.acknowledged == []
 
-    def test_output_a_read_kept_is_taken_by_hand_in_order(self):
-        """A caller that drains the stream itself gets the kept output first"""
+    def test_output_a_read_consumed_is_taken_by_hand_in_order(self):
+        """A caller that drains the stream itself gets consumed output too"""
         stream = make_stream(recv_buffer_size=10)
-        stream._keep_chunks([b'old'])
+        stream.add_data(b'old')
+        stream._consume()
         stream.add_data(b'new')
 
         assert stream.take_data() == b'oldnew'
         assert buffered(stream) == b''
-        assert stream._read_chunks == []
+        assert stream._pending_size == 0
 
-    def test_a_timeout_keeps_the_output_it_took(self):
+    def test_a_timeout_keeps_the_output_it_consumed(self):
         """A read that never sees the close loses nothing
 
-        The output is taken while the read waits, so a full buffer can not stall
-        the device into a close it never sends. The timeout keeps it in the
-        stream: putting it back would make the device send it twice.
+        The output is consumed while the read waits, so a full buffer can not
+        stall the device into a close it never sends. Consuming leaves the output
+        in the stream, so the timeout has nothing to put back.
         """
         stream = make_stream(recv_buffer_size=10)
         stop = wake_repeatedly(stream)
@@ -462,8 +531,9 @@ class TestReceiveBuffer:
         finally:
             stop()
 
-        assert buffered(stream) == b''
-        assert stream._read_chunks == [b'1234567890']
+        # the output is still there, paid for and no longer holding the device
+        assert buffered(stream) == b'1234567890'
+        assert stream._pending_size == 0
         assert stream.take_data() == b'1234567890'
 
     def test_the_close_takes_the_write_that_came_with_it(self):
@@ -479,20 +549,19 @@ class TestReceiveBuffer:
 class TestInterruptedRead:
     """A read that times out keeps its output and goes on where it stopped
 
-    A read takes the output out of the buffer as it arrives, because a full
-    buffer would stall the device into a close it never sends. A timeout can
-    not put that output back: the acknowledgement of the device was paid for it
-    already, so output back in the buffer is output the device sends a second
-    time, one message per timeout.
+    A read consumes the output as it arrives, because a full buffer would stall
+    the device into a close it never sends. Consuming pays for the writes of the
+    device but leaves the output in the stream: putting it back would make the
+    device send it a second time, one message per timeout.
     """
 
     @staticmethod
     def timed_out():
         """
-        A stream whose read timed out with the write it took kept
+        A stream whose read timed out with the write it consumed
 
         Returns:
-            AdbStreamTCP: Stream with 10 B kept by the interrupted read
+            AdbStreamTCP: Stream with 10 B consumed by the interrupted read
         """
         stream = make_stream(recv_buffer_size=10)
         stop = wake_repeatedly(stream)
@@ -504,15 +573,16 @@ class TestInterruptedRead:
             stop()
         return stream
 
-    def test_the_interrupted_read_pays_for_the_write_it_took(self):
-        """Taking a write out of a full buffer acknowledges it"""
+    def test_the_interrupted_read_pays_for_the_write_it_consumed(self):
+        """Consuming a write of a full buffer acknowledges it"""
         stream = self.timed_out()
 
         assert acknowledged(stream) == [1]
-        assert stream._read_chunks == [b'0123456789']
+        assert buffered(stream) == b'0123456789'
+        assert stream._pending_size == 0
 
-    def test_a_retry_pays_for_nothing_it_already_took(self):
-        """The output of the interrupted read is not put back for the device"""
+    def test_a_retry_pays_for_nothing_it_already_consumed(self):
+        """The output of the interrupted read is never asked for twice"""
         stream = self.timed_out()
         stop = wake_repeatedly(stream)
         try:
@@ -523,11 +593,11 @@ class TestInterruptedRead:
             stop()
 
         assert acknowledged(stream) == [1]
-        assert buffered(stream) == b''
-        assert stream._read_chunks == [b'0123456789']
+        assert buffered(stream) == b'0123456789'
+        assert stream._pending_size == 0
 
-    def test_a_retry_returns_the_kept_output_first(self):
-        """What the interrupted read kept comes before what arrives later"""
+    def test_a_retry_returns_the_consumed_output_first(self):
+        """What the interrupted read consumed comes before what arrives later"""
         stream = self.timed_out()
         stream.add_data(b'abcdefghij')
         stream.state = 'closed'
@@ -816,7 +886,7 @@ class TestProtocolRoundTrip:
                 stream = client.open_stream('shell,v2:x', recv_buffer_size=10)
                 assert stream._recv_buffer_size == 10
                 # the first write fills the buffer and is left unacknowledged
-                assert adbd.wait_for(lambda: stream._data_size > 0)
+                assert adbd.wait_for(lambda: stream._pending_size > 0)
                 # the device had every chance to send a second one, and can not
                 time.sleep(0.3)
                 assert adbd.stream_writes == 1

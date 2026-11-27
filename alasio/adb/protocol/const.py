@@ -45,10 +45,19 @@ ADB_MAX_PAYLOAD = 256 * 1024
 # that fell a whole message behind
 ADB_STREAM_RECV_BUFFER_SIZE = 1024 * 1024
 # A device may split its output into many small writes, and every write is a
-# separate object in the buffer of a stream. Past this many objects the buffer
-# is joined once, so a reader that fell far behind holds a few large objects
-# instead of thousands of small ones. Joining costs one copy of the buffered
-# output, amortized over this many writes
+# separate object in the buffer of a stream. A write smaller than this is held
+# back and combined with the small writes that follow it, so a reader that fell
+# far behind holds a few objects per kilobyte instead of one object per write.
+# A write this large is worth an object of its own and is kept as it is: drawing
+# the line by the number of writes instead would combine the writes of a large
+# transfer, which copies the whole of it a second time. 4096 is the payload of
+# an old adbd, so the writes of a device that old already stand on their own
+ADB_STREAM_CHUNK_SIZE = 4096
+# Small writes are also combined once there are this many of them, whatever
+# their size. A device that writes a byte at a time would otherwise hold a
+# thousand objects for one kilobyte of output, and the wait for a chunk size is
+# paid back in object headers. Only writes below the chunk size are counted
+# here, so this never combines a write that was worth an object already
 ADB_STREAM_CHUNK_LIMIT = 32
 
 
