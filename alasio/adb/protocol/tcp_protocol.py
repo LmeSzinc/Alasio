@@ -12,6 +12,10 @@ from alasio.adb.protocol.const import (
 )
 from alasio.logger import logger
 
+# Header of every message of the transport: command, arg0, arg1, data length,
+# data checksum and magic, six little endian unsigned 32 bit integers
+MESSAGE_STRUCT = Struct('<6I')
+
 
 class AdbStreamTCP:
     def __init__(self, local_id: int, service: str, protocol: "AdbProtocolTCP"):
@@ -138,7 +142,6 @@ class AdbProtocolTCP:
         self._broken = False
 
         # internal states
-        self._message_struct = Struct('<6I')
         # maximum payload the device accepts, init with our MAX_PAYLOAD
         self._max_payload = ADB_MAX_PAYLOAD
         # protocol version of this connection: the lower of ours and the one
@@ -411,7 +414,7 @@ class AdbProtocolTCP:
         command = int.from_bytes(command, 'little')
         magic = command ^ 0xFFFFFFFF
 
-        header = self._message_struct.pack(command, arg0, arg1, data_length, data_check, magic)
+        header = MESSAGE_STRUCT.pack(command, arg0, arg1, data_length, data_check, magic)
         payload = header + data
 
         try:
@@ -492,7 +495,7 @@ class AdbProtocolTCP:
             AdbMessageInvalid:
         """
         header = self.recv_exact(stream, 24, header_timeout=header_timeout)
-        command, arg0, arg1, data_length, data_check, magic = self._message_struct.unpack(header)
+        command, arg0, arg1, data_length, data_check, magic = MESSAGE_STRUCT.unpack(header)
 
         # check command
         command_name = header[:4]

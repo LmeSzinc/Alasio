@@ -8,7 +8,6 @@ format of a real adbd and records what the client sends it.
 import socket
 import threading
 import time
-from struct import Struct
 
 import pytest
 
@@ -17,7 +16,7 @@ from alasio.adb.protocol.const import (
     ADB_MAX_PAYLOAD, ADB_MAX_PAYLOAD_V1, ADB_VERSION, ADB_VERSION_SKIP_CHECKSUM, CLSE, CNXN, OKAY, OPEN, WRTE,
     AdbConnectionClosed, AdbConnectionTimeout, AdbMessageInvalid, AdbStreamClosed, AdbStreamTimeout, ShellResult
 )
-from alasio.adb.protocol.tcp_protocol import AdbProtocolTCP, AdbStreamTCP
+from alasio.adb.protocol.tcp_protocol import MESSAGE_STRUCT, AdbProtocolTCP, AdbStreamTCP
 from alasio.logger import logger
 from tests.adb.protocol.fake_adbd import FakeAdbd, ShellReply, encode_message
 
@@ -25,7 +24,6 @@ pytestmark = [
     pytest.mark.parallel,
 ]
 
-_MESSAGE = Struct('<6I')
 # The builtin the module under test calls for the checksum of a payload, kept
 # before a test replaces the name inside the module
 _BUILTIN_SUM = sum
@@ -135,7 +133,7 @@ def decode_message(raw):
     Returns:
         tuple: (command, arg0, arg1, length, checksum, magic, payload)
     """
-    command, arg0, arg1, length, checksum, magic = _MESSAGE.unpack(raw[:24])
+    command, arg0, arg1, length, checksum, magic = MESSAGE_STRUCT.unpack(raw[:24])
     return command.to_bytes(4, 'little'), arg0, arg1, length, checksum, magic, raw[24:]
 
 
