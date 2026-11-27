@@ -12,6 +12,7 @@ binary is run on the CI runners, see the module next to this one.
 """
 
 import base64
+import builtins
 import hashlib
 import os
 import shutil
@@ -408,6 +409,35 @@ class TestLoadUserKey:
         with pytest.raises(AdbAuthKeyInvalid):
             load_user_key()
 
+    def test_the_key_carries_its_primes(self, fs, monkeypatch):
+        """The primes are read with the rest, a signature splits on them"""
+        install_key(fs, monkeypatch, pem('PRIVATE KEY', pkcs8_der()))
+
+        key = load_user_key()
+
+        assert (key.p, key.q) == (P, Q)
+        assert key.p * key.q == key.n
+
+    def test_a_modulus_the_primes_do_not_rebuild(self, fs, monkeypatch):
+        """A file that disagrees with itself would sign tokens a device rejects"""
+        install_key(fs, monkeypatch, pem('PRIVATE KEY', pkcs8_der(N + 2, E, D, P, Q)))
+
+        with pytest.raises(AdbAuthKeyInvalid) as e:
+            load_user_key()
+
+        assert 'do not multiply to its modulus' in str(e.value)
+
+    def test_two_primes_of_the_same_value(self, fs, monkeypatch):
+        """A squared prime has no inverse to split a signature with"""
+        numbers = (0, P * P, E, D, P, P, D % (P - 1), D % (P - 1), 1)
+        body = der(0x30, b''.join(der_integer(value) for value in numbers))
+        install_key(fs, monkeypatch, pem('PRIVATE KEY', body))
+
+        with pytest.raises(AdbAuthKeyInvalid) as e:
+            load_user_key()
+
+        assert 'do not multiply to its modulus' in str(e.value)
+
 
 class TestAdbPath:
     def test_adb_on_the_path(self, monkeypatch):
@@ -708,6 +738,34 @@ class TestSignToken:
 
         with pytest.raises(AdbAuthKeyInvalid):
             tiny.sign(AUTH_TOKEN)
+
+    def test_a_key_with_primes_signs_the_same_bytes(self):
+        """The split of the CRT is a faster route to the one signature"""
+        plain = AdbAuthKey(N, E, D)
+        split = AdbAuthKey(N, E, D, P, Q)
+
+        signature = split.sign(AUTH_TOKEN)
+
+        assert signature == plain.sign(AUTH_TOKEN)
+        assert verify_token(N, E, AUTH_TOKEN, signature)
+
+    def test_a_key_with_primes_does_not_use_the_full_exponent(self, monkeypatch):
+        """Two exponentiations of 1024 bits replace one of 2048"""
+        key = AdbAuthKey(N, E, D, P, Q)
+        # the first signature computes the parameters of the CRT and keeps them
+        key.sign(AUTH_TOKEN)
+        exponents = []
+        real_pow = builtins.pow
+
+        def counting_pow(base, exponent, modulus=None):
+            exponents.append(exponent)
+            return real_pow(base, exponent, modulus)
+
+        monkeypatch.setattr(builtins, 'pow', counting_pow)
+        key.sign(AUTH_TOKEN)
+
+        assert len(exponents) == 2
+        assert all(exponent.bit_length() <= 1024 for exponent in exponents)
 
 
 class TestPublicKey:
