@@ -807,7 +807,9 @@ class TestChecksumVersion:
     From 0x01000001 on the checksum is optional: a device of that version sends
     0 instead of the sum of the payload, and the receiver skips the check before
     it computes anything. Version 0x01000000 has no such right: an old adbd that
-    sends 0 is a device that computed nothing.
+    sends 0 is a device that computed nothing. The host plays by the same rule
+    on the way out, where the sum is a pass over every payload of the connection
+    that the device would only ignore.
     """
 
     @staticmethod
@@ -927,6 +929,111 @@ class TestChecksumVersion:
             self.recv_one(0x01000000, packed(WRTE, 1, 1, b'hello', checksum=0))
 
         assert 'Checksum' in str(e.value)
+
+    def test_the_sum_of_a_sent_message_is_skipped_on_that_version(self, monkeypatch):
+        """The messages of a modern connection carry 0 instead of the sum
+
+        Every write of the connection would pay a pass over its payload for a
+        field the device reads nothing in.
+        """
+        calls = []
+        with FakeAdbd(version=ADB_VERSION_SKIP_CHECKSUM,
+                      responder=lambda command, shell_v2: ShellReply(stdout=b'x\n')) as adbd:
+            client = AdbProtocolTCP(port=adbd.port)
+            client.timeout = 2
+            client.connect()
+            try:
+                assert client._send_checksum is False
+                monkeypatch.setattr(tcp_protocol, 'sum', counting_sum(calls), raising=False)
+                with client.open_stream('shell,v2:echo x') as stream:
+                    assert stream.recv_until_close(timeout=5)
+            finally:
+                client.disconnect()
+
+        assert calls == []
+        assert adbd.violations == []
+
+    def test_the_sum_of_a_large_write_is_skipped_on_that_version(self, monkeypatch):
+        """A write of 128 KiB carries 0 as well, not only a small message"""
+        calls = []
+        with FakeAdbd(version=ADB_VERSION_SKIP_CHECKSUM,
+                      responder=lambda command, shell_v2: ShellReply(close=False)) as adbd:
+            client = AdbProtocolTCP(port=adbd.port)
+            client.timeout = 2
+            client.connect()
+            try:
+                with client.open_stream('shell,v2:cat') as stream:
+                    monkeypatch.setattr(tcp_protocol, 'sum', counting_sum(calls), raising=False)
+                    client.sendto_stream(stream, b'x' * (128 * 1024))
+            finally:
+                client.disconnect()
+
+        assert calls == []
+        assert adbd.violations == []
+
+    def test_the_sum_of_a_sent_message_is_computed_on_an_old_version(self, monkeypatch):
+        """A device of 0x01000000 verifies the field, the client fills it in"""
+        calls = []
+        service = 'shell,v2:echo x'
+        with FakeAdbd(responder=lambda command, shell_v2: ShellReply(stdout=b'x\n')) as adbd:
+            assert adbd.version == 0x01000000
+            client = AdbProtocolTCP(port=adbd.port)
+            client.timeout = 2
+            client.connect()
+            try:
+                assert client._send_checksum is True
+                monkeypatch.setattr(tcp_protocol, 'sum', counting_sum(calls), raising=False)
+                with client.open_stream(service) as stream:
+                    assert stream.recv_until_close(timeout=5)
+            finally:
+                client.disconnect()
+
+        # the OPEN carries the sum of its service name, the device reads it
+        assert len(service.encode() + b'\x00') in calls
+        assert adbd.violations == []
+
+    def test_the_handshake_carries_the_sum_on_every_version(self, monkeypatch):
+        """The version of the device is unknown when the CNXN leaves the host
+
+        A device of 0x01000001 would not read the field, an old one refuses a
+        CNXN without it, and nothing tells the two apart before the answer.
+        """
+        calls = []
+        monkeypatch.setattr(tcp_protocol, 'sum', counting_sum(calls), raising=False)
+
+        with FakeAdbd(version=ADB_VERSION_SKIP_CHECKSUM) as adbd:
+            client = AdbProtocolTCP(port=adbd.port)
+            client.connect()
+            try:
+                assert client._send_checksum is False
+            finally:
+                client.disconnect()
+
+        # the banner of the CNXN, and only it
+        assert calls == [len(adbd.hello)]
+
+    def test_the_flag_follows_the_device_of_the_new_connection(self):
+        """A reconnect to an older device sums again
+
+        The version of a connection is remembered on the object, a device on
+        the same address may answer with another one at the next connect.
+        """
+        with FakeAdbd(version=ADB_VERSION_SKIP_CHECKSUM) as modern, FakeAdbd() as old:
+            client = AdbProtocolTCP(port=modern.port)
+            client.timeout = 2
+            client.connect()
+            try:
+                assert client._send_checksum is False
+            finally:
+                client.disconnect()
+
+            client.port = old.port
+            client.connect()
+            try:
+                assert client._protocol_version == 0x01000000
+                assert client._send_checksum is True
+            finally:
+                client.disconnect()
 
     def test_an_old_device_with_a_wrong_checksum(self):
         """A device of 0x01000000 that sends a wrong checksum is refused"""

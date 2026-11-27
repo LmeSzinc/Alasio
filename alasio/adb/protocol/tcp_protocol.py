@@ -155,6 +155,13 @@ class AdbProtocolTCP:
         # the device answered with, the checksum is optional from 0x01000001 on
         self._protocol_version = ADB_VERSION
 
+        # True while an outgoing message carries the sum of its payload. A
+        # connection of ADB_VERSION_SKIP_CHECKSUM or newer ignores the field, so
+        # the pass over every payload is only spent where it is read: the
+        # handshake, which is sent before the version of the device is known,
+        # always carries it
+        self._send_checksum = True
+
         # local stream ID, a counter that is never rewound: the device may
         # still send a message of a stream that ended, and a reused id would
         # put that message on the stream of an unrelated caller
@@ -401,6 +408,9 @@ class AdbProtocolTCP:
                 # connection of an earlier version may still be the one the
                 # object remembers, so the value is reset for every handshake.
                 self._protocol_version = ADB_VERSION
+                # the message of the handshake is sent before the device told
+                # its version, so it always carries the sum
+                self._send_checksum = True
                 # send CNXN
                 self.message_send(sock, CNXN, ADB_VERSION, ADB_MAX_PAYLOAD, cnxn)
 
@@ -412,12 +422,16 @@ class AdbProtocolTCP:
                 self.features = DeviceFeatures([])
                 self._max_payload = ADB_MAX_PAYLOAD
                 self._protocol_version = ADB_VERSION
+                self._send_checksum = True
                 raise
 
             logger.info(f'Connected to {addr}')
             self._sock = sock
             self._broken = False
             self._protocol_version = min(arg0, ADB_VERSION)
+            # a device of that version reads nothing in the field, the sum of
+            # every payload of the connection is a pass that proves nothing
+            self._send_checksum = self._protocol_version < ADB_VERSION_SKIP_CHECKSUM
             # an old adbd does not fill the field and answers 0, which is the
             # 4096 bytes of the first protocol. Taking the 0 literally would
             # send it 256KB messages it drops, together with the connection
@@ -546,10 +560,13 @@ class AdbProtocolTCP:
         """
         # print('send', command, arg0, arg1, data)
         data_length = len(data)
-        # the checksum of an outgoing message is always computed: the CNXN is
-        # sent before the version of the device is known, and a peer of an old
-        # version verifies it. A device that does not need the field ignores it
-        data_check = sum(data) & 0xFFFFFFFF
+        # the checksum of an outgoing message is read only by a peer older than
+        # ADB_VERSION_SKIP_CHECKSUM, a pass over the payload of every message of
+        # a newer connection would prove nothing there
+        if self._send_checksum:
+            data_check = sum(data) & 0xFFFFFFFF
+        else:
+            data_check = 0
         command = int.from_bytes(command, 'little')
         magic = command ^ 0xFFFFFFFF
 
