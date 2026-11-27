@@ -194,6 +194,19 @@ def buffered(stream):
     return b''.join(stream._data_chunks)
 
 
+def acknowledged(stream):
+    """
+    Acknowledgements a stream sent, as the number of writes each one covers
+
+    Args:
+        stream (AdbStreamTCP): Stream to read the record of
+
+    Returns:
+        list: Counts, in order
+    """
+    return [count for _, count in stream.protocol.acknowledged]
+
+
 class TestRecvUntilClose:
     """Reading a stream until the device closes it"""
 
@@ -423,21 +436,22 @@ class TestReceiveBuffer:
         assert stream.take_data() == b''
         assert stream.protocol.acknowledged == []
 
-    def test_output_of_a_failed_read_is_put_back_in_front(self):
-        """Output a reader took but could not deliver keeps its place"""
+    def test_output_a_read_kept_is_taken_by_hand_in_order(self):
+        """A caller that drains the stream itself gets the kept output first"""
         stream = make_stream(recv_buffer_size=10)
+        stream._keep_chunks([b'old'])
         stream.add_data(b'new')
 
-        stream._restore_data([b'old'])
-
-        assert buffered(stream) == b'oldnew'
-        assert stream._data_size == 6
+        assert stream.take_data() == b'oldnew'
+        assert buffered(stream) == b''
+        assert stream._read_chunks == []
 
     def test_a_timeout_keeps_the_output_it_took(self):
-        """A read that never sees the close returns nothing but loses nothing
+        """A read that never sees the close loses nothing
 
         The output is taken while the read waits, so a full buffer can not stall
-        the device into a close it never sends. A timeout has to put it back.
+        the device into a close it never sends. The timeout keeps it in the
+        stream: putting it back would make the device send it twice.
         """
         stream = make_stream(recv_buffer_size=10)
         stop = wake_repeatedly(stream)
@@ -448,8 +462,9 @@ class TestReceiveBuffer:
         finally:
             stop()
 
-        assert buffered(stream) == b'1234567890'
-        assert stream._data_size == 10
+        assert buffered(stream) == b''
+        assert stream._read_chunks == [b'1234567890']
+        assert stream.take_data() == b'1234567890'
 
     def test_the_close_takes_the_write_that_came_with_it(self):
         """The last write of a device may arrive together with its close"""
@@ -459,6 +474,82 @@ class TestReceiveBuffer:
 
         assert stream.recv_until_close(timeout=0) == b'1234567890'
         assert buffered(stream) == b''
+
+
+class TestInterruptedRead:
+    """A read that times out keeps its output and goes on where it stopped
+
+    A read takes the output out of the buffer as it arrives, because a full
+    buffer would stall the device into a close it never sends. A timeout can
+    not put that output back: the acknowledgement of the device was paid for it
+    already, so output back in the buffer is output the device sends a second
+    time, one message per timeout.
+    """
+
+    @staticmethod
+    def timed_out():
+        """
+        A stream whose read timed out with the write it took kept
+
+        Returns:
+            AdbStreamTCP: Stream with 10 B kept by the interrupted read
+        """
+        stream = make_stream(recv_buffer_size=10)
+        stop = wake_repeatedly(stream)
+        try:
+            stream.add_data(b'0123456789')
+            with pytest.raises(AdbStreamTimeout):
+                stream.recv_until_close(timeout=0.05)
+        finally:
+            stop()
+        return stream
+
+    def test_the_interrupted_read_pays_for_the_write_it_took(self):
+        """Taking a write out of a full buffer acknowledges it"""
+        stream = self.timed_out()
+
+        assert acknowledged(stream) == [1]
+        assert stream._read_chunks == [b'0123456789']
+
+    def test_a_retry_pays_for_nothing_it_already_took(self):
+        """The output of the interrupted read is not put back for the device"""
+        stream = self.timed_out()
+        stop = wake_repeatedly(stream)
+        try:
+            for _ in range(3):
+                with pytest.raises(AdbStreamTimeout):
+                    stream.recv_until_close(timeout=0.05)
+        finally:
+            stop()
+
+        assert acknowledged(stream) == [1]
+        assert buffered(stream) == b''
+        assert stream._read_chunks == [b'0123456789']
+
+    def test_a_retry_returns_the_kept_output_first(self):
+        """What the interrupted read kept comes before what arrives later"""
+        stream = self.timed_out()
+        stream.add_data(b'abcdefghij')
+        stream.state = 'closed'
+
+        assert stream.recv_until_close(timeout=0) == b'0123456789abcdefghij'
+
+    def test_the_output_is_delivered_once(self):
+        """A read after the one that timed out does not repeat its output"""
+        stream = self.timed_out()
+        stream.state = 'closed'
+
+        assert stream.recv_until_close(timeout=0) == b'0123456789'
+        stream.add_data(b'late')
+        assert stream.recv_until_close(timeout=0) == b'late'
+
+    def test_taking_the_output_by_hand_leaves_nothing_behind(self):
+        """A caller that drains the stream itself does not get it a second time"""
+        stream = self.timed_out()
+
+        assert stream.take_data() == b'0123456789'
+        stream.state = 'closed'
+        assert stream.recv_until_close(timeout=0) == b''
 
 
 class TestTimeoutClock:
@@ -741,6 +832,39 @@ class TestProtocolRoundTrip:
         # exit code packet, sent in writes of 4096
         assert adbd.stream_writes == 5
         assert ShellResult.from_shell_v2(data).stdout == output
+        assert adbd.violations == []
+
+    def test_a_read_that_times_out_continues_where_it_stopped(self):
+        """A retried read returns the output of the device once, in order
+
+        The output a read took is kept when the read times out, because its
+        acknowledgement was paid already: back in the buffer it would ask the
+        device for a second copy. A device that never closes proves that retries
+        neither lose nor repeat the output.
+        """
+        output = b'x' * 200_000
+        with FakeAdbd(responder=lambda command, shell_v2: ShellReply(stdout=output, close=False)) as adbd:
+            adbd.wait_write_okay = True
+            # 200000 bytes in writes of the reply chunk size
+            writes = len(range(0, len(output), adbd.reply_chunk_size))
+            client = AdbProtocolTCP(port=adbd.port)
+            client.connect()
+            try:
+                stream = client.open_stream('shell:x', recv_buffer_size=4096)
+                # the device sends its whole output and never closes
+                with pytest.raises(AdbStreamTimeout):
+                    stream.recv_until_close(timeout=1)
+                assert adbd.stream_writes == writes
+                for _ in range(3):
+                    with pytest.raises(AdbStreamTimeout):
+                        stream.recv_until_close(timeout=0.05)
+                data = stream.take_data()
+            finally:
+                client.disconnect()
+
+            assert adbd.stream_writes == writes
+
+        assert data == output
         assert adbd.violations == []
 
     def test_repeated_streams_reuse_the_connection(self):

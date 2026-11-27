@@ -87,6 +87,13 @@ class AdbStreamTCP:
         # is at most 1 for a device that keeps to the protocol, because this
         # stream never holds one back while its buffer has room
         self._okay_debt = 0
+        # Output a read took out of the buffer while it waits for the close. A
+        # timeout keeps it here instead of putting it back into the buffer: the
+        # acknowledgement of that output is on the wire already, so output back
+        # in the buffer would ask the device to send it a second time. The read
+        # of a caller that retried continues from here and the output is
+        # delivered once, in order
+        self._read_chunks: "list[bytes]" = []
         self._buffer_lock = Lock()
 
     def __str__(self):
@@ -157,32 +164,58 @@ class AdbStreamTCP:
 
     def take_data(self) -> bytes:
         """
-        Take the buffered output and let the device send more.
+        Take the output the stream holds and let the device send more.
 
         Returns:
-            bytes: Everything buffered, in order. Empty bytes for an empty
-                buffer, which acknowledges nothing
+            bytes: Everything held, in order. Empty bytes for nothing held,
+                which acknowledges nothing
         """
         chunks = self.take_chunks()
         return _join_chunks(chunks)
 
     def take_chunks(self) -> "list[bytes]":
         """
-        Take the buffered output and let the device send more.
+        Take the output the stream holds and let the device send more.
 
         The chunks are handed over as they are, which is what a caller that
         collects the output of many writes wants: it can join them once instead
-        of once per write.
+        of once per write. Output an interrupted read kept comes first, so a
+        caller that takes the output by hand gets it in order and once.
 
         Returns:
-            list[bytes]: Everything buffered, in order. An empty list for an
+            list[bytes]: Everything held, in order. An empty list for nothing
+                held, which acknowledges nothing
+        """
+        with self._buffer_lock:
+            chunks = self._read_chunks + self._data_chunks
+            if not chunks:
+                # nothing was taken, so nothing can be released: a reader that
+                # wakes without data must not pull a write of the device into
+                # a buffer that is still full
+                return []
+            self._read_chunks = []
+            self._data_chunks = []
+            self._data_size = 0
+            debt = self._payable_debt()
+        if debt:
+            self.protocol.acknowledge_stream(self, debt)
+        return chunks
+
+    def _take_arrived(self) -> "list[bytes]":
+        """
+        Take the output that arrived since the buffer was last taken.
+
+        The caller holds on to it while the read waits, so a timeout keeps it
+        rather than puts it back: the acknowledgement of the device was paid
+        for it already, and output back in the buffer is output the device is
+        asked to send a second time.
+
+        Returns:
+            list[bytes]: Output that arrived, in order. An empty list for an
                 empty buffer, which acknowledges nothing
         """
         with self._buffer_lock:
             if not self._data_chunks:
-                # nothing was taken, so nothing can be released: a reader that
-                # wakes without data must not pull a write of the device into
-                # a buffer that is still full
                 return []
             chunks = self._data_chunks
             self._data_chunks = []
@@ -192,18 +225,17 @@ class AdbStreamTCP:
             self.protocol.acknowledge_stream(self, debt)
         return chunks
 
-    def _restore_data(self, chunks: "list[bytes]"):
+    def _keep_chunks(self, chunks: "list[bytes]"):
         """
-        Put back output a reader took but could not deliver.
+        Keep the output a read took, for the read of a caller that retried.
 
         Args:
-            chunks (list[bytes]): Output to put back at the front of the buffer
+            chunks (list[bytes]): Output the read took out of the buffer
         """
         if not chunks:
             return
         with self._buffer_lock:
-            self._data_chunks[:0] = chunks
-            self._data_size += sum(len(chunk) for chunk in chunks)
+            self._read_chunks[:0] = chunks
 
     def _payable_debt(self) -> int:
         """
@@ -231,11 +263,11 @@ class AdbStreamTCP:
         collected it would leave the buffer full, the acknowledgement of the
         device held back and the device stalled on a close it never sends.
 
-        On a timeout the output taken so far is put back into the buffer, so a
-        retried call loses nothing. The acknowledgement of the device cannot be
-        taken back, so each timeout lets one more write of the device through
-        before the buffer fills again: a stream that times out over and over
-        grows by one message per timeout.
+        On a timeout the output taken so far stays with the stream, and the
+        next call returns it first and goes on reading. Putting it back into the
+        buffer would be worse than useless: its acknowledgement was paid
+        already, so the device would send it a second time and the buffer would
+        grow by one message per timeout.
 
         Args:
             timeout (int | float): Seconds to wait for the close. Defaults to 20.
@@ -248,7 +280,11 @@ class AdbStreamTCP:
             AdbConnectionClosed: When the connection was dropped under the
                 stream, its output is incomplete
         """
-        chunks = []
+        with self._buffer_lock:
+            # the output of a read that timed out comes first, it was sent before
+            # anything the device sends from now on
+            chunks = self._read_chunks
+            self._read_chunks = []
         # the state decides first: the data of an already closed stream is
         # returned whatever the timeout is, and a signal of an earlier message
         # can not stand for the close
@@ -257,20 +293,20 @@ class AdbStreamTCP:
             # the clock must not move under it: a wall clock correction would
             # stretch the timeout by the size of the jump, or cut it short
             if timeout < 0.001:
-                # the output taken so far is put back: a caller that retries
-                # must not lose what the device already sent
-                self._restore_data(chunks)
+                # a caller that retries must not lose what the device sent, and
+                # must not ask for it again either
+                self._keep_chunks(chunks)
                 raise AdbStreamTimeout('Timeout when receiving stream until close')
             start = perf_counter()
             self.recv_event.acquire(timeout=timeout)
             timeout -= perf_counter() - start
-            chunks += self.take_chunks()
+            chunks += self._take_arrived()
 
         if self.aborted:
             raise AdbConnectionClosed(f'Connection lost while receiving the stream: {self}')
 
         # the last write of a device may arrive together with its close
-        chunks += self.take_chunks()
+        chunks += self._take_arrived()
         # the chunks are joined once, at the end
         return _join_chunks(chunks)
 
