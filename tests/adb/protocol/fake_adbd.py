@@ -274,6 +274,9 @@ class FakeAdbd:
         fault_on_reply (str): Fault injected in the next message sent, the same
             names as open_fault without 'refuse', 'silent' and 'close'
         answer_write_okay (bool): True to acknowledge WRTE of the host
+        wait_write_okay (bool): True to send the next write of a stream only
+            after the host acknowledged the previous one, the way a device of a
+            stream without a window does. False to send them all at once
         close_after_writes (int): Close the stream instead of acknowledging the
             WRTE once the host sent this many messages on the connection, the way
             a command that exited answers a host that is still writing. 0 leaves
@@ -353,6 +356,13 @@ class FakeAdbd:
         self.open_delay = 0.0
         self.fault_on_reply = ''
         self.answer_write_okay = True
+        # True to send the next write of a stream only after the host
+        # acknowledged the previous one, which is how a device of a stream
+        # without a window keeps itself from overrunning a reader
+        self.wait_write_okay = False
+        # Seconds a device waits for that acknowledgement before it writes its
+        # wait into the log and keeps waiting
+        self.write_okay_timeout = 0.2
         self.answer_close_clse = True
         # Close the stream instead of acknowledging a WRTE once the host wrote
         # this many messages, the way a command that exited answers a host that
@@ -376,6 +386,10 @@ class FakeAdbd:
         self.writes = []
         self.client_closes = []
         self.write_okays = 0
+        # writes the device sent on a stream, chunk per message
+        self.stream_writes = 0
+        # streams the device stopped writing to, waiting for the host
+        self.write_stalls = []
         self.violations = []
         self.connections = 0
         self.connection_ends = []
@@ -389,6 +403,7 @@ class FakeAdbd:
         self._sockets = []
         self._closed = False
         self._remote_id = 1000
+        self._write_credit = {}
         self._server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self._server.bind(('127.0.0.1', 0))
@@ -459,6 +474,7 @@ class FakeAdbd:
                 'opens_without_nul': len(self.opens_without_nul),
                 'writes': len(self.writes),
                 'write_okays': self.write_okays,
+                'stream_writes': self.stream_writes,
                 'violations': [reason for reason, _ in self.violations],
             }
 
@@ -664,6 +680,10 @@ class FakeAdbd:
             elif command == OKAY:
                 with self._lock:
                     self.write_okays += 1
+                    # arg1 is the id this device gave the stream
+                    credit = self._write_credit.get(arg1)
+                if credit is not None:
+                    credit.release()
             else:
                 self._violation(f'unexpected command {command} from the host', message)
 
@@ -734,10 +754,44 @@ class FakeAdbd:
             payload = reply.stdout + reply.stderr
 
         chunk_size = self.reply_chunk_size
-        for start in range(0, len(payload), chunk_size):
-            self._send(sock, WRTE, remote_id, local_id, payload[start:start + chunk_size])
-        if reply.close:
-            self._send(sock, CLSE, remote_id, local_id)
+        credit = None
+        if self.wait_write_okay:
+            # a stream without a window carries one write at a time: the next
+            # one is sent after the host acknowledged the previous one
+            credit = threading.Semaphore(0)
+            with self._lock:
+                self._write_credit[remote_id] = credit
+        try:
+            for index, start in enumerate(range(0, len(payload), chunk_size)):
+                if index and credit is not None:
+                    self._wait_write_credit(credit, remote_id)
+                self._send(sock, WRTE, remote_id, local_id, payload[start:start + chunk_size])
+                with self._lock:
+                    self.stream_writes += 1
+            if reply.close:
+                self._send(sock, CLSE, remote_id, local_id)
+        finally:
+            if credit is not None:
+                with self._lock:
+                    self._write_credit.pop(remote_id, None)
+
+    def _wait_write_credit(self, credit, remote_id):
+        """
+        Wait for the acknowledgement of one write of a stream.
+
+        A device waits without a limit: the host decides when it has read
+        enough, and a device that gave up would drop the rest of the output of
+        a command. The first timeout is recorded, then the wait goes on, so a
+        test can tell a stalled device from one that is merely slow.
+
+        Args:
+            credit (threading.Semaphore): Credit of the stream
+            remote_id (int): Id of the stream, for the record
+        """
+        if not credit.acquire(timeout=self.write_okay_timeout):
+            with self._lock:
+                self.write_stalls.append(remote_id)
+            credit.acquire()
 
     def accepts(self, service):
         """

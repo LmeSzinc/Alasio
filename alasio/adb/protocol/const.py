@@ -36,6 +36,20 @@ ADB_VERSION = ADB_VERSION_SKIP_CHECKSUM
 ADB_MAX_PAYLOAD_V1 = 4096
 # Payload this client accepts and advertises in CNXN, the default since Android 5
 ADB_MAX_PAYLOAD = 256 * 1024
+# Bytes of output a stream buffers before it holds back the acknowledgement of
+# the device. A device sends the next write of a stream only after the previous
+# one was acknowledged, so holding one back is what slows a device down.
+# Without it a writer that is not read grows the buffer without a bound. The
+# value is the payload of one message of adbd, so a reader that keeps up takes
+# the output in pieces of a message and a device is only held back by a reader
+# that fell a whole message behind
+ADB_STREAM_RECV_BUFFER_SIZE = 1024 * 1024
+# A device may split its output into many small writes, and every write is a
+# separate object in the buffer of a stream. Past this many objects the buffer
+# is joined once, so a reader that fell far behind holds a few large objects
+# instead of thousands of small ones. Joining costs one copy of the buffered
+# output, amortized over this many writes
+ADB_STREAM_CHUNK_LIMIT = 32
 
 
 class AdbConnectionClosed(Exception):

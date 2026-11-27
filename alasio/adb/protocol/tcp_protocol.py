@@ -9,8 +9,9 @@ from alasio.adb.protocol import keygen
 from alasio.adb.protocol.cnxn import DeviceFeatures
 from alasio.adb.protocol.const import (
     ADB_AUTH_CONFIRM_TIMEOUT, ADB_AUTH_RSAPUBLICKEY, ADB_AUTH_SIGNATURE, ADB_AUTH_TOKEN, ADB_COMMANDS, ADB_MAX_PAYLOAD,
-    ADB_MAX_PAYLOAD_V1, ADB_VERSION, ADB_VERSION_SKIP_CHECKSUM, AUTH, AUTH_TOKEN_SIZE, CLSE, CNXN, OKAY, OPEN, WRTE,
-    AdbAuthRejected, AdbConnectionClosed, AdbConnectionTimeout, AdbMessageInvalid, AdbStreamClosed, AdbStreamTimeout
+    ADB_MAX_PAYLOAD_V1, ADB_STREAM_CHUNK_LIMIT, ADB_STREAM_RECV_BUFFER_SIZE, ADB_VERSION, ADB_VERSION_SKIP_CHECKSUM,
+    AUTH, AUTH_TOKEN_SIZE, CLSE, CNXN, OKAY, OPEN, WRTE, AdbAuthRejected, AdbConnectionClosed, AdbConnectionTimeout,
+    AdbMessageInvalid, AdbStreamClosed, AdbStreamTimeout
 )
 from alasio.logger import logger
 
@@ -24,8 +25,30 @@ MESSAGE_STRUCT = Struct('<6I')
 DISCONNECT_JOIN_TIMEOUT = 2
 
 
+def _join_chunks(chunks: "list[bytes]") -> bytes:
+    """
+    Build the output of a stream from the chunks of its buffer.
+
+    A device that sent its whole output in one write is the common case, and
+    the chunk of that write is handed back as the object the reader of the
+    connection built, so its payload is not copied at all.
+
+    Args:
+        chunks (list[bytes]): Chunks of the buffer, in order
+
+    Returns:
+        bytes: The chunks as one bytes object
+    """
+    if not chunks:
+        return b''
+    if len(chunks) == 1:
+        return chunks[0]
+    return b''.join(chunks)
+
+
 class AdbStreamTCP:
-    def __init__(self, local_id: int, service: str, protocol: "AdbProtocolTCP"):
+    def __init__(self, local_id: int, service: str, protocol: "AdbProtocolTCP",
+                 recv_buffer_size: int = ADB_STREAM_RECV_BUFFER_SIZE):
         self.local_id = local_id
         self.remote_id = 0  # will be set after A_OPEN
         self.service = service
@@ -47,8 +70,24 @@ class AdbStreamTCP:
         # command that ended
         self.aborted = False
 
-        # result buffer
-        self.data_buffer: "deque[bytes]" = deque()
+        # Bytes of output to hold before the acknowledgements of the device are
+        # held back, see ADB_STREAM_RECV_BUFFER_SIZE
+        self._recv_buffer_size = recv_buffer_size
+        # Result buffer: one chunk per write of the device, and their total
+        # size. A chunk is the bytes object the reader of the connection built,
+        # so a write goes in and comes out without being copied, and the output
+        # of a single write is handed back as the very same object. The
+        # dispatch thread appends and the reader takes, so the chunks and the
+        # size are guarded by one lock
+        self._data_chunks: "list[bytes]" = []
+        self._data_size = 0
+        # Writes of the device this stream did not acknowledge yet. A device
+        # sends the next write of a stream only after the previous one was
+        # acknowledged, so an acknowledgement that is held back stalls it. It
+        # is at most 1 for a device that keeps to the protocol, because this
+        # stream never holds one back while its buffer has room
+        self._okay_debt = 0
+        self._buffer_lock = Lock()
 
     def __str__(self):
         return (f'{self.__class__.__name__}(remote_id={self.remote_id}, local_id={self.local_id}, '
@@ -91,9 +130,112 @@ class AdbStreamTCP:
         """
         self.protocol.close_stream(self)
 
+    def add_data(self, data: bytes) -> bool:
+        """
+        Store the payload of a write of the device.
+
+        Args:
+            data (bytes): Payload of the write
+
+        Returns:
+            bool: True when the write has to be acknowledged at once, False
+                when the buffer is full and the acknowledgement is held back
+                until the reader takes the output
+        """
+        with self._buffer_lock:
+            self._data_chunks.append(data)
+            self._data_size += len(data)
+            if len(self._data_chunks) > ADB_STREAM_CHUNK_LIMIT:
+                # a device can split its output into many small writes. Joining
+                # them here keeps a reader that fell behind on a few large
+                # objects instead of one object per write
+                self._data_chunks = [b''.join(self._data_chunks)]
+            if self._data_size < self._recv_buffer_size:
+                return True
+            self._okay_debt += 1
+            return False
+
+    def take_data(self) -> bytes:
+        """
+        Take the buffered output and let the device send more.
+
+        Returns:
+            bytes: Everything buffered, in order. Empty bytes for an empty
+                buffer, which acknowledges nothing
+        """
+        chunks = self.take_chunks()
+        return _join_chunks(chunks)
+
+    def take_chunks(self) -> "list[bytes]":
+        """
+        Take the buffered output and let the device send more.
+
+        The chunks are handed over as they are, which is what a caller that
+        collects the output of many writes wants: it can join them once instead
+        of once per write.
+
+        Returns:
+            list[bytes]: Everything buffered, in order. An empty list for an
+                empty buffer, which acknowledges nothing
+        """
+        with self._buffer_lock:
+            if not self._data_chunks:
+                # nothing was taken, so nothing can be released: a reader that
+                # wakes without data must not pull a write of the device into
+                # a buffer that is still full
+                return []
+            chunks = self._data_chunks
+            self._data_chunks = []
+            self._data_size = 0
+            debt = self._payable_debt()
+        if debt:
+            self.protocol.acknowledge_stream(self, debt)
+        return chunks
+
+    def _restore_data(self, chunks: "list[bytes]"):
+        """
+        Put back output a reader took but could not deliver.
+
+        Args:
+            chunks (list[bytes]): Output to put back at the front of the buffer
+        """
+        if not chunks:
+            return
+        with self._buffer_lock:
+            self._data_chunks[:0] = chunks
+            self._data_size += sum(len(chunk) for chunk in chunks)
+
+    def _payable_debt(self) -> int:
+        """
+        Claim the acknowledgements the reader made room for.
+
+        The caller holds the buffer lock. A held back acknowledgement is only
+        released when the buffer has room again: released while it is still
+        full, the device would send the next write into a full buffer, and the
+        reader would wait for output a stalled device never sends.
+
+        Returns:
+            int: Number of acknowledgements to send
+        """
+        if self._data_size >= self._recv_buffer_size:
+            return 0
+        debt = self._okay_debt
+        self._okay_debt = 0
+        return debt
+
     def recv_until_close(self, timeout: "int | float" = 20) -> bytes:
         """
         Receive data of the stream until the device closes it.
+
+        The output is taken out of the buffer as it arrives. A reader that only
+        collected it would leave the buffer full, the acknowledgement of the
+        device held back and the device stalled on a close it never sends.
+
+        On a timeout the output taken so far is put back into the buffer, so a
+        retried call loses nothing. The acknowledgement of the device cannot be
+        taken back, so each timeout lets one more write of the device through
+        before the buffer fills again: a stream that times out over and over
+        grows by one message per timeout.
 
         Args:
             timeout (int | float): Seconds to wait for the close. Defaults to 20.
@@ -106,6 +248,7 @@ class AdbStreamTCP:
             AdbConnectionClosed: When the connection was dropped under the
                 stream, its output is incomplete
         """
+        chunks = []
         # the state decides first: the data of an already closed stream is
         # returned whatever the timeout is, and a signal of an earlier message
         # can not stand for the close
@@ -114,18 +257,22 @@ class AdbStreamTCP:
             # the clock must not move under it: a wall clock correction would
             # stretch the timeout by the size of the jump, or cut it short
             if timeout < 0.001:
+                # the output taken so far is put back: a caller that retries
+                # must not lose what the device already sent
+                self._restore_data(chunks)
                 raise AdbStreamTimeout('Timeout when receiving stream until close')
             start = perf_counter()
             self.recv_event.acquire(timeout=timeout)
             timeout -= perf_counter() - start
+            chunks += self.take_chunks()
 
         if self.aborted:
             raise AdbConnectionClosed(f'Connection lost while receiving the stream: {self}')
 
-        # build output
-        data = b''.join(self.data_buffer)
-        self.data_buffer.clear()
-        return data
+        # the last write of a device may arrive together with its close
+        chunks += self.take_chunks()
+        # the chunks are joined once, at the end
+        return _join_chunks(chunks)
 
 
 class AdbProtocolTCP:
@@ -688,19 +835,26 @@ class AdbProtocolTCP:
 
         return command_name, arg0, arg1, payload
 
-    def open_stream(self, service: str) -> AdbStreamTCP:
+    def open_stream(self, service: str, recv_buffer_size: int = ADB_STREAM_RECV_BUFFER_SIZE
+                    ) -> AdbStreamTCP:
         """
         Args:
-            service: Command like "shell:echo hello"
+            service (str): Command like "shell:echo hello"
+            recv_buffer_size (int): Bytes of output to buffer before the writes
+                of the device are held back. Defaults to
+                ADB_STREAM_RECV_BUFFER_SIZE
 
         Returns:
             AdbStreamTCP: The opened stream
 
         Raises:
+            ValueError: When the buffer size is not positive
             AdbConnectionClosed: When there is no connection
             AdbConnectionTimeout: When the device does not answer in time
             AdbStreamClosed: When the device refuses the service
         """
+        if recv_buffer_size <= 0:
+            raise ValueError(f'Receive buffer size must be positive: {recv_buffer_size}')
         if '\x00' in service:
             # the service name ends at the first null byte, sending one inside
             # would truncate the name on the device
@@ -709,7 +863,7 @@ class AdbProtocolTCP:
         sock = self._require_sock()
         with self._connect_lock:
             local_id = self._stream_id_allocate()
-            stream = AdbStreamTCP(local_id, service, protocol=self)
+            stream = AdbStreamTCP(local_id, service, protocol=self, recv_buffer_size=recv_buffer_size)
             self._stream_dict[local_id] = stream
 
         try:
@@ -829,6 +983,32 @@ class AdbProtocolTCP:
             if stream.state != 'opened':
                 raise AdbStreamClosed(f'Stream closed after {start} of {len(data)} bytes: {stream}')
 
+    def acknowledge_stream(self, stream: AdbStreamTCP, count: int = 1, sock: "socket.socket | None" = None):
+        """
+        Acknowledge writes of the device that the stream held back.
+
+        Args:
+            stream (AdbStreamTCP): Stream to acknowledge
+            count (int): Number of writes to acknowledge. Defaults to 1
+            sock (socket.socket): Connection to send on, the current one by
+                default. The dispatch thread passes the socket it reads, which
+                may not be the current one any more
+
+        Raises:
+            AdbConnectionClosed: When there is no connection
+            AdbConnectionTimeout: When the device does not take the message
+        """
+        if sock is None:
+            sock = self._sock
+            if sock is None:
+                # the connection is gone and its streams were dropped with it
+                return
+        for _ in range(count):
+            if stream.state != 'opened' or not stream.remote_id:
+                # a stream that ended has no write left to acknowledge
+                return
+            self.message_send(sock, OKAY, stream.local_id, stream.remote_id)
+
     def _dispatch_message(self, sock: socket.socket, command: bytes, remote_id: int, local_id: int, data: bytes):
         """
         Dispatch one message of the device to its stream.
@@ -869,13 +1049,17 @@ class AdbProtocolTCP:
         # dispatch message to stream
         elif command == WRTE:
             if stream.state == 'opened':
-                # response device with OKAY
-                self.message_send(sock, OKAY, stream.local_id, stream.remote_id)
-                stream.data_buffer.append(data)
+                # the write is buffered before it is acknowledged: a device
+                # sends the next write of a stream only after this one is
+                # acknowledged, so holding the acknowledgement back while the
+                # buffer is full is what slows a device down
+                acknowledge = stream.add_data(data)
                 try:
                     stream.recv_event.release()
                 except RuntimeError:
                     pass
+                if acknowledge:
+                    self.acknowledge_stream(stream, sock=sock)
             else:
                 logger.warning(f'Unexpected command={command} on stream {stream}')
 

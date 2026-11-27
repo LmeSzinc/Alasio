@@ -14,9 +14,9 @@ import pytest
 import alasio.adb.protocol.tcp_protocol as tcp_protocol
 from alasio.adb.protocol import keygen
 from alasio.adb.protocol.const import (
-    ADB_MAX_PAYLOAD, ADB_MAX_PAYLOAD_V1, ADB_VERSION, ADB_VERSION_SKIP_CHECKSUM, CLSE, CNXN, OKAY, OPEN, WRTE,
-    AdbAuthKeyMissing, AdbConnectionClosed, AdbConnectionTimeout, AdbMessageInvalid, AdbStreamClosed, AdbStreamTimeout,
-    ShellResult
+    ADB_MAX_PAYLOAD, ADB_MAX_PAYLOAD_V1, ADB_STREAM_CHUNK_LIMIT, ADB_STREAM_RECV_BUFFER_SIZE, ADB_VERSION,
+    ADB_VERSION_SKIP_CHECKSUM, CLSE, CNXN, OKAY, OPEN, WRTE, AdbAuthKeyMissing, AdbConnectionClosed,
+    AdbConnectionTimeout, AdbMessageInvalid, AdbStreamClosed, AdbStreamTimeout, ShellResult
 )
 from alasio.adb.protocol.tcp_protocol import MESSAGE_STRUCT, AdbProtocolTCP, AdbStreamTCP
 from alasio.logger import logger
@@ -54,13 +54,17 @@ def counting_sum(calls):
 
 
 class _Protocol:
-    """A stream only asks its protocol to close it"""
+    """A stream only asks its protocol to close it and to acknowledge writes"""
 
     def __init__(self):
         self.closed = []
+        self.acknowledged = []
 
     def close_stream(self, stream):
         self.closed.append(stream)
+
+    def acknowledge_stream(self, stream, count=1, sock=None):
+        self.acknowledged.append((stream, count))
 
 
 class _NullSock:
@@ -80,17 +84,24 @@ class _NullSock:
         self.closed = True
 
 
-def make_stream(state='opened'):
+def make_stream(state='opened', recv_buffer_size=ADB_STREAM_RECV_BUFFER_SIZE, protocol=None):
     """
     Build a stream without a connection
 
     Args:
         state (str): Initial state of the stream
+        recv_buffer_size (int): Bytes of output to buffer before the acknowledgement
+            of the device is held back
+        protocol (AdbProtocolTCP): Protocol the stream talks to, a stand-in that
+            only records the calls by default
 
     Returns:
         AdbStreamTCP: The stream
     """
-    stream = AdbStreamTCP(local_id=1, service='shell:echo', protocol=_Protocol())
+    if protocol is None:
+        protocol = _Protocol()
+    stream = AdbStreamTCP(local_id=1, service='shell:echo', protocol=protocol,
+                          recv_buffer_size=recv_buffer_size)
     stream.state = state
     return stream
 
@@ -157,14 +168,40 @@ def packed(command, arg0, arg1, data=b'', magic=None, checksum=None):
     return encode_message(command, arg0, arg1, data, magic=magic, checksum=checksum)
 
 
+def sent_commands(sock):
+    """
+    Commands of the messages a socket stand-in recorded
+
+    Args:
+        sock (_NullSock): Socket that recorded the messages
+
+    Returns:
+        list: Commands, in order
+    """
+    return [decode_message(raw)[0] for raw in sock.sent]
+
+
+def buffered(stream):
+    """
+    Bytes waiting in the buffer of a stream
+
+    Args:
+        stream (AdbStreamTCP): Stream to read the buffer of
+
+    Returns:
+        bytes: Buffered output, in order
+    """
+    return b''.join(stream._data_chunks)
+
+
 class TestRecvUntilClose:
     """Reading a stream until the device closes it"""
 
     def test_returns_the_buffered_data_when_the_stream_closes(self):
         """Every message received before the close is returned in order"""
         stream = make_stream()
-        stream.data_buffer.append(b'abc')
-        stream.data_buffer.append(b'def')
+        stream.add_data(b'abc')
+        stream.add_data(b'def')
         stream.state = 'closed'
 
         assert stream.recv_until_close(timeout=1) == b'abcdef'
@@ -172,16 +209,16 @@ class TestRecvUntilClose:
     def test_clears_the_buffer_after_returning_it(self):
         """The buffer is drained, a second read does not repeat the data"""
         stream = make_stream()
-        stream.data_buffer.append(b'abc')
+        stream.add_data(b'abc')
         stream.state = 'closed'
 
         assert stream.recv_until_close(timeout=1) == b'abc'
-        assert list(stream.data_buffer) == []
+        assert buffered(stream) == b''
 
     def test_a_closed_stream_needs_no_timeout(self):
         """The data of a closed stream is returned even with a timeout of zero"""
         stream = make_stream()
-        stream.data_buffer.append(b'abc')
+        stream.add_data(b'abc')
         stream.state = 'closed'
 
         assert stream.recv_until_close(timeout=0) == b'abc'
@@ -196,10 +233,36 @@ class TestRecvUntilClose:
         """A device sends the output of a command in many writes"""
         stream = make_stream()
         for chunk in (b'a', b'bb', b'ccc'):
-            stream.data_buffer.append(chunk)
+            stream.add_data(chunk)
         stream.state = 'closed'
 
         assert stream.recv_until_close(timeout=1) == b'abbccc'
+
+    def test_a_single_write_comes_back_as_the_same_object(self):
+        """The output of one write is not copied on its way through the stream
+
+        A screenshot is a few hundred kilobytes in one write. The reader of the
+        connection already built those bytes, so the stream hands that very
+        object back instead of copying it into a buffer and out again.
+        """
+        payload = b'x' * 300_000
+        stream = make_stream()
+        stream.add_data(payload)
+        stream.state = 'closed'
+
+        assert stream.recv_until_close(timeout=0) is payload
+
+    def test_many_writes_are_copied_once(self):
+        """A message that spans writes is joined once, not once per write"""
+        stream = make_stream()
+        stream.add_data(b'x' * 256_000)
+        stream.add_data(b'x' * 44_000)
+        stream.state = 'closed'
+
+        data = stream.recv_until_close(timeout=0)
+
+        assert len(data) == 300_000
+        assert data == b'x' * 300_000
 
     def test_times_out_when_the_stream_never_closes(self):
         """A stream that keeps sending without closing still times out"""
@@ -222,7 +285,7 @@ class TestRecvUntilClose:
         is what the dispatch thread does for every write of the device.
         """
         stream = make_stream()
-        stream.data_buffer.append(b'partial')
+        stream.add_data(b'partial')
         signalled = threading.Event()
 
         def signal_once():
@@ -240,6 +303,162 @@ class TestRecvUntilClose:
                 stream.recv_until_close(timeout=0.2)
         finally:
             thread.join(timeout=5)
+
+
+class TestReceiveBuffer:
+    """The stream holds back the acknowledgement of a device it can not keep up with
+
+    The classic stream protocol carries one write at a time and has no window:
+    a device sends the next write only after the previous one was acknowledged.
+    Holding that acknowledgement back is what slows a device down. A client
+    that acknowledges every write as it arrives is pulled along by the device,
+    whatever it does with the output.
+    """
+
+    def test_the_default_buffer_is_one_message(self):
+        """The default buffer is the payload of one message of adbd"""
+        assert ADB_STREAM_RECV_BUFFER_SIZE == 1024 * 1024
+        assert make_stream()._recv_buffer_size == ADB_STREAM_RECV_BUFFER_SIZE
+
+    def test_a_write_that_fits_is_acknowledged_at_once(self):
+        """Below the buffer size the device is asked for more output"""
+        stream = make_stream(recv_buffer_size=10)
+
+        assert stream.add_data(b'1234') is True
+        assert buffered(stream) == b'1234'
+        assert stream._data_size == 4
+        assert stream._okay_debt == 0
+
+    def test_the_write_that_fills_the_buffer_is_held_back(self):
+        """A write that reaches the buffer size is stored but not acknowledged"""
+        stream = make_stream(recv_buffer_size=10)
+
+        assert stream.add_data(b'1234') is True
+        assert stream.add_data(b'5678') is True
+        assert stream.add_data(b'90') is False
+        assert buffered(stream) == b'1234567890'
+        assert stream._data_size == 10
+        assert stream._okay_debt == 1
+
+    def test_a_write_larger_than_the_buffer_is_held_back(self):
+        """One write of a device can exceed the buffer, it is not split"""
+        stream = make_stream(recv_buffer_size=10)
+
+        assert stream.add_data(b'x' * 100) is False
+        # the write is kept as one chunk, not cut to fit the buffer
+        assert stream._data_chunks == [b'x' * 100]
+
+    def test_a_stored_write_is_not_copied(self):
+        """A write goes into the buffer as the object the connection built
+
+        A screenshot is a few hundred kilobytes in one write. Copying it into a
+        bytearray on the way in is a copy that buys nothing: the bytes are
+        already immutable and the buffer only holds them.
+        """
+        payload = b'x' * 300_000
+        stream = make_stream()
+
+        stream.add_data(payload)
+
+        assert stream._data_chunks[0] is payload
+
+    def test_small_writes_are_joined_once_the_list_grows_long(self):
+        """Many small writes do not become one object each in the buffer
+
+        A device can split its output into writes of a few dozen bytes. Keeping
+        one object per write would cost more in object headers and list slots
+        than the output itself, so the buffer is joined once the list grows long.
+        """
+        stream = make_stream(recv_buffer_size=1024)
+
+        for _ in range(ADB_STREAM_CHUNK_LIMIT + 1):
+            stream.add_data(b'x' * 10)
+
+        assert len(stream._data_chunks) == 1
+        assert stream._data_size == (ADB_STREAM_CHUNK_LIMIT + 1) * 10
+        assert buffered(stream) == b'x' * ((ADB_STREAM_CHUNK_LIMIT + 1) * 10)
+
+    def test_the_joined_buffer_still_takes_every_byte(self):
+        """The join keeps the order and hands the output back in one piece"""
+        stream = make_stream(recv_buffer_size=1024)
+        writes = [b'a', b'bb', b'ccc'] * (ADB_STREAM_CHUNK_LIMIT)
+
+        for write in writes:
+            stream.add_data(write)
+        stream.state = 'closed'
+
+        assert stream.recv_until_close(timeout=0) == b''.join(writes)
+
+    def test_the_list_is_left_alone_below_the_limit(self):
+        """The output that fits in a few writes is never copied"""
+        stream = make_stream(recv_buffer_size=1024)
+
+        for _ in range(ADB_STREAM_CHUNK_LIMIT):
+            stream.add_data(b'x')
+
+        assert len(stream._data_chunks) == ADB_STREAM_CHUNK_LIMIT
+
+    def test_the_reader_releases_the_write_it_made_room_for(self):
+        """Taking the output acknowledges the write that was held back"""
+        stream = make_stream(recv_buffer_size=10)
+        stream.add_data(b'1234567890')
+
+        assert stream.take_data() == b'1234567890'
+        assert stream.protocol.acknowledged == [(stream, 1)]
+        assert stream._okay_debt == 0
+
+    def test_a_release_waits_for_room(self):
+        """An acknowledgement is not released into a buffer that is still full"""
+        stream = make_stream(recv_buffer_size=10)
+        stream.add_data(b'1234567890')
+
+        # the buffer is full, a release now would let the device write into it
+        assert stream._payable_debt() == 0
+        assert stream._okay_debt == 1
+
+    def test_taking_an_empty_buffer_acknowledges_nothing(self):
+        """A reader that wakes without data does not pull in a write"""
+        stream = make_stream(recv_buffer_size=10)
+
+        assert stream.take_data() == b''
+        assert stream.protocol.acknowledged == []
+
+    def test_output_of_a_failed_read_is_put_back_in_front(self):
+        """Output a reader took but could not deliver keeps its place"""
+        stream = make_stream(recv_buffer_size=10)
+        stream.add_data(b'new')
+
+        stream._restore_data([b'old'])
+
+        assert buffered(stream) == b'oldnew'
+        assert stream._data_size == 6
+
+    def test_a_timeout_keeps_the_output_it_took(self):
+        """A read that never sees the close returns nothing but loses nothing
+
+        The output is taken while the read waits, so a full buffer can not stall
+        the device into a close it never sends. A timeout has to put it back.
+        """
+        stream = make_stream(recv_buffer_size=10)
+        stop = wake_repeatedly(stream)
+        try:
+            stream.add_data(b'1234567890')
+            with pytest.raises(AdbStreamTimeout):
+                stream.recv_until_close(timeout=0.1)
+        finally:
+            stop()
+
+        assert buffered(stream) == b'1234567890'
+        assert stream._data_size == 10
+
+    def test_the_close_takes_the_write_that_came_with_it(self):
+        """The last write of a device may arrive together with its close"""
+        stream = make_stream(recv_buffer_size=10)
+        stream.add_data(b'1234567890')
+        stream.state = 'closed'
+
+        assert stream.recv_until_close(timeout=0) == b'1234567890'
+        assert buffered(stream) == b''
 
 
 class TestTimeoutClock:
@@ -397,6 +616,15 @@ class TestOpenStream:
         # the id of the failed open is spent, the next open gets the next one
         assert protocol._stream_id_next == 2
 
+    def test_rejects_a_receive_buffer_that_is_not_positive(self):
+        """A stream that may buffer nothing would never acknowledge a write"""
+        protocol = AdbProtocolTCP()
+
+        for recv_buffer_size in (0, -1):
+            with pytest.raises(ValueError) as e:
+                protocol.open_stream('shell:echo', recv_buffer_size=recv_buffer_size)
+            assert 'positive' in str(e.value)
+
     def test_rejects_a_null_byte_in_the_service(self):
         """The service name ends at the first null, a null inside truncates it"""
         protocol = AdbProtocolTCP()
@@ -477,6 +705,42 @@ class TestProtocolRoundTrip:
         assert result.stdout == b'hello\n'
         assert result.exitcode == 0
         assert adbd.opens == ['shell,v2:echo hello']
+        assert adbd.violations == []
+
+    def test_the_device_is_held_back_when_the_reader_does_not_keep_up(self):
+        """A device of a stream without a window stalls instead of filling memory
+
+        The client buffers a write and holds its acknowledgement back. The
+        device, which sends the next write only after that acknowledgement,
+        stops. When the reader takes the output the device resumes and the whole
+        output arrives: a held back acknowledgement slows a device down, it does
+        not lose its output.
+        """
+        output = b'x' * 20000
+        with FakeAdbd(responder=lambda command, shell_v2: ShellReply(stdout=output)) as adbd:
+            adbd.wait_write_okay = True
+            client = AdbProtocolTCP(port=adbd.port)
+            client.connect()
+            try:
+                stream = client.open_stream('shell,v2:x', recv_buffer_size=10)
+                assert stream._recv_buffer_size == 10
+                # the first write fills the buffer and is left unacknowledged
+                assert adbd.wait_for(lambda: stream._data_size > 0)
+                # the device had every chance to send a second one, and can not
+                time.sleep(0.3)
+                assert adbd.stream_writes == 1
+                # it is blocked on the acknowledgement, not out of output
+                assert stream.remote_id in adbd.write_stalls
+
+                # the reader takes the output, the device resumes and finishes
+                data = stream.recv_until_close(timeout=5)
+            finally:
+                client.disconnect()
+
+        # 20000 bytes in frames of 4096 plus the header of each frame and the
+        # exit code packet, sent in writes of 4096
+        assert adbd.stream_writes == 5
+        assert ShellResult.from_shell_v2(data).stdout == output
         assert adbd.violations == []
 
     def test_repeated_streams_reuse_the_connection(self):
@@ -798,7 +1062,72 @@ class TestMessageRecvValidation:
 
         assert sock.sent == []
         assert capture.fd.any_contains('Unexpected command')
-        assert list(stream.data_buffer) == []
+        assert buffered(stream) == b''
+
+
+class TestWriteAcknowledgement:
+    """The client asks a device for more output only when it has room"""
+
+    @staticmethod
+    def dispatch(recv_buffer_size, data):
+        """
+        Dispatch one write of a device to a stream of a given buffer size
+
+        Args:
+            recv_buffer_size (int): Bytes the stream buffers before it holds back
+            data (bytes): Payload of the write
+
+        Returns:
+            tuple: (stream, socket that recorded what the client sent)
+        """
+        protocol = AdbProtocolTCP()
+        sock = _NullSock()
+        protocol._sock = sock
+        stream = make_stream(recv_buffer_size=recv_buffer_size, protocol=protocol)
+        stream.remote_id = 9
+        protocol._stream_dict[stream.local_id] = stream
+
+        protocol._dispatch_message(sock, WRTE, 9, stream.local_id, data)
+        return stream, sock
+
+    def test_a_write_that_fits_is_acknowledged(self):
+        """The device is asked for the next write while the buffer has room"""
+        stream, sock = self.dispatch(recv_buffer_size=10, data=b'1234')
+
+        assert buffered(stream) == b'1234'
+        assert sent_commands(sock) == [OKAY]
+
+    def test_a_write_that_fills_the_buffer_is_not_acknowledged(self):
+        """A write that fills the buffer is stored and left unacknowledged"""
+        stream, sock = self.dispatch(recv_buffer_size=10, data=b'1234567890')
+
+        assert buffered(stream) == b'1234567890'
+        assert sent_commands(sock) == []
+
+    def test_the_reader_acknowledges_when_it_takes_the_output(self):
+        """The held back write is acknowledged by the reader, not the dispatcher"""
+        stream, sock = self.dispatch(recv_buffer_size=10, data=b'1234567890')
+        assert sent_commands(sock) == []
+
+        assert stream.take_data() == b'1234567890'
+        assert sent_commands(sock) == [OKAY]
+
+    def test_the_acknowledgement_carries_the_ids_of_the_stream(self):
+        """OKAY names both sides of the stream, the device needs the pair"""
+        stream, sock = self.dispatch(recv_buffer_size=10, data=b'x' * 10)
+        stream.take_data()
+
+        command, arg0, arg1, length, checksum, magic, data = decode_message(sock.sent[0])
+        assert command == OKAY
+        assert arg0 == stream.local_id
+        assert arg1 == stream.remote_id
+        assert data == b''
+
+    def test_the_reader_is_woken_for_a_write_it_has_to_acknowledge(self):
+        """The wait is woken before the acknowledgement decision"""
+        stream, sock = self.dispatch(recv_buffer_size=10, data=b'1234567890')
+
+        assert stream.recv_event.acquire(blocking=False) is True
 
 
 class TestChecksumVersion:
