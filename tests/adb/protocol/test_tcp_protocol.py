@@ -136,6 +136,48 @@ def wake_repeatedly(stream, interval=0.005):
     return stop_it
 
 
+def drip_bytes(sock, data, interval=0.05):
+    """
+    Send bytes one at a time, a byte every interval, like a slow link
+
+    A peer of this shape sends each byte just before the timeout of the read
+    that waits for it, which is what a timeout counted per recv() call never
+    ends.
+
+    Args:
+        sock (socket.socket): Socket to write
+        data (bytes): Bytes to send
+        interval (float): Seconds between two bytes. Defaults to 0.05.
+
+    Returns:
+        callable: Stops the writer and joins its thread
+    """
+    stop = threading.Event()
+
+    def run():
+        start = time.perf_counter()
+        for index in range(len(data)):
+            # a fixed rate, whatever the granularity of sleep on this system
+            delay = start + index * interval - time.perf_counter()
+            if delay > 0 and stop.wait(delay):
+                return
+            if stop.is_set():
+                return
+            try:
+                sock.sendall(data[index:index + 1])
+            except OSError:
+                return
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+
+    def stop_it():
+        stop.set()
+        thread.join(timeout=5)
+
+    return stop_it
+
+
 def decode_message(raw):
     """
     Decode one message of the adb transport, independently of the client
@@ -2625,6 +2667,28 @@ class TestConnectFailure:
 
         assert client._sock is None
 
+    def test_a_device_that_drips_the_handshake(self):
+        """A peer that dribbles the banner is given up on at the timeout
+
+        The timeout of a read used to be counted per recv() call, so a peer
+        that sent a byte just before each one held connect() for as long as
+        the handshake is long, and the callers of the connection behind it.
+        """
+        with FakeAdbd(banner=b'device::features=shell_v2') as adbd:
+            # 24 bytes of header and 25 bytes of banner, a byte per 0.05s,
+            # which is 2.4s for a timeout of 0.2s
+            adbd.drip = 0.05
+            client = AdbProtocolTCP(port=adbd.port)
+            client.timeout = 0.2
+
+            start = time.perf_counter()
+            with pytest.raises(AdbConnectionTimeout):
+                client.connect()
+            elapsed = time.perf_counter() - start
+
+        assert elapsed < 1.0
+        assert client._sock is None
+
     def test_a_connect_that_times_out(self, monkeypatch):
         """The connect itself is bounded by the timeout of the connection"""
         calls = []
@@ -2801,3 +2865,113 @@ class TestRecvExact:
             thread.join(timeout=5)
             reader.close()
             writer.close()
+
+
+class TestReadDeadline:
+    """The timeout of a read is the deadline of the whole message
+
+    The timeout of a socket is the timeout of one recv() call. Counting it per
+    call lets a peer that sends a byte just before each one hold the client
+    for as long as the message is long: 24 timeouts for a header, one per byte
+    for a payload. The read as a whole is what is bounded, and that is also
+    what bounds connect() to a peer that is not adbd.
+    """
+
+    @staticmethod
+    def socket_pair(timeout=0.2):
+        """
+        Build a pair of connected sockets with a short timeout
+
+        Args:
+            timeout (float): Timeout of the reader. Defaults to 0.2.
+
+        Returns:
+            tuple: (reader, writer)
+        """
+        reader, writer = socket.socketpair()
+        reader.settimeout(timeout)
+        return reader, writer
+
+    def test_a_header_that_drips_is_given_up_on_in_time(self):
+        """24 bytes at one per 0.05s is 1.2s, the deadline of the read is 0.2s"""
+        reader, writer = self.socket_pair()
+        stop = drip_bytes(writer, b'h' * 24)
+        try:
+            start = time.perf_counter()
+            with pytest.raises(AdbConnectionTimeout):
+                AdbProtocolTCP.recv_exact(reader, 24)
+            elapsed = time.perf_counter() - start
+        finally:
+            stop()
+            reader.close()
+            writer.close()
+
+        assert 0.15 < elapsed < 0.8
+
+    def test_a_payload_that_drips_is_given_up_on_in_time(self):
+        """The payload of a message is part of the same deadline"""
+        reader, writer = self.socket_pair()
+        message = packed(WRTE, 1, 1, b'x' * 30)
+        # the header arrives at once, the 30 bytes of payload over 1.5s
+        writer.sendall(message[:24])
+        stop = drip_bytes(writer, message[24:])
+        try:
+            start = time.perf_counter()
+            with pytest.raises(AdbConnectionTimeout):
+                AdbProtocolTCP().message_recv(reader)
+            elapsed = time.perf_counter() - start
+        finally:
+            stop()
+            reader.close()
+            writer.close()
+
+        assert elapsed < 0.8
+
+    def test_the_idle_wait_is_unlimited_but_a_message_is_not(self):
+        """The dispatch thread waits for an idle device, not for half a header"""
+        reader, writer = self.socket_pair()
+        # the header started arriving, the rest of it drips for 1.15s
+        writer.sendall(b'x')
+        stop = drip_bytes(writer, b'x' * 23)
+        try:
+            start = time.perf_counter()
+            with pytest.raises(AdbConnectionTimeout):
+                AdbProtocolTCP.recv_exact(reader, 24, header_timeout=False)
+            elapsed = time.perf_counter() - start
+        finally:
+            stop()
+            reader.close()
+            writer.close()
+
+        assert elapsed < 0.8
+
+    def test_a_message_that_fits_in_the_timeout_is_read(self):
+        """A slow link that delivers the message in time is not an error"""
+        reader, writer = self.socket_pair(timeout=1.0)
+        stop = drip_bytes(writer, b'x' * 24, interval=0.01)
+        try:
+            assert AdbProtocolTCP.recv_exact(reader, 24) == b'x' * 24
+        finally:
+            stop()
+            reader.close()
+            writer.close()
+
+    def test_the_timeout_of_the_socket_is_left_alone(self):
+        """The read is bounded without shortening the timeout of the socket
+
+        The socket of a connection is shared with the threads that send on it,
+        and a send reads the same timeout. A read that set the remaining time
+        of its deadline would fail the write of another thread.
+        """
+        reader, writer = self.socket_pair(timeout=0.3)
+        stop = drip_bytes(writer, b'x' * 8)
+        try:
+            with pytest.raises(AdbConnectionTimeout):
+                AdbProtocolTCP.recv_exact(reader, 24)
+            timeout_after = reader.gettimeout()
+        finally:
+            stop()
+            reader.close()
+            writer.close()
+
+        assert timeout_after == 0.3

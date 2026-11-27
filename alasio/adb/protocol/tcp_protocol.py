@@ -1,5 +1,5 @@
 import socket
-from collections import deque
+from select import select
 from struct import Struct
 from threading import Lock, Thread, current_thread
 from time import perf_counter
@@ -320,6 +320,8 @@ class AdbProtocolTCP:
         super().__init__()
         self.host = host
         self.port = port
+        # Seconds of a request: the deadline of the whole handshake, of a
+        # message, and of the wait for an answer of the device
         self.timeout = 5
 
         self._connect_lock = Lock()
@@ -771,42 +773,81 @@ class AdbProtocolTCP:
     @staticmethod
     def recv_exact(sock: socket.socket, length: int, header_timeout=True) -> bytes:
         """
+        Read exactly `length` bytes from a socket.
+
+        The timeout of the socket is the deadline of the whole read and not of
+        every recv() call: a peer that sends one byte just before the timeout
+        of each call would otherwise hold the caller for `length` times the
+        timeout, and the dispatch thread with it. The timeout of the socket is
+        left as it is, because the senders of the connection share it: a
+        shorter one would fail a write of another thread.
+
+        Args:
+            sock (socket.socket): Connected socket to read
+            length (int): Bytes to read
+            header_timeout (bool): True to bound the read by the timeout of the
+                socket. False to wait through the idle timeouts of the socket
+                until the first byte, which is what the dispatch thread does
+                between the messages of a device. Defaults to True.
+
+        Returns:
+            bytes: Exactly `length` bytes
+
         Raises:
-            AdbConnectionClosed:
-            AdbConnectionTimeout:
+            AdbConnectionClosed: When the peer closes the connection
+            AdbConnectionTimeout: When the read does not finish in time
         """
-        # fast path for receiving message header
+        deadline = None
         if header_timeout:
+            timeout = sock.gettimeout()
+            if timeout is not None:
+                deadline = perf_counter() + timeout
+
+        # the first byte is read directly, one recv() is bounded by the timeout
+        # of the socket already
+        part = ' when receiving header' if header_timeout else ''
+        while 1:
             try:
-                data = sock.recv(length)
+                chunk = sock.recv(length)
+                break
             except socket.timeout as e:
                 # before OSError, socket.timeout is a subclass of it
-                raise AdbConnectionTimeout(f'{e.__class__.__name__} when receiving header: {e}')
-            except (ConnectionError, OSError) as e:
-                raise AdbConnectionClosed(f'{e.__class__.__name__} when receiving header: {e}')
-        else:
-            # wait until getting any data
-            # No `sock.settimeout(None)` because setting timeout between None and 5 back and forth
-            # might cause race condition, just wait
-            while 1:
-                try:
-                    data = sock.recv(length)
-                    break
-                except socket.timeout:
+                if not header_timeout:
+                    # the device is idle, the dispatch thread waits for it
                     continue
-                except (ConnectionError, OSError) as e:
-                    raise AdbConnectionClosed(f'{e.__class__.__name__}: {e}')
+                raise AdbConnectionTimeout(f'{e.__class__.__name__}{part}: {e}')
+            except (ConnectionError, OSError) as e:
+                raise AdbConnectionClosed(f'{e.__class__.__name__}{part}: {e}')
 
-        total = len(data)
-        if not total:
+        if not chunk:
             raise AdbConnectionClosed('No data when receiving header')
-        if total >= length:
-            return data
+        if len(chunk) >= length:
+            return chunk
 
-        # receive more
-        data = deque([data])
-        remain = length - total
-        while 1:
+        # the message started arriving, so the rest of it is bounded by the
+        # timeout even for a caller that waits for an idle device
+        if deadline is None:
+            timeout = sock.gettimeout()
+            if timeout is not None:
+                deadline = perf_counter() + timeout
+
+        chunks = [chunk]
+        remain = length - len(chunk)
+        while remain > 0:
+            if deadline is not None:
+                remaining = deadline - perf_counter()
+                if remaining <= 0:
+                    raise AdbConnectionTimeout(f'Timeout when receiving chunk: {length - remain} of {length} bytes')
+                try:
+                    # wait for the rest of the message without touching the
+                    # timeout of the socket, select() reports when the next
+                    # bytes are there and the recv() below returns at once
+                    readable, _, _ = select([sock], [], [], remaining)
+                except (ConnectionError, OSError) as e:
+                    raise AdbConnectionClosed(f'{e.__class__.__name__} when receiving chunk: {e}')
+                if not readable:
+                    raise AdbConnectionTimeout(f'Timeout when receiving chunk: {length - remain} of {length} bytes')
+
             try:
                 chunk = sock.recv(remain)
             except socket.timeout as e:
@@ -816,12 +857,10 @@ class AdbProtocolTCP:
             if not chunk:
                 raise AdbConnectionClosed('No data when receiving chunk')
 
-            data.append(chunk)
+            chunks.append(chunk)
             remain -= len(chunk)
-            if remain <= 0:
-                break
 
-        return b''.join(data)
+        return chunks[0] if len(chunks) == 1 else b''.join(chunks)
 
     def message_recv(self, stream: socket.socket, header_timeout=True) -> "tuple[bytes, int, int, bytes]":
         """

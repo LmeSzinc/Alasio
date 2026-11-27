@@ -373,6 +373,10 @@ class FakeAdbd:
         self.zero_checksum = False
         self.reply_chunk_size = 4096
         self.frame_size = 4096
+        # Seconds between the bytes of an outgoing message. 0 writes a message
+        # in one go, anything else models a link that delivers it a byte at a
+        # time, which is a peer that sends just before every timeout
+        self.drip = 0.0
         # raw bytes to answer instead of a built CNXN, for a garbage handshake
         self.cnxn_reply = None
 
@@ -835,7 +839,17 @@ class FakeAdbd:
             # a device of 0x01000001 may not compute one at all
             checksum = 0
         with self._send_lock:
-            _sendall(sock, encode_message(command, arg0, arg1, data, magic, checksum, length))
+            message = encode_message(command, arg0, arg1, data, magic, checksum, length)
+            if not self.drip:
+                _sendall(sock, message)
+                return
+            # a slow link delivers the message a byte at a time. The loop stops
+            # at the first byte the peer no longer takes, a device does not keep
+            # writing into a connection that is gone
+            for index in range(len(message)):
+                if not _sendall(sock, message[index:index + 1]):
+                    return
+                time.sleep(self.drip)
 
     def _recv_message(self, sock):
         """
@@ -917,11 +931,15 @@ def _sendall(sock, data):
     Args:
         sock (socket.socket): Connection to write
         data (bytes): Bytes to send
+
+    Returns:
+        bool: True when every byte was sent, False when the connection is gone
     """
     try:
         sock.sendall(data)
+        return True
     except OSError:
-        pass
+        return False
 
 
 def close_socket(sock):
