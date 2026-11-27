@@ -146,7 +146,9 @@ def verify_signature(public_key, token, signature):
     size = (n.bit_length() + 7) // 8
     if len(signature) != size:
         return False
-    digest = SHA1_DIGEST_INFO + hashlib.sha1(token).digest()
+    # adb calls RSA_sign(NID_sha1, token, 20), so the token is the digest the
+    # DigestInfo carries; it is not hashed again before the signature
+    digest = SHA1_DIGEST_INFO + token
     padding = size - len(digest) - 3
     if padding < 8:
         return False

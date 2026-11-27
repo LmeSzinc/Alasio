@@ -12,7 +12,6 @@ next to this one.
 
 import base64
 import builtins
-import hashlib
 import struct
 
 import pytest
@@ -70,7 +69,7 @@ def verify_token(n, e, token, signature):
     size = (n.bit_length() + 7) // 8
     if len(signature) != size:
         return False
-    digest = SHA1_DIGEST_INFO + hashlib.sha1(token).digest()
+    digest = SHA1_DIGEST_INFO + token
     block = b'\x00\x01' + b'\xff' * (size - len(digest) - 3) + b'\x00' + digest
     return pow(int.from_bytes(signature, 'big'), e, n).to_bytes(size, 'big') == block
 
@@ -144,6 +143,16 @@ class TestSignToken:
 
         with pytest.raises(AdbAuthKeyInvalid):
             tiny.sign(AUTH_TOKEN)
+
+    def test_the_token_is_what_the_digest_block_carries(self, key):
+        """adb hands the token to RSA_sign as the digest, it is not hashed again"""
+        size = (N.bit_length() + 7) // 8
+
+        signature = key.sign(AUTH_TOKEN)
+
+        block = pow(int.from_bytes(signature, 'big'), E, N).to_bytes(size, 'big')
+        assert block[-len(SHA1_DIGEST_INFO) - len(AUTH_TOKEN):-len(AUTH_TOKEN)] == SHA1_DIGEST_INFO
+        assert block[-len(AUTH_TOKEN):] == AUTH_TOKEN
 
     def test_a_key_with_primes_signs_the_same_bytes(self):
         """The split of the CRT is a faster route to the one signature"""

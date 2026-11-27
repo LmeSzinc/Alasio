@@ -19,7 +19,6 @@ which reads it and generates it with the adb binary when the machine has none.
 import base64
 import binascii
 import getpass
-import hashlib
 import socket
 
 from alasio.adb.protocol.const import AUTH_TOKEN_SIZE, AdbAuthKeyInvalid
@@ -36,7 +35,9 @@ PEM_PKCS1 = 'RSA PRIVATE KEY'
 
 # DigestInfo of SHA1 in PKCS#1 v1.5, the padding adb signs a token with. The
 # signature predates the version field of the protocol, and a device of any
-# version verifies exactly this, not a modern digest
+# version verifies exactly this, not a modern digest. adb hands the 20 byte
+# token of the device to RSA_sign as the digest itself, so the token is
+# appended unchanged instead of being hashed once more
 SHA1_DIGEST_INFO = bytes.fromhex('3021300906052b0e03021a05000414')
 
 # Bytes of the modulus of the adb public key format, a key of another size has
@@ -270,7 +271,10 @@ class AdbAuthKey:
 
         The signature is PKCS#1 v1.5 over SHA1, which is what RSA_sign of adb
         produces and what adbd verifies. It is not a choice: a device of any
-        version knows no other digest.
+        version knows no other digest. adb passes the token to RSA_sign as the
+        digest, and RSA_sign takes its input to be the digest already, so the
+        token is what the DigestInfo carries: hashing it again signs a value no
+        adbd recovers.
 
         Args:
             token (bytes): The 20 bytes the device sent
@@ -285,7 +289,7 @@ class AdbAuthKey:
         if len(token) != AUTH_TOKEN_SIZE:
             raise ValueError(f'An AUTH token is {AUTH_TOKEN_SIZE} bytes, got {len(token)}')
         size = self._modulus_size()
-        digest = SHA1_DIGEST_INFO + hashlib.sha1(token).digest()
+        digest = SHA1_DIGEST_INFO + token
         padding = size - len(digest) - 3
         if padding < 8:
             raise AdbAuthKeyInvalid(f'A {self.n.bit_length()} bit adb key is too small to sign an AUTH token')

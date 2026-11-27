@@ -18,16 +18,18 @@ with the message of AdbAuthKeyMissing, instead of turning the run green.
 """
 
 import base64
-import hashlib
 import os
 import shutil
+import socket
+import struct
 import tempfile
+from threading import Event, Thread
 
 import pytest
 
 from alasio.adb.protocol import keygen
 from alasio.adb.protocol.auth import SHA1_DIGEST_INFO
-from alasio.adb.protocol.const import AUTH_TOKEN_SIZE, AdbAuthKeyInvalid
+from alasio.adb.protocol.const import ADB_MAX_PAYLOAD, ADB_VERSION, AUTH_TOKEN_SIZE, AdbAuthKeyInvalid
 from alasio.adb.protocol.keygen import load_user_key
 from alasio.ext import env
 from alasio.ext.concurrent.cmd import run_cmd
@@ -114,7 +116,7 @@ def verify_token(n, e, token, signature):
     size = (n.bit_length() + 7) // 8
     if len(signature) != size:
         return False
-    digest = SHA1_DIGEST_INFO + hashlib.sha1(token).digest()
+    digest = SHA1_DIGEST_INFO + token
     block = b'\x00\x01' + b'\xff' * (size - len(digest) - 3) + b'\x00' + digest
     return pow(int.from_bytes(signature, 'big'), e, n).to_bytes(size, 'big') == block
 
@@ -236,3 +238,95 @@ class TestTheContractWithAdb:
 
         assert (n, e) == (key.n, key.e)
         assert verify_token(n, e, token, signature)
+
+
+def capture_server_signature(token):
+    """
+    Ask the adb server of this machine to sign a token.
+
+    The server signs with the key the module reads, so the two signatures of the
+    same token have to be the same bytes. A listener stands in for a device that
+    asks for one signature and then lets the server in; adb signs the token
+    before it looks at the rest of the connection.
+
+    Args:
+        token (bytes): The 20 bytes the device asks to sign
+
+    Returns:
+        bytes: Signature the adb server sent
+    """
+    header = struct.Struct('<6I')
+    captured = {}
+    done = Event()
+
+    def send_message(sock, command, arg0, arg1, data=b''):
+        number = struct.unpack('<I', command)[0]
+        checksum = sum(data) & 0xFFFFFFFF
+        sock.sendall(header.pack(number, arg0, arg1, len(data), checksum, number ^ 0xFFFFFFFF) + data)
+
+    def recv_message(sock):
+        head = b''
+        while len(head) < header.size:
+            chunk = sock.recv(header.size - len(head))
+            if not chunk:
+                raise ConnectionError('the adb server closed the connection')
+            head += chunk
+        number, arg0, arg1, length, _checksum, _magic = header.unpack(head)
+        data = b''
+        while len(data) < length:
+            chunk = sock.recv(length - len(data))
+            if not chunk:
+                raise ConnectionError('the adb server closed the connection')
+            data += chunk
+        return struct.pack('<I', number), arg0, arg1, data
+
+    def serve(listener):
+        conn, _address = listener.accept()
+        try:
+            command, _arg0, _arg1, _data = recv_message(conn)
+            assert command == b'CNXN'
+            send_message(conn, b'AUTH', 1, 0, token)
+            while True:
+                command, arg0, _arg1, data = recv_message(conn)
+                if command == b'AUTH' and arg0 == 2:
+                    captured['signature'] = data
+                    break
+            send_message(conn, b'CNXN', ADB_VERSION, ADB_MAX_PAYLOAD, b'device::features=shell_v2\x00')
+        except Exception as e:
+            captured['error'] = e
+        finally:
+            conn.close()
+            done.set()
+
+    listener = socket.socket()
+    listener.bind(('127.0.0.1', 0))
+    listener.listen(1)
+    port = listener.getsockname()[1]
+    Thread(target=serve, args=(listener,), daemon=True).start()
+    address = f'127.0.0.1:{port}'
+    try:
+        run_adb('connect', address)
+        assert done.wait(30), 'the adb server did not offer to sign the token'
+    finally:
+        run_adb('disconnect', address)
+        listener.close()
+    if 'error' in captured:
+        raise captured['error']
+    return captured['signature']
+
+
+class TestTheSignatureOfTheServer:
+    def test_the_binary_signs_the_same_bytes_as_the_module(self):
+        """
+        The padding is judged by adb, not by a second model of the same guess.
+
+        The unit tests build the digest block themselves, so a wrong idea of
+        what adb signs passes them: the fake device verifies with the same
+        wrong idea. This test asks the binary for the signature of a fixed
+        token and compares the bytes with the signature of the module.
+        """
+        token = bytes(range(AUTH_TOKEN_SIZE))
+
+        signature = capture_server_signature(token)
+
+        assert signature == load_user_key().sign(token)

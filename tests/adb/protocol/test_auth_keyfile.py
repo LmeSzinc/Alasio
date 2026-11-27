@@ -18,7 +18,6 @@ files never change while the suite runs, and every test only inspects them.
 """
 
 import base64
-import hashlib
 import os
 
 import pytest
@@ -109,7 +108,7 @@ def verify_token(n, e, token, signature):
     size = (n.bit_length() + 7) // 8
     if len(signature) != size:
         return False
-    digest = SHA1_DIGEST_INFO + hashlib.sha1(token).digest()
+    digest = SHA1_DIGEST_INFO + token
     block = b'\x00\x01' + b'\xff' * (size - len(digest) - 3) + b'\x00' + digest
     return pow(int.from_bytes(signature, 'big'), e, n).to_bytes(size, 'big') == block
 
@@ -226,7 +225,7 @@ class TestTheSignatureOfThePair:
         key = pair.key
         token = bytes(range(AUTH_TOKEN_SIZE))
         size = (key.n.bit_length() + 7) // 8
-        digest = SHA1_DIGEST_INFO + hashlib.sha1(token).digest()
+        digest = SHA1_DIGEST_INFO + token
         block = b'\x00\x01' + b'\xff' * (size - len(digest) - 3) + b'\x00' + digest
         plain = pow(int.from_bytes(block, 'big'), key.d, key.n).to_bytes(size, 'big')
 
