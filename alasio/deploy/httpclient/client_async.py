@@ -62,6 +62,22 @@ class AsyncHttpClient(HttpClientBase):
         super().__init__(client)
 
     @classmethod
+    def retry_errors(cls):
+        """
+        The failures of one attempt that another attempt may fix: a
+        transport error of httpx2, i.e. a failure without a status code
+        (dns lookup failure, connect refusal, ssl handshake failure,
+        timeout, read/write error). A subclass declares the failures of
+        its own protocol on top, e.g. the broken pack of the git
+        transport, see GitHttpClient.
+
+        Returns:
+            tuple[type[BaseException], ...]: The types retried
+        """
+        import httpx2
+        return (httpx2.TransportError,)
+
+    @classmethod
     def create_client(cls):
         """
         Create a httpx2.AsyncClient with the options of the domain.
@@ -123,28 +139,62 @@ class AsyncHttpClient(HttpClientBase):
         if self._own_client and client is not None:
             await client.aclose()
 
+    async def _retry(self, url, attempt, attempts):
+        """
+        Run one attempt of a request, and run it again while it fails with
+        an error this client retries.
+
+        Args:
+            url (str): URL of the request, for the log of a failed attempt
+            attempt (Callable[[], Awaitable]): One attempt, called with no
+                argument; it must leave nothing of a failed attempt behind,
+                a retry starts from the beginning
+            attempts (int): Attempts of the request
+
+        Returns:
+            Any: What the attempt that succeeded returned
+
+        Raises:
+            Exception: The failure of the last attempt, when no attempt is
+                left or the failure is not an error this client retries
+        """
+        retry_errors = self.retry_errors()
+        for index in range(attempts):
+            if index:
+                # a transport error is often a one-off blip of the network:
+                # wait a moment, then run the same request from scratch
+                await trio.sleep(self.RETRY_BACKOFF)
+            try:
+                return await attempt()
+            except Exception as e:
+                # every failed attempt is logged; only an error of
+                # retry_errors() is retried while an attempt is left
+                self._log_attempt_failure(url, index, attempts, e)
+                if not isinstance(e, retry_errors) or index + 1 >= attempts:
+                    raise
+
     async def request(self, method, url, headers=None, timeout=None, attempts=HttpClientBase.REQUEST_ATTEMPTS,
                       **kwargs):
         """
-        Send one http request and return its response, retrying a
-        transport error up to `attempts` attempts.
+        Send one http request and return its response, retrying an error of
+        retry_errors() up to `attempts` attempts.
 
         The core of every verb of the class: get() and the future
         verbs (post, ...) only fill in the method, the timeout and the
         retry are handled here.
 
         The retry semantics are the shared design of base.py: a
-        transport error (dns lookup failure, connect refusal, ssl
-        handshake failure, timeout, read/write error - there is no
-        status code at all) is retried while an attempt is left, an
-        http status error (4xx / 5xx) is never retried: the status is
-        the answer of the server, classified by the caller - a mirror
-        probe reads a non-2xx as "this candidate cannot serve the
-        path", see AsyncHttpProbe.head() - and every failed attempt
-        is logged with a warning. The wait before a
-        retry is a trio sleep, so the cancellation of the enclosing
-        task interrupts it (like it interrupts the in-flight request
-        itself).
+        failure of retry_errors() (by default a transport error: dns
+        lookup failure, connect refusal, ssl handshake failure,
+        timeout, read/write error - there is no status code at all) is
+        retried while an attempt is left, an http status error
+        (4xx / 5xx) is never retried: the status is the answer of the
+        server, classified by the caller - a mirror probe reads a
+        non-2xx as "this candidate cannot serve the path", see
+        AsyncHttpProbe.head() - and every failed attempt is logged with
+        a warning. The wait before a retry is a trio sleep, so the
+        cancellation of the enclosing task interrupts it (like it
+        interrupts the in-flight request itself).
 
         The timeout is the timeout of the call, or the default timeout
         of the class when the call gives none: httpx always receives
@@ -176,32 +226,16 @@ class AsyncHttpClient(HttpClientBase):
                 error of the last attempt, or the status error of the
                 server
         """
-        import httpx2
-
         timeout = self._get_timeout(timeout)
         client = self._get_aclient()
-        for attempt in range(attempts):
-            if attempt:
-                # a transport error is often a one-off blip of the
-                # network: wait a moment, then retry the same request
-                await trio.sleep(self.RETRY_BACKOFF)
-            try:
-                response = await client.request(
-                    method, url, headers=headers, timeout=timeout, **kwargs)
-                self._raise_for_status(response)
-                return response
-            except httpx2.TransportError as e:
-                # a transport error is logged, and retried while an
-                # attempt is left: a one-off network blip should not
-                # fail the request
-                self._log_attempt_failure(url, attempt, attempts, e)
-                if attempt + 1 >= attempts:
-                    raise
-            except Exception as e:
-                # every other failure (an http status error, ...) is
-                # logged and raised as-is, it is never retried
-                self._log_attempt_failure(url, attempt, attempts, e)
-                raise
+
+        async def attempt():
+            response = await client.request(
+                method, url, headers=headers, timeout=timeout, **kwargs)
+            self._raise_for_status(response)
+            return response
+
+        return await self._retry(url, attempt, attempts)
 
     async def get(self, url, headers=None, timeout=None, attempts=HttpClientBase.REQUEST_ATTEMPTS,
                   **kwargs):
@@ -268,16 +302,17 @@ class AsyncHttpClient(HttpClientBase):
         The async twin of HttpClient.stream(), see it for the contract:
         the response body is not read into memory, the consumer reads it
         (e.g. response.aiter_bytes() into an async file write). A
-        transport error while opening the response and a transport
-        error while the consumer reads it (e.g. a read timeout in the
-        middle of a download) discard the attempt and the transfer is
-        started over with a fresh request: the consumer is awaited once
-        per attempt and must leave nothing of a failed attempt behind.
-        Any other failure of the consumer (e.g. a hash check of the
-        bytes) is logged and raised as-is, it is never retried. The
-        wait before a retry is a trio sleep, so the cancellation of the
-        enclosing task interrupts it (like it interrupts the in-flight
-        request itself).
+        failure of retry_errors() while opening the response and while
+        the consumer reads it (e.g. a read timeout in the middle of a
+        download) discard the attempt and the transfer is started over
+        with a fresh request: the consumer is awaited once per attempt
+        and must leave nothing of a failed attempt behind. Any other
+        failure of the consumer (e.g. a hash check of the bytes) is
+        logged and raised as-is, it is never retried, unless the class
+        declares it retryable too (see retry_errors()). The wait before
+        a retry is a trio sleep, so the cancellation of the enclosing
+        task interrupts it (like it interrupts the in-flight request
+        itself).
 
         Args:
             url (str): URL to request
@@ -306,31 +341,13 @@ class AsyncHttpClient(HttpClientBase):
                 error of the server
             Exception: The failure of the consumer, raised as-is
         """
-        import httpx2
-
         timeout = self._get_timeout(timeout)
         client = self._get_aclient()
-        for attempt in range(attempts):
-            if attempt:
-                # a transport error is often a one-off blip of the
-                # network: wait a moment, then retry the same transfer
-                await trio.sleep(self.RETRY_BACKOFF)
-            try:
-                async with client.stream(
-                        method, url, headers=headers, timeout=timeout, **kwargs) as response:
-                    self._raise_for_status(response)
-                    await consume(response)
-                return
-            except httpx2.TransportError as e:
-                # a transport error of the transfer (opening the
-                # response or reading it) is logged, and retried while
-                # an attempt is left
-                self._log_attempt_failure(url, attempt, attempts, e)
-                if attempt + 1 >= attempts:
-                    raise
-            except Exception as e:
-                # every other failure (a status error, the check of the
-                # consumer, ...) is logged and raised as-is, it is
-                # never retried
-                self._log_attempt_failure(url, attempt, attempts, e)
-                raise
+
+        async def attempt():
+            async with client.stream(
+                    method, url, headers=headers, timeout=timeout, **kwargs) as response:
+                self._raise_for_status(response)
+                await consume(response)
+
+        await self._retry(url, attempt, attempts)

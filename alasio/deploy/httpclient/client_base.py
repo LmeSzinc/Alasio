@@ -18,11 +18,14 @@ does not own are handed to httpx2 unchanged (**kwargs), so an option of
 httpx (follow_redirects, params, cookies, auth, content, ...) needs no
 new argument here.
 
-Only a transport error is retried, i.e. a failure without a status
-code: dns lookup failure, connect refusal, ssl handshake failure,
-timeout, read/write error. A one-off network blip of the user network
-is absorbed instead of failing the caller. An http status error
-(4xx / 5xx) is never retried: it is the answer of the server, and
+Only a failure the client declares in retry_errors() is retried, i.e. a
+failure a fresh attempt can fix: for the http clients a transport error
+without a status code (dns lookup failure, connect refusal, ssl
+handshake failure, timeout, read/write error), for the git client a
+connection error and a pack that arrived broken. A one-off network blip
+of the user network is absorbed instead of failing the caller. An http
+status error (4xx / 5xx) is never retried: it is the answer of the
+server, and
 whether another strategy (e.g. another mirror) makes sense is decided
 by the caller, which knows the content semantics. Every failed attempt
 is logged with a warning, whatever the failure is: an absorbed blip
@@ -77,7 +80,64 @@ from alasio.logger.utils import stringify_event
 STATUS_DOC_LINK = '\nFor more information check: '
 
 
-class HttpClientBase:
+class RetryPolicyBase:
+    """
+    The retry policy of a transport client: the attempts of a transfer, the
+    wait between them, the failures another attempt may fix, and the log of
+    a failed attempt.
+
+    A subclass declares the failures of its own protocol in retry_errors():
+    the http clients retry a transport error of httpx2, the git client a
+    connection error and a pack that arrived broken, and neither knows the
+    errors of the other transport. Every other failure is the answer of the
+    peer (an http status) or a failure of the consumer of the caller: it is
+    logged and raised as it is, never retried.
+
+    Only the policy is shared. The loop that runs an attempt and retries it is
+    written in each client class: the attempt of a client is its own transport
+    (a request of httpx2, an exchange on a git:// socket), and the wait of its
+    own flavor (time.sleep when the calling thread blocks, trio.sleep when the
+    caller runs on the event loop). A retry therefore reads as a method of the
+    class that owns the transport, and no client depends on a shared loop.
+    """
+
+    # attempts of a transfer whose caller does not set them: a one-off blip
+    # of the network should not fail a data transfer
+    REQUEST_ATTEMPTS = 3
+    # seconds to wait before the retry of a transfer
+    RETRY_BACKOFF = 0.5
+
+    @classmethod
+    def retry_errors(cls):
+        """
+        The failures of one attempt that another attempt may fix.
+
+        Returns:
+            tuple[type[BaseException], ...]: The types the transfer loop
+                retries, empty by default: a client overrides it with the
+                errors of its own transport
+        """
+        return ()
+
+    def _log_attempt_failure(self, url, attempt, attempts, e):
+        """
+        Log one failed attempt of a transfer.
+
+        Every attempt is logged, whatever the failure is: an absorbed blip
+        stays visible in the log and exhausted retries read as the sequence
+        of attempts.
+
+        Args:
+            url (str): URL of the transfer
+            attempt (int): Zero based index of the failed attempt
+            attempts (int): Attempts of the transfer
+            e (Exception): The failure of the attempt
+        """
+        logger.warning(
+            f'Request to "{url}" failed (attempt {attempt + 1}/{attempts}): {stringify_event(e)}')
+
+
+class HttpClientBase(RetryPolicyBase):
     """
     Shared design of the retrying http clients: the retry policy, the
     default timeout, the ownership of the httpx2 client and the
@@ -122,13 +182,6 @@ class HttpClientBase:
         """
         import httpx2
         return httpx2.Timeout(connect=cls.PROBE_TIMEOUT, read=30.0, write=30.0, pool=cls.PROBE_TIMEOUT)
-
-    # attempts of a request whose caller does not set them: a transport
-    # error is retried, up to three attempts (a one-off network blip
-    # should not fail a data request)
-    REQUEST_ATTEMPTS = 3
-    # seconds to wait before the retry of a request
-    RETRY_BACKOFF = 0.5
 
     def __init__(self, client=None):
         """
@@ -211,20 +264,3 @@ class HttpClientBase:
                 # another version of httpx: the message is raised as it is
                 raise
             raise httpx2.HTTPStatusError(message, request=e.request, response=e.response) from None
-
-    def _log_attempt_failure(self, url, attempt, attempts, e):
-        """
-        Log one failed attempt of a request.
-
-        Every attempt is logged, whatever the failure is: an absorbed
-        blip stays visible in the log and exhausted retries read as the
-        sequence of attempts.
-
-        Args:
-            url (str): URL of the request
-            attempt (int): Zero based index of the failed attempt
-            attempts (int): Attempts of the request
-            e (Exception): The failure of the attempt
-        """
-        logger.warning(
-            f'Request to "{url}" failed (attempt {attempt + 1}/{attempts}): {stringify_event(e)}')

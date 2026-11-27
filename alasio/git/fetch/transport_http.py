@@ -4,6 +4,7 @@ from alasio.deploy.httpclient.client_async import AsyncHttpClient
 from alasio.ext.path.atomic import atomic_write
 from alasio.git.fetch.pkt import FetchPayload, agather_bytes, aparse_packfile_stream, aparse_pkt_line, parse_pkt_line
 from alasio.git.fetch.transport import BaseTransport
+from alasio.git.file.exception import PackBroken, PktLineBroken
 from alasio.logger import logger
 
 
@@ -14,9 +15,9 @@ class GitHttpClient(AsyncHttpClient):
     http2 and the redirects are the options of a smart-http request of git, and
     the proxy is the one of the arguments: an explicit proxy, never the one of
     the environment, so a proxy tool that left its variables behind cannot route
-    a fetch. The rest is the design of AsyncHttpClient: a transport error is
-    retried up to the attempts of the call, an http status is the answer of the
-    server and is raised as it is.
+    a fetch. The rest is the design of AsyncHttpClient: an error of
+    retry_errors() is retried up to the attempts of the call, an http status is
+    the answer of the server and is raised as it is.
     """
 
     def __init__(self, proxy=None):
@@ -27,6 +28,21 @@ class GitHttpClient(AsyncHttpClient):
         """
         super().__init__()
         self._proxy = proxy
+
+    @classmethod
+    def retry_errors(cls):
+        """
+        The failures of one attempt that another attempt may fix: the transport
+        errors of AsyncHttpClient, and an answer that arrived broken, i.e. a
+        pack that does not match its own trailing sha1 (see
+        aparse_packfile_stream) or a pkt-line stream cut in the middle of a
+        line. The chunked encoding of http does not hide either of them from
+        the reader of the body.
+
+        Returns:
+            tuple[type[BaseException], ...]: The types retried
+        """
+        return AsyncHttpClient.retry_errors() + (PackBroken, PktLineBroken)
 
     def create_client(self):
         """
@@ -141,7 +157,10 @@ class HttpTransport(BaseTransport):
         finally:
             await client.aclose()
 
-        atomic_write(output_file, data)
+        if output_file is not None:
+            atomic_write(output_file, data)
+
+        return data
 
     async def fetch_pack_v2(self, payload: FetchPayload, output_file=None):
         """
@@ -182,7 +201,10 @@ class HttpTransport(BaseTransport):
         finally:
             await client.aclose()
 
-        atomic_write(output_file, data)
+        if output_file is not None:
+            atomic_write(output_file, data)
+
+        return data
 
     def _build_v2_payload(self, payload: FetchPayload):
         """

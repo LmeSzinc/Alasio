@@ -1,47 +1,35 @@
 import trio
 
+from alasio.ext.cache import cached_property
 from alasio.ext.path.atomic import atomic_write
+from alasio.git.fetch.client_git import DEFAULT_GIT_PORT, AsyncGitClient
 from alasio.git.fetch.pkt import (
-    FetchPayload, agather_bytes, aparse_packfile_stream, aparse_pkt_line, create_pkt_line, parse_pkt_line
+    FetchPayload, agather_bytes, aparse_packfile_stream, aparse_pkt_line, create_pkt_line, receive_chunks
 )
 from alasio.git.fetch.transport import BaseTransport
 from alasio.logger import logger
 
-# Bytes to read from the connection at once
-RECEIVE_SIZE = 65536
-
-
-async def receive_chunks(stream, size=RECEIVE_SIZE):
-    """
-    Yield what the server sends until the stream ends.
-
-    The end of a git:// answer is not always a clean close: a server may reset
-    the connection right after the last byte of the pack. `git daemon` on
-    windows does exactly that, and every byte of the pack did arrive before the
-    reset, so a reset is the end of the stream here, not a failure. A pack cut
-    short is detected by its own trailing sha1 when the pack is read, see
-    `alasio.git.stage.genidx`.
-
-    Args:
-        stream (trio.abc.ReceiveStream): The connection
-        size (int): Bytes to read at once. Defaults to RECEIVE_SIZE.
-
-    Yields:
-        bytes: One chunk of the answer
-    """
-    while True:
-        try:
-            chunk = await stream.receive_some(size)
-        except (trio.BrokenResourceError, trio.ClosedResourceError):
-            # Reset by the peer, the stream is over
-            return
-        if not chunk:
-            return
-        yield chunk
-
 
 class GitTransport(BaseTransport):
-    """Transport implementation for Git protocol using TCP."""
+    """
+    Transport implementation for Git protocol using TCP.
+
+    The protocol itself is the one of AsyncGitClient, which owns the retries:
+    this class only names the server of the arguments and logs the transfer.
+    """
+
+    @cached_property
+    def client(self):
+        """
+        Returns:
+            AsyncGitClient: The retrying client of the server
+        """
+        repo_url = self.arguments.repo_url
+        return AsyncGitClient(
+            host=repo_url.host,
+            port=repo_url.port or DEFAULT_GIT_PORT,
+            path=repo_url.path,
+        )
 
     async def fetch_refs(self):
         """
@@ -50,52 +38,8 @@ class GitTransport(BaseTransport):
                 key: sha1
                 value: ref like refs/heads/bug_fix, refs/heads/v2021.10.24, refs/pull/1007/head
         """
-        host = self.arguments.repo_url.host
-        port = self.arguments.repo_url.port or 9418
-        path = self.arguments.repo_url.path
-        logger.info(f'fetch_refs: git://{host}:{port}{path}')
-
-        async with await trio.open_tcp_stream(host, port) as stream:
-            # Send handshake
-            handshake = f'git-upload-pack {path}\0host={host}\0'
-            await stream.send_all(create_pkt_line(handshake))
-
-            # Read refs
-            content = bytearray()
-            while True:
-                chunk = await stream.receive_some(4096)
-                if not chunk:
-                    break
-                content.extend(chunk)
-                if content.endswith(b'0000'):
-                    break
-
-        logger.debug(f'Received {len(content)} bytes from server')
-        logger.debug(f'First 200 bytes: {bytes(content[:200])!r}')
-
-        out = {}
-        for line in parse_pkt_line(bytes(content)):
-            # parse line, which might be :
-            # d5f854cedd666de9a99ebacbd3fb47971afc4271 HEAD\x00multi_ack thin-pack ...
-            # cbba8f024a69c24380efe82b3b0ec3c736d01dfb refs/heads/bug_fix\n
-            # 8b63ab79e956b90805dff2167448a72262fe50eb refs/heads/v2021.10.24\n
-            # b9f14832259b2b093a03fdfd5c611baceea7c926 refs/pull/1007/head\n
-            # b408a075f13681edd44fcbb17d452bdd8aaf67aa refs/tags/v2020.04.08\n
-            sha1, sep, rest = line.strip().partition(b' ')
-            if not sep:
-                continue
-            # Extract ref (may have capabilities after \0)
-            ref = rest.split(b'\0')[0]
-            if not ref.startswith(b'refs/'):
-                continue
-            # validate
-            if len(sha1) != 40:
-                logger.warning(f'fetch_refs: Unexpected sha1 length "{sha1}"')
-                continue
-            # set
-            out[sha1] = ref
-
-        return out
+        logger.info(f'fetch_refs: {self.client.url}')
+        return await self.client.refs()
 
     async def fetch_pack_v1(self, payload: FetchPayload, output_file=None):
         """
@@ -107,39 +51,17 @@ class GitTransport(BaseTransport):
         Returns:
             bytes | None:
         """
-        host = self.arguments.repo_url.host
-        port = self.arguments.repo_url.port or 9418
-        path = self.arguments.repo_url.path
-        logger.info(f'fetch_pack_v1: git://{host}:{port}{path}')
-
-        async with await trio.open_tcp_stream(host, port) as stream:
-            # Send handshake
-            handshake = f'git-upload-pack {path}\0host={host}\0'
-            await stream.send_all(create_pkt_line(handshake))
-
-            # Read and discard refs (already fetched in fetch_refs)
-            content = bytearray()
-            while True:
-                chunk = await stream.receive_some(4096)
-                if not chunk:
-                    break
-                content.extend(chunk)
-                if content.endswith(b'0000'):
-                    break
-
-            # Send want/have/done
-            await stream.send_all(payload.build())
-
-            # Receive packfile
-            pkt_stream = aparse_pkt_line(receive_chunks(stream))
-            file_stream = aparse_packfile_stream(pkt_stream)
-            data = await agather_bytes(file_stream)
-
-        atomic_write(output_file, data)
+        logger.info(f'fetch_pack_v1: {self.client.url}')
+        return await self.client.fetch_pack(payload, output_file=output_file)
 
     async def fetch_pack_v2(self, payload: FetchPayload, output_file=None):
         """
         Fetch pack using Git Protocol v2.
+
+        The client does not parse the pack section of protocol v2 yet, so this
+        exchange is not part of AsyncGitClient and has neither its checksum nor
+        its retries: see test_fetch_pack_v2, which is skipped for the same
+        reason.
 
         Args:
             payload (FetchPayload): The fetch request payload.
@@ -150,7 +72,7 @@ class GitTransport(BaseTransport):
             bytes | None:
         """
         host = self.arguments.repo_url.host
-        port = self.arguments.repo_url.port or 9418
+        port = self.arguments.repo_url.port or DEFAULT_GIT_PORT
         path = self.arguments.repo_url.path
         logger.info(f'fetch_pack_v2: git://{host}:{port}{path}')
 
@@ -180,7 +102,8 @@ class GitTransport(BaseTransport):
             file_stream = aparse_packfile_stream(pkt_stream)
             data = await agather_bytes(file_stream)
 
-        atomic_write(output_file, data)
+        if output_file is not None:
+            atomic_write(output_file, data)
 
     def _build_v2_payload(self, payload: FetchPayload):
         """

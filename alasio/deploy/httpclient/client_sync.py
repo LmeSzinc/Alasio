@@ -60,6 +60,20 @@ class HttpClient(HttpClientBase):
         super().__init__(client)
 
     @classmethod
+    def retry_errors(cls):
+        """
+        The failures of one attempt that another attempt may fix: a
+        transport error of httpx2, i.e. a failure without a status code
+        (dns lookup failure, connect refusal, ssl handshake failure,
+        timeout, read/write error).
+
+        Returns:
+            tuple[type[BaseException], ...]: The types retried
+        """
+        import httpx2
+        return (httpx2.TransportError,)
+
+    @classmethod
     def create_client(cls):
         """
         Create a httpx2.Client with the options of the domain.
@@ -160,10 +174,9 @@ class HttpClient(HttpClientBase):
             httpx2.HTTPError: If the request fails: the transport error
                 of the last attempt, or the status error of the server
         """
-        import httpx2
-
         timeout = self._get_timeout(timeout)
         client = self._get_client()
+        retry_errors = self.retry_errors()
         for attempt in range(attempts):
             if attempt:
                 # a transport error is often a one-off blip of the
@@ -173,18 +186,14 @@ class HttpClient(HttpClientBase):
                 response = client.request(method, url, headers=headers, timeout=timeout, **kwargs)
                 self._raise_for_status(response)
                 return response
-            except httpx2.TransportError as e:
-                # a transport error is logged, and retried while an
-                # attempt is left: a one-off network blip should not
-                # fail the request
-                self._log_attempt_failure(url, attempt, attempts, e)
-                if attempt + 1 >= attempts:
-                    raise
             except Exception as e:
-                # every other failure (an http status error, ...) is
-                # logged and raised as-is, it is never retried
+                # every failed attempt is logged; only an error of
+                # retry_errors() is retried while an attempt is left,
+                # every other one (an http status error, ...) is raised
+                # as it is
                 self._log_attempt_failure(url, attempt, attempts, e)
-                raise
+                if not isinstance(e, retry_errors) or attempt + 1 >= attempts:
+                    raise
 
     def get(self, url, headers=None, timeout=None, attempts=HttpClientBase.REQUEST_ATTEMPTS, **kwargs):
         """
@@ -279,10 +288,9 @@ class HttpClient(HttpClientBase):
                 error of the server
             Exception: The failure of the consumer, raised as-is
         """
-        import httpx2
-
         timeout = self._get_timeout(timeout)
         client = self._get_client()
+        retry_errors = self.retry_errors()
         for attempt in range(attempts):
             if attempt:
                 # a transport error is often a one-off blip of the
@@ -293,16 +301,12 @@ class HttpClient(HttpClientBase):
                     self._raise_for_status(response)
                     consume(response)
                 return
-            except httpx2.TransportError as e:
-                # a transport error of the transfer (opening the
-                # response or reading it) is logged, and retried while
-                # an attempt is left
-                self._log_attempt_failure(url, attempt, attempts, e)
-                if attempt + 1 >= attempts:
-                    raise
             except Exception as e:
-                # every other failure (a status error, the check of the
-                # consumer, ...) is logged and raised as-is, it is
-                # never retried
+                # every failed attempt is logged; only an error of
+                # retry_errors() (of the transfer or of the consumer) is
+                # retried while an attempt is left, every other one (a
+                # status error, a check of the consumer) is raised as it
+                # is
                 self._log_attempt_failure(url, attempt, attempts, e)
-                raise
+                if not isinstance(e, retry_errors) or attempt + 1 >= attempts:
+                    raise

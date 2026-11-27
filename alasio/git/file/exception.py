@@ -32,6 +32,17 @@ class PackBroken(Exception):
     pass
 
 
+class PktLineBroken(Exception):
+    """
+    Raised when a pkt-line stream ends in the middle of a line.
+
+    A pkt-line is read by the length header at its front, so a stream that ends
+    after a header and a part of its payload leaves a line that can never be
+    completed. That is a transfer cut short, not the end of the stream: the
+    end of a pkt-line stream is the flush-pkt (or the clean close after it).
+    """
+
+
 class PackNotSelfContained(PackBroken):
     """
     Raised when a pack refers to a delta base that the pack does not hold.
