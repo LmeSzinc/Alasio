@@ -1359,8 +1359,25 @@ class TestDisconnect:
             client.disconnect()
 
             assert thread is not None
-            thread.join(timeout=5)
-            assert not thread.is_alive()
+            # disconnect() waits for the thread itself, the connection is not
+            # released while a thread still reads its socket
+            assert thread.is_alive() is False
+
+    def test_a_disconnect_ends_the_connection_with_a_fin(self):
+        """The device reads the end of the connection as an end of file
+
+        A close that still holds unread data in the receive buffer sends a RST
+        instead, which a device does not read as a connection that ended.
+        """
+        with FakeAdbd() as adbd:
+            client = AdbProtocolTCP(port=adbd.port)
+            client.connect()
+            client.disconnect()
+
+            # the end is recorded by the thread of the device, just after the
+            # close that woke the client
+            assert adbd.wait_for(lambda: adbd.connection_ends == ['eof'])
+            assert adbd.violations == []
 
     def test_a_disconnect_wakes_a_reader(self):
         """A reader of a dropped connection does not wait for its timeout
@@ -1467,6 +1484,104 @@ class TestDisconnect:
                     assert stream.recv_until_close(timeout=5) == b''
             finally:
                 client.disconnect()
+
+
+class _HalfCloseSocket:
+    """A socket whose half close ends the reader, the way a device answers a FIN"""
+
+    def __init__(self, reader_ended, answer=True):
+        """
+        Args:
+            reader_ended (threading.Event): Set when the reader of the socket ends
+            answer (bool): True to end the reader on the half close, False to
+                stand for a device that never answers
+        """
+        self.calls = []
+        self._reader_ended = reader_ended
+        self._answer = answer
+
+    def shutdown(self, how):
+        self.calls.append(('shutdown', how))
+        if self._answer and how == socket.SHUT_WR:
+            self._reader_ended.set()
+
+    def close(self):
+        # the flag tells whether the reader ended before the descriptor did
+        self.calls.append(('close', self._reader_ended.is_set()))
+
+
+class _ClosedSocket:
+    """A socket the peer already closed"""
+
+    def __init__(self):
+        self.calls = []
+
+    def shutdown(self, how):
+        self.calls.append(('shutdown', how))
+        raise OSError(9, 'Bad file descriptor')
+
+    def close(self):
+        self.calls.append(('close',))
+
+
+class TestGracefulClose:
+    """The socket is half closed, the reader ends, then the socket is closed"""
+
+    @staticmethod
+    def reader(ended):
+        """
+        Start a thread that stands for the dispatch thread of a connection.
+
+        Args:
+            ended (threading.Event): Event the thread waits on
+
+        Returns:
+            threading.Thread: The started thread
+        """
+        thread = threading.Thread(target=ended.wait, daemon=True)
+        thread.start()
+        return thread
+
+    def test_the_half_close_comes_before_the_join(self):
+        """The FIN goes out first, the descriptor is closed after the reader
+
+        `SHUT_WR` leaves the receive direction open: the FIN of the device is
+        what wakes the reader, and closing the read side here may drop it.
+        """
+        reader_ended = threading.Event()
+        sock = _HalfCloseSocket(reader_ended)
+
+        AdbProtocolTCP._graceful_close(sock, self.reader(reader_ended))
+
+        assert sock.calls == [('shutdown', socket.SHUT_WR), ('close', True)]
+
+    def test_a_device_that_does_not_answer_is_given_the_timeout(self, monkeypatch):
+        """A reader that does not end is waited for at most the join timeout"""
+        monkeypatch.setattr(tcp_protocol, 'DISCONNECT_JOIN_TIMEOUT', 0.1)
+        reader_ended = threading.Event()
+        sock = _HalfCloseSocket(reader_ended, answer=False)
+        thread = self.reader(reader_ended)
+
+        start = time.perf_counter()
+        AdbProtocolTCP._graceful_close(sock, thread)
+        elapsed = time.perf_counter() - start
+
+        # join() may return a little before the timeout it was given, the
+        # resolution of the clock on Windows is 15.6ms
+        assert elapsed >= 0.05
+        # the descriptor is released even though the reader still waits
+        assert sock.calls == [('shutdown', socket.SHUT_WR), ('close', False)]
+
+        reader_ended.set()
+        thread.join(timeout=1)
+
+    def test_a_socket_the_peer_already_closed_is_still_released(self):
+        """A dead link ends with the close instead of an error"""
+        sock = _ClosedSocket()
+
+        AdbProtocolTCP._graceful_close(sock, None)
+
+        assert sock.calls == [('shutdown', socket.SHUT_WR), ('close',)]
 
 
 class TestConnectionRelease:

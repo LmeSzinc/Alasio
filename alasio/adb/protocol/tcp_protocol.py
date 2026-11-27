@@ -18,6 +18,11 @@ from alasio.logger import logger
 # data checksum and magic, six little endian unsigned 32 bit integers
 MESSAGE_STRUCT = Struct('<6I')
 
+# Seconds disconnect() waits for the dispatch thread to end after the half
+# close it sends. A device answers the FIN of the half close by closing its
+# side, so this is only spent on a link that is already gone.
+DISCONNECT_JOIN_TIMEOUT = 2
+
 
 class AdbStreamTCP:
     def __init__(self, local_id: int, service: str, protocol: "AdbProtocolTCP"):
@@ -227,15 +232,19 @@ class AdbProtocolTCP:
     @staticmethod
     def _close_socket(sock: "socket.socket | None"):
         """
-        Close a socket and wake the reads another thread blocks on it.
+        Close a socket of this thread, sending a FIN instead of a RST.
+
+        The caller must be the only thread that uses the socket: the thread
+        that opened it, or the dispatch thread that read it. A close from
+        another thread is what `_graceful_close()` exists to avoid.
 
         Args:
             sock (socket.socket): Socket to close, None is ignored
         """
         if sock is None:
             return
-        # shutdown() is what wakes a recv() blocked in another thread, close()
-        # alone leaves that thread waiting on a descriptor nobody will write
+        # stop both directions before the close, so a close that still holds
+        # unread data in the receive buffer sends a FIN and not a RST
         try:
             sock.shutdown(socket.SHUT_RDWR)
         except (OSError, AttributeError):
@@ -245,6 +254,45 @@ class AdbProtocolTCP:
             sock.close()
         except OSError:
             pass
+
+    @staticmethod
+    def _graceful_close(sock: "socket.socket", thread: "Thread | None"):
+        """
+        Half close a socket, let its dispatch thread end, then close it.
+
+        `shutdown(SHUT_WR)` sends a FIN and keeps the receive direction open,
+        so the device answers with its own FIN and the dispatch thread ends on
+        a readable event that every platform delivers. The descriptor is closed
+        only after that thread is gone: a close from another thread is not able
+        to interrupt a read that already waits on it on every platform, and it
+        frees a descriptor the thread may still be using. See
+        python/cpython#154224 for the macOS case.
+
+        A device that does not answer the FIN is given
+        `DISCONNECT_JOIN_TIMEOUT` seconds, after which the descriptor is closed
+        anyway and the read of that thread ends on the close or on the timeout
+        of the socket.
+
+        Args:
+            sock (socket.socket): Socket to close
+            thread (Thread): Dispatch thread that reads it, None when there is none
+        """
+        try:
+            try:
+                # the receive direction stays open: the FIN of the device is
+                # what wakes the dispatch thread, closing the read side here
+                # may drop that FIN together with the data of the device
+                sock.shutdown(socket.SHUT_WR)
+            except (OSError, AttributeError):
+                # already closed, or a socket stand-in without shutdown
+                pass
+            if thread is not None and thread.is_alive() and thread is not current_thread():
+                thread.join(timeout=DISCONNECT_JOIN_TIMEOUT)
+        finally:
+            try:
+                sock.close()
+            except OSError:
+                pass
 
     def _abort_streams(self):
         """
@@ -264,15 +312,16 @@ class AdbProtocolTCP:
                 except RuntimeError:
                     pass
 
-    def _drop_connection(self):
+    def _detach_connection(self):
         """
-        Forget the current connection, close its socket and drop its streams.
+        Forget the current connection and wake the callers waiting on it.
 
-        The caller holds `_connect_lock`, and it has to join the returned thread
-        itself, outside of the lock: the dispatch thread takes that lock too.
+        The caller holds `_connect_lock`. The socket and the thread come back
+        to be released by the caller outside of that lock: the dispatch thread
+        takes the same lock on its way out, so joining it here would deadlock.
 
         Returns:
-            Thread | None: The dispatch thread of the dropped connection
+            tuple: (socket, thread), both None when there is no connection
         """
         sock = self._sock
         thread = self._recv_thread
@@ -280,14 +329,14 @@ class AdbProtocolTCP:
         self._recv_thread = None
         self._broken = False
         if sock is None:
-            return None
+            return None, None
 
         # we don't need graceful stream close before socket close, because adbd
-        # will do anyway, so we just release resources on our side
+        # will do anyway, so we just release resources on our side. The streams
+        # go first: a caller that is sending has to see the connection closed
+        # instead of reaching a socket that may not send any more
         self._abort_streams()
-
-        self._close_socket(sock)
-        return thread
+        return sock, thread
 
     def connect(self):
         """
@@ -316,7 +365,10 @@ class AdbProtocolTCP:
             # the receiving thread gave up on the previous connection, its
             # socket is dead although the object is still here
             if self._sock is not None:
-                self._drop_connection()
+                sock, _thread = self._detach_connection()
+                # the dispatch thread of a broken connection closed its own
+                # socket, this only releases an object it is done with
+                self._close_socket(sock)
 
             addr = f'{self.host}:{self.port}'
             logger.info(f'Connecting to {addr}')
@@ -447,10 +499,15 @@ class AdbProtocolTCP:
 
     def disconnect(self):
         """
-        Close the connection and release everything it holds.
+        End the connection and release everything it holds.
 
-        The socket is closed and the dispatch thread is woken and joined, so
-        the object holds nothing after this call. A second call is a no-op.
+        The connection ends with a half close: the socket sends a FIN, the
+        device answers with its own, and the dispatch thread ends on that
+        readable event. The descriptor is closed here, after the thread is
+        gone, so no thread closes a socket another thread reads. A device that
+        does not answer still ends the call within `DISCONNECT_JOIN_TIMEOUT`.
+
+        The object holds nothing after this call. A second call is a no-op.
         """
         with self._connect_lock:
             # check if already disconnected
@@ -459,11 +516,10 @@ class AdbProtocolTCP:
 
             addr = f'{self.host}:{self.port}'
             logger.info(f'Disconnecting to {addr}')
-            thread = self._drop_connection()
+            sock, thread = self._detach_connection()
 
-        # join outside of the lock, the dispatch thread takes it as well
-        if thread is not None and thread.is_alive() and thread is not current_thread():
-            thread.join(timeout=2)
+        # release outside of the lock, the dispatch thread takes it as well
+        self._graceful_close(sock, thread)
 
         logger.info(f'Disconnected to {addr}')
 

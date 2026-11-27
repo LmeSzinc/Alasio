@@ -307,6 +307,10 @@ class FakeAdbd:
         write_okays (int): Number of OKAY the host sent for a WRTE
         violations (list): (reason, message) of everything the host did wrong
         connections (int): Number of accepted connections
+        connection_ends (list): How the read loop of every connection ended:
+            `eof` for a host that closed, `reset` for a reset, `error` for
+            another socket error, `aborted` for a connection that ended before
+            its read loop (a refused handshake, a device that gave up)
         auth_challenges (int): Number of AUTH tokens sent
         auth_signatures (list): Signatures the host sent, in order
         auth_public_keys (list): Public key payloads the host offered, in order
@@ -374,6 +378,7 @@ class FakeAdbd:
         self.write_okays = 0
         self.violations = []
         self.connections = 0
+        self.connection_ends = []
         self.auth_challenges = 0
         self.auth_signatures = []
         self.auth_public_keys = []
@@ -439,6 +444,24 @@ class FakeAdbd:
         for sock in sockets:
             close_socket(sock)
 
+    def snapshot(self):
+        """
+        Read the recordings of the device as plain data.
+
+        Returns:
+            dict: Counters and lists of what the device saw, json serializable
+        """
+        with self._lock:
+            return {
+                'connections': self.connections,
+                'connection_ends': list(self.connection_ends),
+                'opens': list(self.opens),
+                'opens_without_nul': len(self.opens_without_nul),
+                'writes': len(self.writes),
+                'write_okays': self.write_okays,
+                'violations': [reason for reason, _ in self.violations],
+            }
+
     def wait_for(self, predicate, timeout=5, message=None):
         """
         Wait until a recording of the device satisfies a predicate.
@@ -485,6 +508,7 @@ class FakeAdbd:
         """
         Serve one connection: the handshake, then the messages of the host.
         """
+        end = 'aborted'
         try:
             message = self._recv_message(sock)
             if message is None:
@@ -512,11 +536,18 @@ class FakeAdbd:
                 self._send(sock, CNXN, self.version, self.max_payload, self.banner)
 
             self._read_loop(sock)
+        except ConnectionResetError:
+            # the host closed a socket whose receive buffer still held data
+            end = 'reset'
         except OSError:
-            # the host closed the connection, which is how every test ends
-            pass
+            # another socket error, e.g. the device closed the socket itself
+            end = 'error'
+        else:
+            end = 'eof'
         finally:
             close_socket(sock)
+            with self._lock:
+                self.connection_ends.append(end)
 
     def _authenticate(self, sock):
         """
