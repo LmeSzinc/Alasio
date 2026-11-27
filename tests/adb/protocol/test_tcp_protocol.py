@@ -12,7 +12,7 @@ import time
 import pytest
 
 import alasio.adb.protocol.tcp_protocol as tcp_protocol
-from alasio.adb.protocol import auth
+from alasio.adb.protocol import keygen
 from alasio.adb.protocol.const import (
     ADB_MAX_PAYLOAD, ADB_MAX_PAYLOAD_V1, ADB_VERSION, ADB_VERSION_SKIP_CHECKSUM, CLSE, CNXN, OKAY, OPEN, WRTE,
     AdbAuthKeyMissing, AdbConnectionClosed, AdbConnectionTimeout, AdbMessageInvalid, AdbStreamClosed, AdbStreamTimeout,
@@ -1922,7 +1922,7 @@ class TestConnectFailure:
         def no_key():
             raise AdbAuthKeyMissing('No adb key at /nonexistent')
 
-        monkeypatch.setattr(auth, 'load_user_key', no_key)
+        monkeypatch.setattr(keygen, 'load_user_key', no_key)
         with FakeAdbd() as adbd:
             adbd.auth_required = True
             client = AdbProtocolTCP(port=adbd.port)

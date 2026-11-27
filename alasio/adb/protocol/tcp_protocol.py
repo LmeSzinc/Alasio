@@ -5,7 +5,7 @@ from threading import Lock, Thread, current_thread
 from time import perf_counter
 from typing import Literal
 
-from alasio.adb.protocol import auth
+from alasio.adb.protocol import keygen
 from alasio.adb.protocol.cnxn import DeviceFeatures
 from alasio.adb.protocol.const import (
     ADB_AUTH_CONFIRM_TIMEOUT, ADB_AUTH_RSAPUBLICKEY, ADB_AUTH_SIGNATURE, ADB_AUTH_TOKEN, ADB_COMMANDS, ADB_MAX_PAYLOAD,
@@ -419,7 +419,7 @@ class AdbProtocolTCP:
                 if key is None:
                     # a device that does not ask for authentication needs no key,
                     # so the file is only read when a challenge arrives
-                    key = auth.load_user_key()
+                    key = keygen.load_user_key()
                 if challenge == 1:
                     # a device that knows the key of this host answers the
                     # signature with a CNXN and no dialog

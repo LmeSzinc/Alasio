@@ -12,8 +12,8 @@ Every test works in a folder of the system temp and points user_key_path() at
 it: the key of the user who runs the suite is never read and never written.
 
 The file is skipped outside CI, like the other tests of the real disk: a
-developer machine may have no adb at all, and the fake keygen of test_auth.py is
-the coverage there. On CI a machine without adb fails the test that needs it
+developer machine may have no adb at all, and the fake keygen of test_keygen.py
+is the coverage there. On CI a machine without adb fails the test that needs it
 with the message of AdbAuthKeyMissing, instead of turning the run green.
 """
 
@@ -25,9 +25,10 @@ import tempfile
 
 import pytest
 
-from alasio.adb.protocol import auth
-from alasio.adb.protocol.auth import SHA1_DIGEST_INFO, load_user_key
+from alasio.adb.protocol import keygen
+from alasio.adb.protocol.auth import SHA1_DIGEST_INFO
 from alasio.adb.protocol.const import AUTH_TOKEN_SIZE, AdbAuthKeyInvalid
+from alasio.adb.protocol.keygen import load_user_key
 from alasio.ext import env
 from alasio.ext.concurrent.cmd import run_cmd
 
@@ -50,7 +51,7 @@ def folder(monkeypatch):
         str: Absolute path of an empty folder
     """
     path = tempfile.mkdtemp(prefix='alasio_adbkey_')
-    monkeypatch.setattr(auth, 'user_key_path', lambda: os.path.join(path, 'adbkey'))
+    monkeypatch.setattr(keygen, 'user_key_path', lambda: os.path.join(path, 'adbkey'))
     try:
         yield path
     finally:
@@ -64,7 +65,7 @@ def key_path():
     Returns:
         str: Path of the private key
     """
-    return auth.user_key_path()
+    return keygen.user_key_path()
 
 
 def run_adb(*args):
@@ -79,7 +80,7 @@ def run_adb(*args):
     """
     # a test asks adb a question a failure answers as well, e.g. the usage of a
     # command, so the exit code is data here and not an error
-    return run_cmd([auth._adb_path(), *args], check=False)
+    return run_cmd([keygen.adb_path(), *args], check=False)
 
 
 def decode_public_key(blob):
@@ -182,7 +183,7 @@ class TestTheKeyOfTheMachine:
     def test_the_directory_of_the_key_is_created(self, folder, monkeypatch):
         """adb keygen does not create a directory, ~/.android is the module's job"""
         target = os.path.join(folder, 'new', 'home', '.android', 'adbkey')
-        monkeypatch.setattr(auth, 'user_key_path', lambda: target)
+        monkeypatch.setattr(keygen, 'user_key_path', lambda: target)
 
         key = load_user_key()
 

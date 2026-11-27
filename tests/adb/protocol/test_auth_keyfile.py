@@ -23,9 +23,10 @@ import os
 
 import pytest
 
-from alasio.adb.protocol import auth
-from alasio.adb.protocol.auth import SHA1_DIGEST_INFO, AdbAuthKey, load_user_key
+from alasio.adb.protocol import auth, keygen
+from alasio.adb.protocol.auth import SHA1_DIGEST_INFO, AdbAuthKey
 from alasio.adb.protocol.const import AUTH_TOKEN_SIZE, AdbAuthKeyInvalid
+from alasio.adb.protocol.keygen import load_user_key
 from alasio.testing.filesystem import fs  # noqa: F401
 
 pytestmark = [
@@ -170,7 +171,7 @@ class TestTheKeyOfThePair:
 
     def test_the_module_reads_the_file_of_the_user(self, monkeypatch):
         """The read path of the handshake is the one under test, not from_pem"""
-        monkeypatch.setattr(auth, 'user_key_path', lambda: KEY_FILE)
+        monkeypatch.setattr(keygen, 'user_key_path', lambda: KEY_FILE)
 
         key = load_user_key()
 
@@ -182,7 +183,7 @@ class TestTheKeyOfThePair:
         # the pair of the module scope is read before the fake filesystem of the
         # function scope is installed, so the real bytes are the ones truncated
         fs.create_file(KEY_FILE, contents=pair.pem[:400])
-        monkeypatch.setattr(auth, 'user_key_path', lambda: KEY_FILE)
+        monkeypatch.setattr(keygen, 'user_key_path', lambda: KEY_FILE)
 
         with pytest.raises(AdbAuthKeyInvalid):
             load_user_key()
