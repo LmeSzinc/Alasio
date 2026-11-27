@@ -5,13 +5,20 @@ The key of this file is built from two primes that were generated once for the
 suite: a test never reads the adb key of whoever runs it, and the suite does not
 need adb to be installed. What the client produces is checked with RSA itself
 and with a decoder of the public key format written here, so a mistake of the
-module can not cancel itself out.
+module can not cancel itself out. The one thing a test here never does is run
+adb: the binary that generates a missing key is replaced by a writer of the same
+file, because the suite has to run on a machine without platform-tools. The real
+binary is run on the CI runners, see the module next to this one.
 """
 
 import base64
 import hashlib
 import os
+import shutil
 import struct
+import sys
+import threading
+from types import ModuleType
 
 import pytest
 
@@ -23,6 +30,8 @@ from alasio.adb.protocol.const import (
 )
 from alasio.adb.protocol.tcp import AdbTCP
 from alasio.adb.protocol.tcp_protocol import AdbProtocolTCP
+from alasio.ext.concurrent.cmd import CmdlineError, CmdlineResultStr
+from alasio.logger import logger
 from alasio.testing.filesystem import fs  # noqa: F401
 from tests.adb.protocol.fake_adbd import AUTH_TOKEN, FakeAdbd, ShellReply
 
@@ -102,25 +111,39 @@ def der_integer(value):
     return der(0x02, raw)
 
 
-def pkcs1_der():
+def pkcs1_der(n=N, e=E, d=D, p=P, q=Q):
     """
-    PKCS#1 RSAPrivateKey of the test key, built here and not by the module.
+    PKCS#1 RSAPrivateKey of a key, built here and not by the module.
+
+    Args:
+        n (int): Modulus. Defaults to the test key.
+        e (int): Public exponent. Defaults to the test key.
+        d (int): Private exponent. Defaults to the test key.
+        p (int): First prime. Defaults to the test key.
+        q (int): Second prime. Defaults to the test key.
 
     Returns:
         bytes: DER of the key
     """
-    numbers = (0, N, E, D, P, Q, D % (P - 1), D % (Q - 1), pow(Q, -1, P))
+    numbers = (0, n, e, d, p, q, d % (p - 1), d % (q - 1), pow(q, -1, p))
     return der(0x30, b''.join(der_integer(value) for value in numbers))
 
 
-def pkcs8_der():
+def pkcs8_der(n=N, e=E, d=D, p=P, q=Q):
     """
-    PKCS#8 PrivateKeyInfo that wraps the test key.
+    PKCS#8 PrivateKeyInfo that wraps a key.
+
+    Args:
+        n (int): Modulus. Defaults to the test key.
+        e (int): Public exponent. Defaults to the test key.
+        d (int): Private exponent. Defaults to the test key.
+        p (int): First prime. Defaults to the test key.
+        q (int): Second prime. Defaults to the test key.
 
     Returns:
         bytes: DER of the key
     """
-    return der(0x30, der_integer(0) + RSA_ALGORITHM + der(0x04, pkcs1_der()))
+    return der(0x30, der_integer(0) + RSA_ALGORITHM + der(0x04, pkcs1_der(n, e, d, p, q)))
 
 
 def pem(label, body):
@@ -137,6 +160,12 @@ def pem(label, body):
     text = base64.b64encode(body).decode('ascii')
     lines = [text[i:i + 64] for i in range(0, len(text), 64)]
     return '\n'.join([f'-----BEGIN {label}-----', *lines, f'-----END {label}-----']) + '\n'
+
+
+# A second key, small enough to write by hand: it stands for the key another
+# worker generated when this one was still writing its own
+OTHER_N = 61 * 53
+OTHER_PEM = pem('PRIVATE KEY', pkcs8_der(OTHER_N, 17, 2753, 61, 53))
 
 
 def decode_public_key(blob):
@@ -211,6 +240,89 @@ def connect(adbd, timeout=5):
     return client
 
 
+class Keygen:
+    """
+    Stands in for `run_cmd` running `adb keygen`.
+
+    The command line is recorded, so a test can assert the path of the binary,
+    the temporary name and the timeout. The files are written with `open()` and
+    not with a helper of the fake filesystem: adb uses a plain fopen, it creates
+    no directory, and a missing parent has to fail the same way here.
+
+    Attributes:
+        contents (str): PEM written at the target, empty to write nothing
+        returncode (int): Exit code of the binary
+        stderr (str): Error output of the binary
+        error (Exception): Exception raised instead of writing anything, a
+            CmdlineError when run_cmd never reaches the binary
+        calls (list): (command line, keyword arguments) the module ran, in order
+    """
+
+    def __init__(self, contents=None, returncode=0, stderr='', error=None):
+        """
+        Args:
+            contents (str): PEM written at the target. Defaults to None, which
+                writes the key of this test file
+            returncode (int): Exit code of the binary. Defaults to 0.
+            stderr (str): Error output of the binary. Defaults to ''.
+            error (Exception): Exception raised instead of writing anything.
+                Defaults to None.
+        """
+        self.contents = pem('PRIVATE KEY', pkcs8_der()) if contents is None else contents
+        self.returncode = returncode
+        self.stderr = stderr
+        self.error = error
+        self.calls = []
+
+    def __call__(self, cmd, **kwargs):
+        """
+        Write the key the way keygen does, and report the exit code.
+
+        Args:
+            cmd (list): Command line of the binary
+            **kwargs: Arguments of run_cmd, recorded with the command
+
+        Returns:
+            CmdlineResultStr: Result of the binary
+
+        Raises:
+            Exception: The injected error, when there is one
+        """
+        self.calls.append((cmd, kwargs))
+        if self.error is not None:
+            raise self.error
+        target = cmd[2]
+        if self.contents:
+            # a killed keygen may leave a partial file behind, which is what the
+            # module has to clean up
+            with open(target, 'w') as f:
+                f.write(self.contents)
+            with open(f'{target}.pub', 'w') as f:
+                f.write('ssh-rsa a-public-key tester@host')
+        return CmdlineResultStr(cmd=cmd, returncode=self.returncode, stdout='', stderr=self.stderr)
+
+    def install(self, monkeypatch):
+        """
+        Replace the binary and the runner of the module.
+
+        Args:
+            monkeypatch: pytest fixture
+
+        Returns:
+            Keygen: This fake
+        """
+        monkeypatch.setattr(auth, '_adb_path', lambda: 'adb')
+        monkeypatch.setattr(auth, 'run_cmd', self)
+        return self
+
+
+@pytest.fixture
+def keygen(fs, monkeypatch):
+    """A fake adb binary, with the key path of the module redirected"""
+    monkeypatch.setattr(auth, 'user_key_path', lambda: KEY_PATH)
+    return Keygen().install(monkeypatch)
+
+
 @pytest.fixture(scope='module')
 def key():
     """The key of this file"""
@@ -248,14 +360,20 @@ class TestLoadUserKey:
 
         assert key.n == N
 
-    def test_a_missing_key(self, fs, monkeypatch):
-        """A user without a key gets an error that names the file"""
+    def test_a_missing_key_without_adb(self, fs, monkeypatch):
+        """A machine without a key and without adb can not authenticate"""
+
+        def missing():
+            raise AdbAuthKeyMissing('No adb binary on this machine')
+
         monkeypatch.setattr(auth, 'user_key_path', lambda: KEY_PATH)
+        monkeypatch.setattr(auth, '_adb_path', missing)
 
         with pytest.raises(AdbAuthKeyMissing) as e:
             load_user_key()
 
-        assert KEY_PATH in str(e.value)
+        assert 'No adb binary on this machine' in str(e.value)
+        assert not os.path.exists(KEY_PATH)
 
     @pytest.mark.parametrize('contents', [
         '',
@@ -289,6 +407,276 @@ class TestLoadUserKey:
 
         with pytest.raises(AdbAuthKeyInvalid):
             load_user_key()
+
+
+class TestAdbPath:
+    def test_adb_on_the_path(self, monkeypatch):
+        """platform-tools on PATH is the common case, adbutils is not touched"""
+        module = ModuleType('adbutils')
+
+        def finder():
+            raise AssertionError('adbutils was asked although adb is on PATH')
+
+        module.adb_path = finder
+        monkeypatch.setitem(sys.modules, 'adbutils', module)
+        monkeypatch.setattr(shutil, 'which', lambda name: r'C:\platform-tools\adb.exe')
+
+        assert auth._adb_path() == r'C:\platform-tools\adb.exe'
+
+    @pytest.mark.parametrize('variable', ['ANDROID_HOME', 'ANDROID_SDK_ROOT'])
+    def test_the_adb_of_the_android_sdk(self, fs, monkeypatch, variable):
+        """The sdk of the CI runners holds adb without putting it on PATH"""
+        sdk = '/opt/android' if variable == 'ANDROID_HOME' else '/opt/alternate'
+        name = 'adb.exe' if sys.platform == 'win32' else 'adb'
+        binary = os.path.join(sdk, 'platform-tools', name)
+        fs.create_file(binary, contents='')
+        monkeypatch.setitem(sys.modules, 'adbutils', None)
+        monkeypatch.setattr(shutil, 'which', lambda which: None)
+        monkeypatch.delenv('ANDROID_HOME', raising=False)
+        monkeypatch.delenv('ANDROID_SDK_ROOT', raising=False)
+        monkeypatch.setenv(variable, sdk)
+
+        assert auth._adb_path() == binary
+
+    def test_an_sdk_without_platform_tools(self, fs, monkeypatch):
+        """A variable that names a folder with no adb is not a binary"""
+        monkeypatch.setitem(sys.modules, 'adbutils', None)
+        monkeypatch.setattr(shutil, 'which', lambda name: None)
+        monkeypatch.setenv('ANDROID_HOME', '/opt/empty')
+        monkeypatch.delenv('ANDROID_SDK_ROOT', raising=False)
+
+        with pytest.raises(AdbAuthKeyMissing):
+            auth._adb_path()
+
+    def test_the_adb_of_adbutils(self, monkeypatch):
+        """A machine without platform-tools uses the copy inside the wheel"""
+        module = ModuleType('adbutils')
+        module.adb_path = lambda: '/opt/wheel/adbutils/binaries/adb'
+        monkeypatch.setitem(sys.modules, 'adbutils', module)
+        monkeypatch.setattr(shutil, 'which', lambda name: None)
+        monkeypatch.delenv('ANDROID_HOME', raising=False)
+        monkeypatch.delenv('ANDROID_SDK_ROOT', raising=False)
+
+        assert auth._adb_path() == '/opt/wheel/adbutils/binaries/adb'
+
+    def test_the_finder_of_an_older_adbutils(self, monkeypatch):
+        """The name of the finder moved to adbutils._utils"""
+        package = ModuleType('adbutils')
+        utils = ModuleType('adbutils._utils')
+        utils.adb_path = lambda: '/opt/wheel/adbutils/binaries/adb'
+        package._utils = utils
+        monkeypatch.setitem(sys.modules, 'adbutils', package)
+        monkeypatch.setitem(sys.modules, 'adbutils._utils', utils)
+        monkeypatch.setattr(shutil, 'which', lambda name: None)
+        monkeypatch.delenv('ANDROID_HOME', raising=False)
+        monkeypatch.delenv('ANDROID_SDK_ROOT', raising=False)
+
+        assert auth._adb_path() == '/opt/wheel/adbutils/binaries/adb'
+
+    def test_adbutils_without_a_binary(self, monkeypatch):
+        """A wheel that lost its binary is an error, not a path of None"""
+        module = ModuleType('adbutils')
+        module.adb_path = lambda: None
+        monkeypatch.setitem(sys.modules, 'adbutils', module)
+        monkeypatch.setattr(shutil, 'which', lambda name: None)
+        monkeypatch.delenv('ANDROID_HOME', raising=False)
+        monkeypatch.delenv('ANDROID_SDK_ROOT', raising=False)
+
+        with pytest.raises(AdbAuthKeyMissing) as e:
+            auth._adb_path()
+
+        assert 'reinstall adbutils' in str(e.value)
+
+    def test_no_adb_at_all(self, monkeypatch):
+        """Neither PATH nor the sdk nor adbutils has a binary for the key"""
+        monkeypatch.setitem(sys.modules, 'adbutils', None)
+        monkeypatch.setattr(shutil, 'which', lambda name: None)
+        monkeypatch.delenv('ANDROID_HOME', raising=False)
+        monkeypatch.delenv('ANDROID_SDK_ROOT', raising=False)
+
+        with pytest.raises(AdbAuthKeyMissing) as e:
+            auth._adb_path()
+
+        assert 'platform-tools' in str(e.value)
+
+
+class TestGenerateUserKey:
+    def test_a_missing_key_is_generated(self, keygen):
+        """The first contact of a fresh machine creates the key with adb"""
+        with logger.mock_capture_writer() as capture:
+            key = load_user_key()
+
+        assert (key.n, key.e, key.d) == (N, E, D)
+        # adb keygen creates no directory, so the module has to
+        assert os.path.isdir('/home/tester/.android')
+        assert os.path.isfile(KEY_PATH)
+        assert os.path.isfile(f'{KEY_PATH}.pub')
+        assert len(keygen.calls) == 1
+        command, kwargs = keygen.calls[0]
+        assert command[:2] == ['adb', 'keygen']
+        assert command[2].startswith(f'{KEY_PATH}.')
+        assert command[2].endswith('.tmp')
+        assert not os.path.exists(command[2])
+        assert not os.path.exists(f'{command[2]}.pub')
+        assert kwargs['timeout'] == auth.ADB_KEYGEN_TIMEOUT
+        # a failing keygen reports itself, the exit code is read and given a message
+        assert kwargs['check'] is False
+        # the console flag is only a thing on Windows
+        assert ('creationflags' in kwargs) == (sys.platform == 'win32')
+        assert capture.concat() == (
+            f'WARNING | Generated a new adb key at {KEY_PATH}, allow it on the device when it asks\n'
+        )
+
+    def test_the_key_is_generated_only_once(self, keygen):
+        """A second call reads the file adb wrote"""
+        load_user_key()
+        load_user_key()
+
+        assert len(keygen.calls) == 1
+
+    def test_the_key_of_the_user_is_never_replaced(self, fs, keygen):
+        """A machine that already has a key never runs keygen"""
+        contents = pem('PRIVATE KEY', pkcs8_der())
+        fs.create_file(KEY_PATH, contents=contents)
+
+        key = load_user_key()
+
+        assert key.n == N
+        assert keygen.calls == []
+        with open(KEY_PATH) as f:
+            assert f.read() == contents
+
+    def test_a_broken_key_is_never_replaced(self, fs, keygen):
+        """A file that does not parse is an error: a new key loses every device"""
+        fs.create_file(KEY_PATH, contents='not a key')
+
+        with pytest.raises(AdbAuthKeyInvalid):
+            load_user_key()
+
+        assert keygen.calls == []
+        with open(KEY_PATH) as f:
+            assert f.read() == 'not a key'
+
+    def test_a_directory_that_can_not_be_created(self, fs, keygen):
+        """A read only home is a machine that can not authenticate"""
+        # a file where the directory belongs fails makedirs the same way
+        fs.create_file('/home/tester/.android')
+
+        with pytest.raises(AdbAuthKeyMissing) as e:
+            load_user_key()
+
+        assert '/home/tester/.android' in str(e.value)
+        assert keygen.calls == []
+
+    def test_a_keygen_that_fails(self, keygen):
+        """A non zero exit is an error, and leaves neither a key nor a tmp"""
+        keygen.returncode = 1
+        keygen.stderr = 'error: could not generate key'
+
+        with pytest.raises(AdbAuthKeyMissing) as e:
+            load_user_key()
+
+        assert 'exited with 1' in str(e.value)
+        assert 'could not generate key' in str(e.value)
+        assert not os.path.exists(KEY_PATH)
+        assert not os.path.exists(keygen.calls[0][0][2])
+
+    def test_a_keygen_that_times_out(self, keygen):
+        """A binary that hangs does not hold the handshake forever"""
+        keygen.error = CmdlineError(
+            msg=f"Command timed out after {auth.ADB_KEYGEN_TIMEOUT}s: ['adb', 'keygen', '{KEY_PATH}']",
+            cmd=['adb', 'keygen', KEY_PATH],
+        )
+
+        with pytest.raises(AdbAuthKeyMissing) as e:
+            load_user_key()
+
+        assert 'timed out after 60s' in str(e.value)
+
+    def test_a_binary_that_is_gone(self, keygen):
+        """A path that no longer holds a program is reported as such"""
+        keygen.error = CmdlineError(msg='Command not found: adb', cmd=['adb'])
+
+        with pytest.raises(AdbAuthKeyMissing) as e:
+            load_user_key()
+
+        assert 'Command not found: adb' in str(e.value)
+        assert 'Can not run adb keygen' in str(e.value)
+
+    def test_a_keygen_that_writes_nothing(self, keygen):
+        """An exit code of 0 is not enough, the key has to be there"""
+        keygen.contents = ''
+
+        with pytest.raises(AdbAuthKeyMissing) as e:
+            load_user_key()
+
+        assert 'wrote no key' in str(e.value)
+        assert not os.path.exists(KEY_PATH)
+
+    def test_a_keygen_without_a_public_key_file(self, keygen, monkeypatch):
+        """The .pub is a convenience, a key without it still authenticates"""
+
+        def run(cmd, **kwargs):
+            with open(cmd[2], 'w') as f:
+                f.write(pem('PRIVATE KEY', pkcs8_der()))
+            return CmdlineResultStr(cmd=cmd, returncode=0, stdout='', stderr='')
+
+        monkeypatch.setattr(auth, 'run_cmd', run)
+
+        key = load_user_key()
+
+        assert key.n == N
+        assert os.path.isfile(KEY_PATH)
+        assert not os.path.exists(f'{KEY_PATH}.pub')
+
+    def test_the_key_is_read_back_from_the_file(self, keygen, monkeypatch):
+        """Two workers may generate at once, the file is what counts"""
+
+        def replace(tmp, target):
+            # another worker replaced the file after this one finished its keygen
+            with open(target, 'w') as f:
+                f.write(OTHER_PEM)
+
+        monkeypatch.setattr(auth, 'atomic_replace_tmp', replace)
+
+        key = load_user_key()
+
+        assert key.n == OTHER_N
+
+    def test_two_workers_generate_at_the_same_time(self, keygen, monkeypatch):
+        """The temporary names of two threads never collide"""
+        barrier = threading.Barrier(2)
+        lock = threading.Lock()
+
+        def run(cmd, **kwargs):
+            with lock:
+                keygen.calls.append((cmd, kwargs))
+            barrier.wait(timeout=10)
+            with open(cmd[2], 'w') as f:
+                f.write(pem('PRIVATE KEY', pkcs8_der()))
+            return CmdlineResultStr(cmd=cmd, returncode=0, stdout='', stderr='')
+
+        monkeypatch.setattr(auth, 'run_cmd', run)
+        keys = []
+        errors = []
+
+        def load():
+            try:
+                keys.append(load_user_key())
+            except BaseException as e:
+                errors.append(e)
+
+        threads = [threading.Thread(target=load) for _ in range(2)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=20)
+
+        assert errors == []
+        assert sorted(key.n for key in keys) == [N, N]
+        assert len(keygen.calls) == 2
+        first, second = (call[0][2] for call in keygen.calls)
+        assert first != second
 
 
 class TestSignToken:
@@ -524,4 +912,33 @@ class TestHandshake:
                 client.disconnect()
 
         assert adbd.auth_challenges == 1
+        assert adbd.violations == []
+
+    def test_a_machine_without_a_key_generates_one_and_asks_the_device(self, fs, monkeypatch):
+        """The first contact of a fresh machine: keygen, signature, public key
+
+        The key is the only thing a machine can not derive by itself, so it is
+        made with adb on the spot. The device then sees a key it does not know,
+        which is the dialog its user answers.
+        """
+        monkeypatch.setattr(auth, 'user_key_path', lambda: KEY_PATH)
+        keygen = Keygen().install(monkeypatch)
+
+        with FakeAdbd() as adbd:
+            adbd.auth_required = True
+            client = AdbProtocolTCP(port=adbd.port)
+            client.timeout = 5
+
+            try:
+                client.connect()
+                assert client.is_connected
+            finally:
+                client.disconnect()
+
+        assert len(keygen.calls) == 1
+        # the signature of a key the device never saw, then the public key
+        assert adbd.auth_challenges == 2
+        assert len(adbd.auth_signatures) == 1
+        assert len(adbd.auth_public_keys) == 1
+        assert adbd.auth_key == (N, E)
         assert adbd.violations == []
