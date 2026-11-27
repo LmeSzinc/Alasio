@@ -435,6 +435,13 @@ jobs:
         run: pnpm run smoke:csp
         working-directory: webapp
 
+      # renders every compatibility feature of the compat page in electron 22:
+      # the unit tests prove the pipeline emits the right values, only the
+      # engine can prove they are painted instead of dropped
+      - name: Smoke frontend compat
+        run: pnpm run smoke:compat
+        working-directory: frontend
+
       # the locale packs are part of the electron distribution, which the webapp
       # job deliberately does not download: the guard over them runs here, where
       # the binary the client ships is installed

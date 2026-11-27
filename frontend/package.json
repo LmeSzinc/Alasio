@@ -19,6 +19,7 @@
     "codegen": "tsx scripts/check-format.ts",
     "test": "vitest run",
     "smoke:csp": "node ../webapp/node_modules/electron/cli.js ../webapp/scripts/csp/browser-smoke.cjs --target frontend",
+    "smoke:compat": "node ../webapp/node_modules/electron/cli.js ../webapp/scripts/compat/browser-smoke.cjs",
     "i18ngen": "tsx scripts/i18n/cli.ts",
     "fix:lucide": "tsx scripts/lucide-per-icon.ts src"
   },

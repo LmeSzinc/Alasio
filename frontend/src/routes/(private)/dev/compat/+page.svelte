@@ -144,24 +144,24 @@
     <Card.Root>
       <Card.Header>
         <Card.Title>2. OKLAB Color Space</Card.Title>
-        <Card.Description>Testing oklab() color function (pre-computed for older browsers)</Card.Description>
+        <Card.Description>Testing oklab() color function (compiled to rgb() for older browsers)</Card.Description>
       </Card.Header>
       <Card.Content>
         <div class="grid grid-cols-2 gap-4 md:grid-cols-4">
           <div class="space-y-2">
-            <div class="h-20 rounded-lg shadow-md" style="background: oklab(0.65 0.15 0.1);"></div>
+            <div class="swatch-oklab-1 h-20 rounded-lg shadow-md"></div>
             <code class="block text-xs">oklab(0.65 0.15 0.1)</code>
           </div>
           <div class="space-y-2">
-            <div class="h-20 rounded-lg shadow-md" style="background: oklab(0.5 -0.1 0.15);"></div>
+            <div class="swatch-oklab-2 h-20 rounded-lg shadow-md"></div>
             <code class="block text-xs">oklab(0.5 -0.1 0.15)</code>
           </div>
           <div class="space-y-2">
-            <div class="h-20 rounded-lg shadow-md" style="background: oklab(0.7 0.2 -0.15);"></div>
+            <div class="swatch-oklab-3 h-20 rounded-lg shadow-md"></div>
             <code class="block text-xs">oklab(0.7 0.2 -0.15)</code>
           </div>
           <div class="space-y-2">
-            <div class="h-20 rounded-lg shadow-md" style="background: oklab(0.45 -0.15 -0.1);"></div>
+            <div class="swatch-oklab-4 h-20 rounded-lg shadow-md"></div>
             <code class="block text-xs">oklab(0.45 -0.15 -0.1)</code>
           </div>
         </div>
@@ -172,27 +172,26 @@
     <Card.Root>
       <Card.Header>
         <Card.Title>3. color-mix() Function</Card.Title>
-        <Card.Description>Testing color-mix() with CSS variables (pre-computed for older browsers)</Card.Description>
+        <Card.Description>
+          Testing color-mix() with static colors (compiled to rgb() for older browsers)
+        </Card.Description>
       </Card.Header>
       <Card.Content>
         <div class="grid grid-cols-2 gap-4 md:grid-cols-4">
           <div class="space-y-2">
-            <div class="h-20 rounded-lg shadow-md" style="background: color-mix(in srgb, red, blue);"></div>
+            <div class="swatch-mix-1 h-20 rounded-lg shadow-md"></div>
             <code class="block text-xs">color-mix(in srgb, red, blue)</code>
           </div>
           <div class="space-y-2">
-            <div class="h-20 rounded-lg shadow-md" style="background: color-mix(in srgb, green 70%, yellow);"></div>
+            <div class="swatch-mix-2 h-20 rounded-lg shadow-md"></div>
             <code class="block text-xs">color-mix(in srgb, green 70%, yellow)</code>
           </div>
           <div class="space-y-2">
-            <div class="h-20 rounded-lg shadow-md" style="background: color-mix(in srgb, purple, white 50%);"></div>
+            <div class="swatch-mix-3 h-20 rounded-lg shadow-md"></div>
             <code class="block text-xs">color-mix(in srgb, purple, white 50%)</code>
           </div>
           <div class="space-y-2">
-            <div
-              class="h-20 rounded-lg shadow-md"
-              style="background: color-mix(in srgb, orange, transparent 30%);"
-            ></div>
+            <div class="swatch-mix-4 h-20 rounded-lg shadow-md"></div>
             <code class="block text-xs">color-mix(in srgb, orange, transparent 30%)</code>
           </div>
         </div>
@@ -254,6 +253,22 @@
             </div>
           </div>
         </div>
+
+        <div class="mt-4 grid grid-cols-2 gap-4">
+          <div class="space-y-2">
+            <div class="text-sm font-medium">Nested Rule</div>
+            <div class="nest-probe rounded-lg p-4">
+              <div class="nest-probe-child h-10 rounded"></div>
+            </div>
+          </div>
+
+          <div class="space-y-2">
+            <div class="text-sm font-medium">Flat Rule (Reference)</div>
+            <div class="rounded-lg bg-violet-500 p-4">
+              <div class="nest-oracle-child h-10 rounded"></div>
+            </div>
+          </div>
+        </div>
       </Card.Content>
     </Card.Root>
 
@@ -291,7 +306,7 @@
       </Card.Header>
       <Card.Content>
         <div class="space-y-2">
-          <div class="rounded-lg border p-4" style="background: var(--test-undefined-color, #8b5cf6);">
+          <div class="var-fallback-probe rounded-lg border p-4">
             <p class="font-medium text-white">Fallback Color Test</p>
             <code class="text-xs text-white/80">var(--test-undefined-color, #8b5cf6)</code>
           </div>
@@ -469,12 +484,10 @@
       <Card.Content>
         <div class="grid grid-cols-2 gap-4 md:grid-cols-4">
           <div
-            class="h-32 cursor-pointer rounded-lg shadow-lg transition-all hover:scale-110 hover:rotate-3"
-            style="background: linear-gradient(135deg, color-mix(in srgb, blue, purple) 0%, color-mix(in srgb, purple, pink) 100%);"
+            class="swatch-gradient-mix h-32 cursor-pointer rounded-lg shadow-lg transition-all hover:scale-110 hover:rotate-3"
           ></div>
           <div
-            class="h-32 cursor-pointer rounded-lg shadow-lg transition-all hover:scale-110 hover:-rotate-3"
-            style="background: linear-gradient(135deg, oklab(0.7 0.15 0.1) 0%, oklab(0.5 0.2 -0.1) 100%);"
+            class="swatch-gradient-oklab h-32 cursor-pointer rounded-lg shadow-lg transition-all hover:scale-110 hover:-rotate-3"
           ></div>
           <div
             class="h-32 cursor-pointer rounded-lg bg-linear-to-br from-green-400 to-blue-500 shadow-lg transition-all hover:scale-110 hover:rotate-6"
@@ -530,3 +543,79 @@
     </Card.Root>
   </div>
 </div>
+
+<style>
+  /*
+    These swatches must be declared in a stylesheet, not in an inline `style`
+    attribute: PostCSS only rewrites the CSS it compiles, so an inline
+    `oklab()` or `color-mix()` reaches Chromium 108 unchanged. The engine then
+    drops the declaration at computed-value time and the swatch renders
+    transparent, which is exactly the bug this page exists to catch.
+  */
+  .swatch-oklab-1 {
+    background: oklab(0.65 0.15 0.1);
+  }
+
+  .swatch-oklab-2 {
+    background: oklab(0.5 -0.1 0.15);
+  }
+
+  .swatch-oklab-3 {
+    background: oklab(0.7 0.2 -0.15);
+  }
+
+  .swatch-oklab-4 {
+    background: oklab(0.45 -0.15 -0.1);
+  }
+
+  .swatch-mix-1 {
+    background: color-mix(in srgb, red, blue);
+  }
+
+  .swatch-mix-2 {
+    background: color-mix(in srgb, green 70%, yellow);
+  }
+
+  .swatch-mix-3 {
+    background: color-mix(in srgb, purple, white 50%);
+  }
+
+  .swatch-mix-4 {
+    background: color-mix(in srgb, orange, transparent 30%);
+  }
+
+  .swatch-gradient-mix {
+    background: linear-gradient(135deg, color-mix(in srgb, blue, purple) 0%, color-mix(in srgb, purple, pink) 100%);
+  }
+
+  .swatch-gradient-oklab {
+    background: linear-gradient(135deg, oklab(0.7 0.15 0.1) 0%, oklab(0.5 0.2 -0.1) 100%);
+  }
+
+  /*
+    Nesting: the child of `.nest-probe` is painted by a rule written with `&`,
+    the child of `.nest-oracle-child` by a flat rule of the same color. Chromium
+    108 does not understand nested CSS, so without the polyfill the first child
+    paints nothing while the second still paints; the real-browser check
+    compares the two.
+  */
+  .nest-probe {
+    background: #8b5cf6;
+    & .nest-probe-child {
+      background: #f59e0b;
+    }
+  }
+
+  .nest-oracle-child {
+    background: #f59e0b;
+  }
+
+  /*
+    An undefined variable must fall back to the declared color. The declaration
+    lives in a stylesheet and not in a `style` attribute: PostCSS only rewrites
+    the CSS it compiles, and this page exists to test what it produces.
+  */
+  .var-fallback-probe {
+    background: var(--test-undefined-color, #8b5cf6);
+  }
+</style>
