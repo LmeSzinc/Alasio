@@ -184,6 +184,26 @@ function renderProbes(cases, geometry) {
   const origin = geometry.origin;
   const limit = Math.max(320, window.innerWidth - 16);
 
+  // The minifier of a production build rewrites a color to whichever form is
+  // shorter, so `rgb(128, 0, 128)` arrives as `purple`. The declared value goes
+  // through the engine and comes back as the channels of the computed style,
+  // which is the same shape the probe reads from the painted element: no color
+  // keyword table lives in this script. A value the engine can not parse leaves
+  // the element untouched and is not a declaration it can paint.
+  const normalizeBackground = (value) => {
+    const probe = document.createElement("div");
+    probe.style.background = value;
+    // A value the engine can not parse leaves the inline style empty, which is
+    // the difference between "the rule is missing" and "the engine drops what
+    // it declares". The declaration is kept either way so the report can say
+    // which of the two happened.
+    if (!probe.style.background) return { raw: value, color: "" };
+    document.body.append(probe);
+    const color = getComputedStyle(probe).backgroundColor;
+    probe.remove();
+    return { raw: value, color };
+  };
+
   // Svelte scopes a component's `<style>` rules with a `svelte-*` class that the
   // page's own markup carries. A probe built here has to carry it too, or the
   // page-defined rules (the swatches, the nested rule) never match.
@@ -208,7 +228,7 @@ function renderProbes(cases, geometry) {
         // in order from the rule text and the caller picks the first one it can
         // parse. On this engine that is the `rgb()` the pipeline wrote first.
         for (const match of rule.cssText.matchAll(/(?:^|[;{\s])background(?:-color)?\s*:\s*([^;}]+)/g)) {
-          found.backgrounds.push(match[1].trim());
+          found.backgrounds.push(normalizeBackground(match[1].trim()));
         }
         const image = rule.style.getPropertyValue("background-image");
         if (image) found.backgroundImage = image;
@@ -814,20 +834,20 @@ async function readElement(win, caseId, slot) {
 }
 
 /**
- * The first declared background color that parses.
+ * The first declared background color that the engine can paint.
  *
  * The pipeline emits a color twice when it is outside sRGB, the `rgb()`
  * fallback first and the wider gamut second. The engine under test can not use
- * the second one, so the first parseable declaration is what it paints and what
+ * the second one, so the first declaration it accepts is what it paints and what
  * the probe has to expect.
  *
  * @param {object} record Record returned by the probe
  * @returns {{ value: string, channels: number[] } | null} The declaration
  */
 function firstDeclaredColor(record) {
-  for (const value of record.declared.backgrounds ?? []) {
-    const channels = parseColor(value);
-    if (channels) return { value, channels };
+  for (const declared of record.declared.backgrounds ?? []) {
+    const channels = parseColor(declared.color);
+    if (channels) return { value: declared.raw, channels };
   }
   return null;
 }
@@ -841,10 +861,11 @@ function firstDeclaredColor(record) {
 function judgeDeclaredColor(record) {
   const declared = firstDeclaredColor(record);
   if (!declared) {
-    return [
-      `${label(record)}: no background-color is declared for it ` +
-        `(${JSON.stringify(record.declared.backgrounds ?? [])}): the rule is not in the build`,
-    ];
+    const declarations = (record.declared.backgrounds ?? []).map((entry) => entry.raw);
+    if (declarations.length === 0) {
+      return [`${label(record)}: no background-color is declared for it: the rule is not in the build`];
+    }
+    return [`${label(record)}: the engine drops its declaration ${JSON.stringify(declarations)}: nothing paints`];
   }
   const computed = parseColor(record.color);
   if (!computed || computed[3] === 0) {
