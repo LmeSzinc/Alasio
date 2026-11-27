@@ -76,6 +76,14 @@ class AdbConnectionTimeout(Exception):
     pass
 
 
+class AdbAddressInvalid(Exception):
+    pass
+
+
+class AdbConnectionFailed(Exception):
+    pass
+
+
 class AdbStreamClosed(Exception):
     pass
 

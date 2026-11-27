@@ -11,8 +11,8 @@ from alasio.adb.protocol.const import (
     ADB_AUTH_CONFIRM_TIMEOUT, ADB_AUTH_RSAPUBLICKEY, ADB_AUTH_SIGNATURE, ADB_AUTH_TOKEN, ADB_COMMANDS, ADB_MAX_PAYLOAD,
     ADB_MAX_PAYLOAD_V1, ADB_OPEN_TIMEOUT_LIMIT, ADB_STREAM_CHUNK_LIMIT, ADB_STREAM_CHUNK_SIZE,
     ADB_STREAM_RECV_BUFFER_SIZE, ADB_VERSION, ADB_VERSION_SKIP_CHECKSUM, AUTH, AUTH_TOKEN_SIZE, CLSE, CNXN, OKAY, OPEN,
-    WRTE, AdbAuthRejected, AdbConnectionClosed, AdbConnectionTimeout, AdbMessageInvalid, AdbStreamClosed,
-    AdbStreamTimeout
+    WRTE, AdbAddressInvalid, AdbAuthRejected, AdbConnectionClosed, AdbConnectionFailed, AdbConnectionTimeout,
+    AdbMessageInvalid, AdbStreamClosed, AdbStreamTimeout
 )
 from alasio.logger import logger
 
@@ -319,7 +319,9 @@ class AdbProtocolTCP:
             port (int):
         """
         super().__init__()
-        self.host = host
+        # a host copied out of a config may carry the blanks around it, and the
+        # resolver takes a blank as a name of its own
+        self.host = host.strip()
         self.port = port
         # Seconds of a request: the deadline of the whole handshake, of a
         # message, and of the wait for an answer of the device
@@ -368,7 +370,11 @@ class AdbProtocolTCP:
             AdbProtocolTCP: This client, connected
 
         Raises:
+            AdbAddressInvalid: When the host does not resolve, or is not an
+                address the system can be asked for
             ConnectionRefusedError: When nothing listens on the address
+            AdbConnectionFailed: When the system fails the connect for another
+                reason, like an unreachable network
             AdbConnectionTimeout: When the device does not answer in time
             AdbConnectionClosed: When the device closes the connection during
                 the handshake
@@ -534,6 +540,62 @@ class AdbProtocolTCP:
         self._abort_streams()
         return sock, thread
 
+    def _create_socket(self) -> socket.socket:
+        """
+        Open the TCP connection to the device.
+
+        The address goes through getaddrinfo, so the two families are tried on
+        the addresses the resolver answers with, in its order: a name that
+        answers with both is reachable when either one listens, and an IPv6
+        literal works the way an IPv4 one does.
+
+        Returns:
+            socket.socket: Connected socket, with the timeout of the client and
+                without Nagle
+
+        Raises:
+            AdbAddressInvalid: When the host does not resolve, or the port is
+                not a port
+            ConnectionRefusedError: When nothing listens on the address
+            AdbConnectionFailed: When the system fails the connect for another
+                reason, like an unreachable network
+            AdbConnectionTimeout: When the connect does not end in time
+        """
+        addr = f'{self.host}:{self.port}'
+        if not self.host:
+            # getaddrinfo reads an empty host as the local addresses of every
+            # interface, and the connect then spends the timeout of each of them
+            raise AdbAddressInvalid(f'Invalid address {addr}: the host is empty')
+        try:
+            # the timeout bounds the connect itself, an unreachable host would
+            # otherwise wait for the default of the system, tens of seconds
+            sock = socket.create_connection((self.host, self.port), self.timeout)
+        except socket.timeout as e:
+            # socket.timeout is an OSError, it has to be caught before the
+            # wider clause or a slow host would look like a dead one
+            raise AdbConnectionTimeout(f'{e.__class__.__name__} when connecting to {addr}: {e}')
+        except socket.gaierror as e:
+            raise AdbAddressInvalid(f'Can not resolve {addr}: {e}')
+        except ConnectionRefusedError:
+            # nothing listens on the address, which is a state of the device
+            # and not a failure of the system: the caller decides what to do
+            raise
+        except (OverflowError, UnicodeError) as e:
+            # getaddrinfo refuses a port outside of 0-65535 and a name the idna
+            # codec can not carry, both before any socket exists
+            raise AdbAddressInvalid(f'Invalid address {addr}: {e}')
+        except OSError as e:
+            raise AdbConnectionFailed(f'{e.__class__.__name__} when connecting to {addr}: {e}')
+
+        try:
+            # a request is small and waits for its answer, Nagle would delay
+            # each of them by up to 40ms
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        except OSError as e:
+            self._close_socket(sock)
+            raise AdbConnectionFailed(f'{e.__class__.__name__} when setting up the connection to {addr}: {e}')
+        return sock
+
     def connect(self):
         """
         Connect to the device and read its CNXN.
@@ -544,7 +606,11 @@ class AdbProtocolTCP:
         healthy calls disconnect() and then connect().
 
         Raises:
+            AdbAddressInvalid: When the host does not resolve, or is not an
+                address the system can be asked for
             ConnectionRefusedError: When nothing listens on the address
+            AdbConnectionFailed: When the system fails the connect for another
+                reason, like an unreachable network
             AdbConnectionTimeout: When the device does not answer in time
             AdbConnectionClosed: When the device closes the connection during
                 the handshake
@@ -569,26 +635,15 @@ class AdbProtocolTCP:
             addr = f'{self.host}:{self.port}'
             logger.info(f'Connecting to {addr}')
 
-            # open TCP connection
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            # bound the connect itself, an unreachable host would otherwise wait
-            # for the default timeout of the system, tens of seconds on most
-            sock.settimeout(self.timeout)
-            # a request is small and waits for its answer, Nagle would delay
-            # each of them by up to 40ms
-            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-
             cnxn = (
                 b"host::features=shell_v2,cmd,stat_v2,ls_v2,fixed_push_mkdir,apex,abb,"
                 b"fixed_push_symlink_timestamp,abb_exec,remount_shell,track_app,"
                 b"sendrecv_v2,sendrecv_v2_brotli,sendrecv_v2_lz4,sendrecv_v2_zstd,sendrecv_v2_dry_run_send"
             )
+            sock = None
             try:
-                try:
-                    # may raise ConnectionRefusedError
-                    sock.connect((self.host, self.port))
-                except socket.timeout as e:
-                    raise AdbConnectionTimeout(f'{e.__class__.__name__} when connecting: {e}')
+                # may raise ConnectionRefusedError
+                sock = self._create_socket()
 
                 # The handshake has no version field, so the checksum of the AUTH
                 # tokens below can not be judged yet: a device of 0x01000001

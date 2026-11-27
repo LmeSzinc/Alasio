@@ -322,7 +322,7 @@ class FakeAdbd:
     """
 
     def __init__(self, banner=DEFAULT_BANNER, version=ADB_VERSION, max_payload=ADB_MAX_PAYLOAD,
-                 responder=None, refuse=None):
+                 responder=None, refuse=None, host='127.0.0.1'):
         """
         Args:
             banner (bytes): Payload of the CNXN answer. Defaults to a device
@@ -338,7 +338,10 @@ class FakeAdbd:
             refuse (callable): service -> bool, True to refuse the service the
                 way adbd refuses one it can not create. Defaults to None, which
                 accepts every service.
+            host (str): Address the device listens on. Defaults to 127.0.0.1,
+                an IPv6 literal like ::1 models a device of that family.
         """
+        self.host = host
         self.banner = banner
         self.version = version
         self.max_payload = max_payload
@@ -411,9 +414,9 @@ class FakeAdbd:
         self._closed = False
         self._remote_id = 1000
         self._write_credit = {}
-        self._server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self._server = socket.socket(socket.AF_INET6 if ':' in host else socket.AF_INET, socket.SOCK_STREAM)
         self._server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self._server.bind(('127.0.0.1', 0))
+        self._server.bind((host, 0))
         self._server.listen(16)
         self.port = self._server.getsockname()[1]
         self._accept_thread = threading.Thread(target=self._accept_loop, daemon=True)

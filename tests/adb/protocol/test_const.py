@@ -6,8 +6,8 @@ import pytest
 
 from alasio.adb.protocol.const import (
     ADB_COMMANDS, ADB_MAX_PAYLOAD, ADB_MAX_PAYLOAD_V1, ADB_VERSION, ADB_VERSION_SKIP_CHECKSUM, AUTH, CLSE, CNXN, OKAY,
-    OPEN, SYNC, WRTE, AdbConnectionClosed, AdbConnectionTimeout, AdbMessageInvalid, AdbStreamClosed, AdbStreamTimeout,
-    ShellResult
+    OPEN, SYNC, WRTE, AdbAddressInvalid, AdbConnectionClosed, AdbConnectionFailed, AdbConnectionTimeout,
+    AdbMessageInvalid, AdbStreamClosed, AdbStreamTimeout, ShellResult
 )
 
 pytestmark = [
@@ -222,7 +222,9 @@ class TestConstants:
         assert len(command) == 4
 
     @pytest.mark.parametrize('exception', [
+        AdbAddressInvalid,
         AdbConnectionClosed,
+        AdbConnectionFailed,
         AdbConnectionTimeout,
         AdbStreamClosed,
         AdbStreamTimeout,

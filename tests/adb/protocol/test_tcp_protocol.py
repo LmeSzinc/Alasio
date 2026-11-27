@@ -16,8 +16,8 @@ from alasio.adb.protocol import keygen
 from alasio.adb.protocol.const import (
     ADB_MAX_PAYLOAD, ADB_MAX_PAYLOAD_V1, ADB_OPEN_TIMEOUT_LIMIT, ADB_STREAM_CHUNK_LIMIT, ADB_STREAM_CHUNK_SIZE,
     ADB_STREAM_RECV_BUFFER_SIZE, ADB_VERSION, ADB_VERSION_SKIP_CHECKSUM, CLSE, CNXN, OKAY, OPEN, WRTE,
-    AdbAuthKeyMissing, AdbConnectionClosed, AdbConnectionTimeout, AdbMessageInvalid, AdbStreamClosed, AdbStreamTimeout,
-    ShellResult
+    AdbAddressInvalid, AdbAuthKeyMissing, AdbConnectionClosed, AdbConnectionFailed, AdbConnectionTimeout,
+    AdbMessageInvalid, AdbStreamClosed, AdbStreamTimeout, ShellResult
 )
 from alasio.adb.protocol.tcp_protocol import MESSAGE_STRUCT, AdbProtocolTCP, AdbStreamTCP
 from alasio.logger import logger
@@ -2900,6 +2900,142 @@ class TestConnectFailure:
                 client.disconnect()
 
         assert adbd.violations == []
+
+
+class TestAddress:
+    """The address forms connect() accepts
+
+    The transport is TCP, so every address the OS can be asked for works: a
+    name that answers with both families, an IPv6 literal, and a host with the
+    blanks a copy out of a config leaves around it.
+    """
+
+    def test_an_ipv6_device(self):
+        """A device on an IPv6 literal is reached, handshake and command"""
+        try:
+            adbd = FakeAdbd(host='::1')
+        except OSError as e:
+            pytest.skip(f'this machine has no IPv6 loopback: {e}')
+
+        with adbd:
+            client = AdbProtocolTCP('::1', adbd.port)
+            client.connect()
+            try:
+                assert client.is_connected is True
+                with client.open_stream('shell:echo') as stream:
+                    assert stream.recv_until_close(timeout=5) == b''
+            finally:
+                client.disconnect()
+
+        assert adbd.connections == 1
+        assert adbd.violations == []
+
+    def test_the_blanks_around_the_host_are_dropped(self):
+        """A host copied with the blanks of a config still reaches the device
+
+        The resolver reads the blank as part of the name and answers
+        `getaddrinfo failed` for a host that is otherwise right there.
+        """
+        with FakeAdbd() as adbd:
+            client = AdbProtocolTCP(f'  {adbd.host}\t', adbd.port)
+            assert client.host == adbd.host
+            client.connect()
+            try:
+                assert client.is_connected is True
+            finally:
+                client.disconnect()
+
+    def test_a_host_that_does_not_resolve(self, monkeypatch):
+        """A name the resolver does not know is an address error, not a timeout"""
+
+        def fail(*args, **kwargs):
+            raise socket.gaierror(11001, 'getaddrinfo failed')
+
+        monkeypatch.setattr(tcp_protocol.socket, 'getaddrinfo', fail)
+        client = AdbProtocolTCP('no-such-host.invalid', 5555)
+
+        with pytest.raises(AdbAddressInvalid) as e:
+            client.connect()
+
+        assert "Can not resolve no-such-host.invalid:5555" in str(e.value)
+        assert '11001' in str(e.value)
+        assert client.is_connected is False
+        assert client._sock is None
+
+    def test_an_empty_host(self):
+        """An empty host is a wrong address, not a wait on every interface"""
+        client = AdbProtocolTCP('  ', 5555)
+
+        with pytest.raises(AdbAddressInvalid) as e:
+            client.connect()
+
+        assert 'Invalid address :5555' in str(e.value)
+        assert 'the host is empty' in str(e.value)
+        assert client._sock is None
+
+    def test_a_name_the_resolver_can_not_carry(self):
+        """A host the idna codec refuses is an address error, not a UnicodeError
+
+        The resolver encodes a name with idna before it asks the DNS, and a
+        label over 63 characters fails that encoding.
+        """
+        client = AdbProtocolTCP('a' * 64, 5555)
+
+        with pytest.raises(AdbAddressInvalid) as e:
+            client.connect()
+
+        assert 'label too long' in str(e.value)
+        assert client._sock is None
+
+    def test_a_port_that_does_not_fit_the_field(self, monkeypatch):
+        """A port the resolver refuses is an address error too
+
+        getaddrinfo raises OverflowError for a port outside of 0-65535 on
+        Linux and macOS, while Windows wraps it: a wrong address must not
+        escape as a bare OverflowError.
+        """
+
+        def fail(*args, **kwargs):
+            raise OverflowError('port must be 0-65535')
+
+        monkeypatch.setattr(tcp_protocol.socket, 'getaddrinfo', fail)
+        client = AdbProtocolTCP('127.0.0.1', 99999)
+
+        with pytest.raises(AdbAddressInvalid) as e:
+            client.connect()
+
+        assert 'Invalid address 127.0.0.1:99999' in str(e.value)
+        assert '0-65535' in str(e.value)
+        assert client._sock is None
+
+    def test_a_network_that_carries_no_connection(self, monkeypatch):
+        """An OS error of the connect is a failed connection, not a closed one"""
+
+        class UnreachableSocket:
+            """A socket whose network does not carry the connect"""
+
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def settimeout(self, value):
+                pass
+
+            def connect(self, address):
+                raise OSError(10051, 'A socket operation was attempted to an unreachable network')
+
+            def close(self):
+                pass
+
+        monkeypatch.setattr(tcp_protocol.socket, 'socket', UnreachableSocket)
+        client = AdbProtocolTCP('127.0.0.1', 5555)
+
+        with pytest.raises(AdbConnectionFailed) as e:
+            client.connect()
+
+        assert '10051' in str(e.value)
+        assert 'unreachable' in str(e.value)
+        assert client.is_connected is False
+        assert client._sock is None
 
 
 class TestRecvExact:
