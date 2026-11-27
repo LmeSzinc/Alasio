@@ -7,8 +7,8 @@ from typing import Literal
 
 from alasio.adb.protocol.cnxn import DeviceFeatures
 from alasio.adb.protocol.const import (
-    ADB_COMMANDS, ADB_MAX_PAYLOAD, ADB_VERSION, ADB_VERSION_SKIP_CHECKSUM, CLSE, CNXN, OKAY, OPEN, WRTE,
-    AdbConnectionClosed, AdbConnectionTimeout, AdbMessageInvalid, AdbStreamClosed, AdbStreamTimeout
+    ADB_COMMANDS, ADB_MAX_PAYLOAD, ADB_MAX_PAYLOAD_V1, ADB_VERSION, ADB_VERSION_SKIP_CHECKSUM, CLSE, CNXN, OKAY, OPEN,
+    WRTE, AdbConnectionClosed, AdbConnectionTimeout, AdbMessageInvalid, AdbStreamClosed, AdbStreamTimeout
 )
 from alasio.logger import logger
 
@@ -348,7 +348,10 @@ class AdbProtocolTCP:
             self._sock = sock
             self._broken = False
             self._protocol_version = min(arg0, ADB_VERSION)
-            self._max_payload = min(arg1, ADB_MAX_PAYLOAD)
+            # an old adbd does not fill the field and answers 0, which is the
+            # 4096 bytes of the first protocol. Taking the 0 literally would
+            # send it 256KB messages it drops, together with the connection
+            self._max_payload = min(arg1, ADB_MAX_PAYLOAD) if arg1 else ADB_MAX_PAYLOAD_V1
             self.features = DeviceFeatures.from_cnxn(data)
 
             # start recv thread, it reads the socket it was started for and
@@ -650,7 +653,7 @@ class AdbProtocolTCP:
 
         # the device advertised how much it accepts in one message, a larger
         # payload is dropped by an old adbd and closes the connection
-        chunk_size = self._max_payload or ADB_MAX_PAYLOAD
+        chunk_size = self._max_payload
         for start in range(0, len(data), chunk_size):
             chunk = data[start:start + chunk_size]
             # drop a signal left by an earlier message, only the OKAY of this

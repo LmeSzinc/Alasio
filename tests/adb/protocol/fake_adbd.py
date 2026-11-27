@@ -47,6 +47,9 @@ HEADER_SIZE = 24
 # Protocol versions, the skipping of the checksum was added in 0x01000001
 ADB_VERSION = 0x01000000
 ADB_VERSION_SKIP_CHECKSUM = 0x01000001
+# Payload of the first version of the transport, accepted by an adbd that does
+# not fill the max payload field of its CNXN at all
+ADB_MAX_PAYLOAD_V1 = 4096
 # Payload a device of this fake accepts, the same constant as the client
 ADB_MAX_PAYLOAD = 256 * 1024
 
@@ -175,7 +178,9 @@ class FakeAdbd:
     Attributes:
         banner (bytes): Payload of the CNXN answer of the device
         version (int): Protocol version in the CNXN answer
-        max_payload (int): Payload the device accepts and advertises
+        max_payload (int): Payload the device advertises in its CNXN. 0 models
+            an adbd of the first protocol, which accepts ADB_MAX_PAYLOAD_V1
+            per message although it declares nothing
         responder (callable): (command, shell_v2) -> ShellReply of a shell call
         refuse (callable): service -> True to answer OPEN with CLSE
         auth_required (bool): Answer the CNXN with AUTH instead of CNXN
@@ -221,7 +226,9 @@ class FakeAdbd:
             version (int): Protocol version of the CNXN answer. Defaults to
                 0x01000000.
             max_payload (int): Payload the device accepts and advertises.
-                Defaults to ADB_MAX_PAYLOAD.
+                Defaults to ADB_MAX_PAYLOAD. A device that passes 0 models an
+                adbd that does not fill the field: it advertises 0 and accepts
+                ADB_MAX_PAYLOAD_V1 per message.
             responder (callable): (command, shell_v2) -> ShellReply. Defaults to
                 a command that writes nothing and exits with 0.
             refuse (callable): service -> bool, True to refuse the service the
@@ -591,9 +598,12 @@ class FakeAdbd:
             # a device drops a connection that speaks another dialect
             self._violation(f'magic of {command} is {magic:#x}', message)
             return None
-        if length > self.max_payload:
+        # an adbd that advertises nothing is one of the first protocol, it
+        # still reads ADB_MAX_PAYLOAD_V1 per message
+        limit = self.max_payload or ADB_MAX_PAYLOAD_V1
+        if length > limit:
             # reading the length of a broken header would wait for gigabytes
-            self._violation(f'{command} claims {length} bytes, the limit is {self.max_payload}', message)
+            self._violation(f'{command} claims {length} bytes, the limit is {limit}', message)
             return None
         data = b''
         if length:

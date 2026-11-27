@@ -19,6 +19,10 @@ ADB_VERSION_SKIP_CHECKSUM = 0x01000001
 # is the lower of the two sides. An old adbd answers with its own version, the
 # connection then uses 0x01000000 and every message is checksummed
 ADB_VERSION = ADB_VERSION_SKIP_CHECKSUM
+# Payload of one message of the first version of the transport. An adbd that
+# predates the field leaves it empty and reads 4096 bytes per message
+ADB_MAX_PAYLOAD_V1 = 4096
+# Payload this client accepts and advertises in CNXN, the default since Android 5
 ADB_MAX_PAYLOAD = 256 * 1024
 
 

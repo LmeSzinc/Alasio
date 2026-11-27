@@ -14,8 +14,8 @@ import pytest
 
 import alasio.adb.protocol.tcp_protocol as tcp_protocol
 from alasio.adb.protocol.const import (
-    ADB_MAX_PAYLOAD, ADB_VERSION, ADB_VERSION_SKIP_CHECKSUM, CLSE, CNXN, OKAY, OPEN, WRTE, AdbConnectionClosed,
-    AdbConnectionTimeout, AdbMessageInvalid, AdbStreamClosed, AdbStreamTimeout, ShellResult
+    ADB_MAX_PAYLOAD, ADB_MAX_PAYLOAD_V1, ADB_VERSION, ADB_VERSION_SKIP_CHECKSUM, CLSE, CNXN, OKAY, OPEN, WRTE,
+    AdbConnectionClosed, AdbConnectionTimeout, AdbMessageInvalid, AdbStreamClosed, AdbStreamTimeout, ShellResult
 )
 from alasio.adb.protocol.tcp_protocol import AdbProtocolTCP, AdbStreamTCP
 from alasio.logger import logger
@@ -666,6 +666,21 @@ class TestMessageFormat:
             finally:
                 client.disconnect()
 
+    def test_a_device_that_declares_no_payload(self):
+        """A CNXN of 0 is an adbd of the first protocol, which reads 4096
+
+        An old adbd does not fill the field at all. Reading the 0 as a limit
+        would make the client fall back to 256KB, more than that device reads
+        in one message.
+        """
+        with FakeAdbd(max_payload=0) as adbd:
+            client = AdbProtocolTCP(port=adbd.port)
+            client.connect()
+            try:
+                assert client._max_payload == ADB_MAX_PAYLOAD_V1
+            finally:
+                client.disconnect()
+
 
 class TestMessageRecvValidation:
     """A message of the device that is not valid"""
@@ -1020,6 +1035,22 @@ class TestSendToStream:
     def test_the_payload_of_the_device_is_not_exceeded(self):
         """A write larger than the max payload of the device is split"""
         with FakeAdbd(responder=lambda command, shell_v2: ShellReply(close=False), max_payload=4096) as adbd:
+            client = self.make_client(adbd)
+            try:
+                with self.open_cat(client) as stream:
+                    client.sendto_stream(stream, b'x' * 10000)
+                assert adbd.writes == [b'x' * 4096, b'x' * 4096, b'x' * 1808]
+                assert adbd.violations == []
+            finally:
+                client.disconnect()
+
+    def test_a_device_that_declares_no_payload_is_not_exceeded(self):
+        """A write to a device that advertised 0 is split at 4096, not 256KB
+
+        An adbd of the first protocol leaves the field of its CNXN empty and
+        drops a message larger than 4096 together with the connection.
+        """
+        with FakeAdbd(responder=lambda command, shell_v2: ShellReply(close=False), max_payload=0) as adbd:
             client = self.make_client(adbd)
             try:
                 with self.open_cat(client) as stream:

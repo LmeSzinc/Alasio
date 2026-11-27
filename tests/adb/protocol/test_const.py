@@ -5,8 +5,9 @@ Tests for the message types and the exceptions of the adb protocol.
 import pytest
 
 from alasio.adb.protocol.const import (
-    ADB_COMMANDS, ADB_MAX_PAYLOAD, ADB_VERSION, ADB_VERSION_SKIP_CHECKSUM, AUTH, CLSE, CNXN, OKAY, OPEN, SYNC, WRTE,
-    AdbConnectionClosed, AdbConnectionTimeout, AdbMessageInvalid, AdbStreamClosed, AdbStreamTimeout, ShellResult
+    ADB_COMMANDS, ADB_MAX_PAYLOAD, ADB_MAX_PAYLOAD_V1, ADB_VERSION, ADB_VERSION_SKIP_CHECKSUM, AUTH, CLSE, CNXN, OKAY,
+    OPEN, SYNC, WRTE, AdbConnectionClosed, AdbConnectionTimeout, AdbMessageInvalid, AdbStreamClosed, AdbStreamTimeout,
+    ShellResult
 )
 
 pytestmark = [
@@ -205,6 +206,10 @@ class TestConstants:
     def test_max_payload(self):
         """The payload of one message is 256KB since Android 5"""
         assert ADB_MAX_PAYLOAD == 256 * 1024
+
+    def test_max_payload_v1(self):
+        """The payload of the first protocol is 4096, a device that declares 0 reads that"""
+        assert ADB_MAX_PAYLOAD_V1 == 4096
 
     def test_commands(self):
         """The seven commands of the transport"""
