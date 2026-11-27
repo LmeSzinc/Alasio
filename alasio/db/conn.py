@@ -23,9 +23,13 @@ class SqlitePoolCursor(sqlite3.Cursor):
         return self
 
     def close(self):
-        super().close()
+        # Read the connection before closing the cursor: Cursor.close() makes the
+        # attribute unusable (Python 3.10+ raises ProgrammingError when it is
+        # read afterwards), so reading it after the close would either drop the
+        # connection or raise while returning it to the pool.
         conn = self.connection
         pool = self.pool
+        super().close()
 
         # check transaction
         if conn is not None:
@@ -120,6 +124,15 @@ class SqlitePoolCursor(sqlite3.Cursor):
 
 
 class ExclusiveTransaction:
+    """
+    A cursor inside one BEGIN EXCLUSIVE transaction.
+
+    The cursor always goes back to its pool: after a commit, after a rollback,
+    and also when BEGIN or COMMIT itself fails because another connection holds
+    the lock. A leaked cursor is not a small thing: with ``pool_size=1`` the
+    only connection stays checked out and every later ``cursor()`` waits for it.
+    """
+
     def __init__(self, cursor):
         """
         Args:
@@ -128,15 +141,40 @@ class ExclusiveTransaction:
         self.cursor = cursor
 
     def __enter__(self):
-        self.cursor.execute("BEGIN EXCLUSIVE;")
+        try:
+            self.cursor.execute("BEGIN EXCLUSIVE;")
+        except Exception:
+            # BEGIN fails on a locked database. The cursor still has to go back
+            # to the pool, otherwise a pool_size=1 process keeps its only
+            # connection checked out and every later cursor() waits forever.
+            self.cursor.close()
+            raise
         return self.cursor
 
     def __exit__(self, exc_type, exc_value, traceback):
+        if exc_type is not None:
+            self._rollback_and_close()
+            return
         try:
-            if exc_type is None:
-                self.cursor.commit()
-            else:
-                self.cursor.connection.rollback()
+            self.cursor.commit()
+        except Exception:
+            # COMMIT needs the exclusive lock for a moment, so it fails on a
+            # locked database. Undo the statements here instead of leaving an
+            # open transaction for close() to report as a dev error: that
+            # message would blame the caller for a lock that was not its fault.
+            self._rollback_and_close()
+            raise
+        self.cursor.close()
+
+    def _rollback_and_close(self):
+        """
+        Undo the transaction, then release the cursor.
+
+        The cursor is released even when the rollback raises, so a broken
+        connection cannot stay checked out of the pool.
+        """
+        try:
+            self.cursor.connection.rollback()
         finally:
             self.cursor.close()
 
