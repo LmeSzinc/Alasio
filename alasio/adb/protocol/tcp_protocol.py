@@ -5,10 +5,12 @@ from threading import Lock, Thread, current_thread
 from time import perf_counter
 from typing import Literal
 
+from alasio.adb.protocol import auth
 from alasio.adb.protocol.cnxn import DeviceFeatures
 from alasio.adb.protocol.const import (
-    ADB_COMMANDS, ADB_MAX_PAYLOAD, ADB_MAX_PAYLOAD_V1, ADB_VERSION, ADB_VERSION_SKIP_CHECKSUM, CLSE, CNXN, OKAY, OPEN,
-    WRTE, AdbConnectionClosed, AdbConnectionTimeout, AdbMessageInvalid, AdbStreamClosed, AdbStreamTimeout
+    ADB_AUTH_CONFIRM_TIMEOUT, ADB_AUTH_RSAPUBLICKEY, ADB_AUTH_SIGNATURE, ADB_AUTH_TOKEN, ADB_COMMANDS, ADB_MAX_PAYLOAD,
+    ADB_MAX_PAYLOAD_V1, ADB_VERSION, ADB_VERSION_SKIP_CHECKSUM, AUTH, AUTH_TOKEN_SIZE, CLSE, CNXN, OKAY, OPEN, WRTE,
+    AdbAuthRejected, AdbConnectionClosed, AdbConnectionTimeout, AdbMessageInvalid, AdbStreamClosed, AdbStreamTimeout
 )
 from alasio.logger import logger
 
@@ -170,6 +172,10 @@ class AdbProtocolTCP:
             AdbConnectionClosed: When the device closes the connection during
                 the handshake
             AdbMessageInvalid: When the device does not answer with a CNXN
+            AdbAuthKeyMissing: When this user has no adb key to authenticate with
+            AdbAuthKeyInvalid: When the adb key of this user can not be used
+            AdbAuthRejected: When the device does not accept the adb key of this
+                user, for example because its user denied the dialog
         """
         self.connect()
         return self
@@ -298,6 +304,10 @@ class AdbProtocolTCP:
             AdbConnectionClosed: When the device closes the connection during
                 the handshake
             AdbMessageInvalid: When the device does not answer with a CNXN
+            AdbAuthKeyMissing: When this user has no adb key to authenticate with
+            AdbAuthKeyInvalid: When the adb key of this user can not be used
+            AdbAuthRejected: When the device does not accept the adb key of this
+                user, for example because its user denied the dialog
         """
         with self._connect_lock:
             # check if already connected
@@ -332,13 +342,18 @@ class AdbProtocolTCP:
                 except socket.timeout as e:
                     raise AdbConnectionTimeout(f'{e.__class__.__name__} when connecting: {e}')
 
+                # The handshake has no version field, so the checksum of the AUTH
+                # tokens below can not be judged yet: a device of 0x01000001
+                # writes 0 there and an old one writes the sum, which makes
+                # skipping the check the only rule that accepts both. A
+                # connection of an earlier version may still be the one the
+                # object remembers, so the value is reset for every handshake.
+                self._protocol_version = ADB_VERSION
                 # send CNXN
                 self.message_send(sock, CNXN, ADB_VERSION, ADB_MAX_PAYLOAD, cnxn)
 
-                # recv CNXN from device
-                command, arg0, arg1, data = self.message_recv(sock)
-                if command != CNXN:
-                    raise AdbMessageInvalid(f'Expect {CNXN} after connection but got {command}')
+                # recv CNXN from device, signing the token when its adbd is secure
+                arg0, arg1, data = self._recv_cnxn(sock)
             except Exception:
                 # cleanup on error
                 self._close_socket(sock)
@@ -361,6 +376,74 @@ class AdbProtocolTCP:
             # stops as soon as the connection is replaced
             self._recv_thread = Thread(target=self._task_dispatch_message, args=(sock,), daemon=True)
             self._recv_thread.start()
+
+    def _recv_cnxn(self, sock: socket.socket):
+        """
+        Read the CNXN of the device, answering the AUTH challenges on the way.
+
+        A device with a secure adbd answers the CNXN with an AUTH token: the host
+        signs the token with the key adb keeps for this user, and offers the
+        public key when the device does not know it yet. A device that was
+        allowed once accepts the signature without a dialog; only the first
+        contact needs a user, and then the device itself asks.
+
+        Args:
+            sock (socket.socket): Connected socket, right after the CNXN of the host
+
+        Returns:
+            tuple: (version, max_payload, banner) of the CNXN of the device
+
+        Raises:
+            AdbMessageInvalid: When the device answers something else
+            AdbAuthKeyMissing: When this user has no adb key
+            AdbAuthKeyInvalid: When the adb key of this user can not be used
+            AdbAuthRejected: When the device does not accept the adb key
+            AdbConnectionClosed:
+            AdbConnectionTimeout:
+        """
+        key = None
+        challenge = 0
+        extended = False
+        try:
+            while True:
+                command, arg0, arg1, data = self.message_recv(sock)
+                if command == CNXN:
+                    return arg0, arg1, data
+                if command != AUTH:
+                    raise AdbMessageInvalid(f'Expect {CNXN} after connection but got {command}')
+                if arg0 != ADB_AUTH_TOKEN or len(data) != AUTH_TOKEN_SIZE:
+                    # a device only ever asks the host to sign a token
+                    raise AdbMessageInvalid(f'Unexpected AUTH with arg0={arg0} length={len(data)}')
+
+                challenge += 1
+                if key is None:
+                    # a device that does not ask for authentication needs no key,
+                    # so the file is only read when a challenge arrives
+                    key = auth.load_user_key()
+                if challenge == 1:
+                    # a device that knows the key of this host answers the
+                    # signature with a CNXN and no dialog
+                    self.message_send(sock, AUTH, ADB_AUTH_SIGNATURE, 0, key.sign(data))
+                    continue
+                if challenge == 2:
+                    # the key is new to the device, which shows a dialog. The
+                    # answer comes when its user takes a decision, and that takes
+                    # longer than the timeout of a request
+                    logger.info(f'Device {self.host}:{self.port} asks to allow the adb key of this user')
+                    sock.settimeout(ADB_AUTH_CONFIRM_TIMEOUT)
+                    extended = True
+                    self.message_send(sock, AUTH, ADB_AUTH_RSAPUBLICKEY, 0, key.public_key_payload())
+                    continue
+                # the device asks again after both the signature and the public
+                # key: its user denied the dialog, or it does not accept the key
+                raise AdbAuthRejected(f'Device {self.host}:{self.port} refused the adb key of this user')
+        finally:
+            if extended:
+                try:
+                    sock.settimeout(self.timeout)
+                except OSError:
+                    # the socket is already closed, connect() cleans it up
+                    pass
 
     def disconnect(self):
         """

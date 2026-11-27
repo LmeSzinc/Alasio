@@ -12,9 +12,11 @@ import time
 import pytest
 
 import alasio.adb.protocol.tcp_protocol as tcp_protocol
+from alasio.adb.protocol import auth
 from alasio.adb.protocol.const import (
     ADB_MAX_PAYLOAD, ADB_MAX_PAYLOAD_V1, ADB_VERSION, ADB_VERSION_SKIP_CHECKSUM, CLSE, CNXN, OKAY, OPEN, WRTE,
-    AdbConnectionClosed, AdbConnectionTimeout, AdbMessageInvalid, AdbStreamClosed, AdbStreamTimeout, ShellResult
+    AdbAuthKeyMissing, AdbConnectionClosed, AdbConnectionTimeout, AdbMessageInvalid, AdbStreamClosed, AdbStreamTimeout,
+    ShellResult
 )
 from alasio.adb.protocol.tcp_protocol import MESSAGE_STRUCT, AdbProtocolTCP, AdbStreamTCP
 from alasio.logger import logger
@@ -1914,17 +1916,21 @@ class TestConnectFailure:
         # the timeout was set before the connect, which is what bounds it
         assert calls == ['socket', 0.2]
 
-    def test_a_device_that_requires_authentication(self):
-        """A device with a secure adbd answers AUTH, the client can not sign"""
+    def test_a_device_that_requires_authentication_without_a_key(self, monkeypatch):
+        """A secure device fails the connect when this user has no adb key"""
+
+        def no_key():
+            raise AdbAuthKeyMissing('No adb key at /nonexistent')
+
+        monkeypatch.setattr(auth, 'load_user_key', no_key)
         with FakeAdbd() as adbd:
             adbd.auth_required = True
             client = AdbProtocolTCP(port=adbd.port)
             client.timeout = 1
 
-            with pytest.raises(AdbMessageInvalid) as e:
+            with pytest.raises(AdbAuthKeyMissing):
                 client.connect()
 
-        assert 'AUTH' in str(e.value)
         assert adbd.auth_challenges == 1
         assert client._sock is None
 

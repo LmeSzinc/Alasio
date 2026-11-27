@@ -26,10 +26,12 @@ Examples:
     >>> adbd = FakeAdbd(refuse=lambda service: service.startswith('bogus'))
 """
 
+import base64
+import hashlib
 import socket
 import threading
 import time
-from struct import Struct
+from struct import Struct, unpack_from
 
 # Commands of the transport, transcribed from the protocol description rather
 # than imported from the client under test
@@ -73,6 +75,17 @@ LEGACY_BANNER = (
 )
 # Token of an unauthenticated connection, a device sends 20 random bytes
 AUTH_TOKEN = bytes(range(20))
+# First argument of AUTH: the device sends a token, the host answers with the
+# signature of it and, when the key is new to the device, with the public key
+ADB_AUTH_TOKEN = 1
+ADB_AUTH_SIGNATURE = 2
+ADB_AUTH_RSAPUBLICKEY = 3
+AUTH_TOKEN_SIZE = 20
+# struct RSAPublicKey of the adb public key format, see libcrypto_utils
+ANDROID_PUBKEY_MODULUS_SIZE = 2048 // 8
+ANDROID_PUBKEY_ENCODED_SIZE = 3 * 4 + 2 * ANDROID_PUBKEY_MODULUS_SIZE
+# DigestInfo of SHA1 in PKCS#1 v1.5, the only digest adbd verifies
+SHA1_DIGEST_INFO = bytes.fromhex('3021300906052b0e03021a05000414')
 
 
 def encode_message(command, arg0, arg1, data=b'', magic=None, checksum=None, length=None):
@@ -102,6 +115,75 @@ def encode_message(command, arg0, arg1, data=b'', magic=None, checksum=None, len
     if length is None:
         length = len(data)
     return HEADER.pack(value, arg0, arg1, length, checksum, magic) + data
+
+
+def next_auth_token(token):
+    """
+    Token of the next challenge, a device sends new bytes for every round.
+
+    Args:
+        token (bytes): Token of the previous challenge
+
+    Returns:
+        bytes: 20 bytes of a new token
+    """
+    return hashlib.sha256(token).digest()[:AUTH_TOKEN_SIZE]
+
+
+def verify_signature(public_key, token, signature):
+    """
+    Verify the signature of an AUTH token the way adbd verifies it.
+
+    Args:
+        public_key (tuple): (n, e) of the key the device trusts
+        token (bytes): The token the device asked the host to sign
+        signature (bytes): Signature the host sent
+
+    Returns:
+        bool: True when the signature matches the token
+    """
+    n, e = public_key
+    size = (n.bit_length() + 7) // 8
+    if len(signature) != size:
+        return False
+    digest = SHA1_DIGEST_INFO + hashlib.sha1(token).digest()
+    padding = size - len(digest) - 3
+    if padding < 8:
+        return False
+    expected = b'\x00\x01' + b'\xff' * padding + b'\x00' + digest
+    decrypted = pow(int.from_bytes(signature, 'big'), e, n).to_bytes(size, 'big')
+    return decrypted == expected
+
+
+def decode_public_key(blob):
+    """
+    Decode the binary public key format of adb.
+
+    The layout is struct RSAPublicKey of libcrypto_utils: the modulus in 32 bit
+    words, the Montgomery parameters n0inv and rr, the modulus and the exponent,
+    all little endian.
+
+    Args:
+        blob (bytes): Encoded key
+
+    Returns:
+        tuple | None: (n, e), None when the blob is not a valid key
+    """
+    if len(blob) != ANDROID_PUBKEY_ENCODED_SIZE:
+        return None
+    words, n0inv = unpack_from('<II', blob, 0)
+    n = int.from_bytes(blob[8:8 + ANDROID_PUBKEY_MODULUS_SIZE], 'little')
+    rr = int.from_bytes(blob[8 + ANDROID_PUBKEY_MODULUS_SIZE:8 + 2 * ANDROID_PUBKEY_MODULUS_SIZE], 'little')
+    e = int.from_bytes(blob[8 + 2 * ANDROID_PUBKEY_MODULUS_SIZE:], 'little')
+    if words * 4 != ANDROID_PUBKEY_MODULUS_SIZE or n < 3 or not n & 1:
+        return None
+    if (n0inv * (n & 0xFFFFFFFF)) % (1 << 32) != (1 << 32) - 1:
+        return None
+    if rr != pow(2, ANDROID_PUBKEY_MODULUS_SIZE * 8 * 2, n):
+        return None
+    if not 1 < e < 1 << 32:
+        return None
+    return n, e
 
 
 def split_service(service):
@@ -202,6 +284,16 @@ class FakeAdbd:
         frame_size (int): Largest payload of one frame of shell_v2
         zero_checksum (bool): True to send every message with a checksum of 0,
             which a device of version 0x01000001 may do
+        auth_required (bool): Answer the CNXN with an AUTH token instead of a
+            CNXN, the way a device with a secure adbd does
+        auth_key (tuple): (n, e) of the key the device already trusts. None
+            trusts no key, so the first signature fails and the host has to
+            offer its public key
+        auth_allow_new_key (bool): True to accept the public key the host
+            offers, the way the user of a device taps "allow" in the dialog
+        auth_delay (float): Seconds to sleep after accepting a public key, which
+            models the time a user spends on the dialog
+        auth_arg0 (int): Argument of the AUTH token, 1 on a real adbd
 
     Recordings:
         hello (bytes): The CNXN payload the host sent
@@ -215,6 +307,9 @@ class FakeAdbd:
         write_okays (int): Number of OKAY the host sent for a WRTE
         violations (list): (reason, message) of everything the host did wrong
         connections (int): Number of accepted connections
+        auth_challenges (int): Number of AUTH tokens sent
+        auth_signatures (list): Signatures the host sent, in order
+        auth_public_keys (list): Public key payloads the host offered, in order
     """
 
     def __init__(self, banner=DEFAULT_BANNER, version=ADB_VERSION, max_payload=ADB_MAX_PAYLOAD,
@@ -245,6 +340,10 @@ class FakeAdbd:
 
         # switches of the device
         self.auth_required = False
+        self.auth_key = None
+        self.auth_allow_new_key = True
+        self.auth_delay = 0.0
+        self.auth_arg0 = ADB_AUTH_TOKEN
         self.silent = False
         self.open_fault = ''
         self.open_delay = 0.0
@@ -276,6 +375,8 @@ class FakeAdbd:
         self.violations = []
         self.connections = 0
         self.auth_challenges = 0
+        self.auth_signatures = []
+        self.auth_public_keys = []
 
         self._lock = threading.RLock()
         self._send_lock = threading.Lock()
@@ -402,14 +503,7 @@ class FakeAdbd:
                 self._drain(sock)
                 return
 
-            if self.auth_required:
-                with self._lock:
-                    self.auth_challenges += 1
-                self._send(sock, AUTH, 0, 0, AUTH_TOKEN)
-                # a device that requires a signature answers every attempt with
-                # a new challenge, the host that can not sign ends the
-                # connection itself
-                self._drain(sock)
+            if self.auth_required and not self._authenticate(sock):
                 return
 
             if self.cnxn_reply is not None:
@@ -423,6 +517,87 @@ class FakeAdbd:
             pass
         finally:
             close_socket(sock)
+
+    def _authenticate(self, sock):
+        """
+        Run the AUTH exchange of a secure adbd.
+
+        A device that trusts the key of the host sends a token and accepts the
+        signature of it. A device that sees the key for the first time rejects
+        the signature, sends another token and lets the host offer its public
+        key, which is what the dialog of the device is about.
+
+        Args:
+            sock (socket.socket): Connection to authenticate
+
+        Returns:
+            bool: True when the host is authorized, False when the connection is
+                over
+        """
+        token = AUTH_TOKEN
+        while True:
+            with self._lock:
+                self.auth_challenges += 1
+            self._send(sock, AUTH, self.auth_arg0, 0, token)
+            message = self._recv_message(sock)
+            if message is None:
+                return False
+            command, arg0, arg1, data = message
+            if command != AUTH:
+                self._violation(f'{command} during authentication', message)
+                return False
+            if arg0 == ADB_AUTH_SIGNATURE:
+                with self._lock:
+                    self.auth_signatures.append(data)
+                if self.auth_key is not None and verify_signature(self.auth_key, token, data):
+                    return True
+                # a signature the device can not verify is answered by a new
+                # token, which is also what a device that does not know the key
+                # does when the host has only sent the signature
+                token = next_auth_token(token)
+                continue
+            if arg0 == ADB_AUTH_RSAPUBLICKEY:
+                with self._lock:
+                    self.auth_public_keys.append(data)
+                key = self._accept_public_key(data, message)
+                if key is None:
+                    return False
+                if not self.auth_allow_new_key:
+                    # the user denied the dialog, the device keeps asking for a
+                    # key that it accepts
+                    token = next_auth_token(token)
+                    continue
+                if self.auth_delay:
+                    time.sleep(self.auth_delay)
+                self.auth_key = key
+                return True
+            self._violation(f'AUTH arg0={arg0} from the host', message)
+            return False
+
+    def _accept_public_key(self, data, message):
+        """
+        Decode the public key a host offers, the way adbd decodes it.
+
+        Args:
+            data (bytes): Payload of the AUTH message
+            message (tuple): The message, for the violation record
+
+        Returns:
+            tuple | None: (n, e) of the key, None when the payload is not one
+        """
+        if not data.endswith(b'\x00'):
+            self._violation('the public key of the host is not null terminated', message)
+            return None
+        text, _, _ = data[:-1].partition(b' ')
+        try:
+            blob = base64.b64decode(text, validate=True)
+        except ValueError:
+            self._violation('the public key of the host is not base64', message)
+            return None
+        key = decode_public_key(blob)
+        if key is None:
+            self._violation('the public key of the host is not an adb public key', message)
+        return key
 
     def _read_loop(self, sock):
         """

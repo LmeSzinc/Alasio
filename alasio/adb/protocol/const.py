@@ -11,6 +11,18 @@ CLSE = b'CLSE'
 WRTE = b'WRTE'
 
 ADB_COMMANDS = {SYNC, CNXN, AUTH, OPEN, OKAY, CLSE, WRTE}
+# First argument of AUTH. A secure adbd sends a token, the host answers with the
+# signature of that token and, when the device does not know the key yet, with
+# the public key itself
+ADB_AUTH_TOKEN = 1
+ADB_AUTH_SIGNATURE = 2
+ADB_AUTH_RSAPUBLICKEY = 3
+# A device sends 20 random bytes to sign
+AUTH_TOKEN_SIZE = 20
+# Seconds to wait for the user to allow the key on the device. A first contact
+# shows a dialog, and the timeout of a request would close the connection before
+# the user can read it
+ADB_AUTH_CONFIRM_TIMEOUT = 60
 # From this version on the checksum of a message is optional: a peer of that
 # version may send 0 instead of the sum of the payload, and a connection of that
 # version verifies nothing
@@ -43,6 +55,18 @@ class AdbStreamTimeout(Exception):
 
 
 class AdbMessageInvalid(Exception):
+    pass
+
+
+class AdbAuthKeyMissing(Exception):
+    pass
+
+
+class AdbAuthKeyInvalid(Exception):
+    pass
+
+
+class AdbAuthRejected(Exception):
     pass
 
 
