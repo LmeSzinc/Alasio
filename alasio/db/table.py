@@ -173,6 +173,28 @@ class AlasioTable(Generic[T_model]):
         transaction.cursor.CREATE_TABLE = self.CREATE_TABLE
         return transaction
 
+    def immediate_transaction(self):
+        """
+        Provides a cursor within a single IMMEDIATE transaction.
+        Commits on successful exit, rolls back on exception.
+
+        BEGIN IMMEDIATE takes RESERVED at BEGIN: other writers wait, readers do
+        not. Use it when a read and the write that depends on it must happen
+        without releasing the write lock in between, and without blocking
+        readers for the length of the transaction.
+
+        Usage:
+            with self.immediate_transaction() as cursor:
+                # IMPORTANT: reuse this cursor
+                self.execute_one_or_many(..., _cursor_=c)
+                self.execute_one_or_many(..., _cursor_=c)
+        """
+        transaction = SQLITE_POOL.immediate_transaction(self.file)
+        # copy CREATE_TABLE to cursor, so it can auto create table if table not exists
+        transaction.cursor.TABLE_NAME = self.TABLE_NAME
+        transaction.cursor.CREATE_TABLE = self.CREATE_TABLE
+        return transaction
+
     def create_table(self):
         """
         Table is auto created, but you can still create it manually.

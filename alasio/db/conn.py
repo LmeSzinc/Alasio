@@ -123,15 +123,18 @@ class SqlitePoolCursor(sqlite3.Cursor):
         return super().executemany(*args, **kwargs)
 
 
-class ExclusiveTransaction:
+class TransactionContext:
     """
-    A cursor inside one BEGIN EXCLUSIVE transaction.
+    A cursor inside a single transaction, however the transaction ends.
 
     The cursor always goes back to its pool: after a commit, after a rollback,
     and also when BEGIN or COMMIT itself fails because another connection holds
     the lock. A leaked cursor is not a small thing: with ``pool_size=1`` the
     only connection stays checked out and every later ``cursor()`` waits for it.
     """
+
+    # BEGIN statement of the transaction, set by the subclasses
+    BEGIN = ''
 
     def __init__(self, cursor):
         """
@@ -142,7 +145,7 @@ class ExclusiveTransaction:
 
     def __enter__(self):
         try:
-            self.cursor.execute("BEGIN EXCLUSIVE;")
+            self.cursor.execute(self.BEGIN)
         except Exception:
             # BEGIN fails on a locked database. The cursor still has to go back
             # to the pool, otherwise a pool_size=1 process keeps its only
@@ -177,6 +180,28 @@ class ExclusiveTransaction:
             self.cursor.connection.rollback()
         finally:
             self.cursor.close()
+
+
+class ExclusiveTransaction(TransactionContext):
+    """
+    A transaction started with BEGIN EXCLUSIVE.
+
+    Takes the exclusive lock at BEGIN: other writers and readers both wait.
+    """
+
+    BEGIN = 'BEGIN EXCLUSIVE;'
+
+
+class ImmediateTransaction(TransactionContext):
+    """
+    A transaction started with BEGIN IMMEDIATE.
+
+    Takes RESERVED at BEGIN: other writers wait, readers do not. Use it for a
+    read-modify-write that must not release the lock between the read and the
+    write, and that must not block readers while it runs.
+    """
+
+    BEGIN = 'BEGIN IMMEDIATE;'
 
 
 class ConnectionPool:
@@ -365,6 +390,27 @@ class ConnectionPool:
         cursor = self.cursor()
         return ExclusiveTransaction(cursor)
 
+    def immediate_transaction(self):
+        """
+        Provides a cursor within a single IMMEDIATE transaction.
+        Commits on successful exit, rolls back on exception.
+
+        BEGIN IMMEDIATE takes RESERVED at BEGIN: other writers wait, readers do
+        not. Use it for a read-modify-write that must keep the lock between the
+        read and the write, and that must not block readers (BEGIN EXCLUSIVE
+        does) while it runs.
+
+        Usage:
+            with pool.immediate_transaction() as c:
+                cursor.execute(...)
+                cursor.execute(...)
+
+        Returns:
+            ImmediateTransaction:
+        """
+        cursor = self.cursor()
+        return ImmediateTransaction(cursor)
+
     def gc(self, idle=60):
         """
         Close connections that have not been used for more than 60s
@@ -509,6 +555,25 @@ class SqlitePool:
         """
         pool = self.get_pool(file)
         return pool.exclusive_transaction()
+
+    def immediate_transaction(self, file):
+        """
+        Provides a cursor within a single IMMEDIATE transaction.
+        Commits on successful exit, rolls back on exception.
+
+        Args:
+            file (str):
+
+        Returns:
+            ImmediateTransaction:
+
+        Usage:
+            with pool.immediate_transaction(file) as cursor:
+                cursor.execute(...)
+                cursor.execute(...)
+        """
+        pool = self.get_pool(file)
+        return pool.immediate_transaction()
 
     def gc(self, idle=60):
         """
